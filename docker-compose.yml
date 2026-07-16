@@ -1,0 +1,22 @@
+# 로컬 실행: BFF + 도원 추론 서버.
+# ⚠ 추론 서버(inference)는 내부용 — 공개 포트로 노출하지 않는다(expose만, ports 금지).
+services:
+  bff:
+    build: .
+    ports:
+      - "8080:8080" # 공개 엣지
+    environment:
+      - PORT=8080
+      - INFERENCE_BASE_URL=http://inference:8000
+      - JWT_SECRET=change-me-in-real-env
+      - DB_PATH=data/bff.db
+    depends_on:
+      - inference
+
+  # 도원 추론 서버(별도 레포 Standin-server). 참고용 정의.
+  inference:
+    # TODO: Standin-server 이미지를 빌드/지정. 예:
+    #   build: ../Standin-server
+    image: standin-server:local
+    expose:
+      - "8000" # 내부만(공개 X)
