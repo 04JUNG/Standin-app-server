@@ -1,0 +1,2 @@
+# 저장소 내부는 LF로 정규화(운영체제 혼용 시 CRLF 잡음 방지)
+* text=auto eol=lf
