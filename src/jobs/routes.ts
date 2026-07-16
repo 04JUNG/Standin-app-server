@@ -19,8 +19,7 @@ jobsRoutes.post("/", async (c) => {
     );
   }
   const hint = typeof body["hint"] === "string" ? body["hint"] : "";
-  // TODO(Phase 1): requireAuth에서 userId 획득해 전달
-  const job = createJob(null);
+  const job = createJob(c.get("userId") ?? null);
   void runAnalysisJob(job.id, file, hint); // fire-and-forget
   return c.json({ jobId: job.id, status: job.status, createdAt: job.createdAt }, 202);
 });

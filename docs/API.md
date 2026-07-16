@@ -9,7 +9,7 @@
 - 시간은 ISO 8601, ID는 string.
 - 오류는 **봉투 형식**으로 통일(§오류). `requestId`는 서버가 부여.
 - 분석은 **Job 기반**(제출→폴링). 동기 추론을 BFF가 감싼다.
-- 인증이 필요한 엔드포인트는 `Authorization: Bearer <access>` (Phase 1).
+- **인증**: `/v1/auth/*`·`/healthz`는 공개. **`/v1/users/*`·`/v1/analysis/*`·`/v1/pose-candidates/*`는 `Authorization: Bearer <access>` 필수**(없으면 401).
 
 ---
 
@@ -27,7 +27,7 @@
 ```
 
 클라는 `message`를 직접 표시하지 않고 `code`를 사용자 메시지로 매핑한다.
-주요 코드: `INVALID_INPUT`(400) · `UNAUTHENTICATED`/`INVALID_TOKEN`(401) · `NOT_FOUND`(404) · `NOT_READY`(409) · `NOT_IMPLEMENTED`(501) · `INFERENCE_FAILED`(Job status=failed).
+주요 코드: `INVALID_INPUT`(400) · `UNAUTHENTICATED`/`INVALID_TOKEN`/`INVALID_CREDENTIALS`(401) · `NOT_FOUND`(404) · `NOT_READY`/`EMAIL_TAKEN`(409) · `NOT_IMPLEMENTED`(501) · `INFERENCE_FAILED`(Job status=failed).
 
 ---
 
@@ -41,9 +41,9 @@
 
 ---
 
-## POST /v1/analysis/jobs
+## POST /v1/analysis/jobs 🔒
 
-컷 이미지 업로드 → Job 생성. **즉시 `jobId` 반환**하고 추론은 백그라운드로 수행.
+컷 이미지 업로드 → Job 생성. **즉시 `jobId` 반환**하고 추론은 백그라운드로 수행. (인증 필요)
 
 요청: `multipart/form-data`
 
@@ -126,10 +126,35 @@
 
 ---
 
-## POST /v1/auth/{login,refresh,logout} · GET /v1/users/me
+## 인증 (Phase 1 구현됨)
 
-🚧 Phase 1. JWT access + refresh(회전). 현재 `501`.
-- `login`: 이메일·비번(argon2) → access + refresh
-- `refresh`: 회전(이전 무효화 — 클라 ADR-002 single-flight)
-- `logout`: refresh 폐기
-- `users/me`: 현재 유저
+JWT access(짧게) + refresh(회전). 비밀번호는 argon2 해시. `/v1/auth/*`는 공개.
+
+**토큰 응답 형태**(register·login·refresh 공통):
+
+```json
+{
+  "user": { "id": "user_...", "email": "a@b.com", "displayName": "작가" },
+  "accessToken": "eyJ...",
+  "accessTokenExpiresAt": "2026-07-16T14:18:54.000Z",
+  "refreshToken": "eyJ..."
+}
+```
+(refresh 응답은 `user` 없이 토큰 3필드만)
+
+### POST /v1/auth/register
+`{ email, password(8자+), displayName? }` → `201` 토큰. 중복 이메일 `409 EMAIL_TAKEN`.
+
+### POST /v1/auth/login
+`{ email, password }` → `200` 토큰. 불일치 `401 INVALID_CREDENTIALS`(계정 존재 여부 비노출).
+
+### POST /v1/auth/refresh
+`{ refreshToken }` → `200` 새 토큰 쌍. **회전**: 사용된 refresh는 즉시 무효(재사용 시 `401`) — 클라 ADR-002 single-flight와 맞물림.
+
+### POST /v1/auth/logout
+`{ refreshToken }` → `{ "ok": true }`. 해당 refresh 폐기.
+
+### GET /v1/users/me 🔒
+현재 유저(`{ id, email, displayName }`). 세션 복원용. (인증 필요)
+
+> ⚠ Phase 1 한계: 유저·refresh 저장이 **인메모리**(서버 재시작 시 초기화). SQLite/Postgres로 교체 예정.

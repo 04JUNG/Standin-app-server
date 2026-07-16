@@ -1,12 +1,8 @@
-// JWT 검증 미들웨어. TODO(Phase 1): 실제 유저 조회·권한·userId 주입.
-// 현재는 토큰 서명/만료 유효성만 확인한다.
+// JWT access 토큰 검증 미들웨어. 유효하면 userId를 컨텍스트에 주입한다.
 import type { MiddlewareHandler } from "hono";
-import { jwtVerify } from "jose";
-import { config } from "../config.js";
 import type { AppEnv } from "../env.js";
 import { errorEnvelope } from "../mapping.js";
-
-const secret = new TextEncoder().encode(config.jwtSecret);
+import { verifyAccess } from "./tokens.js";
 
 export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   const header = c.req.header("Authorization") ?? "";
@@ -15,8 +11,8 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
     return c.json(errorEnvelope("UNAUTHENTICATED", "토큰이 필요합니다.", c.get("requestId")), 401);
   }
   try {
-    await jwtVerify(token, secret);
-    // TODO(Phase 1): payload.sub → c.set("userId", ...)
+    const userId = await verifyAccess(token);
+    c.set("userId", userId);
     await next();
     return;
   } catch {
