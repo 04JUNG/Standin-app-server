@@ -38,8 +38,12 @@ npm run build && npm start    # dist로 빌드 후 실행
 | 메서드 | 경로 | 상태 |
 |---|---|---|
 | `GET` | `/healthz` | ✅ 동작(+추론 연결 확인) |
-| `POST` | `/v1/auth/register` | ✅ 계정 생성 → 토큰 |
-| `POST` | `/v1/auth/login` | ✅ 로그인 → access+refresh |
+| `POST` | `/v1/auth/register` | ✅ 계정 생성 → 인증 메일(토큰 미발급) |
+| `GET` | `/v1/auth/verify-email` | ✅ 이메일 인증 링크 처리 |
+| `POST` | `/v1/auth/resend-verification` | ✅ 인증 메일 재발송 |
+| `POST` | `/v1/auth/login` | ✅ 로그인(이메일 인증 필요) → access+refresh |
+| `GET` | `/v1/auth/oauth/:provider/start` | ✅ 소셜 로그인 시작(google·kakao·naver) |
+| `GET` | `/v1/auth/oauth/:provider/callback` | ✅ 소셜 콜백 → 토큰 |
 | `POST` | `/v1/auth/refresh` | ✅ refresh 회전 |
 | `POST` | `/v1/auth/logout` | ✅ refresh 폐기 |
 | `GET` | `/v1/users/me` 🔒 | ✅ 현재 유저(세션 복원) |
@@ -61,7 +65,8 @@ src/
 ├─ mapping.ts      계약 번역(matchLevel·오류봉투)
 ├─ db.ts           SQLite(better-sqlite3): users·refresh_tokens·jobs 테이블
 ├─ jobs/           Job 생성·폴링·백그라운드 러너(동기추론→Job 래핑, SQLite)
-├─ auth/           middleware(JWT) · routes(register/login/refresh/logout) · tokens · users(SQLite)
+├─ auth/           routes(register/login/verify/refresh/logout) · tokens · users(SQLite) · mailer
+│  └─ oauth/       소셜 로그인(google·kakao·naver) 레지스트리 + start/callback
 ├─ users/          GET /me
 └─ pose/           BVH 프록시
 ```
@@ -77,6 +82,7 @@ Phase 3     저장 Postgres·큐 Redis(BullMQ), 필요 시 추론 단계 스트�
 
 ## 알려진 TODO
 - `matchLevel` 임계값은 시드값 → `Standin-server/docs/SEARCH_EVAL`로 보정 필요.
-- 회원가입(`/v1/auth/register`)은 검증·레이트리밋·이메일 확인 없음(Phase 2 하드닝).
+- 회원가입 하드닝: 레이트리밋·봇 방지 미포함(Phase 2). 이메일 인증은 구현됨.
+- 소셜 로그인은 provider 키가 있어야 동작(없으면 `PROVIDER_UNAVAILABLE`). 데스크톱 토큰 전달은 `OAUTH_SUCCESS_REDIRECT`(딥링크) 필요.
 - SQLite는 단일 인스턴스용 → 다중 인스턴스 스케일 시 Postgres.
 - 추론 서버는 **무인증·내부용** → 공개 노출 금지, BFF만 공개 엣지.

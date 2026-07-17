@@ -27,7 +27,7 @@
 ```
 
 클라는 `message`를 직접 표시하지 않고 `code`를 사용자 메시지로 매핑한다.
-주요 코드: `INVALID_INPUT`(400) · `UNAUTHENTICATED`/`INVALID_TOKEN`/`INVALID_CREDENTIALS`(401) · `NOT_FOUND`(404) · `NOT_READY`/`EMAIL_TAKEN`(409) · `NOT_IMPLEMENTED`(501) · `INFERENCE_FAILED`(Job status=failed).
+주요 코드: `INVALID_INPUT`/`PROVIDER_UNAVAILABLE`/`OAUTH_STATE_MISMATCH`/`EMAIL_REQUIRED`(400) · `UNAUTHENTICATED`/`INVALID_TOKEN`/`INVALID_CREDENTIALS`(401) · `EMAIL_NOT_VERIFIED`(403) · `NOT_FOUND`(404) · `NOT_READY`/`EMAIL_TAKEN`(409) · `NOT_IMPLEMENTED`(501) · `OAUTH_FAILED`(502) · `INFERENCE_FAILED`(Job status=failed).
 
 ---
 
@@ -126,15 +126,17 @@
 
 ---
 
-## 인증 (Phase 1 구현됨)
+## 인증
 
 JWT access(짧게) + refresh(회전). 비밀번호는 argon2 해시. `/v1/auth/*`는 공개.
+로그인 방식: **local(이메일+비번, 이메일 인증 필요)** + **소셜(google·kakao·naver)**.
 
-**토큰 응답 형태**(register·login·refresh 공통):
+**토큰 응답 형태**(login·refresh·소셜 콜백 공통):
 
 ```json
 {
-  "user": { "id": "user_...", "email": "a@b.com", "displayName": "작가" },
+  "user": { "id": "user_...", "email": "a@b.com", "displayName": "작가",
+            "provider": "local", "emailVerified": true },
   "accessToken": "eyJ...",
   "accessTokenExpiresAt": "2026-07-16T14:18:54.000Z",
   "refreshToken": "eyJ..."
@@ -142,19 +144,29 @@ JWT access(짧게) + refresh(회전). 비밀번호는 argon2 해시. `/v1/auth/*
 ```
 (refresh 응답은 `user` 없이 토큰 3필드만)
 
-### POST /v1/auth/register
-`{ email, password(8자+), displayName? }` → `201` 토큰. 중복 이메일 `409 EMAIL_TAKEN`.
+### local 이메일 인증 흐름
+`register → (인증 메일) → verify-email 클릭 → login`. 인증 전에는 login이 `403`.
 
-### POST /v1/auth/login
-`{ email, password }` → `200` 토큰. 불일치 `401 INVALID_CREDENTIALS`(계정 존재 여부 비노출).
+- **POST /v1/auth/register** — `{ email, password(8자+), displayName? }`
+  → `201 { user, requiresEmailVerification: true }` (⚠ 토큰 미발급) + 인증 메일 발송. 중복 `409 EMAIL_TAKEN`.
+  (SMTP 미설정 시 dev에서는 인증 링크가 **서버 콘솔**에 출력됨)
+- **GET /v1/auth/verify-email?token=…** — 인증 링크 처리(성공/실패 HTML).
+- **POST /v1/auth/resend-verification** — `{ email }` → 항상 `{ ok:true }`(계정 존재 비노출). 미인증 local이면 재발송.
+- **POST /v1/auth/login** — `{ email, password }` → `200` 토큰. 불일치 `401 INVALID_CREDENTIALS`, 미인증 `403 EMAIL_NOT_VERIFIED`.
 
-### POST /v1/auth/refresh
-`{ refreshToken }` → `200` 새 토큰 쌍. **회전**: 사용된 refresh는 즉시 무효(재사용 시 `401`) — 클라 ADR-002 single-flight와 맞물림.
+### 소셜 로그인 (google · kakao · naver)
+브라우저 리디렉트 기반 authorization code flow. BFF가 code 교환·프로필 조회·유저 upsert·토큰 발급을 담당.
 
-### POST /v1/auth/logout
-`{ refreshToken }` → `{ "ok": true }`. 해당 refresh 폐기.
+- **GET /v1/auth/oauth/:provider/start** — provider 인가 페이지로 `302`. 미설정 provider면 `400 PROVIDER_UNAVAILABLE`.
+- **GET /v1/auth/oauth/:provider/callback?code&state** — code 교환 → 토큰.
+  - `OAUTH_SUCCESS_REDIRECT` 설정 시 그 URL로 `302`(쿼리에 `accessToken`·`refreshToken`). 미설정이면 토큰 JSON.
+  - CSRF: state httpOnly 쿠키 검증(불일치 `400 OAUTH_STATE_MISMATCH`).
+  - provider 콘솔에 등록할 Redirect URI: `{PUBLIC_URL}/v1/auth/oauth/{provider}/callback`.
+  - 소셜 이메일이 기존 다른 방식 계정과 겹치면 `409 EMAIL_TAKEN`(자동 링크 안 함).
 
-### GET /v1/users/me 🔒
-현재 유저(`{ id, email, displayName }`). 세션 복원용. (인증 필요)
+### 세션
+- **POST /v1/auth/refresh** — `{ refreshToken }` → `200` 새 토큰 쌍. **회전**(재사용 `401` — ADR-002 single-flight).
+- **POST /v1/auth/logout** — `{ refreshToken }` → `{ "ok": true }`.
+- **GET /v1/users/me** 🔒 — 현재 유저(`{ id, email, displayName, provider, emailVerified }`). 세션 복원용.
 
 > 저장: 유저·refresh jti·Job은 **SQLite**(`data/bff.db`, BFF 전용·추론 poses.db와 분리)에 영속한다. 스케일 시 Postgres.
