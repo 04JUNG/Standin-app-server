@@ -31,6 +31,20 @@ npm run typecheck             # tsc --noEmit
 npm run build && npm start    # dist로 빌드 후 실행
 ```
 
+## Docker — 전체 스택 실행 (inference + BFF)
+
+추론 서버와 BFF를 함께 컨테이너로 띄운다. ⚠ 세 레포가 **형제 디렉터리**로 클론돼 있어야 한다(`../Standin-server`를 빌드 컨텍스트로 사용).
+
+```bash
+docker compose up --build      # inference(8000, 내부) + bff(8080, 공개)
+# 확인: curl http://localhost:8080/healthz  → { "ok": true, "inference": true }
+docker compose down            # 종료 (SQLite는 bff-data 볼륨에 유지)
+```
+
+- **클라(Standin-client)는 컨테이너 대상이 아니다** — Tauri 데스크톱 앱이라 네이티브로 실행한다.
+  `npm run tauri dev` 후 클라 `.env`의 `VITE_API_BASE_URL=http://localhost:8080`(이 BFF)로 연결.
+- 추론 서버는 내부 네트워크에서만 노출(무인증). 공개 포트는 BFF(8080)만.
+
 ## 엔드포인트 (현재 스캐폴드 상태)
 
 | 메서드 | 경로 | 상태 |
