@@ -59,8 +59,9 @@ src/
 ├─ types.ts        클라 /v1 계약 타입(공유 대상)
 ├─ inference.ts    도원 추론 서버 호출 격리(analyze·getPoseBvh·health)
 ├─ mapping.ts      계약 번역(matchLevel·오류봉투)
-├─ jobs/           Job 생성·폴링·백그라운드 러너(동기추론→Job 래핑)
-├─ auth/           middleware(JWT) · routes(register/login/refresh/logout) · tokens · users(인메모리)
+├─ db.ts           SQLite(better-sqlite3): users·refresh_tokens·jobs 테이블
+├─ jobs/           Job 생성·폴링·백그라운드 러너(동기추론→Job 래핑, SQLite)
+├─ auth/           middleware(JWT) · routes(register/login/refresh/logout) · tokens · users(SQLite)
 ├─ users/          GET /me
 └─ pose/           BVH 프록시
 ```
@@ -68,14 +69,14 @@ src/
 ## 로드맵 (Phase)
 
 ```
-Phase 0 ✅  Job 래핑·BVH 프록시·헬스. Job 저장 인메모리.
-Phase 1 ~   인증(JWT+refresh 회전·argon2·/users/me·보호 라우트) ✅ / 유저·Job 저장 영속화(SQLite·Postgres) ⬜
+Phase 0 ✅  Job 래핑·BVH 프록시·헬스.
+Phase 1 ✅  인증(JWT+refresh 회전·argon2·/users/me·보호 라우트) + 유저·refresh·Job **SQLite 영속**.
 Phase 2     rerun(excludeCandidateIds)·matchLevel 실데이터 보정·레이트리밋.
-Phase 3     큐를 Redis(BullMQ) 기반으로, 필요 시 추론 단계 스트리밍.
+Phase 3     저장 Postgres·큐 Redis(BullMQ), 필요 시 추론 단계 스트리밍.
 ```
 
 ## 알려진 TODO
-- **저장이 인메모리**(유저·refresh jti·Job 모두 재시작 시 소실) → SQLite(`node:sqlite`/better-sqlite3) 또는 Postgres.
 - `matchLevel` 임계값은 시드값 → `Standin-server/docs/SEARCH_EVAL`로 보정 필요.
 - 회원가입(`/v1/auth/register`)은 검증·레이트리밋·이메일 확인 없음(Phase 2 하드닝).
+- SQLite는 단일 인스턴스용 → 다중 인스턴스 스케일 시 Postgres.
 - 추론 서버는 **무인증·내부용** → 공개 노출 금지, BFF만 공개 엣지.

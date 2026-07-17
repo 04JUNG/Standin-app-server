@@ -157,4 +157,4 @@ JWT access(짧게) + refresh(회전). 비밀번호는 argon2 해시. `/v1/auth/*
 ### GET /v1/users/me 🔒
 현재 유저(`{ id, email, displayName }`). 세션 복원용. (인증 필요)
 
-> ⚠ Phase 1 한계: 유저·refresh 저장이 **인메모리**(서버 재시작 시 초기화). SQLite/Postgres로 교체 예정.
+> 저장: 유저·refresh jti·Job은 **SQLite**(`data/bff.db`, BFF 전용·추론 poses.db와 분리)에 영속한다. 스케일 시 Postgres.

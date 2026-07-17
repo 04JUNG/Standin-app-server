@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Standin BFF (app server) — Tauri 클라와 도원 추론 서버 사이 계층 (Hono/TS)",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
@@ -14,10 +16,12 @@
   "dependencies": {
     "@hono/node-server": "^1.13.7",
     "@node-rs/argon2": "^2.0.2",
+    "better-sqlite3": "^11.10.0",
     "hono": "^4.6.14",
     "jose": "^5.9.6"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.5",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"

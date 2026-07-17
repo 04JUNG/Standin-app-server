@@ -1,8 +1,8 @@
-// 유저 저장소 + 비밀번호 해시.
-// ⚠ Phase 1: 인메모리(프로세스 재시작 시 소실). BFF 전용 DB(SQLite/Postgres)로 교체 예정.
-//    ⚠ 추론 라이브러리 poses.db와 절대 섞지 않는다(PII).
+// 유저 저장소(SQLite) + 비밀번호 해시(argon2).
+// ⚠ 추론 라이브러리 poses.db와 분리된 BFF 전용 DB(PII).
 import { randomUUID } from "node:crypto";
 import { hash, verify } from "@node-rs/argon2";
+import { db, isUniqueViolation } from "../db.js";
 
 export interface User {
   id: string;
@@ -17,8 +17,16 @@ export interface PublicUser {
   displayName: string;
 }
 
-const byEmail = new Map<string, User>();
-const byId = new Map<string, User>();
+interface UserRow {
+  id: string;
+  email: string;
+  password_hash: string;
+  display_name: string;
+}
+
+function toUser(r: UserRow): User {
+  return { id: r.id, email: r.email, passwordHash: r.password_hash, displayName: r.display_name };
+}
 
 export function publicUser(u: User): PublicUser {
   return { id: u.id, email: u.email, displayName: u.displayName };
@@ -26,30 +34,44 @@ export function publicUser(u: User): PublicUser {
 
 export class EmailTakenError extends Error {}
 
+const insert = db.prepare(
+  "INSERT INTO users (id, email, password_hash, display_name, created_at) VALUES (?, ?, ?, ?, ?)",
+);
+const selByEmail = db.prepare(
+  "SELECT id, email, password_hash, display_name FROM users WHERE lower(email) = lower(?)",
+);
+const selById = db.prepare(
+  "SELECT id, email, password_hash, display_name FROM users WHERE id = ?",
+);
+
 export async function createUser(
   email: string,
   password: string,
   displayName: string,
 ): Promise<User> {
-  const key = email.toLowerCase();
-  if (byEmail.has(key)) throw new EmailTakenError(email);
   const user: User = {
     id: `user_${randomUUID()}`,
     email,
     passwordHash: await hash(password),
     displayName,
   };
-  byEmail.set(key, user);
-  byId.set(user.id, user);
+  try {
+    insert.run(user.id, user.email, user.passwordHash, user.displayName, new Date().toISOString());
+  } catch (e) {
+    if (isUniqueViolation(e)) throw new EmailTakenError(email);
+    throw e;
+  }
   return user;
 }
 
 export function findByEmail(email: string): User | undefined {
-  return byEmail.get(email.toLowerCase());
+  const row = selByEmail.get(email) as UserRow | undefined;
+  return row ? toUser(row) : undefined;
 }
 
 export function findById(id: string): User | undefined {
-  return byId.get(id);
+  const row = selById.get(id) as UserRow | undefined;
+  return row ? toUser(row) : undefined;
 }
 
 export function verifyPassword(user: User, password: string): Promise<boolean> {

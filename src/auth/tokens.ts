@@ -1,14 +1,15 @@
-// JWT 발급·검증 + refresh 회전.
-// access(짧게) + refresh(길게, 회전). refresh는 jti를 서버가 기억해 회전 시 이전 것을 무효화.
-// ⚠ Phase 1: 유효 refresh jti를 인메모리로 관리(재시작 시 전부 무효). DB/Redis로 교체 예정.
+// JWT 발급·검증 + refresh 회전. 유효 refresh는 jti를 SQLite에 화이트리스트로 저장.
+// 회전 시 이전 jti를 삭제 → 재사용 즉시 무효(클라 ADR-002 single-flight와 맞물림).
 import { randomUUID } from "node:crypto";
 import { SignJWT, jwtVerify } from "jose";
 import { config } from "../config.js";
+import { db } from "../db.js";
 
 const secret = new TextEncoder().encode(config.jwtSecret);
 
-// jti -> userId (살아있는 refresh 토큰만)
-const validRefreshJtis = new Map<string, string>();
+const insertJti = db.prepare("INSERT INTO refresh_tokens (jti, user_id, expires_at) VALUES (?, ?, ?)");
+const hasJti = db.prepare("SELECT 1 FROM refresh_tokens WHERE jti = ?");
+const deleteJti = db.prepare("DELETE FROM refresh_tokens WHERE jti = ?");
 
 export interface TokenPair {
   accessToken: string;
@@ -33,14 +34,15 @@ async function signAccess(userId: string): Promise<{ token: string; exp: number 
 
 async function signRefresh(userId: string): Promise<string> {
   const jti = randomUUID();
+  const exp = nowSec() + config.refreshTokenTtl;
   const token = await new SignJWT({ typ: "refresh" })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(userId)
     .setJti(jti)
     .setIssuedAt()
-    .setExpirationTime(nowSec() + config.refreshTokenTtl)
+    .setExpirationTime(exp)
     .sign(secret);
-  validRefreshJtis.set(jti, userId);
+  insertJti.run(jti, userId, exp);
   return token;
 }
 
@@ -62,15 +64,15 @@ export async function verifyAccess(token: string): Promise<string> {
   return payload.sub;
 }
 
-// refresh 회전: 검증 → 이전 jti 무효화 → 새 쌍 발급(클라 ADR-002 single-flight 대응).
+// refresh 회전: JWT 검증(만료 포함) → 화이트리스트 확인 → 이전 jti 삭제 → 새 쌍 발급.
 export async function rotateRefresh(token: string): Promise<TokenPair> {
   const { payload } = await jwtVerify(token, secret);
   const jti = payload.jti;
   if (payload.typ !== "refresh" || typeof payload.sub !== "string" || typeof jti !== "string") {
     throw new Error("not a refresh token");
   }
-  if (!validRefreshJtis.has(jti)) throw new Error("refresh revoked or already rotated");
-  validRefreshJtis.delete(jti);
+  if (!hasJti.get(jti)) throw new Error("refresh revoked or already rotated");
+  deleteJti.run(jti);
   return issueTokens(payload.sub);
 }
 
@@ -78,7 +80,7 @@ export async function rotateRefresh(token: string): Promise<TokenPair> {
 export async function revokeRefresh(token: string): Promise<void> {
   try {
     const { payload } = await jwtVerify(token, secret);
-    if (typeof payload.jti === "string") validRefreshJtis.delete(payload.jti);
+    if (typeof payload.jti === "string") deleteJti.run(payload.jti);
   } catch {
     // 이미 만료/위조 → 무시
   }
