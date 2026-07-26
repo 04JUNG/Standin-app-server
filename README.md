@@ -33,15 +33,21 @@ npm run build && npm start    # dist로 빌드 후 실행
 
 ## 엔드포인트 (현재 스캐폴드 상태)
 
+🔒 = 인증 필요(`Authorization: Bearer <access>`)
+
 | 메서드 | 경로 | 상태 |
 |---|---|---|
 | `GET` | `/healthz` | ✅ 동작(+추론 연결 확인) |
-| `POST` | `/v1/analysis/jobs` | ✅ Job 생성 → `/analyze` 백그라운드 호출 |
-| `GET` | `/v1/analysis/jobs/:id` | ✅ 상태 폴링 |
-| `GET` | `/v1/analysis/jobs/:id/result` | ✅ 결과(+matchLevel 매핑) |
-| `POST` | `/v1/analysis/jobs/:id/rerun` | 🚧 Phase 2 stub(501) |
-| `GET` | `/v1/pose-candidates/:id/export` | ✅ BVH 프록시 |
-| `POST` | `/v1/auth/{login,refresh,logout}` | 🚧 Phase 1 stub(501) |
+| `POST` | `/v1/auth/register` | ✅ 계정 생성 → 토큰 |
+| `POST` | `/v1/auth/login` | ✅ 로그인 → access+refresh |
+| `POST` | `/v1/auth/refresh` | ✅ refresh 회전 |
+| `POST` | `/v1/auth/logout` | ✅ refresh 폐기 |
+| `GET` | `/v1/users/me` 🔒 | ✅ 현재 유저(세션 복원) |
+| `POST` | `/v1/analysis/jobs` 🔒 | ✅ Job 생성 → `/analyze` 백그라운드 호출 |
+| `GET` | `/v1/analysis/jobs/:id` 🔒 | ✅ 상태 폴링 |
+| `GET` | `/v1/analysis/jobs/:id/result` 🔒 | ✅ 결과(+matchLevel 매핑) |
+| `POST` | `/v1/analysis/jobs/:id/rerun` 🔒 | 🚧 Phase 2 stub(501) |
+| `GET` | `/v1/pose-candidates/:id/export` 🔒 | ✅ BVH 프록시 |
 
 ## 구조
 
@@ -53,22 +59,24 @@ src/
 ├─ types.ts        클라 /v1 계약 타입(공유 대상)
 ├─ inference.ts    도원 추론 서버 호출 격리(analyze·getPoseBvh·health)
 ├─ mapping.ts      계약 번역(matchLevel·오류봉투)
-├─ jobs/           Job 생성·폴링·백그라운드 러너(동기추론→Job 래핑)
-├─ auth/           JWT 미들웨어 + 라우트(Phase 1 stub)
+├─ db.ts           SQLite(better-sqlite3): users·refresh_tokens·jobs 테이블
+├─ jobs/           Job 생성·폴링·백그라운드 러너(동기추론→Job 래핑, SQLite)
+├─ auth/           middleware(JWT) · routes(register/login/refresh/logout) · tokens · users(SQLite)
+├─ users/          GET /me
 └─ pose/           BVH 프록시
 ```
 
 ## 로드맵 (Phase)
 
 ```
-Phase 0 (지금)  Job 래핑·BVH 프록시·헬스 동작. Job 저장은 인메모리.
-Phase 1         인증(JWT+refresh 회전)·유저 DB·/v1/users/me. Job 저장을 SQLite/Postgres로.
-Phase 2         rerun(excludeCandidateIds)·matchLevel 임계값 실데이터 보정·레이트리밋.
-Phase 3         큐를 Redis 기반으로, 필요 시 추론 단계 스트리밍.
+Phase 0 ✅  Job 래핑·BVH 프록시·헬스.
+Phase 1 ✅  인증(JWT+refresh 회전·argon2·/users/me·보호 라우트) + 유저·refresh·Job **SQLite 영속**.
+Phase 2     rerun(excludeCandidateIds)·matchLevel 실데이터 보정·레이트리밋.
+Phase 3     저장 Postgres·큐 Redis(BullMQ), 필요 시 추론 단계 스트리밍.
 ```
 
 ## 알려진 TODO
-- Job 저장이 **인메모리**(재시작 시 소실) → SQLite(`node:sqlite`/better-sqlite3) 또는 Postgres.
-- 인증 전체 미구현(Phase 1 stub).
 - `matchLevel` 임계값은 시드값 → `Standin-server/docs/SEARCH_EVAL`로 보정 필요.
+- 회원가입(`/v1/auth/register`)은 검증·레이트리밋·이메일 확인 없음(Phase 2 하드닝).
+- SQLite는 단일 인스턴스용 → 다중 인스턴스 스케일 시 Postgres.
 - 추론 서버는 **무인증·내부용** → 공개 노출 금지, BFF만 공개 엣지.
