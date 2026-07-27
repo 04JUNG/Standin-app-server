@@ -64,6 +64,24 @@ export async function verifyAccess(token: string): Promise<string> {
   return payload.sub;
 }
 
+// 이메일 인증용 토큰(stateless). 인증 링크에 담아 발송 → 클릭 시 검증.
+export async function signEmailVerifyToken(userId: string): Promise<string> {
+  return new SignJWT({ typ: "email_verify" })
+    .setProtectedHeader({ alg: "HS256" })
+    .setSubject(userId)
+    .setIssuedAt()
+    .setExpirationTime(nowSec() + config.emailVerifyTtl)
+    .sign(secret);
+}
+
+export async function verifyEmailVerifyToken(token: string): Promise<string> {
+  const { payload } = await jwtVerify(token, secret);
+  if (payload.typ !== "email_verify" || typeof payload.sub !== "string") {
+    throw new Error("not an email-verify token");
+  }
+  return payload.sub;
+}
+
 // refresh 회전: JWT 검증(만료 포함) → 화이트리스트 확인 → 이전 jti 삭제 → 새 쌍 발급.
 export async function rotateRefresh(token: string): Promise<TokenPair> {
   const { payload } = await jwtVerify(token, secret);
