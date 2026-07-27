@@ -1,22 +1,42 @@
-# 로컬 실행: BFF + 도원 추론 서버.
-# ⚠ 추론 서버(inference)는 내부용 — 공개 포트로 노출하지 않는다(expose만, ports 금지).
+# 로컬 전체 스택 실행: 추론 서버(inference) + BFF(bff).
+#
+# ⚠ 전제: 세 레포가 같은 부모 아래 형제 디렉터리로 클론돼 있어야 한다(../Standin-server 빌드 컨텍스트).
+#     workspaces/
+#     ├─ Standin-server        (inference, 이 compose가 빌드)
+#     ├─ Standin-app-server    (bff, 여기)
+#     └─ Standin-client        (Tauri 데스크톱 — 컨테이너 대상 아님, 아래 참고)
+#
+# ⚠ 클라(Standin-client)는 Tauri 데스크톱 앱이라 컨테이너로 띄우지 않는다.
+#    네이티브로 실행하고(`npm run tauri dev`) .env의 VITE_API_BASE_URL 을
+#    http://localhost:8080 (이 BFF)로 두면 전체 흐름이 연결된다.
+#
+# 실행:  docker compose up --build      (종료: docker compose down)
+
 services:
+  inference:
+    build: ../Standin-server
+    environment:
+      - VLM_PROVIDER=mock      # 키·모델 없이 실행
+      - POSE_BACKEND=mock
+    expose:
+      - "8000"                 # 내부 네트워크만(무인증 → 공개 포트 노출 금지)
+    # 추론 서버를 직접 디버깅하려면 주석 해제(개발용):
+    # ports:
+    #   - "8000:8000"
+
   bff:
     build: .
-    ports:
-      - "8080:8080" # 공개 엣지
-    environment:
-      - PORT=8080
-      - INFERENCE_BASE_URL=http://inference:8000
-      - JWT_SECRET=change-me-in-real-env
-      - DB_PATH=data/bff.db
     depends_on:
       - inference
+    environment:
+      - PORT=8080
+      - INFERENCE_BASE_URL=http://inference:8000   # compose 네트워크의 서비스명
+      - JWT_SECRET=${JWT_SECRET:-dev-only-change-me}
+      - DB_PATH=/app/data/bff.db
+    ports:
+      - "8080:8080"            # 공개 엣지(클라가 여기로 연결)
+    volumes:
+      - bff-data:/app/data     # SQLite(유저·refresh·Job) 영속
 
-  # 도원 추론 서버(별도 레포 Standin-server). 참고용 정의.
-  inference:
-    # TODO: Standin-server 이미지를 빌드/지정. 예:
-    #   build: ../Standin-server
-    image: standin-server:local
-    expose:
-      - "8000" # 내부만(공개 X)
+volumes:
+  bff-data:
