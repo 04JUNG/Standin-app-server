@@ -7,7 +7,8 @@ import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import { config } from "./config.js";
 
 export const pool = new Pool({
-  connectionString: config.databaseUrl,
+  // undefined면 pg가 표준 PG* 환경변수를 읽는다(config.usePgEnvVars 주석 참고).
+  connectionString: config.usePgEnvVars ? undefined : config.databaseUrl,
   // RDS는 TLS를 요구하지만 사설 CA라 체인 검증은 끈다. 로컬(compose)은 TLS 자체가 없다.
   ssl: config.databaseSsl ? { rejectUnauthorized: false } : undefined,
   max: config.databasePoolMax,
