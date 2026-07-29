@@ -1,15 +1,11 @@
-// JWT 발급·검증 + refresh 회전. 유효 refresh는 jti를 SQLite에 화이트리스트로 저장.
+// JWT 발급·검증 + refresh 회전. 유효 refresh는 jti를 DB에 화이트리스트로 저장.
 // 회전 시 이전 jti를 삭제 → 재사용 즉시 무효(클라 ADR-002 single-flight와 맞물림).
 import { randomUUID } from "node:crypto";
 import { SignJWT, jwtVerify } from "jose";
 import { config } from "../config.js";
-import { db } from "../db.js";
+import { execute } from "../db.js";
 
 const secret = new TextEncoder().encode(config.jwtSecret);
-
-const insertJti = db.prepare("INSERT INTO refresh_tokens (jti, user_id, expires_at) VALUES (?, ?, ?)");
-const hasJti = db.prepare("SELECT 1 FROM refresh_tokens WHERE jti = ?");
-const deleteJti = db.prepare("DELETE FROM refresh_tokens WHERE jti = ?");
 
 export interface TokenPair {
   accessToken: string;
@@ -42,7 +38,11 @@ async function signRefresh(userId: string): Promise<string> {
     .setIssuedAt()
     .setExpirationTime(exp)
     .sign(secret);
-  insertJti.run(jti, userId, exp);
+  await execute("INSERT INTO refresh_tokens (jti, user_id, expires_at) VALUES ($1, $2, $3)", [
+    jti,
+    userId,
+    exp,
+  ]);
   return token;
 }
 
@@ -89,8 +89,11 @@ export async function rotateRefresh(token: string): Promise<TokenPair> {
   if (payload.typ !== "refresh" || typeof payload.sub !== "string" || typeof jti !== "string") {
     throw new Error("not a refresh token");
   }
-  if (!hasJti.get(jti)) throw new Error("refresh revoked or already rotated");
-  deleteJti.run(jti);
+  // 확인과 삭제를 한 문장으로 처리한다. 태스크가 여러 개면 "조회 → 삭제" 사이에
+  // 다른 요청이 끼어들어 같은 refresh가 두 번 통과할 수 있다(SQLite 단일 프로세스에서는
+  // 직렬화돼 드러나지 않던 경합). 삭제된 행이 0이면 이미 쓰인 토큰이다.
+  const deleted = await execute("DELETE FROM refresh_tokens WHERE jti = $1", [jti]);
+  if (deleted === 0) throw new Error("refresh revoked or already rotated");
   return issueTokens(payload.sub);
 }
 
@@ -98,7 +101,9 @@ export async function rotateRefresh(token: string): Promise<TokenPair> {
 export async function revokeRefresh(token: string): Promise<void> {
   try {
     const { payload } = await jwtVerify(token, secret);
-    if (typeof payload.jti === "string") deleteJti.run(payload.jti);
+    if (typeof payload.jti === "string") {
+      await execute("DELETE FROM refresh_tokens WHERE jti = $1", [payload.jti]);
+    }
   } catch {
     // 이미 만료/위조 → 무시
   }

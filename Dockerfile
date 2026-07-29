@@ -1,5 +1,6 @@
-# Standin BFF (Node/Hono). 단일 스테이지 — 네이티브 의존성(better-sqlite3·argon2)의
-# prebuilt 바이너리가 npm ci에서 자동 설치된다(빌드 툴 불필요).
+# Standin BFF (Node/Hono).
+# 네이티브 의존성은 argon2(@node-rs)뿐이고 prebuilt 바이너리가 npm ci에서 설치된다(빌드 툴 불필요).
+# DB는 외부 PostgreSQL이라 컨테이너에 영속 디스크가 필요 없다 — ECS Fargate에 그대로 올라간다.
 FROM node:20-slim
 
 WORKDIR /app
@@ -12,9 +13,12 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-ENV PORT=8080 \
-    DB_PATH=/app/data/bff.db
+# 런타임에는 devDependencies가 필요 없다(이미지 축소).
+RUN npm prune --omit=dev
+
+ENV NODE_ENV=production \
+    PORT=8080
 EXPOSE 8080
 
-# SQLite 파일이 놓일 디렉터리(compose에서 볼륨 마운트)
+# DATABASE_URL은 실행 시 주입한다(compose / ECS 태스크 정의).
 CMD ["node", "dist/index.js"]

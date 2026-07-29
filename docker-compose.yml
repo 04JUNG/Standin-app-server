@@ -1,4 +1,4 @@
-# 로컬 전체 스택 실행: 추론 서버(inference) + BFF(bff).
+# 로컬 전체 스택 실행: DB(postgres) + 추론 서버(inference) + BFF(bff).
 #
 # ⚠ 전제: 세 레포가 같은 부모 아래 형제 디렉터리로 클론돼 있어야 한다(../Standin-server 빌드 컨텍스트).
 #     workspaces/
@@ -11,15 +11,36 @@
 #    http://localhost:8080 (이 BFF)로 두면 전체 흐름이 연결된다.
 #
 # 실행:  docker compose up --build      (종료: docker compose down)
+# DB만:  docker compose up -d postgres  (앱은 로컬에서 npm run dev)
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=standin
+      - POSTGRES_PASSWORD=standin
+      - POSTGRES_DB=standin
+    ports:
+      # 호스트는 5433. 개발 PC에 네이티브 Postgres가 5432를 이미 쓰는 경우가 흔해서
+      # 기본 포트를 피한다(그대로 두면 조용히 다른 DB에 붙어 인증 실패로 나타난다).
+      # 컨테이너 사이(bff → postgres)는 여전히 5432를 쓴다.
+      - "5433:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      # BFF가 기동하며 스키마를 만들기 때문에 DB가 실제로 받을 준비가 될 때까지 기다려야 한다.
+      test: ["CMD-SHELL", "pg_isready -U standin -d standin"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
   inference:
     build: ../Standin-server
     environment:
-      - VLM_PROVIDER=mock      # 키·모델 없이 실행
+      - VLM_PROVIDER=mock # 키·모델 없이 실행
       - POSE_BACKEND=mock
     expose:
-      - "8000"                 # 내부 네트워크만(무인증 → 공개 포트 노출 금지)
+      - "8000" # 내부 네트워크만(무인증 → 공개 포트 노출 금지)
     # 추론 서버를 직접 디버깅하려면 주석 해제(개발용):
     # ports:
     #   - "8000:8000"
@@ -27,16 +48,18 @@ services:
   bff:
     build: .
     depends_on:
-      - inference
+      postgres:
+        condition: service_healthy
+      inference:
+        condition: service_started
     environment:
       - PORT=8080
-      - INFERENCE_BASE_URL=http://inference:8000   # compose 네트워크의 서비스명
+      - INFERENCE_BASE_URL=http://inference:8000 # compose 네트워크의 서비스명
       - JWT_SECRET=${JWT_SECRET:-dev-only-change-me}
-      - DB_PATH=/app/data/bff.db
+      - DATABASE_URL=postgres://standin:standin@postgres:5432/standin
+      - DATABASE_SSL=false # 로컬 compose는 TLS 없음. RDS에서는 true.
     ports:
-      - "8080:8080"            # 공개 엣지(클라가 여기로 연결)
-    volumes:
-      - bff-data:/app/data     # SQLite(유저·refresh·Job) 영속
+      - "8080:8080" # 공개 엣지(클라가 여기로 연결)
 
 volumes:
-  bff-data:
+  pg-data:

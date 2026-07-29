@@ -77,10 +77,10 @@ oauthRoutes.get("/:provider/callback", async (c) => {
     );
   }
 
-  let user = findByProvider(name as OAuthProviderName, info.providerId);
+  let user = await findByProvider(name as OAuthProviderName, info.providerId);
   if (!user) {
     // 같은 이메일이 다른 방식으로 이미 가입됨 → 자동 링크는 하지 않고 안내(보안)
-    if (findByEmail(info.email)) {
+    if (await findByEmail(info.email)) {
       return c.json(
         errorEnvelope("EMAIL_TAKEN", "이미 다른 방법으로 가입된 이메일입니다. 기존 방식으로 로그인하세요.", c.get("requestId")),
         409,

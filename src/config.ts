@@ -18,8 +18,12 @@ export const config = {
   refreshTokenTtl: Number(process.env.REFRESH_TOKEN_TTL ?? 1209600), // 14일
   emailVerifyTtl: Number(process.env.EMAIL_VERIFY_TTL ?? 86400), // 24시간
 
-  // BFF 전용 DB(추론 poses.db와 분리)
-  dbPath: env("DB_PATH", "data/bff.db"),
+  // BFF 전용 DB(추론 poses.db와 분리). PostgreSQL.
+  // 기본 포트가 5433인 이유는 docker-compose.yml 주석 참고(네이티브 Postgres와 충돌 회피).
+  databaseUrl: env("DATABASE_URL", "postgres://standin:standin@localhost:5433/standin"),
+  // RDS는 TLS 필수. 로컬 compose는 TLS가 없으므로 기본 off.
+  databaseSsl: env("DATABASE_SSL", "false") === "true",
+  databasePoolMax: Number(process.env.DATABASE_POOL_MAX ?? 10),
 
   // 소셜 로그인 성공 후 토큰을 넘길 클라 리디렉트(데스크톱 딥링크 등). 없으면 콜백이 JSON 반환.
   oauthSuccessRedirect: env("OAUTH_SUCCESS_REDIRECT"),
