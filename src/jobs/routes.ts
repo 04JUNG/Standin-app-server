@@ -19,14 +19,14 @@ jobsRoutes.post("/", async (c) => {
     );
   }
   const hint = typeof body["hint"] === "string" ? body["hint"] : "";
-  const job = createJob(c.get("userId") ?? null);
+  const job = await createJob(c.get("userId") ?? null);
   void runAnalysisJob(job.id, file, hint); // fire-and-forget
   return c.json({ jobId: job.id, status: job.status, createdAt: job.createdAt }, 202);
 });
 
 // GET /v1/analysis/jobs/:id — 상태 폴링
-jobsRoutes.get("/:id", (c) => {
-  const job = getJob(c.req.param("id"));
+jobsRoutes.get("/:id", async (c) => {
+  const job = await getJob(c.req.param("id"));
   if (!job) {
     return c.json(errorEnvelope("NOT_FOUND", "unknown jobId", c.get("requestId")), 404);
   }
@@ -40,8 +40,8 @@ jobsRoutes.get("/:id", (c) => {
 });
 
 // GET /v1/analysis/jobs/:id/result — 결과(완료 시)
-jobsRoutes.get("/:id/result", (c) => {
-  const job = getJob(c.req.param("id"));
+jobsRoutes.get("/:id/result", async (c) => {
+  const job = await getJob(c.req.param("id"));
   if (!job) {
     return c.json(errorEnvelope("NOT_FOUND", "unknown jobId", c.get("requestId")), 404);
   }

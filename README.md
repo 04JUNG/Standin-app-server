@@ -36,9 +36,9 @@ npm run build && npm start    # dist로 빌드 후 실행
 추론 서버와 BFF를 함께 컨테이너로 띄운다. ⚠ 세 레포가 **형제 디렉터리**로 클론돼 있어야 한다(`../Standin-server`를 빌드 컨텍스트로 사용).
 
 ```bash
-docker compose up --build      # inference(8000, 내부) + bff(8080, 공개)
+docker compose up --build      # postgres(5432) + inference(8000, 내부) + bff(8080, 공개)
 # 확인: curl http://localhost:8080/healthz  → { "ok": true, "inference": true }
-docker compose down            # 종료 (SQLite는 bff-data 볼륨에 유지)
+docker compose down            # 종료 (DB는 pg-data 볼륨에 유지)
 ```
 
 - **클라(Standin-client)는 컨테이너 대상이 아니다** — Tauri 데스크톱 앱이라 네이티브로 실행한다.
@@ -77,9 +77,9 @@ src/
 ├─ types.ts        클라 /v1 계약 타입(공유 대상)
 ├─ inference.ts    도원 추론 서버 호출 격리(analyze·getPoseBvh·health)
 ├─ mapping.ts      계약 번역(matchLevel·오류봉투)
-├─ db.ts           SQLite(better-sqlite3): users·refresh_tokens·jobs 테이블
-├─ jobs/           Job 생성·폴링·백그라운드 러너(동기추론→Job 래핑, SQLite)
-├─ auth/           routes(register/login/verify/refresh/logout) · tokens · users(SQLite) · mailer
+├─ db.ts           PostgreSQL(pg): Pool·스키마 초기화(advisory lock)·쿼리 헬퍼
+├─ jobs/           Job 생성·폴링·백그라운드 러너(동기추론→Job 래핑, Postgres)
+├─ auth/           routes(register/login/verify/refresh/logout) · tokens · users(Postgres) · mailer
 │  └─ oauth/       소셜 로그인(google·kakao·naver) 레지스트리 + start/callback
 ├─ users/          GET /me
 └─ pose/           BVH 프록시
@@ -89,14 +89,14 @@ src/
 
 ```
 Phase 0 ✅  Job 래핑·BVH 프록시·헬스.
-Phase 1 ✅  인증(JWT+refresh 회전·argon2·/users/me·보호 라우트) + 유저·refresh·Job **SQLite 영속**.
+Phase 1 ✅  인증(JWT+refresh 회전·argon2·/users/me·보호 라우트) + 유저·refresh·Job **PostgreSQL 영속**.
 Phase 2     rerun(excludeCandidateIds)·matchLevel 실데이터 보정·레이트리밋.
-Phase 3     저장 Postgres·큐 Redis(BullMQ), 필요 시 추론 단계 스트리밍.
+Phase 3     큐(SQS 등)로 Job 실행 분리, 필요 시 추론 단계 스트리밍.
 ```
 
 ## 알려진 TODO
 - `matchLevel` 임계값은 시드값 → `Standin-server/docs/SEARCH_EVAL`로 보정 필요.
 - 회원가입 하드닝: 레이트리밋·봇 방지 미포함(Phase 2). 이메일 인증은 구현됨.
 - 소셜 로그인은 provider 키가 있어야 동작(없으면 `PROVIDER_UNAVAILABLE`). 데스크톱 토큰 전달은 `OAUTH_SUCCESS_REDIRECT`(딥링크) 필요.
-- SQLite는 단일 인스턴스용 → 다중 인스턴스 스케일 시 Postgres.
+- Job 실행이 아직 프로세스 내 fire-and-forget → 배포·재시작 시 진행 중 Job이 유실된다(큐로 교체 예정).
 - 추론 서버는 **무인증·내부용** → 공개 노출 금지, BFF만 공개 엣지.

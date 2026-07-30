@@ -6,13 +6,16 @@ import { mapCutResult } from "../mapping.js";
 import { getJob, updateJob } from "./store.js";
 
 export async function runAnalysisJob(jobId: string, file: Blob, hint = ""): Promise<void> {
-  if (!getJob(jobId)) return;
-  updateJob(jobId, { status: "running" });
+  if (!(await getJob(jobId))) return;
+  await updateJob(jobId, { status: "running" });
   try {
     const cut = await analyze(file, hint);
-    updateJob(jobId, { status: "completed", result: mapCutResult(jobId, cut) });
+    await updateJob(jobId, { status: "completed", result: mapCutResult(jobId, cut) });
   } catch (err) {
-    updateJob(jobId, { status: "failed", errorCode: "INFERENCE_FAILED" });
+    // 상태 기록까지 실패하면 Job이 running에 머문다. 로그로 남겨 추적 가능하게 한다.
+    await updateJob(jobId, { status: "failed", errorCode: "INFERENCE_FAILED" }).catch((e) =>
+      console.error(`[job ${jobId}] failed to record failure:`, e),
+    );
     console.error(`[job ${jobId}] inference failed:`, err);
   }
 }

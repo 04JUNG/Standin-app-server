@@ -101,7 +101,7 @@ authRoutes.post("/login", async (c) => {
   if (!creds) {
     return c.json(errorEnvelope("INVALID_INPUT", "이메일·비밀번호를 확인하세요.", c.get("requestId")), 400);
   }
-  const user = findByEmail(creds.email);
+  const user = await findByEmail(creds.email);
   // local 계정이 아니거나(=소셜) 비번 불일치 → 동일 응답(계정 존재·가입방식 비노출)
   if (!user || user.provider !== "local" || !(await verifyPassword(user, creds.password))) {
     return c.json(
@@ -126,7 +126,7 @@ authRoutes.get("/verify-email", async (c) => {
      <h2>${title}</h2><p>${msg}</p></body>`;
   try {
     const userId = await verifyEmailVerifyToken(token);
-    setEmailVerified(userId);
+    await setEmailVerified(userId);
     return c.html(page("이메일 인증 완료 ✅", "이제 로그인할 수 있습니다."));
   } catch {
     return c.html(page("인증 실패", "링크가 만료되었거나 올바르지 않습니다. 인증 메일을 다시 요청하세요."), 400);
@@ -136,7 +136,7 @@ authRoutes.get("/verify-email", async (c) => {
 authRoutes.post("/resend-verification", async (c) => {
   const email = readString(await readJson(c), "email").trim();
   if (email) {
-    const user = findByEmail(email);
+    const user = await findByEmail(email);
     if (user && user.provider === "local" && !user.emailVerified) {
       await sendVerify(user.email, user.id);
     }

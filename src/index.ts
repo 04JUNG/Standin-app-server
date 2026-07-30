@@ -4,6 +4,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
 import { config } from "./config.js";
+import { closeDb, initDb } from "./db.js";
 import type { AppEnv } from "./env.js";
 import { health } from "./inference.js";
 import { requireAuth } from "./auth/middleware.js";
@@ -37,7 +38,24 @@ app.route("/v1/users", usersRoutes);
 app.route("/v1/analysis/jobs", jobsRoutes);
 app.route("/v1/pose-candidates", poseRoutes);
 
-serve({ fetch: app.fetch, port: config.port }, (info) => {
+// DB가 준비된 뒤에 요청을 받는다. 실패하면 기동하지 않는다 —
+// 스키마 없이 떠 있으면 모든 요청이 500이 되고 컨테이너는 healthy로 보인다.
+await initDb().catch((err) => {
+  console.error("[bff] DB 초기화 실패:", err);
+  process.exit(1);
+});
+
+const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(`[bff] listening on http://localhost:${info.port}`);
   console.log(`[bff] inference → ${config.inferenceBaseUrl}`);
 });
+
+// ECS는 태스크를 교체할 때 SIGTERM을 보낸다. 진행 중 요청을 마치고 커넥션을 정리한다.
+for (const signal of ["SIGTERM", "SIGINT"] as const) {
+  process.on(signal, () => {
+    console.log(`[bff] ${signal} 수신 — 종료합니다.`);
+    server.close(() => {
+      void closeDb().finally(() => process.exit(0));
+    });
+  });
+}

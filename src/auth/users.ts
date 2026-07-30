@@ -1,8 +1,8 @@
-// 유저 저장소(SQLite) + 비밀번호 해시(argon2). local + 소셜(google/kakao/naver).
+// 유저 저장소(PostgreSQL) + 비밀번호 해시(argon2). local + 소셜(google/kakao/naver).
 // ⚠ 추론 라이브러리 poses.db와 분리된 BFF 전용 DB(PII).
 import { randomUUID } from "node:crypto";
 import { hash, verify } from "@node-rs/argon2";
-import { db, isUniqueViolation } from "../db.js";
+import { execute, isUniqueViolation, queryOne } from "../db.js";
 
 export type Provider = "local" | "google" | "kakao" | "naver";
 
@@ -31,7 +31,7 @@ interface UserRow {
   display_name: string;
   provider: string;
   provider_id: string | null;
-  email_verified: number;
+  email_verified: boolean;
 }
 
 function toUser(r: UserRow): User {
@@ -42,7 +42,7 @@ function toUser(r: UserRow): User {
     displayName: r.display_name,
     provider: r.provider as Provider,
     providerId: r.provider_id,
-    emailVerified: r.email_verified === 1,
+    emailVerified: r.email_verified,
   };
 }
 
@@ -59,14 +59,30 @@ export function publicUser(u: User): PublicUser {
 export class EmailTakenError extends Error {}
 
 const COLS = "id, email, password_hash, display_name, provider, provider_id, email_verified";
-const insert = db.prepare(
-  `INSERT INTO users (id, email, password_hash, display_name, created_at, provider, provider_id, email_verified)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-);
-const selByEmail = db.prepare(`SELECT ${COLS} FROM users WHERE lower(email) = lower(?)`);
-const selById = db.prepare(`SELECT ${COLS} FROM users WHERE id = ?`);
-const selByProvider = db.prepare(`SELECT ${COLS} FROM users WHERE provider = ? AND provider_id = ?`);
-const updVerified = db.prepare("UPDATE users SET email_verified = 1 WHERE id = ?");
+
+const INSERT = `
+  INSERT INTO users (id, email, password_hash, display_name, created_at, provider, provider_id, email_verified)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+`;
+
+/** 신규 유저 저장. 이메일·provider 중복은 EmailTakenError로 바꾼다. */
+async function insertUser(user: User): Promise<void> {
+  try {
+    await execute(INSERT, [
+      user.id,
+      user.email,
+      user.passwordHash,
+      user.displayName,
+      new Date().toISOString(),
+      user.provider,
+      user.providerId,
+      user.emailVerified,
+    ]);
+  } catch (e) {
+    if (isUniqueViolation(e)) throw new EmailTakenError(user.email);
+    throw e;
+  }
+}
 
 // local 회원가입(이메일 미인증 상태로 생성)
 export async function createUser(
@@ -83,16 +99,11 @@ export async function createUser(
     providerId: null,
     emailVerified: false,
   };
-  try {
-    insert.run(user.id, user.email, user.passwordHash, user.displayName, new Date().toISOString(), "local", null, 0);
-  } catch (e) {
-    if (isUniqueViolation(e)) throw new EmailTakenError(email);
-    throw e;
-  }
+  await insertUser(user);
   return user;
 }
 
-// 소셜 로그인 신규 유저(provider가 이메일을 검증했으므로 email_verified=1)
+// 소셜 로그인 신규 유저(provider가 이메일을 검증했으므로 email_verified=true)
 export async function createOAuthUser(
   provider: Exclude<Provider, "local">,
   providerId: string,
@@ -108,32 +119,35 @@ export async function createOAuthUser(
     providerId,
     emailVerified: true,
   };
-  try {
-    insert.run(user.id, user.email, null, user.displayName, new Date().toISOString(), provider, providerId, 1);
-  } catch (e) {
-    if (isUniqueViolation(e)) throw new EmailTakenError(email);
-    throw e;
-  }
+  await insertUser(user);
   return user;
 }
 
-export function findByEmail(email: string): User | undefined {
-  const row = selByEmail.get(email) as UserRow | undefined;
+export async function findByEmail(email: string): Promise<User | undefined> {
+  const row = await queryOne<UserRow>(`SELECT ${COLS} FROM users WHERE lower(email) = lower($1)`, [
+    email,
+  ]);
   return row ? toUser(row) : undefined;
 }
 
-export function findById(id: string): User | undefined {
-  const row = selById.get(id) as UserRow | undefined;
+export async function findById(id: string): Promise<User | undefined> {
+  const row = await queryOne<UserRow>(`SELECT ${COLS} FROM users WHERE id = $1`, [id]);
   return row ? toUser(row) : undefined;
 }
 
-export function findByProvider(provider: Provider, providerId: string): User | undefined {
-  const row = selByProvider.get(provider, providerId) as UserRow | undefined;
+export async function findByProvider(
+  provider: Provider,
+  providerId: string,
+): Promise<User | undefined> {
+  const row = await queryOne<UserRow>(
+    `SELECT ${COLS} FROM users WHERE provider = $1 AND provider_id = $2`,
+    [provider, providerId],
+  );
   return row ? toUser(row) : undefined;
 }
 
-export function setEmailVerified(userId: string): void {
-  updVerified.run(userId);
+export async function setEmailVerified(userId: string): Promise<void> {
+  await execute("UPDATE users SET email_verified = TRUE WHERE id = $1", [userId]);
 }
 
 export function verifyPassword(user: User, password: string): Promise<boolean> {
