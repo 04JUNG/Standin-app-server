@@ -16,6 +16,7 @@ import {
 } from "./config.js";
 import { createOAuthUser, findByEmail, findByProvider } from "../users.js";
 import { issueTokens } from "../tokens.js";
+import { issueOAuthCode } from "../oauthCodes.js";
 
 export const oauthRoutes = new Hono<AppEnv>();
 
@@ -90,16 +91,15 @@ oauthRoutes.get("/:provider/callback", async (c) => {
     user = await createOAuthUser(name as OAuthProviderName, info.providerId, info.email, displayName);
   }
 
-  const tokens = await issueTokens(user.id);
-
-  // 데스크톱 클라: 딥링크로 토큰 전달(OAUTH_SUCCESS_REDIRECT). 미설정이면 JSON.
+  // 데스크톱 클라: 딥링크로 1회용 코드만 전달(OAUTH_SUCCESS_REDIRECT).
+  // 토큰은 클라가 POST /v1/auth/oauth/exchange로 받아간다 — URL에 장기 자격증명을 남기지 않는다.
   if (config.oauthSuccessRedirect) {
     const r = new URL(config.oauthSuccessRedirect);
-    r.searchParams.set("accessToken", tokens.accessToken);
-    r.searchParams.set("refreshToken", tokens.refreshToken);
+    r.searchParams.set("code", await issueOAuthCode(user.id));
     return c.redirect(r.toString());
   }
-  return c.json(tokens);
+  // 미설정(dev/curl)이면 토큰을 그대로 돌려준다.
+  return c.json(await issueTokens(user.id));
 });
 
 async function exchangeCode(

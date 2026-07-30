@@ -5,6 +5,7 @@
 //   POST /logout              : refresh 폐기
 //   GET  /verify-email        : 이메일 인증 링크 처리
 //   POST /resend-verification : 인증 메일 재발송
+//   POST /oauth/exchange      : 소셜 콜백이 넘긴 1회용 코드 → 토큰(데스크톱 딥링크)
 //   /oauth/:provider/...      : 소셜 로그인(google·kakao·naver)
 // ⚠ 비밀번호·토큰을 로그에 남기지 않는다.
 import { Hono } from "hono";
@@ -16,10 +17,12 @@ import {
   EmailTakenError,
   createUser,
   findByEmail,
+  findById,
   publicUser,
   setEmailVerified,
   verifyPassword,
 } from "./users.js";
+import { consumeOAuthCode } from "./oauthCodes.js";
 import {
   issueTokens,
   revokeRefresh,
@@ -161,6 +164,31 @@ authRoutes.post("/logout", async (c) => {
   const token = readString(await readJson(c), "refreshToken");
   if (token) await revokeRefresh(token);
   return c.json({ ok: true });
+});
+
+// 소셜 로그인 1회용 코드 → 토큰 교환(데스크톱 딥링크용).
+// oauth 라우터보다 먼저 둔다 — /oauth/:provider/start와 경로가 겹치지 않지만
+// 이 엔드포인트는 provider가 아니라 코드를 다루므로 여기(공개 auth 라우트)에 있는 게 맞다.
+authRoutes.post("/oauth/exchange", async (c) => {
+  const code = readString(await readJson(c), "code");
+  if (!code) {
+    return c.json(errorEnvelope("INVALID_INPUT", "code가 필요합니다.", c.get("requestId")), 400);
+  }
+  let userId: string;
+  try {
+    userId = await consumeOAuthCode(code);
+  } catch {
+    return c.json(
+      errorEnvelope("INVALID_CODE", "코드가 만료되었거나 이미 사용되었습니다.", c.get("requestId")),
+      401,
+    );
+  }
+  const user = await findById(userId);
+  if (!user) {
+    return c.json(errorEnvelope("NOT_FOUND", "유저를 찾을 수 없습니다.", c.get("requestId")), 404);
+  }
+  // /login과 동일한 응답 형태 — 클라가 같은 파서를 쓴다.
+  return c.json({ user: publicUser(user), ...(await issueTokens(user.id)) });
 });
 
 // 소셜 로그인

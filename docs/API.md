@@ -131,7 +131,7 @@
 JWT access(짧게) + refresh(회전). 비밀번호는 argon2 해시. `/v1/auth/*`는 공개.
 로그인 방식: **local(이메일+비번, 이메일 인증 필요)** + **소셜(google·kakao·naver)**.
 
-**토큰 응답 형태**(login·refresh·소셜 콜백 공통):
+**토큰 응답 형태**(login·refresh·oauth exchange 공통):
 
 ```json
 {
@@ -158,15 +158,18 @@ JWT access(짧게) + refresh(회전). 비밀번호는 argon2 해시. `/v1/auth/*
 브라우저 리디렉트 기반 authorization code flow. BFF가 code 교환·프로필 조회·유저 upsert·토큰 발급을 담당.
 
 - **GET /v1/auth/oauth/:provider/start** — provider 인가 페이지로 `302`. 미설정 provider면 `400 PROVIDER_UNAVAILABLE`.
-- **GET /v1/auth/oauth/:provider/callback?code&state** — code 교환 → 토큰.
-  - `OAUTH_SUCCESS_REDIRECT` 설정 시 그 URL로 `302`(쿼리에 `accessToken`·`refreshToken`). 미설정이면 토큰 JSON.
+- **GET /v1/auth/oauth/:provider/callback?code&state** — provider code 교환 → 프로필 조회 → 유저 upsert.
+  - `OAUTH_SUCCESS_REDIRECT` 설정 시 그 URL로 `302`(쿼리에 **1회용 `code`만**). 미설정이면 토큰 JSON(dev/curl).
   - CSRF: state httpOnly 쿠키 검증(불일치 `400 OAUTH_STATE_MISMATCH`).
   - provider 콘솔에 등록할 Redirect URI: `{PUBLIC_URL}/v1/auth/oauth/{provider}/callback`.
   - 소셜 이메일이 기존 다른 방식 계정과 겹치면 `409 EMAIL_TAKEN`(자동 링크 안 함).
+- **POST /v1/auth/oauth/exchange** — `{ code }` → `200` 토큰(login과 동일 형태). 만료·재사용 `401 INVALID_CODE`, 누락 `400 INVALID_INPUT`.
+  - 콜백이 넘긴 **60초 1회용** 코드. 서버에는 SHA-256 해시만 저장하고, 소비는 확인·삭제를 한 문장으로 처리해 중복 사용을 막는다.
+  - ⚠ 토큰을 딥링크 URL(`standin://…?accessToken=`)에 실으면 OS 로그·최근 실행 기록에 장기 자격증명이 남는다(클라 `docs/06 §6` 금지). 그래서 코드만 넘긴다.
 
 ### 세션
 - **POST /v1/auth/refresh** — `{ refreshToken }` → `200` 새 토큰 쌍. **회전**(재사용 `401` — ADR-002 single-flight).
 - **POST /v1/auth/logout** — `{ refreshToken }` → `{ "ok": true }`.
 - **GET /v1/users/me** 🔒 — 현재 유저(`{ id, email, displayName, provider, emailVerified }`). 세션 복원용.
 
-> 저장: 유저·refresh jti·Job은 **PostgreSQL**(BFF 전용·추론 poses.db와 분리)에 영속한다. 접속 정보는 `DATABASE_URL`.
+> 저장: 유저·refresh jti·oauth 교환코드·Job은 **PostgreSQL**(BFF 전용·추론 poses.db와 분리)에 영속한다. 접속 정보는 `DATABASE_URL`.
