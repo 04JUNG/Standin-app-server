@@ -56,6 +56,13 @@ const SCHEMA = `
     expires_at BIGINT NOT NULL                           -- unix seconds
   );
 
+  -- 소셜 로그인 성공 후 클라에 넘기는 1회용 교환 코드. 원문이 아니라 SHA-256 해시를 담는다.
+  CREATE TABLE IF NOT EXISTS oauth_codes (
+    code_hash  TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL,
+    expires_at BIGINT NOT NULL                           -- unix seconds
+  );
+
   CREATE TABLE IF NOT EXISTS jobs (
     id          TEXT PRIMARY KEY,
     user_id     TEXT,
@@ -72,6 +79,7 @@ const SCHEMA = `
     WHERE provider_id IS NOT NULL;
 
   CREATE INDEX IF NOT EXISTS refresh_tokens_expires_at ON refresh_tokens (expires_at);
+  CREATE INDEX IF NOT EXISTS oauth_codes_expires_at ON oauth_codes (expires_at);
   CREATE INDEX IF NOT EXISTS jobs_user_id ON jobs (user_id);
 `;
 
@@ -91,9 +99,9 @@ export async function initDb(): Promise<void> {
     await client.query("SELECT pg_advisory_lock($1)", [INIT_LOCK_KEY]);
     try {
       await client.query(SCHEMA);
-      await client.query("DELETE FROM refresh_tokens WHERE expires_at < $1", [
-        Math.floor(Date.now() / 1000),
-      ]);
+      const now = Math.floor(Date.now() / 1000);
+      await client.query("DELETE FROM refresh_tokens WHERE expires_at < $1", [now]);
+      await client.query("DELETE FROM oauth_codes WHERE expires_at < $1", [now]);
     } finally {
       await client.query("SELECT pg_advisory_unlock($1)", [INIT_LOCK_KEY]);
     }
