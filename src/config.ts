@@ -11,13 +11,14 @@ export const config = {
   /**
    * CORS 허용 출처. 콤마로 구분해 CORS_ORIGINS로 덮어쓴다.
    *
-   * 기본값은 Tauri 클라가 쓰는 출처들이다 — dev 웹뷰(1420), 패키지된 앱의 Windows
-   * (http://tauri.localhost)와 macOS(tauri://localhost). 랜딩페이지가 이 API를 직접
-   * 부르게 되면 그 도메인을 CORS_ORIGINS에 추가한다.
+   * 기본값은 클라가 쓰는 출처들이다 — Tauri dev 웹뷰(1420), 패키지된 앱의 Windows
+   * (http://tauri.localhost)와 macOS(tauri://localhost), 그리고 랜딩 dev 서버(5173).
+   * 랜딩의 /signup 이 register·resend-verification 을 직접 호출한다.
+   * 배포에서는 실제 랜딩 도메인을 CORS_ORIGINS에 넣는다.
    */
   corsOrigins: env(
     "CORS_ORIGINS",
-    "http://localhost:1420,http://tauri.localhost,tauri://localhost",
+    "http://localhost:1420,http://tauri.localhost,tauri://localhost,http://localhost:5173",
   )
     .split(",")
     .map((o) => o.trim())
