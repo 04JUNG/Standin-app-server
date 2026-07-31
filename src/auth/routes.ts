@@ -37,6 +37,13 @@ export const authRoutes = new Hono<AppEnv>();
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
+/**
+ * 데스크톱 앱을 다시 앞으로 가져오는 딥링크.
+ * ⚠ `standin://auth/...` 형태를 쓰면 안 된다 — 클라의 딥링크 핸들러가 소셜 로그인
+ * 콜백으로 오인해 "코드 없음" 오류를 띄운다.
+ */
+const APP_DEEP_LINK = "standin://open";
+
 interface Creds {
   email: string;
   password: string;
@@ -124,13 +131,23 @@ authRoutes.post("/login", async (c) => {
 
 authRoutes.get("/verify-email", async (c) => {
   const token = c.req.query("token") ?? "";
-  const page = (title: string, msg: string) =>
-    `<!doctype html><meta charset="utf-8"><body style="font-family:system-ui,sans-serif;text-align:center;padding:48px">
-     <h2>${title}</h2><p>${msg}</p></body>`;
+  // 사용자는 메일 클라이언트에서 이 링크를 누른다 — 그 시점에 데스크톱 앱은 뒤에 가려져
+  // 있거나 꺼져 있다. 인증만 끝내고 놔두면 "이제 뭘 해야 하지"로 흐름이 끊기므로
+  // 앱을 다시 앞으로 가져오는 딥링크를 같이 준다(꺼져 있으면 OS가 실행한다).
+  const page = (title: string, msg: string, showAppLink = false) =>
+    `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+     <body style="font-family:system-ui,sans-serif;text-align:center;padding:48px">
+     <h2>${title}</h2><p>${msg}</p>${
+       showAppLink
+         ? `<p style="margin-top:28px"><a href="${APP_DEEP_LINK}"
+              style="display:inline-block;padding:12px 24px;border-radius:999px;background:#ff6b57;color:#fff;text-decoration:none;font-weight:600">앱으로 돌아가기</a></p>
+            <p style="color:#667085;font-size:13px">앱이 열리지 않으면 Standin을 직접 실행해 주세요.</p>`
+         : ""
+     }</body>`;
   try {
     const userId = await verifyEmailVerifyToken(token);
     await setEmailVerified(userId);
-    return c.html(page("이메일 인증 완료 ✅", "이제 로그인할 수 있습니다."));
+    return c.html(page("이메일 인증 완료 ✅", "이제 앱에서 로그인할 수 있습니다.", true));
   } catch {
     return c.html(page("인증 실패", "링크가 만료되었거나 올바르지 않습니다. 인증 메일을 다시 요청하세요."), 400);
   }
