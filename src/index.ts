@@ -2,6 +2,7 @@
 // 경계: [Tauri] ──/v1──> [BFF: 이 서버] ──HTTP──> [도원 추론 서버]
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { randomUUID } from "node:crypto";
 import { config } from "./config.js";
 import { closeDb, initDb } from "./db.js";
@@ -20,6 +21,21 @@ app.use("*", async (c, next) => {
   c.set("requestId", `req_${randomUUID()}`);
   await next();
 });
+
+// 클라는 Tauri 웹뷰라 출처가 이 서버와 다르다. CORS가 없으면 preflight가 404로 떨어져
+// 로그인 요청 자체가 나가지 못한다(브라우저 dev는 http://localhost:1420, 패키지된 앱은
+// Windows가 http://tauri.localhost, macOS가 tauri://localhost).
+// 허용 목록은 CORS_ORIGINS로 덮어쓴다 — 배포에서 아무 출처나 열지 않기 위해 * 는 쓰지 않는다.
+app.use(
+  "*",
+  cors({
+    origin: config.corsOrigins,
+    allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allowHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
+    maxAge: 600,
+  }),
+);
 
 // 공개 엣지 헬스체크(+ 추론 서버 연결 상태)
 app.get("/healthz", async (c) => {

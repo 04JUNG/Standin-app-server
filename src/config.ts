@@ -8,6 +8,21 @@ export const config = {
   // BFF 공개 URL(OAuth 콜백·이메일 인증 링크 구성용)
   publicUrl: env("PUBLIC_URL", "http://localhost:8080"),
 
+  /**
+   * CORS 허용 출처. 콤마로 구분해 CORS_ORIGINS로 덮어쓴다.
+   *
+   * 기본값은 Tauri 클라가 쓰는 출처들이다 — dev 웹뷰(1420), 패키지된 앱의 Windows
+   * (http://tauri.localhost)와 macOS(tauri://localhost). 랜딩페이지가 이 API를 직접
+   * 부르게 되면 그 도메인을 CORS_ORIGINS에 추가한다.
+   */
+  corsOrigins: env(
+    "CORS_ORIGINS",
+    "http://localhost:1420,http://tauri.localhost,tauri://localhost",
+  )
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean),
+
   // 도원 추론 서버(내부망, 무인증). ⚠ 공개 노출 금지.
   inferenceBaseUrl: env("INFERENCE_BASE_URL", "http://127.0.0.1:8000"),
   inferenceServiceToken: env("INFERENCE_SERVICE_TOKEN"),
