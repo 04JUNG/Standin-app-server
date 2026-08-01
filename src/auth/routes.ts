@@ -36,6 +36,11 @@ import { oauthRoutes } from "./oauth/routes.js";
 export const authRoutes = new Hono<AppEnv>();
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+const MAX_EMAIL_LENGTH = 254;
+
+function isValidEmail(email: string): boolean {
+  return email.length <= MAX_EMAIL_LENGTH && EMAIL_RE.test(email);
+}
 
 /**
  * 데스크톱 앱을 다시 앞으로 가져오는 딥링크.
@@ -54,7 +59,7 @@ function parseCreds(body: unknown): Creds | null {
   const b = body as Record<string, unknown>;
   if (typeof b["email"] !== "string" || typeof b["password"] !== "string") return null;
   const email = b["email"].trim();
-  if (!EMAIL_RE.test(email) || b["password"].length < 8) return null;
+  if (!isValidEmail(email) || b["password"].length < 8) return null;
   return { email, password: b["password"] };
 }
 
@@ -155,7 +160,7 @@ authRoutes.get("/verify-email", async (c) => {
 
 authRoutes.post("/resend-verification", async (c) => {
   const email = readString(await readJson(c), "email").trim();
-  if (email) {
+  if (isValidEmail(email)) {
     const user = await findByEmail(email);
     if (user && user.provider === "local" && !user.emailVerified) {
       await sendVerify(user.email, user.id);
