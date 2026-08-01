@@ -13,6 +13,7 @@ export interface PoseCandidate {
   tags: string[];
   matchLevel: MatchLevel;
   bvhAvailable: boolean;
+  thumbnailUrl?: string;
   // 개발자 모드 전용 원시 점수(UI 기본 노출 X)
   distance?: number;
   rerankScore?: number | null;

@@ -2,7 +2,12 @@
 //  - 추론의 원시 distance → 클라 UI 라벨(matchLevel)
 //  - 추론의 {detail} → 클라 오류봉투 {error:{code,...}}
 import type { CutResult } from "./inference.js";
-import type { AnalysisResult, ErrorEnvelope, MatchLevel, PoseCandidate } from "./types.js";
+import type {
+  AnalysisResult,
+  ErrorEnvelope,
+  MatchLevel,
+  PoseCandidate,
+} from "./types.js";
 
 // 원시 kNN 거리 → UI 라벨.
 // ⚠ 임계값 시드: Standin-server/docs/SEARCH_EVAL(좋은 매칭 ~0.15, 앉기-서기 ~0.36).
@@ -21,18 +26,19 @@ export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
       personIndex: p.index,
       box: p.box,
       tags: p.tags,
-      candidates: p.candidates.map(
-        (c, i): PoseCandidate => ({
-          id: c.pose_id,
-          rank: i + 1,
-          view: c.view,
-          tags: Object.values(c.tags ?? {}),
-          matchLevel: matchLevelFromDistance(c.distance),
-          bvhAvailable: true,
-          distance: c.distance,
-          rerankScore: c.rerank_score,
-        }),
-      ),
+      candidates: p.candidates.map((c, i): PoseCandidate => ({
+        id: c.pose_id,
+        rank: i + 1,
+        view: c.view,
+        tags: Object.values(c.tags ?? {}),
+        matchLevel: matchLevelFromDistance(c.distance),
+        bvhAvailable: true,
+        thumbnailUrl: c.thumbnail_url
+          ? `/v1/pose-candidates/${encodeURIComponent(c.pose_id)}/thumbnail?view=${encodeURIComponent(c.view)}`
+          : undefined,
+        distance: c.distance,
+        rerankScore: c.rerank_score,
+      })),
     })),
   };
 }

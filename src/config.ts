@@ -27,6 +27,8 @@ export const config = {
   // 도원 추론 서버(내부망, 무인증). ⚠ 공개 노출 금지.
   inferenceBaseUrl: env("INFERENCE_BASE_URL", "http://127.0.0.1:8000"),
   inferenceServiceToken: env("INFERENCE_SERVICE_TOKEN"),
+  // Explicit temporary demo mode. User/account endpoints remain protected.
+  allowAnonymousAnalysis: env("ALLOW_ANONYMOUS_ANALYSIS", "false") === "true",
 
   // 인증(JWT)
   jwtSecret: env("JWT_SECRET", "dev-only-change-me"),

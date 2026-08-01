@@ -19,6 +19,7 @@ export interface CutResult {
       tags: Record<string, string>;
       rerank_score: number | null;
       bvh_url: string;
+      thumbnail_url: string | null;
     }>;
   }>;
   notes: string[];
@@ -61,15 +62,32 @@ export async function analyze(file: Blob, hint = ""): Promise<CutResult> {
 
 // GET /pose/{id}/bvh → 원본 응답(상태·바디를 호출측이 그대로 프록시)
 export async function getPoseBvh(poseId: string): Promise<Response> {
-  return fetch(`${config.inferenceBaseUrl}/pose/${encodeURIComponent(poseId)}/bvh`, {
-    headers: authHeaders(),
-  });
+  return fetch(
+    `${config.inferenceBaseUrl}/pose/${encodeURIComponent(poseId)}/bvh`,
+    {
+      headers: authHeaders(),
+    },
+  );
+}
+
+// GET /pose/{id}/thumbnail?view=... → PNG 원본 응답
+export async function getPoseThumbnail(
+  poseId: string,
+  view: string,
+): Promise<Response> {
+  const params = new URLSearchParams({ view });
+  return fetch(
+    `${config.inferenceBaseUrl}/pose/${encodeURIComponent(poseId)}/thumbnail?${params}`,
+    { headers: authHeaders() },
+  );
 }
 
 // GET /healthz → 추론 서버 가용 여부
 export async function health(): Promise<boolean> {
   try {
-    const res = await fetch(`${config.inferenceBaseUrl}/healthz`, { headers: authHeaders() });
+    const res = await fetch(`${config.inferenceBaseUrl}/healthz`, {
+      headers: authHeaders(),
+    });
     return res.ok;
   } catch {
     return false;

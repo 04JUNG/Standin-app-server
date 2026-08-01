@@ -47,8 +47,10 @@ app.get("/healthz", async (c) => {
 app.route("/v1/auth", authRoutes);
 
 app.use("/v1/users/*", requireAuth);
-app.use("/v1/analysis/*", requireAuth);
-app.use("/v1/pose-candidates/*", requireAuth);
+if (!config.allowAnonymousAnalysis) {
+  app.use("/v1/analysis/*", requireAuth);
+  app.use("/v1/pose-candidates/*", requireAuth);
+}
 
 app.route("/v1/users", usersRoutes);
 app.route("/v1/analysis/jobs", jobsRoutes);

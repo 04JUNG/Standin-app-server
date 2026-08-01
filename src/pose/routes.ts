@@ -1,7 +1,8 @@
 // /v1/pose-candidates — 선택 후보의 BVH를 도원 서버에서 프록시.
 import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
-import { getPoseBvh } from "../inference.js";
+import { getPoseBvh, getPoseThumbnail } from "../inference.js";
+import { errorEnvelope } from "../mapping.js";
 
 export const poseRoutes = new Hono<AppEnv>();
 
@@ -13,9 +14,36 @@ poseRoutes.get("/:id/export", async (c) => {
   return new Response(upstream.body, {
     status: upstream.status,
     headers: {
-      "Content-Type": upstream.headers.get("Content-Type") ?? "application/octet-stream",
+      "Content-Type":
+        upstream.headers.get("Content-Type") ?? "application/octet-stream",
       "Content-Disposition":
-        upstream.headers.get("Content-Disposition") ?? `attachment; filename="${poseId}.bvh"`,
+        upstream.headers.get("Content-Disposition") ??
+        `attachment; filename="${poseId}.bvh"`,
+    },
+  });
+});
+
+// GET /v1/pose-candidates/:id/thumbnail?view=front — 인증된 PNG 프록시
+poseRoutes.get("/:id/thumbnail", async (c) => {
+  const view = c.req.query("view");
+  if (!view) {
+    return c.json(
+      errorEnvelope(
+        "INVALID_INPUT",
+        "view 쿼리 파라미터가 필요합니다.",
+        c.get("requestId"),
+      ),
+      400,
+    );
+  }
+
+  const upstream = await getPoseThumbnail(c.req.param("id"), view);
+  return new Response(upstream.body, {
+    status: upstream.status,
+    headers: {
+      "Content-Type": upstream.headers.get("Content-Type") ?? "image/png",
+      "Cache-Control":
+        upstream.headers.get("Cache-Control") ?? "private, max-age=86400",
     },
   });
 });
