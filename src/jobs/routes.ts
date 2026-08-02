@@ -3,7 +3,9 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
 import { errorEnvelope } from "../mapping.js";
-import { createJob, getJob } from "./store.js";
+import { confirmSelections, saveFeedback } from "../analytics/store.js";
+import { storeInput, validateInputImage } from "../inputStorage.js";
+import { createJob, getOwnedJob, setJobInput, updateJob } from "./store.js";
 import { runAnalysisJob } from "./runner.js";
 
 export const jobsRoutes = new Hono<AppEnv>();
@@ -18,15 +20,68 @@ jobsRoutes.post("/", async (c) => {
       400,
     );
   }
-  const hint = typeof body["hint"] === "string" ? body["hint"] : "";
-  const job = await createJob(c.get("userId") ?? null);
-  void runAnalysisJob(job.id, file, hint); // fire-and-forget
+  if (
+    !new Set(["image/png", "image/jpeg", "image/webp"]).has(file.type) ||
+    file.size <= 0 ||
+    file.size > 20 * 1024 * 1024
+  ) {
+    return c.json(
+      errorEnvelope("INVALID_INPUT", "PNG, JPG, WEBP 이미지만 20MB까지 허용됩니다.", c.get("requestId")),
+      400,
+    );
+  }
+  try {
+    await validateInputImage(file);
+  } catch {
+    return c.json(
+      errorEnvelope(
+        "INVALID_INPUT",
+        "Image content does not match its MIME type.",
+        c.get("requestId"),
+      ),
+      400,
+    );
+  }
+  const source = body["source"];
+  if (source !== "capture" && source !== "file" && source !== "clipboard") {
+    return c.json(
+      errorEnvelope("INVALID_INPUT", "source가 필요합니다.", c.get("requestId")),
+      400,
+    );
+  }
+  const optionalDimension = (value: unknown): number | null => {
+    if (typeof value !== "string" || value === "") return null;
+    const parsed = Number(value);
+    return Number.isInteger(parsed) && parsed > 0 && parsed <= 100_000 ? parsed : null;
+  };
+  const width = optionalDimension(body["width"]);
+  const height = optionalDimension(body["height"]);
+  const installationId = c.get("installationId")!;
+  const job = await createJob(c.get("userId") ?? null, null, {
+    installationId,
+    source,
+    mime: file.type || "application/octet-stream",
+    size: file.size,
+    width,
+    height,
+  });
+  try {
+    const stored = await storeInput(installationId, job.id, file);
+    await setJobInput(job.id, { s3Key: stored.key, sha256: stored.sha256 });
+  } catch {
+    await updateJob(job.id, { status: "failed", errorCode: "INPUT_STORAGE_FAILED" });
+    return c.json(
+      errorEnvelope("STORAGE_UNAVAILABLE", "입력 이미지를 안전하게 보관하지 못했습니다.", c.get("requestId")),
+      503,
+    );
+  }
+  void runAnalysisJob(job.id, file); // fire-and-forget; free-form hints are not accepted in beta
   return c.json({ jobId: job.id, status: job.status, createdAt: job.createdAt }, 202);
 });
 
 // GET /v1/analysis/jobs/:id — 상태 폴링
 jobsRoutes.get("/:id", async (c) => {
-  const job = await getJob(c.req.param("id"));
+  const job = await getOwnedJob(c.req.param("id"), c.get("installationId")!);
   if (!job) {
     return c.json(errorEnvelope("NOT_FOUND", "unknown jobId", c.get("requestId")), 404);
   }
@@ -41,7 +96,7 @@ jobsRoutes.get("/:id", async (c) => {
 
 // GET /v1/analysis/jobs/:id/result — 결과(완료 시)
 jobsRoutes.get("/:id/result", async (c) => {
-  const job = await getJob(c.req.param("id"));
+  const job = await getOwnedJob(c.req.param("id"), c.get("installationId")!);
   if (!job) {
     return c.json(errorEnvelope("NOT_FOUND", "unknown jobId", c.get("requestId")), 404);
   }
@@ -49,6 +104,57 @@ jobsRoutes.get("/:id/result", async (c) => {
     return c.json(errorEnvelope("NOT_READY", `job status: ${job.status}`, c.get("requestId")), 409);
   }
   return c.json(job.result);
+});
+
+jobsRoutes.put("/:id/selections", async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { selections?: unknown[] } | null;
+  if (!body?.selections || !Array.isArray(body.selections) || body.selections.length === 0) {
+    return c.json(errorEnvelope("INVALID_INPUT", "selections 배열이 필요합니다.", c.get("requestId")), 400);
+  }
+  const selections: Array<{ personIndex: number; candidateId: string }> = [];
+  const seen = new Set<number>();
+  for (const raw of body.selections) {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+      return c.json(errorEnvelope("INVALID_INPUT", "선택 형식이 잘못되었습니다.", c.get("requestId")), 400);
+    }
+    const item = raw as Record<string, unknown>;
+    if (
+      !Number.isInteger(item.personIndex) ||
+      (item.personIndex as number) < 0 ||
+      typeof item.candidateId !== "string" ||
+      item.candidateId.length === 0 ||
+      seen.has(item.personIndex as number)
+    ) {
+      return c.json(errorEnvelope("INVALID_INPUT", "선택 값이 잘못되었습니다.", c.get("requestId")), 400);
+    }
+    seen.add(item.personIndex as number);
+    selections.push({ personIndex: item.personIndex as number, candidateId: item.candidateId });
+  }
+  const saved = await confirmSelections(c.get("installationId")!, c.req.param("id"), selections);
+  if (!saved) {
+    return c.json(errorEnvelope("INVALID_SELECTION", "노출되지 않은 후보입니다.", c.get("requestId")), 409);
+  }
+  return c.json({ confirmed: true });
+});
+
+const FEEDBACK_REASONS = new Set([
+  "good",
+  "person_missing",
+  "skeleton_wrong",
+  "candidates_irrelevant",
+  "export_problem",
+  "other",
+]);
+
+jobsRoutes.post("/:id/feedback", async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { reason?: unknown } | null;
+  if (typeof body?.reason !== "string" || !FEEDBACK_REASONS.has(body.reason)) {
+    return c.json(errorEnvelope("INVALID_INPUT", "허용되지 않은 피드백입니다.", c.get("requestId")), 400);
+  }
+  if (!(await saveFeedback(c.get("installationId")!, c.req.param("id"), body.reason))) {
+    return c.json(errorEnvelope("NOT_FOUND", "unknown jobId", c.get("requestId")), 404);
+  }
+  return c.json({ saved: true });
 });
 
 // POST /v1/analysis/jobs/:id/rerun — TODO(Phase 2): excludeCandidateIds 반영 재검색

@@ -21,13 +21,39 @@ export function matchLevelFromDistance(distance: number): MatchLevel {
 export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
   return {
     jobId,
+    image: cut.image,
+    inferenceMetadata: {
+      deploymentVersion: cut.inference_metadata.deployment_version,
+      vlmProvider: cut.inference_metadata.vlm_provider,
+      vlmModel: cut.inference_metadata.vlm_model,
+      poseBackend: cut.inference_metadata.pose_backend,
+      poseModelVersion: cut.inference_metadata.pose_model_version,
+      poseLibraryVersion: cut.inference_metadata.pose_library_version,
+      featureVersion: cut.inference_metadata.feature_version,
+    },
     notes: cut.notes ?? [],
     candidatesByPerson: (cut.people ?? []).map((p) => ({
       personIndex: p.index,
       box: p.box,
       tags: p.tags,
+      skeleton: p.skeleton
+        ? {
+            schemaVersion: p.skeleton.schema_version,
+            keypoints: p.skeleton.keypoints,
+            scores: p.skeleton.scores,
+          }
+        : null,
+      confidence: p.confidence,
+      candidateCount: p.candidates.length,
+      candidateShortfallReason:
+        p.candidates.length >= 5
+          ? null
+          : cut.route === "core"
+            ? "UPSTREAM_FEWER_THAN_REQUESTED"
+            : "ANALYSIS_ROUTE_SKIPPED",
       candidates: p.candidates.map((c, i): PoseCandidate => ({
-        id: c.pose_id,
+        id: `${c.pose_id}::${c.view}`,
+        poseId: c.pose_id,
         rank: i + 1,
         view: c.view,
         tags: Object.values(c.tags ?? {}),

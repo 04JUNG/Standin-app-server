@@ -4,5 +4,6 @@ export type AppEnv = {
   Variables: {
     requestId: string;
     userId?: string;
+    installationId?: string;
   };
 };

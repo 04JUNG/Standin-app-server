@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
 import { getPoseBvh, getPoseThumbnail } from "../inference.js";
 import { errorEnvelope } from "../mapping.js";
+import { recordExport, validateExportCandidate } from "../analytics/store.js";
 
 export const poseRoutes = new Hono<AppEnv>();
 
@@ -10,7 +11,51 @@ export const poseRoutes = new Hono<AppEnv>();
 // TODO(Phase 1): requireAuth 적용
 poseRoutes.get("/:id/export", async (c) => {
   const poseId = c.req.param("id");
-  const upstream = await getPoseBvh(poseId);
+  const candidateId = c.req.query("candidateId") ?? "";
+  const jobId = c.req.query("jobId") ?? "";
+  const personIndex = Number(c.req.query("personIndex"));
+  const installationId = c.get("installationId")!;
+  if (
+    !jobId ||
+    !Number.isInteger(personIndex) ||
+    personIndex < 0 ||
+    !candidateId ||
+    !(await validateExportCandidate(installationId, jobId, personIndex, candidateId))
+  ) {
+    return c.json(
+      errorEnvelope("INVALID_EXPORT", "작업에서 선택된 후보가 아닙니다.", c.get("requestId")),
+      409,
+    );
+  }
+  await recordExport({
+    installationId,
+    jobId,
+    personIndex,
+    candidateId,
+    status: "requested",
+  });
+  let upstream: Response;
+  try {
+    upstream = await getPoseBvh(poseId);
+  } catch {
+    await recordExport({
+      installationId,
+      jobId,
+      personIndex,
+      candidateId,
+      status: "failed",
+      errorCode: "INFERENCE_UNAVAILABLE",
+    });
+    throw new Error("pose export upstream unavailable");
+  }
+  await recordExport({
+    installationId,
+    jobId,
+    personIndex,
+    candidateId,
+    status: upstream.ok ? "completed" : "failed",
+    errorCode: upstream.ok ? undefined : `HTTP_${upstream.status}`,
+  });
   return new Response(upstream.body, {
     status: upstream.status,
     headers: {
