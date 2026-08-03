@@ -57,6 +57,7 @@ services:
       - INFERENCE_BASE_URL=http://inference:8000 # compose 네트워크의 서비스명
       - JWT_SECRET=${JWT_SECRET:-dev-only-change-me}
       - DATABASE_URL=postgres://standin:standin@postgres:5432/standin
+      - BETA_CONSENT_VERSION=2026-08-02
       - DATABASE_SSL=false # 로컬 compose는 TLS 없음. RDS에서는 true.
     ports:
       - "8080:8080" # 공개 엣지(클라가 여기로 연결)

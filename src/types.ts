@@ -7,7 +7,8 @@ export type MatchLevel = "high" | "medium" | "low";
 export type AnalysisJobStatus = "queued" | "running" | "completed" | "failed";
 
 export interface PoseCandidate {
-  id: string; // = 추론 pose_id
+  id: string; // unique exposed candidate id (pose + view)
+  poseId: string;
   rank: number;
   view: string;
   tags: string[];
@@ -21,10 +22,28 @@ export interface PoseCandidate {
 
 export interface AnalysisResult {
   jobId: string;
+  image: { width: number; height: number };
+  inferenceMetadata: {
+    deploymentVersion: string;
+    vlmProvider: string;
+    vlmModel: string;
+    poseBackend: string;
+    poseModelVersion: string;
+    poseLibraryVersion: string;
+    featureVersion: number;
+  };
   candidatesByPerson: Array<{
     personIndex: number;
     box: number[] | null;
     tags: Record<string, string>;
+    skeleton: {
+      schemaVersion: string;
+      keypoints: number[][];
+      scores: number[];
+    } | null;
+    confidence: string | null;
+    candidateCount: number;
+    candidateShortfallReason: string | null;
     candidates: PoseCandidate[];
   }>;
   notes: string[];

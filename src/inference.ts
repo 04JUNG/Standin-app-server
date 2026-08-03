@@ -12,6 +12,12 @@ export interface CutResult {
     index: number;
     box: number[] | null;
     tags: Record<string, string>;
+    skeleton: {
+      schema_version: string;
+      keypoints: number[][];
+      scores: number[];
+    } | null;
+    confidence: string | null;
     candidates: Array<{
       pose_id: string;
       view: string;
@@ -23,6 +29,16 @@ export interface CutResult {
     }>;
   }>;
   notes: string[];
+  image: { width: number; height: number };
+  inference_metadata: {
+    deployment_version: string;
+    vlm_provider: string;
+    vlm_model: string;
+    pose_backend: string;
+    pose_model_version: string;
+    pose_library_version: string;
+    feature_version: number;
+  };
 }
 
 export class InferenceError extends Error {

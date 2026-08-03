@@ -9,7 +9,20 @@
 - 시간은 ISO 8601, ID는 string.
 - 오류는 **봉투 형식**으로 통일(§오류). `requestId`는 서버가 부여.
 - 분석은 **Job 기반**(제출→폴링). 동기 추론을 BFF가 감싼다.
-- **인증**: `/v1/auth/*`·`/healthz`는 공개. **`/v1/users/*`·`/v1/analysis/*`·`/v1/pose-candidates/*`는 `Authorization: Bearer <access>` 필수**(없으면 401).
+- **인증**: `/v1/auth/*`·`/healthz`·`POST /v1/installations`는 공개. `/v1/users/*`는 JWT, `/v1/analysis/*`·`/v1/pose-candidates/*`·`/v1/events/*`는 동의된 설치 인증이 필수다.
+
+## 설치 인증과 동의
+
+`POST /v1/installations`에 현재 동의 버전과 최소 환경정보를 보내면 서버가 `installationId`와 한 번만 노출하는 `deviceToken`을 발급한다. 이후 보호 API에는 두 헤더를 보낸다.
+
+```http
+X-Installation-Id: inst_...
+X-Device-Token: ...
+```
+
+서버에는 토큰 SHA-256 해시만 저장한다. 현재 동의 버전은 `BETA_CONSENT_VERSION`이며 불일치 시 `CONSENT_REQUIRED`, 자격증명 누락 시 `INSTALLATION_REQUIRED`로 거부한다.
+
+`DELETE /v1/installations/current/data`는 전용 S3 prefix, 작업·파생 데이터·이벤트·선택·피드백과 설치 레코드를 삭제한다. 응답은 `{ "deleted": true, "backupExpiryDays": 7 }`이다.
 
 ---
 
@@ -49,8 +62,9 @@
 
 | 필드 | 필수 | 설명 |
 |---|:---:|---|
-| `file` | ✅ | 러프 콘티 컷 이미지 |
-| `hint` | — | mock 추론용 dev 힌트(실모델이면 무시) |
+| `file` | ✅ | PNG/JPEG/WEBP 러프 콘티 이미지, 최대 20MB. MIME과 파일 시그니처를 함께 검증한다. |
+| `source` | ✅ | `capture \| file \| clipboard` |
+| `width`, `height` | — | 원본 픽셀 크기 |
 
 응답 `202`:
 
@@ -85,14 +99,29 @@
 ```json
 {
   "jobId": "job_...",
+  "image": { "width": 1280, "height": 720 },
+  "inferenceMetadata": {
+    "deploymentVersion": "git-sha",
+    "vlmProvider": "gemini",
+    "vlmModel": "gemini-2.5-flash",
+    "poseBackend": "rtmlib",
+    "poseModelVersion": "runtime-default",
+    "poseLibraryVersion": "v1",
+    "featureVersion": 1
+  },
   "candidatesByPerson": [
     {
       "personIndex": 0,
       "box": [120, 80, 360, 720],
       "tags": { "shot": "full_half", "action": "standing", "view": "front", "relationship": "solo" },
+      "skeleton": { "schemaVersion": "coco17-v1", "keypoints": [[1, 2]], "scores": [0.9] },
+      "confidence": "high",
+      "candidateCount": 1,
+      "candidateShortfallReason": "UPSTREAM_FEWER_THAN_REQUESTED",
       "candidates": [
         {
-          "id": "stand_solo",
+          "id": "stand_solo::front",
+          "poseId": "stand_solo",
           "rank": 1,
           "view": "front",
           "tags": ["full_half", "standing", "solo", "front"],
@@ -110,6 +139,17 @@
 
 `matchLevel`(high/medium/low)은 **BFF가 원시 `distance`에서 매핑**한다(`src/mapping.ts`). `distance`/`rerankScore`는 개발자 모드용 원시값.
 
+후보가 5개 미만이면 실제 개수만 반환하고 `candidateShortfallReason`을 기록한다. `id`는 작업에서 실제 노출된 후보를 유일하게 식별하며, `poseId`는 BVH 원본 포즈 식별자다.
+
+---
+
+## 행동·선택·피드백
+
+- `POST /v1/events/batch`: 최대 100개의 `eventId`, `sequence`, `occurredAt`, 이벤트명, `jobId`, 허용 속성을 받는다. `eventId`로 중복 제거한다.
+- 허용 이벤트: `app_started`, `input_confirmed`, `results_viewed`, `candidate_selected`, `selection_confirmed`.
+- `PUT /v1/analysis/jobs/{jobId}/selections`: `[{personIndex,candidateId}]`를 멱등 저장하며 해당 작업에서 노출된 후보인지 검증한다.
+- `POST /v1/analysis/jobs/{jobId}/feedback`: `good | person_missing | skeleton_wrong | candidates_irrelevant | export_problem | other`만 허용한다.
+
 ---
 
 ## POST /v1/analysis/jobs/{jobId}/rerun
@@ -118,9 +158,15 @@
 
 ---
 
-## GET /v1/pose-candidates/{poseId}/export
+## GET /v1/pose-candidates/{poseId}/export?jobId=...&personIndex=...&candidateId=...
 
-선택 후보의 BVH를 도원 서버(`GET /pose/{id}/bvh`)에서 프록시. 바이트 스트림(`application/octet-stream`), `Content-Disposition` 파일명 포함.
+작업에서 실제 노출된 후보인지 확인한 뒤 BVH를 도원 서버(`GET /pose/{id}/bvh`)에서 프록시한다. 요청·성공·실패를 서버에서 직접 기록한다.
+
+---
+
+## 관리자 품질 검토
+
+`GET /v1/admin/review/jobs/{jobId}`는 `X-Beta-Admin-Token`이 필요하다. 5분짜리 원본 서명 URL, 인물·스켈레톤·후보·선택·피드백을 반환하고 접근을 감사 테이블에 기록한다.
 
 > 도원 서버가 `409`(합성 단계, 실 BVH 미존재)를 주면 그대로 전달된다.
 

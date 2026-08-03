@@ -38,7 +38,38 @@ export async function execute(text: string, params: unknown[] = []): Promise<num
   return res.rowCount ?? 0;
 }
 
+export async function transaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 const SCHEMA = `
+  CREATE TABLE IF NOT EXISTS installations (
+    id                    TEXT PRIMARY KEY,
+    token_hash            TEXT NOT NULL,
+    consent_version       TEXT NOT NULL,
+    consented_at          TEXT NOT NULL,
+    created_at            TEXT NOT NULL,
+    last_seen_at          TEXT NOT NULL,
+    app_version           TEXT NOT NULL,
+    os_name               TEXT NOT NULL,
+    os_version            TEXT NOT NULL,
+    architecture          TEXT NOT NULL,
+    locale                TEXT NOT NULL,
+    revoked_at            TEXT,
+    deletion_requested_at TEXT
+  );
+
   CREATE TABLE IF NOT EXISTS users (
     id             TEXT PRIMARY KEY,
     email          TEXT NOT NULL,
@@ -74,6 +105,112 @@ const SCHEMA = `
     rerun_of    TEXT
   );
 
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS installation_id TEXT;
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS source TEXT;
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS input_s3_key TEXT;
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS input_sha256 TEXT;
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS input_mime TEXT;
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS input_size BIGINT;
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS input_width INTEGER;
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS input_height INTEGER;
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS input_stored_at TEXT;
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS started_at TEXT;
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS completed_at TEXT;
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS inference_metadata_json TEXT;
+
+  CREATE TABLE IF NOT EXISTS analysis_people (
+    job_id          TEXT NOT NULL,
+    person_index    INTEGER NOT NULL,
+    bbox_json       TEXT,
+    tags_json       TEXT NOT NULL,
+    skeleton_json   TEXT,
+    confidence      TEXT,
+    candidate_count INTEGER NOT NULL DEFAULT 0,
+    candidate_shortfall_reason TEXT,
+    PRIMARY KEY (job_id, person_index)
+  );
+
+  ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS candidate_count INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS candidate_shortfall_reason TEXT;
+
+  CREATE TABLE IF NOT EXISTS analysis_candidates (
+    job_id               TEXT NOT NULL,
+    person_index         INTEGER NOT NULL,
+    candidate_id         TEXT NOT NULL,
+    pose_id              TEXT NOT NULL,
+    rank                  INTEGER NOT NULL,
+    view                  TEXT NOT NULL,
+    distance              DOUBLE PRECISION,
+    rerank_score          DOUBLE PRECISION,
+    match_level           TEXT NOT NULL,
+    tags_json             TEXT NOT NULL,
+    pose_library_version  TEXT NOT NULL,
+    PRIMARY KEY (job_id, person_index, candidate_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS analytics_events (
+    event_id        TEXT PRIMARY KEY,
+    installation_id TEXT NOT NULL,
+    sequence_number BIGINT NOT NULL,
+    event_name      TEXT NOT NULL,
+    occurred_at     TEXT NOT NULL,
+    received_at     TEXT NOT NULL,
+    job_id          TEXT,
+    properties_json TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS confirmed_selections (
+    job_id          TEXT NOT NULL,
+    person_index    INTEGER NOT NULL,
+    installation_id TEXT NOT NULL,
+    candidate_id    TEXT NOT NULL,
+    rank            INTEGER NOT NULL,
+    confirmed_at    TEXT NOT NULL,
+    PRIMARY KEY (job_id, person_index)
+  );
+
+  CREATE TABLE IF NOT EXISTS job_feedback (
+    job_id          TEXT PRIMARY KEY,
+    installation_id TEXT NOT NULL,
+    reason          TEXT NOT NULL,
+    submitted_at    TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS export_events (
+    event_id        TEXT PRIMARY KEY,
+    installation_id TEXT NOT NULL,
+    job_id          TEXT,
+    person_index    INTEGER,
+    candidate_id    TEXT NOT NULL,
+    status          TEXT NOT NULL,
+    occurred_at     TEXT NOT NULL,
+    error_code      TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS daily_analytics_aggregates (
+    day                   TEXT PRIMARY KEY,
+    jobs_started          INTEGER NOT NULL,
+    jobs_completed        INTEGER NOT NULL,
+    jobs_failed           INTEGER NOT NULL,
+    confirmed_selections  INTEGER NOT NULL,
+    top1_selections       INTEGER NOT NULL,
+    mean_reciprocal_rank  DOUBLE PRECISION,
+    exports_completed     INTEGER NOT NULL,
+    feedback_json         TEXT NOT NULL,
+    latency_p50_seconds   DOUBLE PRECISION,
+    latency_p95_seconds   DOUBLE PRECISION,
+    refreshed_at          TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS admin_access_audit (
+    audit_id     TEXT PRIMARY KEY,
+    reviewer     TEXT NOT NULL,
+    action       TEXT NOT NULL,
+    job_id       TEXT,
+    request_id   TEXT NOT NULL,
+    occurred_at  TEXT NOT NULL
+  );
+
   CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower ON users (lower(email));
   CREATE UNIQUE INDEX IF NOT EXISTS users_provider ON users (provider, provider_id)
     WHERE provider_id IS NOT NULL;
@@ -81,6 +218,69 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS refresh_tokens_expires_at ON refresh_tokens (expires_at);
   CREATE INDEX IF NOT EXISTS oauth_codes_expires_at ON oauth_codes (expires_at);
   CREATE INDEX IF NOT EXISTS jobs_user_id ON jobs (user_id);
+  CREATE INDEX IF NOT EXISTS jobs_installation_id ON jobs (installation_id);
+  CREATE INDEX IF NOT EXISTS analytics_events_installation ON analytics_events (installation_id, occurred_at);
+  CREATE INDEX IF NOT EXISTS analytics_events_job ON analytics_events (job_id);
+  CREATE INDEX IF NOT EXISTS candidates_job_rank ON analysis_candidates (job_id, person_index, rank);
+
+  CREATE OR REPLACE VIEW analytics_job_funnel AS
+  SELECT
+    j.id AS job_id,
+    left(j.created_at, 10) AS day,
+    j.status,
+    (CASE WHEN j.inference_metadata_json IS NULL THEN '{}'::jsonb
+          ELSE j.inference_metadata_json::jsonb END)->>'deploymentVersion' AS deployment_version,
+    (CASE WHEN j.inference_metadata_json IS NULL THEN '{}'::jsonb
+          ELSE j.inference_metadata_json::jsonb END)->>'poseModelVersion' AS pose_model_version,
+    EXTRACT(EPOCH FROM (j.input_stored_at::timestamptz - j.created_at::timestamptz)) AS input_storage_seconds,
+    EXTRACT(EPOCH FROM (j.completed_at::timestamptz - j.started_at::timestamptz)) AS inference_seconds,
+    (SELECT min(ae.occurred_at) FROM analytics_events ae
+      WHERE ae.job_id = j.id AND ae.event_name = 'results_viewed') AS results_viewed_at,
+    (SELECT min(cs.confirmed_at) FROM confirmed_selections cs
+      WHERE cs.job_id = j.id) AS selection_confirmed_at,
+    (SELECT min(ee.occurred_at) FROM export_events ee
+      WHERE ee.job_id = j.id AND ee.status = 'completed') AS export_completed_at,
+    (SELECT count(*) FROM analytics_events ae
+      WHERE ae.job_id = j.id AND ae.event_name = 'candidate_selected'
+        AND ae.properties_json::jsonb->>'previousCandidateId' IS NOT NULL)::integer AS candidate_change_count
+  FROM jobs j
+  WHERE j.installation_id IS NOT NULL;
+
+  CREATE OR REPLACE VIEW analytics_candidate_quality AS
+  SELECT
+    j.id AS job_id,
+    left(j.created_at, 10) AS day,
+    (CASE WHEN j.inference_metadata_json IS NULL THEN '{}'::jsonb
+          ELSE j.inference_metadata_json::jsonb END)->>'deploymentVersion' AS deployment_version,
+    (CASE WHEN j.inference_metadata_json IS NULL THEN '{}'::jsonb
+          ELSE j.inference_metadata_json::jsonb END)->>'vlmModel' AS vlm_model,
+    (CASE WHEN j.inference_metadata_json IS NULL THEN '{}'::jsonb
+          ELSE j.inference_metadata_json::jsonb END)->>'poseModelVersion' AS pose_model_version,
+    ap.person_index,
+    ap.confidence AS person_confidence,
+    CASE WHEN ap.skeleton_json IS NULL THEN NULL ELSE (
+      SELECT avg(score::double precision)
+      FROM jsonb_array_elements_text(ap.skeleton_json::jsonb->'scores') AS scores(score)
+    ) END AS mean_joint_confidence,
+    ap.candidate_count,
+    ap.candidate_shortfall_reason,
+    ac.candidate_id,
+    ac.pose_id,
+    ac.rank,
+    ac.distance,
+    ac.rerank_score,
+    EXISTS (
+      SELECT 1 FROM confirmed_selections cs
+      WHERE cs.job_id = ac.job_id AND cs.person_index = ac.person_index
+        AND cs.candidate_id = ac.candidate_id
+    ) AS selected,
+    jf.reason AS feedback_reason
+  FROM jobs j
+  JOIN analysis_people ap ON ap.job_id = j.id
+  LEFT JOIN analysis_candidates ac
+    ON ac.job_id = ap.job_id AND ac.person_index = ap.person_index
+  LEFT JOIN job_feedback jf ON jf.job_id = j.id
+  WHERE j.installation_id IS NOT NULL;
 `;
 
 // 이 앱 전용 advisory lock 키. 다른 서비스와 겹치지 않게 고정값 하나를 쓴다.
@@ -99,12 +299,92 @@ export async function initDb(): Promise<void> {
     await client.query("SELECT pg_advisory_lock($1)", [INIT_LOCK_KEY]);
     try {
       await client.query(SCHEMA);
+      await refreshAggregatesAndRetention(client);
       const now = Math.floor(Date.now() / 1000);
       await client.query("DELETE FROM refresh_tokens WHERE expires_at < $1", [now]);
       await client.query("DELETE FROM oauth_codes WHERE expires_at < $1", [now]);
     } finally {
       await client.query("SELECT pg_advisory_unlock($1)", [INIT_LOCK_KEY]);
     }
+  } finally {
+    client.release();
+  }
+}
+
+async function refreshAggregatesAndRetention(client: PoolClient): Promise<void> {
+  await client.query(`
+    INSERT INTO daily_analytics_aggregates (
+      day, jobs_started, jobs_completed, jobs_failed, confirmed_selections,
+      top1_selections, mean_reciprocal_rank, exports_completed, feedback_json,
+      latency_p50_seconds, latency_p95_seconds, refreshed_at
+    )
+    WITH job_facts AS (
+      SELECT
+        j.*,
+        (SELECT count(*) FROM confirmed_selections cs WHERE cs.job_id = j.id) AS selection_count,
+        (SELECT count(*) FROM confirmed_selections cs WHERE cs.job_id = j.id AND cs.rank = 1) AS top1_count,
+        (SELECT sum(1.0 / cs.rank) FROM confirmed_selections cs WHERE cs.job_id = j.id AND cs.rank > 0) AS reciprocal_rank_sum,
+        (SELECT count(*) FROM export_events ee WHERE ee.job_id = j.id AND ee.status = 'completed') AS completed_export_count,
+        (SELECT jf.reason FROM job_feedback jf WHERE jf.job_id = j.id) AS feedback_reason
+      FROM jobs j
+      WHERE j.installation_id IS NOT NULL AND left(j.created_at, 10) < current_date::text
+    )
+    SELECT
+      left(j.created_at, 10) AS day,
+      count(*)::int,
+      count(*) FILTER (WHERE j.status = 'completed')::int,
+      count(*) FILTER (WHERE j.status = 'failed')::int,
+      sum(j.selection_count)::int,
+      sum(j.top1_count)::int,
+      sum(j.reciprocal_rank_sum) / nullif(sum(j.selection_count), 0),
+      sum(j.completed_export_count)::int,
+      json_build_object(
+        'good', count(*) FILTER (WHERE j.feedback_reason = 'good'),
+        'person_missing', count(*) FILTER (WHERE j.feedback_reason = 'person_missing'),
+        'skeleton_wrong', count(*) FILTER (WHERE j.feedback_reason = 'skeleton_wrong'),
+        'candidates_irrelevant', count(*) FILTER (WHERE j.feedback_reason = 'candidates_irrelevant'),
+        'export_problem', count(*) FILTER (WHERE j.feedback_reason = 'export_problem'),
+        'other', count(*) FILTER (WHERE j.feedback_reason = 'other')
+      )::text,
+      percentile_cont(0.5) WITHIN GROUP (
+        ORDER BY EXTRACT(EPOCH FROM (j.completed_at::timestamptz - j.started_at::timestamptz))
+      ) FILTER (WHERE j.completed_at IS NOT NULL AND j.started_at IS NOT NULL),
+      percentile_cont(0.95) WITHIN GROUP (
+        ORDER BY EXTRACT(EPOCH FROM (j.completed_at::timestamptz - j.started_at::timestamptz))
+      ) FILTER (WHERE j.completed_at IS NOT NULL AND j.started_at IS NOT NULL),
+      now()::text
+    FROM job_facts j
+    GROUP BY left(j.created_at, 10)
+    ON CONFLICT (day) DO UPDATE SET
+      jobs_started = EXCLUDED.jobs_started,
+      jobs_completed = EXCLUDED.jobs_completed,
+      jobs_failed = EXCLUDED.jobs_failed,
+      confirmed_selections = EXCLUDED.confirmed_selections,
+      top1_selections = EXCLUDED.top1_selections,
+      mean_reciprocal_rank = EXCLUDED.mean_reciprocal_rank,
+      exports_completed = EXCLUDED.exports_completed,
+      feedback_json = EXCLUDED.feedback_json,
+      latency_p50_seconds = EXCLUDED.latency_p50_seconds,
+      latency_p95_seconds = EXCLUDED.latency_p95_seconds,
+      refreshed_at = EXCLUDED.refreshed_at
+  `);
+
+  const oldJobs = `SELECT id FROM jobs WHERE installation_id IS NOT NULL
+    AND created_at::timestamptz < now() - interval '365 days'`;
+  await client.query(`DELETE FROM export_events WHERE job_id IN (${oldJobs})`);
+  await client.query(`DELETE FROM job_feedback WHERE job_id IN (${oldJobs})`);
+  await client.query(`DELETE FROM confirmed_selections WHERE job_id IN (${oldJobs})`);
+  await client.query("DELETE FROM analytics_events WHERE occurred_at::timestamptz < now() - interval '365 days'");
+  await client.query(`DELETE FROM admin_access_audit WHERE job_id IN (${oldJobs})`);
+  await client.query(`DELETE FROM analysis_candidates WHERE job_id IN (${oldJobs})`);
+  await client.query(`DELETE FROM analysis_people WHERE job_id IN (${oldJobs})`);
+  await client.query(`DELETE FROM jobs WHERE id IN (${oldJobs})`);
+}
+
+export async function runDataMaintenance(): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await refreshAggregatesAndRetention(client);
   } finally {
     client.release();
   }

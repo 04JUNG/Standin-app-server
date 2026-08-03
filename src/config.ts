@@ -29,6 +29,10 @@ export const config = {
   inferenceServiceToken: env("INFERENCE_SERVICE_TOKEN"),
   // Explicit temporary demo mode. User/account endpoints remain protected.
   allowAnonymousAnalysis: env("ALLOW_ANONYMOUS_ANALYSIS", "false") === "true",
+  betaDataBucket: env("BETA_DATA_BUCKET"),
+  deploymentVersion: env("DEPLOYMENT_VERSION", "development"),
+  consentVersion: env("BETA_CONSENT_VERSION", "2026-08-02"),
+  betaReviewAdminToken: env("BETA_REVIEW_ADMIN_TOKEN"),
 
   // 인증(JWT)
   jwtSecret: env("JWT_SECRET", "dev-only-change-me"),
