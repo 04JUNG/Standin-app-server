@@ -3,7 +3,7 @@ import { execute, queryOne, transaction } from "../db.js";
 
 export const CLIENT_EVENT_PROPERTIES: Record<string, readonly string[]> = {
   app_started: ["appVersion", "osName", "osVersion", "architecture", "locale"],
-  input_confirmed: ["source", "width", "height", "size", "mime"],
+  input_confirmed: ["source", "width", "height", "size", "mime", "surface"],
   results_viewed: ["surface", "peopleCount", "candidateCount"],
   candidate_selected: [
     "personIndex",
@@ -13,6 +13,13 @@ export const CLIENT_EVENT_PROPERTIES: Record<string, readonly string[]> = {
     "surface",
   ],
   selection_confirmed: ["selectionCount"],
+  // 아래는 실패·이탈 계열. 성공 경로만 있으면 "왜 안 쓰는가"에 답할 수 없다.
+  // 값은 전부 코드형 열거라 자유 텍스트가 섞이지 않는다.
+  analysis_failed: ["reason", "surface", "elapsedMs"],
+  rerun_requested: ["surface", "selectedCount", "peopleCount"],
+  export_completed: ["fileCount", "surface"],
+  export_failed: ["code", "surface"],
+  capture_failed: ["code", "surface"],
 } as const;
 
 export function sanitizeEventProperties(
