@@ -48,7 +48,7 @@ refineRoutes.post("/:jobId/people/:personIndex/refine", async (c) => {
   // exportUrl은 기존 공개 export 경로 그대로다(BFF-06). 조정본이 있으면 그 URL이 조정본을,
   // 없으면 베이스를 준다 — 클라이언트는 어느 쪽인지 몰라도 같은 URL만 내려받으면 된다.
   const exportUrl =
-    `/v1/pose-candidates/${encodeURIComponent(candidateIdToPoseId(candidateId))}/export?` +
+    `/v1/pose-candidates/${encodeURIComponent(outcome.poseId)}/export?` +
     new URLSearchParams({ jobId, personIndex: String(personIndex), candidateId });
 
   return c.json({
@@ -61,9 +61,3 @@ refineRoutes.post("/:jobId/people/:personIndex/refine", async (c) => {
     exportUrl,
   });
 });
-
-/** candidateId는 `${poseId}::${view}` 형식이다(mapping.ts). export 경로는 poseId를 쓴다. */
-function candidateIdToPoseId(candidateId: string): string {
-  const separator = candidateId.lastIndexOf("::");
-  return separator === -1 ? candidateId : candidateId.slice(0, separator);
-}

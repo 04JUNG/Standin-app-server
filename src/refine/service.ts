@@ -23,6 +23,8 @@ export interface RefineOutcome {
   /** 코드형 값만. 추론의 raw reason이거나 BFF가 붙인 스킵 사유다. */
   reasonCode: string;
   adjustedLimbs: string[];
+  /** export 경로를 만들 때 쓴다. candidateId 문자열을 파싱하지 않기 위해 함께 돌려준다. */
+  poseId: string;
 }
 
 export type RefineFailure = { error: "JOB_CANDIDATE_MISMATCH" };
@@ -87,6 +89,7 @@ export async function runRefine(
       refined: existing.refined,
       reasonCode: existing.reason,
       adjustedLimbs: existing.limbs,
+      poseId: existing.poseId,
     };
   }
 
@@ -104,7 +107,7 @@ export async function runRefine(
       limbs: [],
     });
     logRefine({ event: "refine_skipped", jobId, personIndex, reasonCode });
-    return { refined: false, reasonCode, adjustedLimbs: [] };
+    return { refined: false, reasonCode, adjustedLimbs: [], poseId: candidate.poseId };
   };
 
   // BFF flag가 꺼져 있으면 추론 endpoint가 살아 있어도 호출하지 않는다(OPS-02).
@@ -168,7 +171,12 @@ export async function runRefine(
     reasonCode: upstream.reason,
     limbCount: upstream.limbs.length,
   });
-  return { refined: true, reasonCode: upstream.reason, adjustedLimbs: upstream.limbs };
+  return {
+    refined: true,
+    reasonCode: upstream.reason,
+    adjustedLimbs: upstream.limbs,
+    poseId: candidate.poseId,
+  };
 }
 
 /**
