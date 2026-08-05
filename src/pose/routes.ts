@@ -4,6 +4,7 @@ import type { AppEnv } from "../env.js";
 import { getPoseBvh, getPoseThumbnail } from "../inference.js";
 import { errorEnvelope } from "../mapping.js";
 import { recordExport, validateExportCandidate } from "../analytics/store.js";
+import { resolveExportArtifact } from "../refine/service.js";
 
 export const poseRoutes = new Hono<AppEnv>();
 
@@ -34,6 +35,27 @@ poseRoutes.get("/:id/export", async (c) => {
     candidateId,
     status: "requested",
   });
+
+  // 이 URL은 조정본과 베이스 중 무엇이 최종인지를 서버가 정한다(BFF-06). 클라이언트는
+  // 추론 서버의 로컬 handle을 알 필요가 없고, 알아서도 안 된다.
+  const artifact = await resolveExportArtifact(jobId, personIndex, candidateId);
+  if (artifact.variant === "refined") {
+    await recordExport({
+      installationId,
+      jobId,
+      personIndex,
+      candidateId,
+      status: "completed",
+      variant: "refined",
+    });
+    return new Response(artifact.bytes, {
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": `attachment; filename="${poseId}.bvh"`,
+      },
+    });
+  }
+
   let upstream: Response;
   try {
     upstream = await getPoseBvh(poseId);
@@ -45,6 +67,8 @@ poseRoutes.get("/:id/export", async (c) => {
       candidateId,
       status: "failed",
       errorCode: "INFERENCE_UNAVAILABLE",
+      variant: "base",
+      fallbackReason: artifact.fallbackReason ?? undefined,
     });
     throw new Error("pose export upstream unavailable");
   }
@@ -55,6 +79,8 @@ poseRoutes.get("/:id/export", async (c) => {
     candidateId,
     status: upstream.ok ? "completed" : "failed",
     errorCode: upstream.ok ? undefined : `HTTP_${upstream.status}`,
+    variant: "base",
+    fallbackReason: artifact.fallbackReason ?? undefined,
   });
   return new Response(upstream.body, {
     status: upstream.status,

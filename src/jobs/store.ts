@@ -2,6 +2,7 @@
 // 인터페이스(createJob/getJob/updateJob)는 유지하되 Promise를 돌려준다.
 import { randomUUID } from "node:crypto";
 import { execute, queryOne, transaction } from "../db.js";
+import type { RefineContext } from "../mapping.js";
 import type { AnalysisResult } from "../types.js";
 
 export type JobStatus = "queued" | "running" | "completed" | "failed";
@@ -155,25 +156,49 @@ export async function updateJob(id: string, patch: Partial<Job>): Promise<void> 
   await execute(`UPDATE jobs SET ${sets.join(", ")} WHERE id = $1`, params);
 }
 
-export async function persistAnalysisRecords(jobId: string, result: AnalysisResult): Promise<void> {
+export async function persistAnalysisRecords(
+  jobId: string,
+  result: AnalysisResult,
+  refineContexts: RefineContext[] = [],
+): Promise<void> {
+  const contextByPerson = new Map(refineContexts.map((ctx) => [ctx.personIndex, ctx]));
   await transaction(async (client) => {
     await client.query("DELETE FROM analysis_candidates WHERE job_id = $1", [jobId]);
     await client.query("DELETE FROM analysis_people WHERE job_id = $1", [jobId]);
     for (const person of result.candidatesByPerson) {
+      const ctx = contextByPerson.get(person.personIndex);
       await client.query(
         `INSERT INTO analysis_people
           (job_id, person_index, bbox_json, tags_json, skeleton_json, confidence,
-           candidate_count, candidate_shortfall_reason)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+           candidate_count, candidate_shortfall_reason,
+           skeleton_state, skeleton_source, coverage_class, fallback_mode,
+           refine_allowed, refinable_limbs_json, refine_context_json, raw_scores_json)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
         [
           jobId,
           person.personIndex,
           person.box ? JSON.stringify(person.box) : null,
           JSON.stringify(person.tags),
           person.skeleton ? JSON.stringify(person.skeleton) : null,
-          person.confidence ?? null,
+          person.confidence,
           person.candidateCount,
           person.candidateShortfallReason,
+          person.skeletonState,
+          person.skeletonSource,
+          person.coverageClass,
+          person.fallbackMode,
+          person.refineAllowed,
+          JSON.stringify(person.refinableLimbs),
+          // refine 입력은 서버측에만 둔다(BFF-04). 클라가 되돌려 보낸 값은 신뢰하지 않는다.
+          ctx
+            ? JSON.stringify({
+                keypoints: ctx.keypoints,
+                scores: ctx.scores,
+                qualityReasons: ctx.qualityReasons,
+                qualityTrace: ctx.qualityTrace,
+              })
+            : null,
+          ctx?.rawScores ? JSON.stringify(ctx.rawScores) : null,
         ],
       );
       for (const candidate of person.candidates) {
