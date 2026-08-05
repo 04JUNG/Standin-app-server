@@ -166,11 +166,16 @@ export async function recordExport(event: {
   candidateId: string;
   status: "requested" | "completed" | "failed";
   errorCode?: string;
+  /** 실제로 내려간 것이 조정본인지 베이스인지(BFF-06). requested 단계에서는 아직 미정. */
+  variant?: "refined" | "base";
+  /** 조정본을 쓰려다 베이스로 내려온 사유. 정상 베이스와 구분하기 위한 값이다. */
+  fallbackReason?: string;
 }): Promise<void> {
   await execute(
     `INSERT INTO export_events
-      (event_id, installation_id, job_id, person_index, candidate_id, status, occurred_at, error_code)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      (event_id, installation_id, job_id, person_index, candidate_id, status, occurred_at,
+       error_code, variant, fallback_reason)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
     [
       `export_${randomUUID()}`,
       event.installationId,
@@ -180,6 +185,8 @@ export async function recordExport(event: {
       event.status,
       new Date().toISOString(),
       event.errorCode ?? null,
+      event.variant ?? null,
+      event.fallbackReason ?? null,
     ],
   );
 }

@@ -7,8 +7,12 @@ import { confirmSelections, saveFeedback } from "../analytics/store.js";
 import { storeInput, validateInputImage } from "../inputStorage.js";
 import { createJob, getOwnedJob, setJobInput, updateJob } from "./store.js";
 import { runAnalysisJob } from "./runner.js";
+import { refineRoutes } from "../refine/routes.js";
 
 export const jobsRoutes = new Hono<AppEnv>();
+
+// POST /:jobId/people/:personIndex/refine. 같은 prefix라 여기 붙이고 파일만 나눈다.
+jobsRoutes.route("/", refineRoutes);
 
 // POST /v1/analysis/jobs — 이미지 업로드 → jobId 즉시 반환(추론은 백그라운드)
 jobsRoutes.post("/", async (c) => {

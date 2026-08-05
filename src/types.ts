@@ -6,6 +6,19 @@ export type MatchLevel = "high" | "medium" | "low";
 
 export type AnalysisJobStatus = "queued" | "running" | "completed" | "failed";
 
+/**
+ * 인물 단위 폴백 상태(요구서 §3-2).
+ *
+ * `soft`(저신뢰지만 후보 있음)와 `hard`(후보 없음)는 **다른 상태**다. 하나로 뭉치면
+ * "참고용 후보를 보여준다"와 "이 인물은 자동 후보가 없다"를 화면이 구분할 수 없다.
+ */
+export type FallbackMode = "none" | "soft" | "hard";
+
+export type PersonConfidence = "high" | "low";
+export type SkeletonState = "valid" | "partial" | "suspect" | "missing" | "invalid";
+export type SkeletonSource = "full_image" | "crop_retry" | "none";
+export type CoverageClass = "full" | "reduced" | "sparse" | "insufficient";
+
 export interface PoseCandidate {
   id: string; // unique exposed candidate id (pose + view)
   poseId: string;
@@ -32,21 +45,36 @@ export interface AnalysisResult {
     poseLibraryVersion: string;
     featureVersion: number;
   };
-  candidatesByPerson: Array<{
-    personIndex: number;
-    box: number[] | null;
-    tags: Record<string, string>;
-    skeleton: {
-      schemaVersion: string;
-      keypoints: number[][];
-      scores: number[];
-    } | null;
-    confidence: string | null;
-    candidateCount: number;
-    candidateShortfallReason: string | null;
-    candidates: PoseCandidate[];
-  }>;
+  candidatesByPerson: AnalysisPerson[];
   notes: string[];
+  /**
+   * 이 응답을 만든 BFF가 어떤 기능을 노출하는가(OPS-02).
+   *
+   * 클라이언트가 자기 판단으로 refine을 호출하지 않게 하려면 서버가 알려 줘야 한다.
+   * 추론 endpoint가 살아 있어도 BFF flag가 꺼져 있으면 여기서 false가 나간다.
+   */
+  capabilities: { refine: boolean };
+}
+
+export interface AnalysisPerson {
+  personIndex: number;
+  box: number[] | null;
+  tags: Record<string, string>;
+  skeleton: {
+    schemaVersion: string;
+    keypoints: number[][];
+    scores: number[];
+  } | null;
+  confidence: PersonConfidence;
+  skeletonState: SkeletonState;
+  skeletonSource: SkeletonSource;
+  coverageClass: CoverageClass;
+  fallbackMode: FallbackMode;
+  refineAllowed: boolean;
+  refinableLimbs: string[];
+  candidateCount: number;
+  candidateShortfallReason: string | null;
+  candidates: PoseCandidate[];
 }
 
 export interface ErrorEnvelope {

@@ -27,6 +27,16 @@ export const config = {
   // 도원 추론 서버(내부망, 무인증). ⚠ 공개 노출 금지.
   inferenceBaseUrl: env("INFERENCE_BASE_URL", "http://127.0.0.1:8000"),
   inferenceServiceToken: env("INFERENCE_SERVICE_TOKEN"),
+
+  /**
+   * refine 노출 스위치(OPS-02). 추론 서버의 REFINE_ENABLED와 **별도**다.
+   *
+   * 추론 endpoint가 살아 있어도 이 값이 false면 클라이언트에 refine을 노출하지 않는다.
+   * 조정본 영속화와 저장 전 미리보기가 staging에서 검증되기 전까지 production 기본값은 off다.
+   */
+  refineFeatureEnabled: env("REFINE_FEATURE_ENABLED", "false") === "true",
+  // refine은 사용자가 저장을 기다리는 동기 경로다. 느려지면 베이스로 넘어간다(BFF-07).
+  refineTimeoutMs: Number(process.env.REFINE_TIMEOUT_MS ?? 5000),
   // Explicit temporary demo mode. User/account endpoints remain protected.
   allowAnonymousAnalysis: env("ALLOW_ANONYMOUS_ANALYSIS", "false") === "true",
   betaDataBucket: env("BETA_DATA_BUCKET"),

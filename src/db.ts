@@ -133,6 +133,17 @@ const SCHEMA = `
   ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS candidate_count INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS candidate_shortfall_reason TEXT;
 
+  -- PR #10 스켈레톤 품질 신호. refine_context_json/raw_scores_json은 공개 응답에 나가지
+  -- 않는다(BFF-03) — refine 입력과 평가용 원본 점수를 서버측에만 두기 위한 컬럼이다.
+  ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS skeleton_state TEXT;
+  ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS skeleton_source TEXT;
+  ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS coverage_class TEXT;
+  ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS fallback_mode TEXT;
+  ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS refine_allowed BOOLEAN NOT NULL DEFAULT FALSE;
+  ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS refinable_limbs_json TEXT;
+  ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS refine_context_json TEXT;
+  ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS raw_scores_json TEXT;
+
   CREATE TABLE IF NOT EXISTS analysis_candidates (
     job_id               TEXT NOT NULL,
     person_index         INTEGER NOT NULL,
@@ -185,6 +196,29 @@ const SCHEMA = `
     status          TEXT NOT NULL,
     occurred_at     TEXT NOT NULL,
     error_code      TEXT
+  );
+
+  -- 실제로 내려간 것이 조정본인지 베이스인지 구분한다(BFF-06). 이게 없으면 조정본
+  -- 조회 실패로 베이스가 나간 경우와 처음부터 베이스인 경우를 지표에서 구분할 수 없다.
+  ALTER TABLE export_events ADD COLUMN IF NOT EXISTS variant TEXT;
+  ALTER TABLE export_events ADD COLUMN IF NOT EXISTS fallback_reason TEXT;
+
+  /* 조정본 artifact 대장(BFF-06).
+     object_key는 추론 컨테이너의 로컬 handle이 아니라 **S3 object key**다 — 태스크가
+     교체돼도 export가 계속 성공해야 하기 때문이다(INF-03, E2E-08).
+     PK가 (job_id, person_index, candidate_id)인 것이 멱등성의 근거다: 같은 선택을 다시
+     눌러도 추론을 다시 호출하지 않고 S3 객체도 중복 생성되지 않는다(BFF-07). */
+  CREATE TABLE IF NOT EXISTS refined_artifacts (
+    job_id       TEXT NOT NULL,
+    person_index INTEGER NOT NULL,
+    candidate_id TEXT NOT NULL,
+    pose_id      TEXT NOT NULL,
+    refined      BOOLEAN NOT NULL,
+    reason       TEXT NOT NULL,
+    object_key   TEXT,
+    limbs_json   TEXT NOT NULL DEFAULT '[]',
+    created_at   TEXT NOT NULL,
+    PRIMARY KEY (job_id, person_index, candidate_id)
   );
 
   CREATE TABLE IF NOT EXISTS daily_analytics_aggregates (
@@ -376,6 +410,8 @@ async function refreshAggregatesAndRetention(client: PoolClient): Promise<void> 
   await client.query(`DELETE FROM confirmed_selections WHERE job_id IN (${oldJobs})`);
   await client.query("DELETE FROM analytics_events WHERE occurred_at::timestamptz < now() - interval '365 days'");
   await client.query(`DELETE FROM admin_access_audit WHERE job_id IN (${oldJobs})`);
+  // S3 객체 자체는 버킷 lifecycle(90일)과 동의 철회 삭제 스윕이 지운다. 여기서는 대장만 정리한다.
+  await client.query(`DELETE FROM refined_artifacts WHERE job_id IN (${oldJobs})`);
   await client.query(`DELETE FROM analysis_candidates WHERE job_id IN (${oldJobs})`);
   await client.query(`DELETE FROM analysis_people WHERE job_id IN (${oldJobs})`);
   await client.query(`DELETE FROM jobs WHERE id IN (${oldJobs})`);
