@@ -3,6 +3,8 @@ import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
 import { getPoseBvh, getPoseThumbnail } from "../inference.js";
 import { errorEnvelope } from "../mapping.js";
+import { recordExport, validateExportCandidate } from "../analytics/store.js";
+import { resolveExportArtifact } from "../refine/service.js";
 
 export const poseRoutes = new Hono<AppEnv>();
 
@@ -10,7 +12,76 @@ export const poseRoutes = new Hono<AppEnv>();
 // TODO(Phase 1): requireAuth 적용
 poseRoutes.get("/:id/export", async (c) => {
   const poseId = c.req.param("id");
-  const upstream = await getPoseBvh(poseId);
+  const candidateId = c.req.query("candidateId") ?? "";
+  const jobId = c.req.query("jobId") ?? "";
+  const personIndex = Number(c.req.query("personIndex"));
+  const installationId = c.get("installationId")!;
+  if (
+    !jobId ||
+    !Number.isInteger(personIndex) ||
+    personIndex < 0 ||
+    !candidateId ||
+    !(await validateExportCandidate(installationId, jobId, personIndex, candidateId))
+  ) {
+    return c.json(
+      errorEnvelope("INVALID_EXPORT", "작업에서 선택된 후보가 아닙니다.", c.get("requestId")),
+      409,
+    );
+  }
+  await recordExport({
+    installationId,
+    jobId,
+    personIndex,
+    candidateId,
+    status: "requested",
+  });
+
+  // 이 URL은 조정본과 베이스 중 무엇이 최종인지를 서버가 정한다(BFF-06). 클라이언트는
+  // 추론 서버의 로컬 handle을 알 필요가 없고, 알아서도 안 된다.
+  const artifact = await resolveExportArtifact(jobId, personIndex, candidateId);
+  if (artifact.variant === "refined") {
+    await recordExport({
+      installationId,
+      jobId,
+      personIndex,
+      candidateId,
+      status: "completed",
+      variant: "refined",
+    });
+    return new Response(artifact.bytes, {
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": `attachment; filename="${poseId}.bvh"`,
+      },
+    });
+  }
+
+  let upstream: Response;
+  try {
+    upstream = await getPoseBvh(poseId);
+  } catch {
+    await recordExport({
+      installationId,
+      jobId,
+      personIndex,
+      candidateId,
+      status: "failed",
+      errorCode: "INFERENCE_UNAVAILABLE",
+      variant: "base",
+      fallbackReason: artifact.fallbackReason ?? undefined,
+    });
+    throw new Error("pose export upstream unavailable");
+  }
+  await recordExport({
+    installationId,
+    jobId,
+    personIndex,
+    candidateId,
+    status: upstream.ok ? "completed" : "failed",
+    errorCode: upstream.ok ? undefined : `HTTP_${upstream.status}`,
+    variant: "base",
+    fallbackReason: artifact.fallbackReason ?? undefined,
+  });
   return new Response(upstream.body, {
     status: upstream.status,
     headers: {

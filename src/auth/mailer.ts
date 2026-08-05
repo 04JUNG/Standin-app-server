@@ -4,6 +4,12 @@ import { config } from "../config.js";
 
 export async function sendVerificationEmail(to: string, verifyLink: string): Promise<void> {
   if (!config.smtp.host) {
+    if (process.env.NODE_ENV === "production") {
+      console.error(
+        JSON.stringify({ type: "mailer", status: "failed", errorCode: "SMTP_NOT_CONFIGURED" }),
+      );
+      throw new Error("SMTP is not configured");
+    }
     // dev: SMTP 미설정 → 링크를 콘솔에 출력(실제 발송 없음)
     console.log(`[mailer] SMTP 미설정. ${to} 인증 링크:\n  ${verifyLink}`);
     return;
