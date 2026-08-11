@@ -3,7 +3,7 @@
 // 핵심 원칙 하나: **refine은 사용자 작업을 실패시키지 않는다.** 안전 게이트가 조정을 버려도,
 // 추론이 느려도, S3가 안 돼도 결과는 "베이스 BVH를 쓴다"는 정상 응답이다. 대신 조정본을
 // 실제로 보관하지 못했다면 절대 refined=true로 기록하지 않는다.
-import { InferenceError, fetchUpstreamPath, refine as refineUpstream } from "../inference.js";
+import { InferenceError, refine as refineUpstream } from "../inference.js";
 import { config } from "../config.js";
 import {
   getRefinedBvh,
@@ -48,7 +48,6 @@ export interface RefineDeps {
   findRefinedArtifact: typeof findRefinedArtifact;
   saveRefinedArtifact: typeof saveRefinedArtifact;
   refineUpstream: typeof refineUpstream;
-  fetchUpstreamPath: typeof fetchUpstreamPath;
   putRefinedBvh: typeof putRefinedBvh;
 }
 
@@ -60,7 +59,6 @@ const defaultDeps: RefineDeps = {
   findRefinedArtifact,
   saveRefinedArtifact,
   refineUpstream,
-  fetchUpstreamPath,
   putRefinedBvh,
 };
 
@@ -142,24 +140,19 @@ export async function runRefine(
   // 안전 게이트가 베이스를 유지한 것 — 오류가 아니다(요구서 §3-3).
   if (!upstream.refined) return skip(upstream.reason);
 
+  // refined=true인데 본문이 없다면 계약 위반이다. 추론 서버가 조정본을 넘기는 경로는
+  // 이 필드 하나뿐이고(REFINE_HANDOFF §3 4단계에서 /refined/{handle}/bvh는 제거됐다),
+  // 없는 걸 지어낼 방법이 없으므로 베이스로 안전 전환한다.
+  if (upstream.bvh === undefined) {
+    logRefine({ event: "refine_failed", jobId, personIndex, stage: "contract" });
+    return skip("upstream_missing_bvh");
+  }
+
   // 여기부터가 INF-03의 핵심: 조정본을 즉시 우리 소유로 옮긴다.
-  //
-  // 신 추론 서버는 본문을 응답에 실어 보내므로 두 번째 요청이 필요 없다. 그 요청이 롤링
-  // 배포 중 조정본을 갖지 않은 다른 태스크에 닿으면 404가 났고, 그래서 인프라가 무중단
-  // 배포를 막아 두고 있다(REFINE_HANDOFF §3). 구 서버는 bvh를 안 보내므로 폴백을 남긴다 —
-  // 4단계에서 fetchUpstreamPath 경로째 제거한다.
+  // 계약상 LF 개행이다. UTF-8로 그대로 인코딩하면 추론이 만든 본문과 같은 바이트가 된다.
   const objectKey = refinedObjectKey({ installationId, jobId, personIndex, candidateId });
   try {
-    let bytes: Uint8Array;
-    if (upstream.bvh !== undefined) {
-      // 계약상 LF 개행이다. UTF-8로 그대로 인코딩하면 추론이 쓴 파일과 같은 바이트가 된다.
-      bytes = new TextEncoder().encode(upstream.bvh);
-    } else {
-      const res = await deps.fetchUpstreamPath(upstream.bvh_url);
-      if (!res.ok) throw new Error(`upstream refined bvh ${res.status}`);
-      bytes = new Uint8Array(await res.arrayBuffer());
-    }
-    await deps.putRefinedBvh(objectKey, bytes);
+    await deps.putRefinedBvh(objectKey, new TextEncoder().encode(upstream.bvh));
   } catch {
     // 조정은 됐지만 우리가 보관하지 못했다 → refined=true로 기록하지 않는다(BFF-06).
     logRefine({ event: "refine_failed", jobId, personIndex, stage: "persist" });
