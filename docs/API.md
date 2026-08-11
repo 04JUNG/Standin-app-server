@@ -22,6 +22,8 @@ X-Device-Token: ...
 
 서버에는 토큰 SHA-256 해시만 저장한다. 현재 동의 버전은 `BETA_CONSENT_VERSION`이며 불일치 시 `CONSENT_REQUIRED`, 자격증명 누락 시 `INSTALLATION_REQUIRED`로 거부한다.
 
+발급은 공개 엔드포인트라 **IP 단위 속도 제한**이 걸린다(기본 1시간 5회). 초과하면 `429 RATE_LIMITED`가 나가므로, 클라는 발급을 재시도 루프로 돌리지 말고 받은 자격증명을 안전 저장소에 보관해 재사용한다.
+
 `DELETE /v1/installations/current/data`는 전용 S3 prefix, 작업·파생 데이터·이벤트·선택·피드백과 설치 레코드를 삭제한다. 응답은 `{ "deleted": true, "backupExpiryDays": 7 }`이다.
 
 ---
@@ -67,9 +69,15 @@ Retry-After: 41230
 |---|---|---|
 | `DAILY_QUOTA_EXCEEDED` | 설치별 일일 분석 한도 초과 | `retryAfterSeconds`, `limit`, `retryAt` |
 | `GLOBAL_QUOTA_EXCEEDED` | 서비스 전체 일일 분석 한도 초과 | `retryAfterSeconds`, `retryAt` |
+| `RATE_LIMITED` | 짧은 시간에 요청이 몰림(IP 단위) | `retryAfterSeconds`, `limit`, `windowSeconds` |
 
 일일 한도는 **KST 자정**에 리셋된다(`retryAt`은 항상 `+09:00` 표기). 한도값은 서버 환경변수로
 조정되므로 클라가 숫자를 하드코딩하지 않고 `details.limit`을 그대로 보여준다.
+
+`RATE_LIMITED`는 IP 단위 burst 제한이며 `POST /v1/installations`와 `POST /v1/analysis/jobs`에
+걸린다. 일일 쿼터와는 별개 카운터라, 남은 일일 횟수가 있어도 잠깐 몰리면 나올 수 있다.
+공용망·NAT에서는 같은 IP를 여러 사용자가 공유할 수 있으므로 "잠시 후 다시 시도"로 안내한다.
+서버는 IP 원문을 저장하지 않고 해시 버킷만 센다.
 
 ---
 
