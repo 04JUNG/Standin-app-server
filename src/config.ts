@@ -44,6 +44,15 @@ export const config = {
   consentVersion: env("BETA_CONSENT_VERSION", "2026-08-02"),
   betaReviewAdminToken: env("BETA_REVIEW_ADMIN_TOKEN"),
 
+  /**
+   * 사용량 제한(오픈베타). 초깃값은 스프린트 2026-08-11 §3 권장값이다.
+   *
+   * 0 이하는 "제한 없음"으로 읽는다 — 전체 일일 상한은 Gemini 비용 산정 전이라
+   * 기본 off로 두고, 숫자가 정해지면 env만 채워 켠다.
+   */
+  quotaInstallationDaily: Number(process.env.QUOTA_INSTALLATION_DAILY ?? 10),
+  quotaGlobalDaily: Number(process.env.QUOTA_GLOBAL_DAILY ?? 0),
+
   // 인증(JWT)
   jwtSecret: env("JWT_SECRET", "dev-only-change-me"),
   accessTokenTtl: Number(process.env.ACCESS_TOKEN_TTL ?? 900), // 15분

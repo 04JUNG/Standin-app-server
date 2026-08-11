@@ -236,6 +236,17 @@ const SCHEMA = `
     refreshed_at          TEXT NOT NULL
   );
 
+  -- 사용량 카운터(설치별 일일 쿼터·전체 상한·IP burst). 정본은 여기다 —
+  -- 프로세스 메모리에 세면 태스크 수만큼 한도가 늘어나고 배포마다 초기화된다.
+  CREATE TABLE IF NOT EXISTS usage_counters (
+    scope        TEXT NOT NULL,      -- installation_day | global_day | ip_register | ip_analyze
+    subject      TEXT NOT NULL,      -- installationId | 'all' | IP 해시
+    window_start TEXT NOT NULL,      -- KST 일자('2026-08-11') 또는 고정창 시작 unix초
+    count        INTEGER NOT NULL DEFAULT 0,
+    expires_at   BIGINT NOT NULL,    -- unix seconds. 지난 창은 청소한다.
+    PRIMARY KEY (scope, subject, window_start)
+  );
+
   CREATE TABLE IF NOT EXISTS admin_access_audit (
     audit_id     TEXT PRIMARY KEY,
     reviewer     TEXT NOT NULL,
@@ -250,6 +261,7 @@ const SCHEMA = `
     WHERE provider_id IS NOT NULL;
 
   CREATE INDEX IF NOT EXISTS refresh_tokens_expires_at ON refresh_tokens (expires_at);
+  CREATE INDEX IF NOT EXISTS usage_counters_expires_at ON usage_counters (expires_at);
   CREATE INDEX IF NOT EXISTS oauth_codes_expires_at ON oauth_codes (expires_at);
   CREATE INDEX IF NOT EXISTS jobs_user_id ON jobs (user_id);
   CREATE INDEX IF NOT EXISTS jobs_installation_id ON jobs (installation_id);
@@ -337,6 +349,7 @@ export async function initDb(): Promise<void> {
       const now = Math.floor(Date.now() / 1000);
       await client.query("DELETE FROM refresh_tokens WHERE expires_at < $1", [now]);
       await client.query("DELETE FROM oauth_codes WHERE expires_at < $1", [now]);
+      await client.query("DELETE FROM usage_counters WHERE expires_at < $1", [now]);
     } finally {
       await client.query("SELECT pg_advisory_unlock($1)", [INIT_LOCK_KEY]);
     }
@@ -421,6 +434,9 @@ export async function runDataMaintenance(): Promise<void> {
   const client = await pool.connect();
   try {
     await refreshAggregatesAndRetention(client);
+    await client.query("DELETE FROM usage_counters WHERE expires_at < $1", [
+      Math.floor(Date.now() / 1000),
+    ]);
   } finally {
     client.release();
   }

@@ -1,7 +1,17 @@
 // Job 저장소(PostgreSQL). result는 JSON 문자열로 저장.
 // 인터페이스(createJob/getJob/updateJob)는 유지하되 Promise를 돌려준다.
 import { randomUUID } from "node:crypto";
-import { execute, queryOne, transaction } from "../db.js";
+import type { Pool, PoolClient } from "pg";
+import { config } from "../config.js";
+import { execute, pool, queryOne, transaction } from "../db.js";
+import {
+  LimitExceededError,
+  dailyWindow,
+  isDisabled,
+  kstIsoString,
+  secondsUntil,
+} from "../limits/policy.js";
+import { refund, tryConsume } from "../limits/store.js";
 import type { RefineContext } from "../mapping.js";
 import type { AnalysisResult } from "../types.js";
 
@@ -48,17 +58,20 @@ function toJob(r: JobRow): Job {
   };
 }
 
-export async function createJob(
+export interface JobInput {
+  installationId: string;
+  source: "capture" | "file" | "clipboard";
+  mime: string;
+  size: number;
+  width: number | null;
+  height: number | null;
+}
+
+async function insertJob(
+  executor: Pool | PoolClient,
   userId: string | null,
-  rerunOf: string | null = null,
-  input?: {
-    installationId: string;
-    source: "capture" | "file" | "clipboard";
-    mime: string;
-    size: number;
-    width: number | null;
-    height: number | null;
-  },
+  rerunOf: string | null,
+  input?: JobInput,
 ): Promise<Job> {
   const now = new Date().toISOString();
   const job: Job = {
@@ -73,7 +86,7 @@ export async function createJob(
     installationId: input?.installationId ?? null,
     inputS3Key: null,
   };
-  await execute(
+  await executor.query(
     `INSERT INTO jobs
       (id, user_id, status, created_at, updated_at, result_json, error_code, rerun_of,
        installation_id, source, input_mime, input_size, input_width, input_height)
@@ -96,6 +109,81 @@ export async function createJob(
     ],
   );
   return job;
+}
+
+export async function createJob(
+  userId: string | null,
+  rerunOf: string | null = null,
+  input?: JobInput,
+): Promise<Job> {
+  return insertJob(pool, userId, rerunOf, input);
+}
+
+/**
+ * 사용량 한도를 확인하면서 Job을 만든다. 오픈베타 분석 경로는 반드시 이 함수를 쓴다.
+ *
+ * 한도 검사와 INSERT를 **한 트랜잭션**에 넣는 이유: 중간에 한도 초과로 throw하면
+ * 롤백이 이미 올린 카운터까지 되돌린다. "먼저 세고 실패하면 빼기"는 그 사이에 프로세스가
+ * 죽으면 쿼터가 영구히 새는 반면, 이 방식은 샐 구멍이 없다.
+ *
+ * 설치 단위 advisory lock을 먼저 잡아 같은 설치의 동시 요청을 직렬화한다
+ * (동시 분석 제한이 붙을 자리이기도 하다).
+ *
+ * @throws LimitExceededError 한도 초과 시
+ */
+export async function createJobWithLimits(
+  userId: string | null,
+  input: JobInput,
+): Promise<Job> {
+  const nowMs = Date.now();
+  const day = dailyWindow(nowMs);
+  return transaction(async (client) => {
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [input.installationId]);
+
+    if (!isDisabled(config.quotaInstallationDaily)) {
+      const ok = await tryConsume(
+        "installation_day",
+        input.installationId,
+        day,
+        config.quotaInstallationDaily,
+        client,
+      );
+      if (!ok) {
+        throw new LimitExceededError(
+          "DAILY_QUOTA_EXCEEDED",
+          secondsUntil(day.resetAtMs, nowMs),
+          { limit: config.quotaInstallationDaily, retryAt: kstIsoString(day.resetAtMs) },
+        );
+      }
+    }
+
+    if (!isDisabled(config.quotaGlobalDaily)) {
+      const ok = await tryConsume("global_day", "all", day, config.quotaGlobalDaily, client);
+      if (!ok) {
+        throw new LimitExceededError(
+          "GLOBAL_QUOTA_EXCEEDED",
+          secondsUntil(day.resetAtMs, nowMs),
+          { retryAt: kstIsoString(day.resetAtMs) },
+        );
+      }
+    }
+
+    return insertJob(client, userId, null, input);
+  });
+}
+
+/**
+ * 커밋 뒤에 요청이 실패했을 때 소비한 일일 쿼터를 돌려준다(예: 입력 저장 실패).
+ * best-effort — 실패해도 요청 처리를 막지 않는다.
+ */
+export async function refundAnalysisQuota(installationId: string): Promise<void> {
+  const day = dailyWindow(Date.now());
+  if (!isDisabled(config.quotaInstallationDaily)) {
+    await refund("installation_day", installationId, day);
+  }
+  if (!isDisabled(config.quotaGlobalDaily)) {
+    await refund("global_day", "all", day);
+  }
 }
 
 export async function getOwnedJob(id: string, installationId: string): Promise<Job | undefined> {

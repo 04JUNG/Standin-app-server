@@ -12,7 +12,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --test dist/analytics/store.test.js dist/inputStorage.test.js dist/mapping.test.js dist/refine/service.test.js"
+    "test": "npm run build && node --test dist/analytics/store.test.js dist/inputStorage.test.js dist/limits/policy.test.js dist/mapping.test.js dist/refine/service.test.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1101.0",
