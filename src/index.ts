@@ -12,6 +12,7 @@ import { requireAuth } from "./auth/middleware.js";
 import { authRoutes } from "./auth/routes.js";
 import { usersRoutes } from "./users/routes.js";
 import { jobsRoutes } from "./jobs/routes.js";
+import { failStaleJobs } from "./jobs/store.js";
 import { poseRoutes } from "./pose/routes.js";
 import { analyticsRoutes } from "./analytics/routes.js";
 import { installationRoutes } from "./installations/routes.js";
@@ -131,6 +132,18 @@ const maintenanceTimer = setInterval(() => {
   void runDataMaintenance().catch(() => console.error("[bff] data maintenance failed"));
 }, 24 * 60 * 60 * 1000);
 maintenanceTimer.unref();
+
+// 유실된 Job 정리. 24시간 주기 유지보수로는 너무 느리다 — 동시 분석 한도가 1이라
+// running인 채로 남은 Job 하나가 그 설치를 계속 막는다.
+const sweepStaleJobs = () =>
+  failStaleJobs()
+    .then((count) => {
+      if (count > 0) console.warn(JSON.stringify({ type: "stale_jobs_swept", count }));
+    })
+    .catch(() => console.error("[bff] stale job sweep failed"));
+void sweepStaleJobs();
+const staleJobTimer = setInterval(() => void sweepStaleJobs(), 60 * 1000);
+staleJobTimer.unref();
 
 // ECS는 태스크를 교체할 때 SIGTERM을 보낸다. 진행 중 요청을 마치고 커넥션을 정리한다.
 for (const signal of ["SIGTERM", "SIGINT"] as const) {

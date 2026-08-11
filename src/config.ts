@@ -52,6 +52,15 @@ export const config = {
    */
   quotaInstallationDaily: Number(process.env.QUOTA_INSTALLATION_DAILY ?? 10),
   quotaGlobalDaily: Number(process.env.QUOTA_GLOBAL_DAILY ?? 0),
+  // 설치별 동시 분석. 중복 클릭·폭주 방지가 목적이라 1이면 충분하다.
+  quotaInstallationConcurrent: Number(process.env.QUOTA_INSTALLATION_CONCURRENT ?? 1),
+  /**
+   * 이 시간이 지나도 queued/running인 Job은 유실로 본다.
+   *
+   * 러너가 프로세스 내 fire-and-forget이라 배포·태스크 교체 시 상태가 running인 채로 남는다.
+   * 동시 분석 한도가 1이면 그 설치는 영원히 막히므로, 오래된 Job은 세지 않고 실패로 정리한다.
+   */
+  analysisStaleAfterSeconds: Number(process.env.ANALYSIS_STALE_AFTER_SECONDS ?? 300),
   // IP burst. NAT·공용망 사용자를 고려해 너무 낮게 잡지 않는다.
   rateIpRegister: Number(process.env.RATE_IP_REGISTER ?? 5),
   rateIpRegisterWindow: Number(process.env.RATE_IP_REGISTER_WINDOW ?? 3600),
