@@ -124,16 +124,13 @@ export interface RefineUpstreamResponse {
   /** false는 오류가 아니다 — 안전 게이트가 조정을 버리고 베이스를 준 정상 결과. */
   refined: boolean;
   reason: string;
-  /** refined면 `/refined/{handle}/bvh`, 아니면 `/pose/{id}/bvh`. 상대 경로다. */
+  /** 항상 베이스(`/pose/{id}/bvh`). 조정본에는 URL이 없다. 상대 경로다. */
   bvh_url: string;
   /**
    * 조정본 BVH 본문(LF 개행). `refined=true`일 때만 채워진다.
    *
-   * 이게 있으면 `bvh_url`로 두 번째 요청을 하지 않아도 된다 — 롤링 배포 중 두 번째 요청이
-   * 다른 태스크에 닿아 404가 나는 경로가 사라진다(REFINE_HANDOFF §3).
-   *
-   * ⚠ optional인 이유는 구 추론 서버가 이 필드를 보내지 않기 때문이다. 순차 배포가 끝나고
-   *   폴백을 제거하는 4단계에서 필수로 바꾼다.
+   * 조정본을 얻는 **유일한** 경로다 — `/refined/{handle}/bvh`는 제거됐다
+   * (REFINE_HANDOFF §3 4단계). `refined=false`면 없다.
    */
   bvh?: string;
   backend: string;
@@ -163,21 +160,8 @@ export async function refine(req: RefineUpstreamRequest): Promise<RefineUpstream
   return (await res.json()) as RefineUpstreamResponse;
 }
 
-/**
- * 추론 서버가 돌려준 상대 경로(`/refined/{handle}/bvh` 등)를 그대로 GET한다.
- *
- * ⚠ 이 파일은 추론 컨테이너의 **로컬 디스크**에 있다. 그래서 BFF는 받자마자 S3로 옮기고
- *   이후에는 다시 이 경로를 쓰지 않는다(INF-03, refineStorage.ts).
- */
-export async function fetchUpstreamPath(path: string): Promise<Response> {
-  if (!path.startsWith("/")) {
-    throw new InferenceError(422, `unexpected upstream path: ${path}`);
-  }
-  return fetch(`${config.inferenceBaseUrl}${path}`, {
-    headers: authHeaders(),
-    signal: AbortSignal.timeout(config.refineTimeoutMs),
-  });
-}
+// fetchUpstreamPath()는 제거됐다(REFINE_HANDOFF §3 4단계). 추론 컨테이너의 로컬
+// 디스크에서 조정본을 받아오던 경로인데, 이제 조정본은 /refine 응답 본문으로만 온다.
 
 // GET /pose/{id}/bvh → 원본 응답(상태·바디를 호출측이 그대로 프록시)
 export async function getPoseBvh(poseId: string): Promise<Response> {

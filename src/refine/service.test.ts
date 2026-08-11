@@ -11,6 +11,9 @@ const INPUT = {
   candidateId: "pose-1::front",
 };
 
+/** 추론이 돌려주는 조정본 본문. 계약상 LF 개행이다. */
+const BASE_BVH = "HIERARCHY\nROOT Hips\nMOTION\nFrames: 1\nFrame Time: 0.033333\n0.0\n";
+
 /** 저장된 artifact를 메모리에 모아 두는 기본 deps. 각 테스트가 필요한 것만 덮어쓴다. */
 function deps(overrides: Partial<RefineDeps> = {}) {
   const saved: RefinedArtifact[] = [];
@@ -34,7 +37,8 @@ function deps(overrides: Partial<RefineDeps> = {}) {
       view: "front",
       refined: true,
       reason: "ok_partial",
-      bvh_url: "/refined/abc123/bvh",
+      bvh_url: "/pose/pose-1/bvh",
+      bvh: BASE_BVH,
       backend: "scipy",
       limbs: ["left_arm"],
       limb_decisions: {},
@@ -42,7 +46,6 @@ function deps(overrides: Partial<RefineDeps> = {}) {
       loss_final: 0.5,
       gain: 0.5,
     }),
-    fetchUpstreamPath: async () => new Response(new Uint8Array([1, 2, 3])),
     putRefinedBvh: async (key) => {
       uploaded.push(key);
     },
@@ -159,29 +162,16 @@ test("failure to persist the artifact is never recorded as refined", async () =>
   assert.equal(saved[0]?.objectKey, null);
 });
 
-test("a 404 on the upstream refined file also falls back to base", async () => {
-  const { outcome, saved } = await run({
-    fetchUpstreamPath: async () => new Response("missing", { status: 404 }),
-  });
-  assert.equal(outcome.reasonCode, "artifact_store_failed");
-  assert.equal(saved[0]?.refined, false);
-});
-
-// REFINE_HANDOFF §3 2단계. 신 추론 서버는 조정본 본문을 응답에 실어 보낸다 → 두 번째
-// 요청이 사라진다. 그 요청이 롤링 배포 중 다른 태스크에 닿아 404가 나던 것이 인프라가
-// 무중단 배포를 막아 둔 이유였다.
-test("an inlined bvh body is stored without a second upstream request", async () => {
-  const BODY = "HIERARCHY\nROOT Hips\nMOTION\nFrames: 1\n";
-  let fetched = false;
-  const stored: Uint8Array[] = [];
-  const { outcome, saved } = await run({
+// REFINE_HANDOFF §3 4단계. 조정본을 얻는 경로는 응답 본문 하나뿐이다. refined=true인데
+// 본문이 없으면 계약 위반이고, 지어낼 방법이 없으므로 베이스로 안전 전환해야 한다.
+test("refined=true without a bvh body falls back to base instead of throwing", async () => {
+  const { outcome, saved, uploaded } = await run({
     refineUpstream: async () => ({
       pose_id: "pose-1",
       view: "front",
       refined: true,
       reason: "ok",
-      bvh_url: "/refined/abc123/bvh",
-      bvh: BODY,
+      bvh_url: "/pose/pose-1/bvh",
       backend: "scipy",
       limbs: ["left_arm"],
       limb_decisions: {},
@@ -189,32 +179,26 @@ test("an inlined bvh body is stored without a second upstream request", async ()
       loss_final: 0.5,
       gain: 0.5,
     }),
-    fetchUpstreamPath: async () => {
-      fetched = true;
-      throw new Error("must not be called when the body is inlined");
-    },
+  });
+  assert.equal(outcome.refined, false);
+  assert.equal(outcome.reasonCode, "upstream_missing_bvh");
+  assert.equal(uploaded.length, 0, "본문이 없으면 아무것도 올리지 않는다");
+  assert.equal(saved[0]?.refined, false);
+  assert.equal(saved[0]?.objectKey, null);
+});
+
+// 응답 본문이 조정본을 얻는 유일한 경로다. 받은 바이트가 그대로 보관돼야 한다.
+test("the inlined bvh body is stored byte-for-byte", async () => {
+  const stored: Uint8Array[] = [];
+  const { outcome, saved } = await run({
     putRefinedBvh: async (_key, bytes) => {
       stored.push(bytes);
     },
   });
   assert.equal(outcome.refined, true);
-  assert.equal(fetched, false, "본문이 있으면 bvh_url을 다시 받아오지 않는다");
   assert.equal(saved[0]?.refined, true);
-  assert.equal(new TextDecoder().decode(stored[0]), BODY);
-});
-
-// 순차 배포 중에는 구 추론 서버가 살아 있다. bvh가 없으면 기존 경로로 되돌아가야 한다.
-// (기본 deps의 refineUpstream이 bvh를 안 보내므로 다른 테스트들도 이 경로를 탄다.)
-test("a response without bvh still falls back to fetching bvh_url", async () => {
-  let fetchedPath: string | null = null;
-  const { outcome } = await run({
-    fetchUpstreamPath: async (path) => {
-      fetchedPath = path;
-      return new Response(new Uint8Array([1, 2, 3]));
-    },
-  });
-  assert.equal(outcome.refined, true);
-  assert.equal(fetchedPath, "/refined/abc123/bvh");
+  assert.equal(new TextDecoder().decode(stored[0]), BASE_BVH);
+  assert.ok(!new TextDecoder().decode(stored[0]).includes("\r\n"), "CRLF가 섞이면 안 된다");
 });
 
 // BFF-07. 같은 선택을 다시 눌러도 추론 재호출도, S3 객체 중복 생성도 없다.
