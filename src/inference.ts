@@ -126,6 +126,16 @@ export interface RefineUpstreamResponse {
   reason: string;
   /** refined면 `/refined/{handle}/bvh`, 아니면 `/pose/{id}/bvh`. 상대 경로다. */
   bvh_url: string;
+  /**
+   * 조정본 BVH 본문(LF 개행). `refined=true`일 때만 채워진다.
+   *
+   * 이게 있으면 `bvh_url`로 두 번째 요청을 하지 않아도 된다 — 롤링 배포 중 두 번째 요청이
+   * 다른 태스크에 닿아 404가 나는 경로가 사라진다(REFINE_HANDOFF §3).
+   *
+   * ⚠ optional인 이유는 구 추론 서버가 이 필드를 보내지 않기 때문이다. 순차 배포가 끝나고
+   *   폴백을 제거하는 4단계에서 필수로 바꾼다.
+   */
+  bvh?: string;
   backend: string;
   limbs: string[];
   limb_decisions: Record<string, unknown>;

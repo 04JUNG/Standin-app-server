@@ -142,12 +142,24 @@ export async function runRefine(
   // 안전 게이트가 베이스를 유지한 것 — 오류가 아니다(요구서 §3-3).
   if (!upstream.refined) return skip(upstream.reason);
 
-  // 여기부터가 INF-03의 핵심: 추론 로컬 디스크의 조정본을 즉시 우리 소유로 옮긴다.
+  // 여기부터가 INF-03의 핵심: 조정본을 즉시 우리 소유로 옮긴다.
+  //
+  // 신 추론 서버는 본문을 응답에 실어 보내므로 두 번째 요청이 필요 없다. 그 요청이 롤링
+  // 배포 중 조정본을 갖지 않은 다른 태스크에 닿으면 404가 났고, 그래서 인프라가 무중단
+  // 배포를 막아 두고 있다(REFINE_HANDOFF §3). 구 서버는 bvh를 안 보내므로 폴백을 남긴다 —
+  // 4단계에서 fetchUpstreamPath 경로째 제거한다.
   const objectKey = refinedObjectKey({ installationId, jobId, personIndex, candidateId });
   try {
-    const res = await deps.fetchUpstreamPath(upstream.bvh_url);
-    if (!res.ok) throw new Error(`upstream refined bvh ${res.status}`);
-    await deps.putRefinedBvh(objectKey, new Uint8Array(await res.arrayBuffer()));
+    let bytes: Uint8Array;
+    if (upstream.bvh !== undefined) {
+      // 계약상 LF 개행이다. UTF-8로 그대로 인코딩하면 추론이 쓴 파일과 같은 바이트가 된다.
+      bytes = new TextEncoder().encode(upstream.bvh);
+    } else {
+      const res = await deps.fetchUpstreamPath(upstream.bvh_url);
+      if (!res.ok) throw new Error(`upstream refined bvh ${res.status}`);
+      bytes = new Uint8Array(await res.arrayBuffer());
+    }
+    await deps.putRefinedBvh(objectKey, bytes);
   } catch {
     // 조정은 됐지만 우리가 보관하지 못했다 → refined=true로 기록하지 않는다(BFF-06).
     logRefine({ event: "refine_failed", jobId, personIndex, stage: "persist" });
