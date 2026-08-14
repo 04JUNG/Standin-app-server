@@ -71,6 +71,8 @@ app.use(
       "X-Device-Token",
       "X-Beta-Admin-Token",
     ],
+    // 429 응답의 Retry-After를 웹뷰가 읽으려면 노출 목록에 있어야 한다(사용량 제한 안내).
+    exposeHeaders: ["Retry-After"],
     credentials: true,
     maxAge: 600,
   }),

@@ -40,7 +40,36 @@ X-Device-Token: ...
 ```
 
 클라는 `message`를 직접 표시하지 않고 `code`를 사용자 메시지로 매핑한다.
-주요 코드: `INVALID_INPUT`/`PROVIDER_UNAVAILABLE`/`OAUTH_STATE_MISMATCH`/`EMAIL_REQUIRED`(400) · `UNAUTHENTICATED`/`INVALID_TOKEN`/`INVALID_CREDENTIALS`(401) · `EMAIL_NOT_VERIFIED`(403) · `NOT_FOUND`(404) · `NOT_READY`/`EMAIL_TAKEN`(409) · `NOT_IMPLEMENTED`(501) · `OAUTH_FAILED`(502) · `INFERENCE_FAILED`(Job status=failed).
+주요 코드: `INVALID_INPUT`/`PROVIDER_UNAVAILABLE`/`OAUTH_STATE_MISMATCH`/`EMAIL_REQUIRED`(400) · `UNAUTHENTICATED`/`INVALID_TOKEN`/`INVALID_CREDENTIALS`(401) · `EMAIL_NOT_VERIFIED`(403) · `NOT_FOUND`(404) · `NOT_READY`/`EMAIL_TAKEN`(409) · `DAILY_QUOTA_EXCEEDED`/`GLOBAL_QUOTA_EXCEEDED`(429) · `NOT_IMPLEMENTED`(501) · `OAUTH_FAILED`(502) · `STORAGE_UNAVAILABLE`(503) · `INFERENCE_FAILED`(Job status=failed).
+
+### 사용량 제한 (`429`)
+
+오픈베타는 로그인 없이 설치 단위로 쓰므로 서버가 사용량을 강제한다. 한도를 넘으면 `429`와 함께
+**언제 다시 쓸 수 있는지**를 `details`와 `Retry-After` 헤더로 준다. 클라는 원인과 다음 사용 가능
+시점을 함께 표시한다.
+
+```http
+HTTP/1.1 429 Too Many Requests
+Retry-After: 41230
+```
+```json
+{
+  "error": {
+    "code": "DAILY_QUOTA_EXCEEDED",
+    "message": "오늘 사용할 수 있는 분석 횟수를 모두 사용했습니다.",
+    "details": { "retryAfterSeconds": 41230, "limit": 10, "retryAt": "2026-08-12T00:00:00.000+09:00" },
+    "requestId": "req_..."
+  }
+}
+```
+
+| code | 의미 | `details` |
+|---|---|---|
+| `DAILY_QUOTA_EXCEEDED` | 설치별 일일 분석 한도 초과 | `retryAfterSeconds`, `limit`, `retryAt` |
+| `GLOBAL_QUOTA_EXCEEDED` | 서비스 전체 일일 분석 한도 초과 | `retryAfterSeconds`, `retryAt` |
+
+일일 한도는 **KST 자정**에 리셋된다(`retryAt`은 항상 `+09:00` 표기). 한도값은 서버 환경변수로
+조정되므로 클라가 숫자를 하드코딩하지 않고 `details.limit`을 그대로 보여준다.
 
 ---
 
@@ -71,6 +100,10 @@ X-Device-Token: ...
 ```json
 { "jobId": "job_...", "status": "queued", "createdAt": "2026-07-16T..." }
 ```
+
+사용량 한도를 넘으면 Job을 만들지 않고 `429`(`DAILY_QUOTA_EXCEEDED`·`GLOBAL_QUOTA_EXCEEDED`)를
+반환한다 — 위 [사용량 제한](#사용량-제한-429) 참고. 한도는 입력 검증을 통과한 요청만 소비하며,
+입력 저장이 실패해 `503 STORAGE_UNAVAILABLE`이 나가면 소비한 쿼터를 돌려준다.
 
 ---
 

@@ -5,9 +5,17 @@ import type { AppEnv } from "../env.js";
 import { errorEnvelope } from "../mapping.js";
 import { confirmSelections, saveFeedback } from "../analytics/store.js";
 import { storeInput, validateInputImage } from "../inputStorage.js";
-import { createJob, getOwnedJob, setJobInput, updateJob } from "./store.js";
+import {
+  createJobWithLimits,
+  getOwnedJob,
+  refundAnalysisQuota,
+  setJobInput,
+  updateJob,
+} from "./store.js";
 import { runAnalysisJob } from "./runner.js";
 import { refineRoutes } from "../refine/routes.js";
+import { limitErrorResponse } from "../limits/http.js";
+import { isLimitExceeded } from "../limits/policy.js";
 
 export const jobsRoutes = new Hono<AppEnv>();
 
@@ -61,19 +69,28 @@ jobsRoutes.post("/", async (c) => {
   const width = optionalDimension(body["width"]);
   const height = optionalDimension(body["height"]);
   const installationId = c.get("installationId")!;
-  const job = await createJob(c.get("userId") ?? null, null, {
-    installationId,
-    source,
-    mime: file.type || "application/octet-stream",
-    size: file.size,
-    width,
-    height,
-  });
+  // 사용량 한도는 입력 검증을 통과한 뒤에 소비한다 — 잘못된 요청이 쿼터를 깎으면 안 된다.
+  let job;
+  try {
+    job = await createJobWithLimits(c.get("userId") ?? null, {
+      installationId,
+      source,
+      mime: file.type || "application/octet-stream",
+      size: file.size,
+      width,
+      height,
+    });
+  } catch (error) {
+    if (isLimitExceeded(error)) return limitErrorResponse(c, error);
+    throw error;
+  }
   try {
     const stored = await storeInput(installationId, job.id, file);
     await setJobInput(job.id, { s3Key: stored.key, sha256: stored.sha256 });
   } catch {
     await updateJob(job.id, { status: "failed", errorCode: "INPUT_STORAGE_FAILED" });
+    // 우리 쪽 저장 장애다. 사용자의 오늘 쿼터를 깎은 채로 두지 않는다.
+    await refundAnalysisQuota(installationId).catch(() => {});
     return c.json(
       errorEnvelope("STORAGE_UNAVAILABLE", "입력 이미지를 안전하게 보관하지 못했습니다.", c.get("requestId")),
       503,

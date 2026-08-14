@@ -61,11 +61,24 @@ docker compose down            # 종료 (DB는 pg-data 볼륨에 유지)
 | `POST` | `/v1/auth/refresh` | ✅ refresh 회전 |
 | `POST` | `/v1/auth/logout` | ✅ refresh 폐기 |
 | `GET` | `/v1/users/me` 🔒 | ✅ 현재 유저(세션 복원) |
-| `POST` | `/v1/analysis/jobs` 🔒 | ✅ Job 생성 → `/analyze` 백그라운드 호출 |
+| `POST` | `/v1/analysis/jobs` 🔒 | ✅ Job 생성 → `/analyze` 백그라운드 호출 (설치별 일일 쿼터 적용, 초과 시 `429`) |
 | `GET` | `/v1/analysis/jobs/:id` 🔒 | ✅ 상태 폴링 |
 | `GET` | `/v1/analysis/jobs/:id/result` 🔒 | ✅ 결과(+matchLevel 매핑) |
 | `POST` | `/v1/analysis/jobs/:id/rerun` 🔒 | 🚧 Phase 2 stub(501) |
 | `GET` | `/v1/pose-candidates/:id/export` 🔒 | ✅ BVH 프록시 |
+
+## 사용량 제한
+
+오픈베타는 로그인 없이 설치 단위로 쓰므로 서버가 사용량을 강제한다. 카운터 정본은
+**PostgreSQL**(`usage_counters`)이다 — 인메모리로 세면 ECS 태스크 수만큼 한도가 늘어나고
+배포마다 초기화된다. 값은 전부 env로 조정하며 **0 이하는 제한 없음**이다.
+
+| env | 기본값 | 의미 |
+|---|---:|---|
+| `QUOTA_INSTALLATION_DAILY` | 10 | 설치별 일일 분석 횟수(KST 자정 리셋) |
+| `QUOTA_GLOBAL_DAILY` | 0 | 서비스 전체 일일 분석 상한(비용 산정 전이라 기본 off) |
+
+초과하면 `429` + `Retry-After`와 함께 재시도 가능 시각을 준다 → `docs/API.md`의 「사용량 제한」.
 
 ## 구조
 
@@ -78,6 +91,7 @@ src/
 ├─ inference.ts    도원 추론 서버 호출 격리(analyze·getPoseBvh·health)
 ├─ mapping.ts      계약 번역(matchLevel·오류봉투)
 ├─ db.ts           PostgreSQL(pg): Pool·스키마 초기화(advisory lock)·쿼리 헬퍼
+├─ limits/         사용량 제한(정책 계산·Postgres 카운터·429 번역)
 ├─ jobs/           Job 생성·폴링·백그라운드 러너(동기추론→Job 래핑, Postgres)
 ├─ auth/           routes(register/login/verify/refresh/logout) · tokens · users(Postgres) · mailer
 │  └─ oauth/       소셜 로그인(google·kakao·naver) 레지스트리 + start/callback
