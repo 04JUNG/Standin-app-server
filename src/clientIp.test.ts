@@ -17,9 +17,12 @@ test("XFF를 위조해도 실제 IP가 선택된다", () => {
   assert.equal(ipBucketKey(a), ipBucketKey(b));
 });
 
-test("프록시가 없으면 홉 0으로 가장 오른쪽을 쓴다", () => {
-  assert.equal(forwardedClientIp("203.0.113.7", 0), "203.0.113.7");
-  assert.equal(forwardedClientIp("1.1.1.1, 203.0.113.7", 0), "203.0.113.7");
+test("프록시가 없으면(홉 0) XFF를 통째로 무시한다", () => {
+  // 앞에 프록시가 없으면 XFF는 클라가 직접 써 보낸 값이다. 이걸 쓰면 헤더만 바꿔가며
+  // 매 요청 새 버킷을 만들어 IP 제한을 통째로 우회할 수 있다.
+  assert.equal(forwardedClientIp("203.0.113.7", 0), null);
+  assert.equal(forwardedClientIp("1.1.1.1, 203.0.113.7", 0), null);
+  assert.equal(forwardedClientIp("203.0.113.7", -1), null);
 });
 
 test("체인이 홉 수보다 짧으면 가장 왼쪽으로 떨어진다", () => {

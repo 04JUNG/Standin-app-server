@@ -16,18 +16,21 @@ import type { AppEnv } from "./env.js";
  * 주장하면 제한을 통째로 우회한다. 우리가 신뢰하는 프록시 홉 수만큼 **오른쪽에서**
  * 세어 들어간 자리가 우리가 검증할 수 있는 마지막 주소다.
  *
+ * hops가 0이면 우리 앞에 프록시가 없다는 뜻이므로 **헤더를 통째로 무시한다** —
+ * 그 경우 XFF는 클라가 직접 써 보낸 값이라 아무 것도 보장하지 않는다.
+ *
  * @param header X-Forwarded-For 원문
  * @param hops 오른쪽에서 신뢰하는 프록시 수(배포=1, 프록시 없는 로컬=0)
- * @returns 판별된 IP. 헤더가 없거나 자리를 못 찾으면 null
+ * @returns 판별된 IP. 신뢰할 근거가 없으면 null(소켓 주소로 폴백)
  */
 export function forwardedClientIp(header: string | undefined, hops: number): string | null {
-  if (!header) return null;
+  if (!header || hops <= 0) return null;
   const chain = header
     .split(",")
     .map((v) => stripPort(v.trim()))
     .filter(Boolean);
   if (chain.length === 0) return null;
-  const index = chain.length - 1 - Math.max(0, hops);
+  const index = chain.length - 1 - hops;
   // 홉 수보다 체인이 짧으면(프록시 설정 불일치) 가장 왼쪽으로 떨어진다.
   return chain[Math.max(0, index)] ?? null;
 }
