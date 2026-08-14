@@ -70,6 +70,7 @@ Retry-After: 41230
 | `DAILY_QUOTA_EXCEEDED` | 설치별 일일 분석 한도 초과 | `retryAfterSeconds`, `limit`, `retryAt` |
 | `GLOBAL_QUOTA_EXCEEDED` | 서비스 전체 일일 분석 한도 초과 | `retryAfterSeconds`, `retryAt` |
 | `RATE_LIMITED` | 짧은 시간에 요청이 몰림(IP 단위) | `retryAfterSeconds`, `limit`, `windowSeconds` |
+| `CONCURRENCY_LIMIT` | 같은 설치에 진행 중인 분석이 있음 | `retryAfterSeconds`, `limit` |
 
 일일 한도는 **KST 자정**에 리셋된다(`retryAt`은 항상 `+09:00` 표기). 한도값은 서버 환경변수로
 조정되므로 클라가 숫자를 하드코딩하지 않고 `details.limit`을 그대로 보여준다.
@@ -78,6 +79,15 @@ Retry-After: 41230
 걸린다. 일일 쿼터와는 별개 카운터라, 남은 일일 횟수가 있어도 잠깐 몰리면 나올 수 있다.
 공용망·NAT에서는 같은 IP를 여러 사용자가 공유할 수 있으므로 "잠시 후 다시 시도"로 안내한다.
 서버는 IP 원문을 저장하지 않고 해시 버킷만 센다.
+
+`CONCURRENCY_LIMIT`은 같은 설치가 분석을 동시에 여러 개 돌리지 못하게 막는다(기본 1개).
+중복 클릭이 대부분이므로 진행 중인 Job의 완료를 기다렸다가 다시 시도하면 된다.
+
+### 서비스 일시 중단 (`503 SERVICE_PAUSED`)
+
+운영자가 분석을 즉시 중단한 상태다(비용·장애 대응). 사용자 잘못이 아니므로 `429`와 구분한다.
+재시도 시각을 줄 수 없으므로 `Retry-After`가 없다 — 클라는 "지금은 분석을 이용할 수 없습니다"
+계열로 안내하고 자동 재시도 루프를 돌리지 않는다.
 
 ---
 
@@ -109,8 +119,9 @@ Retry-After: 41230
 { "jobId": "job_...", "status": "queued", "createdAt": "2026-07-16T..." }
 ```
 
-사용량 한도를 넘으면 Job을 만들지 않고 `429`(`DAILY_QUOTA_EXCEEDED`·`GLOBAL_QUOTA_EXCEEDED`)를
-반환한다 — 위 [사용량 제한](#사용량-제한-429) 참고. 한도는 입력 검증을 통과한 요청만 소비하며,
+사용량 한도를 넘으면 Job을 만들지 않고 `429`(`DAILY_QUOTA_EXCEEDED`·`GLOBAL_QUOTA_EXCEEDED`·
+`CONCURRENCY_LIMIT`·`RATE_LIMITED`)를 반환한다 — 위 [사용량 제한](#사용량-제한-429) 참고.
+운영자가 분석을 중단했으면 `503 SERVICE_PAUSED`다. 한도는 입력 검증을 통과한 요청만 소비하며,
 입력 저장이 실패해 `503 STORAGE_UNAVAILABLE`이 나가면 소비한 쿼터를 돌려준다.
 
 ---
@@ -130,6 +141,11 @@ Retry-After: 41230
 ```
 
 > ⚠ 동기 추론을 감싸므로 세분 단계(`detecting`/`skeleton`/…)는 제공하지 않는다. Phase 0은 4-상태만.
+
+`error`(status=`failed`)에는 `INFERENCE_FAILED`, `INPUT_STORAGE_FAILED`, `ABANDONED`가 들어간다.
+`ABANDONED`는 배포·태스크 교체로 실행 중이던 Job이 유실된 경우다 — 러너가 아직 프로세스 내
+fire-and-forget이라 생길 수 있고, 서버가 주기적으로 정리해 무응답 대신 명시적 실패로 만든다.
+클라는 "다시 시도"를 안내하면 된다.
 
 ---
 
@@ -302,6 +318,38 @@ BFF가 보관해 둔 값을 서버측에서 읽는다 — 클라이언트가 값
 ## 관리자 품질 검토
 
 `GET /v1/admin/review/jobs/{jobId}`는 `X-Beta-Admin-Token`이 필요하다. 5분짜리 원본 서명 URL, 인물·스켈레톤·후보·선택·피드백을 반환하고 접근을 감사 테이블에 기록한다.
+
+---
+
+## 운영 스위치 (kill switch)
+
+토큰이 틀리면 다른 관리자 경로와 마찬가지로 `404`로 응답한다(경로 존재를 숨긴다).
+
+`GET /v1/admin/flags`
+
+```json
+{
+  "analysisEnabled": true,
+  "reason": null,
+  "updatedAt": null,
+  "globalDaily": { "day": "2026-08-11", "used": 42, "limit": 0 }
+}
+```
+
+`PUT /v1/admin/flags/analysis_enabled`
+
+```json
+{ "enabled": false, "reason": "Gemini 비용 급증" }
+```
+```json
+{ "analysisEnabled": false, "reason": "Gemini 비용 급증",
+  "updatedAt": "2026-08-11T...", "propagationSeconds": 5 }
+```
+
+값은 DB(`service_flags`)에 있어 **재배포 없이** 모든 태스크에 반영된다. 각 태스크는 5초 캐시를
+쓰므로 전파에 최대 5초 걸린다. 꺼진 동안 `POST /v1/analysis/jobs`는 `503 SERVICE_PAUSED`를
+반환하며, 이미 접수된 Job의 폴링·결과 조회는 그대로 동작한다. 토글은 `admin_access_audit`에
+`pause_analysis`·`resume_analysis`로 남는다.
 
 > 도원 서버가 `409`(합성 단계, 실 BVH 미존재)를 주면 그대로 전달된다.
 

@@ -77,6 +77,8 @@ docker compose down            # 종료 (DB는 pg-data 볼륨에 유지)
 |---|---:|---|
 | `QUOTA_INSTALLATION_DAILY` | 10 | 설치별 일일 분석 횟수(KST 자정 리셋) |
 | `QUOTA_GLOBAL_DAILY` | 0 | 서비스 전체 일일 분석 상한(비용 산정 전이라 기본 off) |
+| `QUOTA_INSTALLATION_CONCURRENT` | 1 | 설치별 동시 분석 개수 |
+| `ANALYSIS_STALE_AFTER_SECONDS` | 300 | 유실 Job 판정 시간 |
 | `RATE_IP_REGISTER` / `_WINDOW` | 5 / 3600 | IP별 설치 발급 burst |
 | `RATE_IP_ANALYZE` / `_WINDOW` | 5 / 60 | IP별 분석 요청 burst |
 | `TRUSTED_PROXY_HOPS` | 1 | XFF 오른쪽에서 신뢰하는 프록시 홉 수 |
@@ -90,6 +92,18 @@ docker compose down            # 종료 (DB는 pg-data 볼륨에 유지)
 그만큼 세어 들어간 자리를 쓰고, 클라가 채울 수 있는 왼쪽은 믿지 않는다. **이 값을 실제 프록시
 수보다 크게 잡으면 IP 제한이 통째로 우회된다.** IP는 원문 대신 `/64`(IPv6) 정규화 후 해시로만
 저장한다.
+
+### Kill switch
+
+운영자가 분석을 즉시 중단·재개한다. 값은 DB(`service_flags`)에 있어 **재배포가 필요 없고**,
+각 태스크의 5초 캐시 때문에 전파에 최대 5초 걸린다.
+
+```bash
+curl -X PUT "$BFF/v1/admin/flags/analysis_enabled" -H "X-Beta-Admin-Token: $TOKEN" -H 'Content-Type: application/json' -d '{"enabled":false,"reason":"비용 급증"}'
+```
+
+꺼진 동안 `POST /v1/analysis/jobs`가 `503 SERVICE_PAUSED`를 반환한다(진행 중 Job 폴링은 정상).
+현재 상태와 오늘 전체 사용량은 `GET /v1/admin/flags`로 본다.
 
 ## 구조
 
@@ -123,5 +137,5 @@ Phase 3     큐(SQS 등)로 Job 실행 분리, 필요 시 추론 단계 스트�
 - `matchLevel` 임계값은 시드값 → `Standin-server/docs/SEARCH_EVAL`로 보정 필요.
 - 회원가입 하드닝: 레이트리밋·봇 방지 미포함(Phase 2). 이메일 인증은 구현됨.
 - 소셜 로그인은 provider 키가 있어야 동작(없으면 `PROVIDER_UNAVAILABLE`). 데스크톱 토큰 전달은 `OAUTH_SUCCESS_REDIRECT`(딥링크) 필요.
-- Job 실행이 아직 프로세스 내 fire-and-forget → 배포·재시작 시 진행 중 Job이 유실된다(큐로 교체 예정).
+- Job 실행이 아직 프로세스 내 fire-and-forget → 배포·재시작 시 진행 중 Job이 유실된다(큐로 교체 예정). 유실된 Job은 60초 주기 스위퍼가 `failed`/`ABANDONED`로 정리해 무응답과 동시 분석 한도 잠김을 막는다.
 - 추론 서버는 **무인증·내부용** → 공개 노출 금지, BFF만 공개 엣지.

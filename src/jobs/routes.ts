@@ -14,6 +14,7 @@ import {
 } from "./store.js";
 import { runAnalysisJob } from "./runner.js";
 import { refineRoutes } from "../refine/routes.js";
+import { isAnalysisEnabled } from "../limits/flags.js";
 import { limitErrorResponse } from "../limits/http.js";
 import { isLimitExceeded } from "../limits/policy.js";
 
@@ -24,6 +25,14 @@ jobsRoutes.route("/", refineRoutes);
 
 // POST /v1/analysis/jobs — 이미지 업로드 → jobId 즉시 반환(추론은 백그라운드)
 jobsRoutes.post("/", async (c) => {
+  // 운영자 kill switch. 사용자 잘못이 아니므로 429가 아니라 503으로 구분한다.
+  // 20MB body를 읽기 전에 본다.
+  if (!(await isAnalysisEnabled())) {
+    return c.json(
+      errorEnvelope("SERVICE_PAUSED", "지금은 분석을 이용할 수 없습니다.", c.get("requestId")),
+      503,
+    );
+  }
   const body = await c.req.parseBody();
   const file = body["file"];
   if (!(file instanceof File)) {

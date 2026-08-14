@@ -247,6 +247,14 @@ const SCHEMA = `
     PRIMARY KEY (scope, subject, window_start)
   );
 
+  -- 운영 스위치. env로 두면 반영에 재배포가 필요해 "즉시 중단"이 되지 않는다.
+  CREATE TABLE IF NOT EXISTS service_flags (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    reason     TEXT,
+    updated_at TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS admin_access_audit (
     audit_id     TEXT PRIMARY KEY,
     reviewer     TEXT NOT NULL,

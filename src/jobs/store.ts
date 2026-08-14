@@ -58,6 +58,9 @@ function toJob(r: JobRow): Job {
   };
 }
 
+/** 진행 중 분석은 보통 수 초에 끝난다. 그 정도 뒤에 다시 눌러보라고 안내한다. */
+const CONCURRENCY_RETRY_SECONDS = 10;
+
 export interface JobInput {
   installationId: string;
   source: "capture" | "file" | "clipboard";
@@ -140,6 +143,22 @@ export async function createJobWithLimits(
   return transaction(async (client) => {
     await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [input.installationId]);
 
+    if (!isDisabled(config.quotaInstallationConcurrent)) {
+      // 오래된 Job은 세지 않는다 — 배포로 유실된 running Job이 설치를 영구히 막는다.
+      const cutoff = new Date(nowMs - config.analysisStaleAfterSeconds * 1000).toISOString();
+      const res = await client.query(
+        `SELECT count(*)::int AS running FROM jobs
+         WHERE installation_id = $1 AND status IN ('queued','running') AND created_at > $2`,
+        [input.installationId, cutoff],
+      );
+      const running = (res.rows[0] as { running: number }).running;
+      if (running >= config.quotaInstallationConcurrent) {
+        throw new LimitExceededError("CONCURRENCY_LIMIT", CONCURRENCY_RETRY_SECONDS, {
+          limit: config.quotaInstallationConcurrent,
+        });
+      }
+    }
+
     if (!isDisabled(config.quotaInstallationDaily)) {
       const ok = await tryConsume(
         "installation_day",
@@ -184,6 +203,26 @@ export async function refundAnalysisQuota(installationId: string): Promise<void>
   if (!isDisabled(config.quotaGlobalDaily)) {
     await refund("global_day", "all", day);
   }
+}
+
+/**
+ * 유실된 Job을 실패로 정리한다.
+ *
+ * 러너는 프로세스 내 fire-and-forget이라(runner.ts) 배포·태스크 교체 시 상태가
+ * queued/running인 채로 영원히 남는다. 사용자에게는 무응답으로 보이고, 동시 분석
+ * 한도가 1이면 그 설치는 다시 분석할 수 없다. 명시적 실패로 바꿔 둘 다 푼다.
+ *
+ * @returns 정리한 Job 수
+ */
+export async function failStaleJobs(): Promise<number> {
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - config.analysisStaleAfterSeconds * 1000).toISOString();
+  return execute(
+    `UPDATE jobs SET status = 'failed', error_code = 'ABANDONED',
+       updated_at = $1, completed_at = $1
+     WHERE status IN ('queued','running') AND created_at < $2`,
+    [now.toISOString(), cutoff],
+  );
 }
 
 export async function getOwnedJob(id: string, installationId: string): Promise<Job | undefined> {
