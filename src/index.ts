@@ -16,6 +16,7 @@ import { poseRoutes } from "./pose/routes.js";
 import { analyticsRoutes } from "./analytics/routes.js";
 import { installationRoutes } from "./installations/routes.js";
 import { requireInstallation } from "./installations/middleware.js";
+import { rateLimitByIp } from "./limits/middleware.js";
 import { adminRoutes } from "./admin/routes.js";
 
 const app = new Hono<AppEnv>();
@@ -86,10 +87,25 @@ app.get("/healthz", async (c) => {
 // /v1 계약 (클라 endpoints.ts와 맞물림)
 // 공개: /v1/auth/*  |  보호(requireAuth): users·analysis·pose-candidates
 app.route("/v1/auth", authRoutes);
+
+// 설치 등록은 공개 엔드포인트라 IP 제한이 유일한 방어선이다(무제한 발급 차단).
+// 동의 철회 삭제(DELETE /current/data)는 제한하지 않는다 — 메서드를 좁혀서 건다.
+app.on(
+  "POST",
+  "/v1/installations",
+  rateLimitByIp("ip_register", config.rateIpRegister, config.rateIpRegisterWindow),
+);
 app.route("/v1/installations", installationRoutes);
 
 app.use("/v1/users/*", requireAuth);
 app.use("/v1/analysis/*", requireInstallation);
+// 인증 뒤·본문 파싱 앞에 둔다. 미인증 요청이 IP 예산을 깎지 않게 하고,
+// 20MB body를 읽기 전에 거절하기 위해서다.
+app.on(
+  "POST",
+  "/v1/analysis/jobs",
+  rateLimitByIp("ip_analyze", config.rateIpAnalyze, config.rateIpAnalyzeWindow),
+);
 app.use("/v1/pose-candidates/*", requireInstallation);
 app.use("/v1/events/*", requireInstallation);
 
