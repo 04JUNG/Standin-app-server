@@ -79,6 +79,10 @@ docker compose down            # 종료 (DB는 pg-data 볼륨에 유지)
 | `QUOTA_GLOBAL_DAILY` | 0 | 서비스 전체 일일 분석 상한(비용 산정 전이라 기본 off) |
 | `QUOTA_INSTALLATION_CONCURRENT` | 1 | 설치별 동시 분석 개수 |
 | `ANALYSIS_STALE_AFTER_SECONDS` | 300 | 유실 Job 판정 시간 |
+| `ANALYSIS_TIMEOUT_MS` | 120000 | 추론 `/analyze` 상한 |
+| `HEALTH_TIMEOUT_MS` | 3000 | `/healthz`의 추론 확인 상한 |
+| `MAX_UPLOAD_BYTES` | 20971520 | 업로드 상한(20MB) |
+| `MAX_IMAGE_PIXELS` | 50000000 | 허용 최대 픽셀 수 |
 | `RATE_IP_REGISTER` / `_WINDOW` | 5 / 3600 | IP별 설치 발급 burst |
 | `RATE_IP_ANALYZE` / `_WINDOW` | 5 / 60 | IP별 분석 요청 burst |
 | `TRUSTED_PROXY_HOPS` | 1 | XFF 오른쪽에서 신뢰하는 프록시 홉 수 |
@@ -117,6 +121,7 @@ src/
 ├─ mapping.ts      계약 번역(matchLevel·오류봉투)
 ├─ db.ts           PostgreSQL(pg): Pool·스키마 초기화(advisory lock)·쿼리 헬퍼
 ├─ limits/         사용량 제한(정책 계산·Postgres 카운터·429 번역)
+├─ imageHeader.ts  업로드 이미지 헤더에서 실제 크기 읽기(위조·폭탄 방어)
 ├─ jobs/           Job 생성·폴링·백그라운드 러너(동기추론→Job 래핑, Postgres)
 ├─ auth/           routes(register/login/verify/refresh/logout) · tokens · users(Postgres) · mailer
 │  └─ oauth/       소셜 로그인(google·kakao·naver) 레지스트리 + start/callback

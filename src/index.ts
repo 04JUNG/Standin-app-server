@@ -3,11 +3,13 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { bodyLimit } from "hono/body-limit";
 import { randomUUID } from "node:crypto";
 import { config } from "./config.js";
 import { closeDb, initDb, runDataMaintenance } from "./db.js";
 import type { AppEnv } from "./env.js";
 import { health } from "./inference.js";
+import { errorEnvelope } from "./mapping.js";
 import { requireAuth } from "./auth/middleware.js";
 import { authRoutes } from "./auth/routes.js";
 import { usersRoutes } from "./users/routes.js";
@@ -106,6 +108,20 @@ app.on(
   "POST",
   "/v1/analysis/jobs",
   rateLimitByIp("ip_analyze", config.rateIpAnalyze, config.rateIpAnalyzeWindow),
+  // parseBody()는 body를 통째로 메모리에 올린 뒤에야 크기를 알 수 있다. 그 전에
+  // Content-Length로 끊어 500MB 업로드를 다 받아놓고 거절하는 일이 없게 한다.
+  bodyLimit({
+    maxSize: config.maxUploadBytes,
+    onError: (c) =>
+      c.json(
+        errorEnvelope(
+          "PAYLOAD_TOO_LARGE",
+          "이미지가 너무 큽니다. 20MB 이하로 줄여 주세요.",
+          c.get("requestId"),
+        ),
+        413,
+      ),
+  }),
 );
 app.use("/v1/pose-candidates/*", requireInstallation);
 app.use("/v1/events/*", requireInstallation);

@@ -37,6 +37,23 @@ export const config = {
   refineFeatureEnabled: env("REFINE_FEATURE_ENABLED", "false") === "true",
   // refine은 사용자가 저장을 기다리는 동기 경로다. 느려지면 베이스로 넘어간다(BFF-07).
   refineTimeoutMs: Number(process.env.REFINE_TIMEOUT_MS ?? 5000),
+  /**
+   * 분석 호출 상한(OB-04). 없으면 추론이 멈췄을 때 Job이 running에 영원히 남고,
+   * 동시 분석 한도가 1이라 그 설치는 스위퍼가 돌 때까지 아무것도 못 한다.
+   */
+  analysisTimeoutMs: Number(process.env.ANALYSIS_TIMEOUT_MS ?? 120_000),
+  /**
+   * 헬스체크의 추론 확인 상한. ⚠ 이게 없으면 추론이 멈출 때 /healthz도 같이 멈추고,
+   * ALB가 멀쩡한 BFF 태스크를 비정상으로 판단해 교체한다.
+   */
+  healthTimeoutMs: Number(process.env.HEALTH_TIMEOUT_MS ?? 3000),
+  /** 업로드 상한(bytes). body를 다 읽기 전에 이 값으로 먼저 끊는다. */
+  maxUploadBytes: Number(process.env.MAX_UPLOAD_BYTES ?? 20 * 1024 * 1024),
+  /**
+   * 허용할 최대 픽셀 수. 파일 크기 상한과 별개다 — 압축이 잘 되는 이미지는 20MB
+   * 안에서도 수십억 픽셀을 선언할 수 있고, 그걸 펼치는 건 추론 서버다.
+   */
+  maxImagePixels: Number(process.env.MAX_IMAGE_PIXELS ?? 50_000_000),
   // Explicit temporary demo mode. User/account endpoints remain protected.
   allowAnonymousAnalysis: env("ALLOW_ANONYMOUS_ANALYSIS", "false") === "true",
   betaDataBucket: env("BETA_DATA_BUCKET"),
