@@ -1,7 +1,7 @@
 // BFF의 핵심 역할: 동기 추론(/analyze)을 백그라운드로 호출해 Job으로 감싼다.
 // ⚠ Phase 0: 프로세스 내 비동기 실행(await 하지 않고 fire-and-forget).
 //    Phase 3: 큐(BullMQ/Redis 등)로 교체 — 이 함수 시그니처는 유지.
-import { analyze } from "../inference.js";
+import { InferenceTimeoutError, analyze } from "../inference.js";
 import { extractRefineContexts, mapCutResult } from "../mapping.js";
 import type { AnalysisResult } from "../types.js";
 import { getJob, persistAnalysisRecords, updateJob } from "./store.js";
@@ -38,9 +38,12 @@ export async function runAnalysisJob(jobId: string, file: Blob, hint = ""): Prom
     await persistAnalysisRecords(jobId, result, extractRefineContexts(cut));
     await updateJob(jobId, { status: "completed", result });
     logQualityMetrics(jobId, result);
-  } catch {
+  } catch (error) {
+    // timeout을 5xx와 구분한다 — "추론이 거절했다"와 "추론이 응답하지 않는다"는
+    // 운영 대응이 다르고, 클라도 다르게 안내한다.
+    const errorCode = error instanceof InferenceTimeoutError ? "ANALYSIS_TIMEOUT" : "INFERENCE_FAILED";
     // 상태 기록까지 실패하면 Job이 running에 머문다. 로그로 남겨 추적 가능하게 한다.
-    await updateJob(jobId, { status: "failed", errorCode: "INFERENCE_FAILED" }).catch(() =>
+    await updateJob(jobId, { status: "failed", errorCode }).catch(() =>
       console.error(
         JSON.stringify({
           type: "analysis_job",
@@ -57,7 +60,7 @@ export async function runAnalysisJob(jobId: string, file: Blob, hint = ""): Prom
         jobId,
         status: "failed",
         durationMs: Date.now() - startedAt,
-        errorCode: "INFERENCE_FAILED",
+        errorCode,
       }),
     );
   }

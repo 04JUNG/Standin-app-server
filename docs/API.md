@@ -42,7 +42,7 @@ X-Device-Token: ...
 ```
 
 클라는 `message`를 직접 표시하지 않고 `code`를 사용자 메시지로 매핑한다.
-주요 코드: `INVALID_INPUT`/`PROVIDER_UNAVAILABLE`/`OAUTH_STATE_MISMATCH`/`EMAIL_REQUIRED`(400) · `UNAUTHENTICATED`/`INVALID_TOKEN`/`INVALID_CREDENTIALS`(401) · `EMAIL_NOT_VERIFIED`(403) · `NOT_FOUND`(404) · `NOT_READY`/`EMAIL_TAKEN`(409) · `DAILY_QUOTA_EXCEEDED`/`GLOBAL_QUOTA_EXCEEDED`(429) · `NOT_IMPLEMENTED`(501) · `OAUTH_FAILED`(502) · `STORAGE_UNAVAILABLE`(503) · `INFERENCE_FAILED`(Job status=failed).
+주요 코드: `INVALID_INPUT`/`PROVIDER_UNAVAILABLE`/`OAUTH_STATE_MISMATCH`/`EMAIL_REQUIRED`(400) · `UNAUTHENTICATED`/`INVALID_TOKEN`/`INVALID_CREDENTIALS`(401) · `EMAIL_NOT_VERIFIED`(403) · `NOT_FOUND`(404) · `NOT_READY`/`EMAIL_TAKEN`(409) · `PAYLOAD_TOO_LARGE`(413) · `DAILY_QUOTA_EXCEEDED`/`GLOBAL_QUOTA_EXCEEDED`(429) · `NOT_IMPLEMENTED`(501) · `OAUTH_FAILED`(502) · `STORAGE_UNAVAILABLE`(503) · `INFERENCE_FAILED`(Job status=failed).
 
 ### 사용량 제한 (`429`)
 
@@ -109,15 +109,22 @@ Retry-After: 41230
 
 | 필드 | 필수 | 설명 |
 |---|:---:|---|
-| `file` | ✅ | PNG/JPEG/WEBP 러프 콘티 이미지, 최대 20MB. MIME과 파일 시그니처를 함께 검증한다. |
+| `file` | ✅ | PNG/JPEG/WEBP 러프 콘티 이미지, 최대 20MB. MIME·파일 시그니처·헤더의 실제 픽셀 크기를 검증한다. |
 | `source` | ✅ | `capture \| file \| clipboard` |
-| `width`, `height` | — | 원본 픽셀 크기 |
+| `width`, `height` | — | 원본 픽셀 크기(참고값). 서버가 헤더에서 실제 크기를 읽으면 **그 값이 우선한다** |
 
 응답 `202`:
 
 ```json
 { "jobId": "job_...", "status": "queued", "createdAt": "2026-07-16T..." }
 ```
+
+### 업로드 방어
+
+- **`413 PAYLOAD_TOO_LARGE`** — body가 20MB를 넘으면 `Content-Length` 단계에서 끊는다. 전체를 다 받은 뒤 거절하지 않는다. (`Content-Length`가 없거나 거짓이면 파싱 후 `400 INVALID_INPUT`으로 잡힌다.)
+- MIME 값을 믿지 않고 **파일 시그니처**를 확인한다. 불일치는 `400 INVALID_INPUT`.
+- 헤더에서 **실제 픽셀 크기**를 읽어 상한(기본 5천만 픽셀)을 넘으면 `400 INVALID_INPUT`. 파일 크기 상한만으로는 막을 수 없다 — 잘 압축된 20MB 이미지가 수십억 픽셀을 선언할 수 있고 그걸 펼치는 것은 추론 서버다.
+- 클라가 보낸 `width`/`height`는 **참고값**이다. 헤더에서 읽어낸 값이 있으면 그 값을 기록한다.
 
 사용량 한도를 넘으면 Job을 만들지 않고 `429`(`DAILY_QUOTA_EXCEEDED`·`GLOBAL_QUOTA_EXCEEDED`·
 `CONCURRENCY_LIMIT`·`RATE_LIMITED`)를 반환한다 — 위 [사용량 제한](#사용량-제한-429) 참고.
@@ -142,7 +149,8 @@ Retry-After: 41230
 
 > ⚠ 동기 추론을 감싸므로 세분 단계(`detecting`/`skeleton`/…)는 제공하지 않는다. Phase 0은 4-상태만.
 
-`error`(status=`failed`)에는 `INFERENCE_FAILED`, `INPUT_STORAGE_FAILED`, `ABANDONED`가 들어간다.
+`error`(status=`failed`)에는 `INFERENCE_FAILED`, `ANALYSIS_TIMEOUT`, `INPUT_STORAGE_FAILED`, `ABANDONED`가 들어간다.
+`ANALYSIS_TIMEOUT`은 추론이 상한 시간(`ANALYSIS_TIMEOUT_MS`, 기본 120초) 안에 응답하지 않은 경우다 — 추론이 거절한 `INFERENCE_FAILED`와 구분한다.
 `ABANDONED`는 배포·태스크 교체로 실행 중이던 Job이 유실된 경우다 — 러너가 아직 프로세스 내
 fire-and-forget이라 생길 수 있고, 서버가 주기적으로 정리해 무응답 대신 명시적 실패로 만든다.
 클라는 "다시 시도"를 안내하면 된다.
