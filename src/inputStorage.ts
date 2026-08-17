@@ -8,6 +8,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { config } from "./config.js";
+import { readImageSize, type ImageSize } from "./imageHeader.js";
 
 const client = new S3Client({});
 
@@ -40,36 +41,44 @@ function hasExpectedSignature(bytes: Uint8Array, mime: string): boolean {
 export async function storeInput(
   installationId: string,
   jobId: string,
-  file: Blob,
-): Promise<{ key: string | null; sha256: string; bytes: Uint8Array }> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  if (!hasExpectedSignature(bytes, file.type)) {
-    throw new InvalidImageContentError("input image signature does not match MIME type");
-  }
+  bytes: Uint8Array,
+  mime: string,
+): Promise<{ key: string | null; sha256: string }> {
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   if (!config.betaDataBucket) {
     if (process.env.NODE_ENV === "production") {
       throw new Error("BETA_DATA_BUCKET is required in production");
     }
-    return { key: null, sha256, bytes };
+    return { key: null, sha256 };
   }
-  const key = `installations/${installationId}/jobs/${jobId}/input.${extensionFor(file.type)}`;
+  const key = `installations/${installationId}/jobs/${jobId}/input.${extensionFor(mime)}`;
   await client.send(
     new PutObjectCommand({
       Bucket: config.betaDataBucket,
       Key: key,
       Body: bytes,
-      ContentType: file.type || "application/octet-stream",
+      ContentType: mime || "application/octet-stream",
     }),
   );
-  return { key, sha256, bytes };
+  return { key, sha256 };
 }
 
-export async function validateInputImage(file: Blob): Promise<void> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  if (!hasExpectedSignature(bytes, file.type)) {
+/** 헤더에서 읽어낸 실제 크기. 형식을 못 읽으면 null(= 확인 불가). */
+export interface InspectedImage {
+  size: ImageSize | null;
+}
+
+/**
+ * 업로드된 바이트가 주장한 MIME과 실제로 맞는지 확인하고 실제 크기를 읽는다.
+ *
+ * 바이트를 인자로 받는 이유: 예전에는 검증과 저장이 각각 `arrayBuffer()`를 불러
+ * 같은 20MB를 최소 두 번 메모리에 올렸다. 호출부가 한 번만 읽어 넘긴다.
+ */
+export function inspectInputImage(bytes: Uint8Array, mime: string): InspectedImage {
+  if (!hasExpectedSignature(bytes, mime)) {
     throw new InvalidImageContentError("input image signature does not match MIME type");
   }
+  return { size: readImageSize(bytes, mime) };
 }
 
 export async function deleteInstallationObjects(installationId: string): Promise<void> {

@@ -70,6 +70,19 @@ export interface CutResult {
   };
 }
 
+/** 추론 호출이 상한 시간을 넘겼다. 5xx와 구분해 Job 실패 사유로 남긴다. */
+export class InferenceTimeoutError extends Error {
+  constructor(public readonly timeoutMs: number) {
+    super(`inference timed out after ${timeoutMs}ms`);
+    this.name = "InferenceTimeoutError";
+  }
+}
+
+/** AbortSignal.timeout이 던지는 것은 TimeoutError DOMException이다. */
+export function isAbortTimeout(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "TimeoutError";
+}
+
 export class InferenceError extends Error {
   constructor(
     public status: number,
@@ -94,11 +107,20 @@ export async function analyze(file: Blob, hint = ""): Promise<CutResult> {
   form.append("file", file, "cut.png");
   if (hint) form.append("hint", hint);
 
-  const res = await fetch(`${config.inferenceBaseUrl}/analyze`, {
-    method: "POST",
-    body: form,
-    headers: authHeaders(),
-  });
+  // 상한이 없으면 추론이 멈췄을 때 Job이 running에 영원히 남는다. 동시 분석 한도가
+  // 1이라 그 설치는 스위퍼가 돌 때까지(수 분) 아무것도 못 한다.
+  let res: Response;
+  try {
+    res = await fetch(`${config.inferenceBaseUrl}/analyze`, {
+      method: "POST",
+      body: form,
+      headers: authHeaders(),
+      signal: AbortSignal.timeout(config.analysisTimeoutMs),
+    });
+  } catch (error) {
+    if (isAbortTimeout(error)) throw new InferenceTimeoutError(config.analysisTimeoutMs);
+    throw error;
+  }
   if (!res.ok) {
     throw new InferenceError(res.status, await safeText(res));
   }
@@ -188,8 +210,11 @@ export async function getPoseThumbnail(
 // GET /healthz → 추론 서버 가용 여부
 export async function health(): Promise<boolean> {
   try {
+    // ⚠ 상한이 없으면 추론이 멈출 때 /healthz도 같이 멈춘다. ALB는 그걸 BFF 장애로
+    //   읽고 멀쩡한 태스크를 교체한다 — 추론 장애가 BFF 장애로 번지는 경로다.
     const res = await fetch(`${config.inferenceBaseUrl}/healthz`, {
       headers: authHeaders(),
+      signal: AbortSignal.timeout(config.healthTimeoutMs),
     });
     return res.ok;
   } catch {

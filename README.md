@@ -61,11 +61,53 @@ docker compose down            # 종료 (DB는 pg-data 볼륨에 유지)
 | `POST` | `/v1/auth/refresh` | ✅ refresh 회전 |
 | `POST` | `/v1/auth/logout` | ✅ refresh 폐기 |
 | `GET` | `/v1/users/me` 🔒 | ✅ 현재 유저(세션 복원) |
-| `POST` | `/v1/analysis/jobs` 🔒 | ✅ Job 생성 → `/analyze` 백그라운드 호출 |
+| `POST` | `/v1/analysis/jobs` 🔒 | ✅ Job 생성 → `/analyze` 백그라운드 호출 (설치별 일일 쿼터 적용, 초과 시 `429`) |
 | `GET` | `/v1/analysis/jobs/:id` 🔒 | ✅ 상태 폴링 |
 | `GET` | `/v1/analysis/jobs/:id/result` 🔒 | ✅ 결과(+matchLevel 매핑) |
 | `POST` | `/v1/analysis/jobs/:id/rerun` 🔒 | 🚧 Phase 2 stub(501) |
 | `GET` | `/v1/pose-candidates/:id/export` 🔒 | ✅ BVH 프록시 |
+
+## 사용량 제한
+
+오픈베타는 로그인 없이 설치 단위로 쓰므로 서버가 사용량을 강제한다. 카운터 정본은
+**PostgreSQL**(`usage_counters`)이다 — 인메모리로 세면 ECS 태스크 수만큼 한도가 늘어나고
+배포마다 초기화된다. 값은 전부 env로 조정하며 **0 이하는 제한 없음**이다.
+
+| env | 기본값 | 의미 |
+|---|---:|---|
+| `QUOTA_INSTALLATION_DAILY` | 10 | 설치별 일일 분석 횟수(KST 자정 리셋) |
+| `QUOTA_GLOBAL_DAILY` | 0 | 서비스 전체 일일 분석 상한(비용 산정 전이라 기본 off) |
+| `QUOTA_INSTALLATION_CONCURRENT` | 1 | 설치별 동시 분석 개수 |
+| `ANALYSIS_STALE_AFTER_SECONDS` | 300 | 유실 Job 판정 시간 |
+| `ANALYSIS_TIMEOUT_MS` | 120000 | 추론 `/analyze` 상한 |
+| `HEALTH_TIMEOUT_MS` | 3000 | `/healthz`의 추론 확인 상한 |
+| `MAX_UPLOAD_BYTES` | 20971520 | 업로드 상한(20MB) |
+| `MAX_IMAGE_PIXELS` | 50000000 | 허용 최대 픽셀 수 |
+| `RATE_IP_REGISTER` / `_WINDOW` | 5 / 3600 | IP별 설치 발급 burst |
+| `RATE_IP_ANALYZE` / `_WINDOW` | 5 / 60 | IP별 분석 요청 burst |
+| `TRUSTED_PROXY_HOPS` | 1 | XFF 오른쪽에서 신뢰하는 프록시 홉 수 |
+| `IP_HASH_SALT` | (`JWT_SECRET`) | IP 해시 솔트 |
+
+초과하면 `429` + `Retry-After`와 함께 재시도 가능 시각을 준다 → `docs/API.md`의 「사용량 제한」.
+
+⚠ `TRUSTED_PROXY_HOPS`는 배포 체인(`CloudFront → ALB → BFF`) 기준 **1**이고, 프록시가 없는
+로컬은 **0**이다. `0`이면 `X-Forwarded-For`를 아예 읽지 않고 소켓 주소를 쓴다 — 앞에 프록시가
+없으면 그 헤더는 클라가 직접 써 보낸 값이라 아무 것도 보장하지 않는다. `0`보다 크면 오른쪽에서
+그만큼 세어 들어간 자리를 쓰고, 클라가 채울 수 있는 왼쪽은 믿지 않는다. **이 값을 실제 프록시
+수보다 크게 잡으면 IP 제한이 통째로 우회된다.** IP는 원문 대신 `/64`(IPv6) 정규화 후 해시로만
+저장한다.
+
+### Kill switch
+
+운영자가 분석을 즉시 중단·재개한다. 값은 DB(`service_flags`)에 있어 **재배포가 필요 없고**,
+각 태스크의 5초 캐시 때문에 전파에 최대 5초 걸린다.
+
+```bash
+curl -X PUT "$BFF/v1/admin/flags/analysis_enabled" -H "X-Beta-Admin-Token: $TOKEN" -H 'Content-Type: application/json' -d '{"enabled":false,"reason":"비용 급증"}'
+```
+
+꺼진 동안 `POST /v1/analysis/jobs`가 `503 SERVICE_PAUSED`를 반환한다(진행 중 Job 폴링은 정상).
+현재 상태와 오늘 전체 사용량은 `GET /v1/admin/flags`로 본다.
 
 ## 구조
 
@@ -78,6 +120,8 @@ src/
 ├─ inference.ts    도원 추론 서버 호출 격리(analyze·getPoseBvh·health)
 ├─ mapping.ts      계약 번역(matchLevel·오류봉투)
 ├─ db.ts           PostgreSQL(pg): Pool·스키마 초기화(advisory lock)·쿼리 헬퍼
+├─ limits/         사용량 제한(정책 계산·Postgres 카운터·429 번역)
+├─ imageHeader.ts  업로드 이미지 헤더에서 실제 크기 읽기(위조·폭탄 방어)
 ├─ jobs/           Job 생성·폴링·백그라운드 러너(동기추론→Job 래핑, Postgres)
 ├─ auth/           routes(register/login/verify/refresh/logout) · tokens · users(Postgres) · mailer
 │  └─ oauth/       소셜 로그인(google·kakao·naver) 레지스트리 + start/callback
@@ -98,5 +142,5 @@ Phase 3     큐(SQS 등)로 Job 실행 분리, 필요 시 추론 단계 스트�
 - `matchLevel` 임계값은 시드값 → `Standin-server/docs/SEARCH_EVAL`로 보정 필요.
 - 회원가입 하드닝: 레이트리밋·봇 방지 미포함(Phase 2). 이메일 인증은 구현됨.
 - 소셜 로그인은 provider 키가 있어야 동작(없으면 `PROVIDER_UNAVAILABLE`). 데스크톱 토큰 전달은 `OAUTH_SUCCESS_REDIRECT`(딥링크) 필요.
-- Job 실행이 아직 프로세스 내 fire-and-forget → 배포·재시작 시 진행 중 Job이 유실된다(큐로 교체 예정).
+- Job 실행이 아직 프로세스 내 fire-and-forget → 배포·재시작 시 진행 중 Job이 유실된다(큐로 교체 예정). 유실된 Job은 60초 주기 스위퍼가 `failed`/`ABANDONED`로 정리해 무응답과 동시 분석 한도 잠김을 막는다.
 - 추론 서버는 **무인증·내부용** → 공개 노출 금지, BFF만 공개 엣지.

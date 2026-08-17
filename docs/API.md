@@ -22,6 +22,8 @@ X-Device-Token: ...
 
 서버에는 토큰 SHA-256 해시만 저장한다. 현재 동의 버전은 `BETA_CONSENT_VERSION`이며 불일치 시 `CONSENT_REQUIRED`, 자격증명 누락 시 `INSTALLATION_REQUIRED`로 거부한다.
 
+발급은 공개 엔드포인트라 **IP 단위 속도 제한**이 걸린다(기본 1시간 5회). 초과하면 `429 RATE_LIMITED`가 나가므로, 클라는 발급을 재시도 루프로 돌리지 말고 받은 자격증명을 안전 저장소에 보관해 재사용한다.
+
 `DELETE /v1/installations/current/data`는 전용 S3 prefix, 작업·파생 데이터·이벤트·선택·피드백과 설치 레코드를 삭제한다. 응답은 `{ "deleted": true, "backupExpiryDays": 7 }`이다.
 
 ---
@@ -40,7 +42,52 @@ X-Device-Token: ...
 ```
 
 클라는 `message`를 직접 표시하지 않고 `code`를 사용자 메시지로 매핑한다.
-주요 코드: `INVALID_INPUT`/`PROVIDER_UNAVAILABLE`/`OAUTH_STATE_MISMATCH`/`EMAIL_REQUIRED`(400) · `UNAUTHENTICATED`/`INVALID_TOKEN`/`INVALID_CREDENTIALS`(401) · `EMAIL_NOT_VERIFIED`(403) · `NOT_FOUND`(404) · `NOT_READY`/`EMAIL_TAKEN`(409) · `NOT_IMPLEMENTED`(501) · `OAUTH_FAILED`(502) · `INFERENCE_FAILED`(Job status=failed).
+주요 코드: `INVALID_INPUT`/`PROVIDER_UNAVAILABLE`/`OAUTH_STATE_MISMATCH`/`EMAIL_REQUIRED`(400) · `UNAUTHENTICATED`/`INVALID_TOKEN`/`INVALID_CREDENTIALS`(401) · `EMAIL_NOT_VERIFIED`(403) · `NOT_FOUND`(404) · `NOT_READY`/`EMAIL_TAKEN`(409) · `PAYLOAD_TOO_LARGE`(413) · `DAILY_QUOTA_EXCEEDED`/`GLOBAL_QUOTA_EXCEEDED`(429) · `NOT_IMPLEMENTED`(501) · `OAUTH_FAILED`(502) · `STORAGE_UNAVAILABLE`(503) · `INFERENCE_FAILED`(Job status=failed).
+
+### 사용량 제한 (`429`)
+
+오픈베타는 로그인 없이 설치 단위로 쓰므로 서버가 사용량을 강제한다. 한도를 넘으면 `429`와 함께
+**언제 다시 쓸 수 있는지**를 `details`와 `Retry-After` 헤더로 준다. 클라는 원인과 다음 사용 가능
+시점을 함께 표시한다.
+
+```http
+HTTP/1.1 429 Too Many Requests
+Retry-After: 41230
+```
+```json
+{
+  "error": {
+    "code": "DAILY_QUOTA_EXCEEDED",
+    "message": "오늘 사용할 수 있는 분석 횟수를 모두 사용했습니다.",
+    "details": { "retryAfterSeconds": 41230, "limit": 10, "retryAt": "2026-08-12T00:00:00.000+09:00" },
+    "requestId": "req_..."
+  }
+}
+```
+
+| code | 의미 | `details` |
+|---|---|---|
+| `DAILY_QUOTA_EXCEEDED` | 설치별 일일 분석 한도 초과 | `retryAfterSeconds`, `limit`, `retryAt` |
+| `GLOBAL_QUOTA_EXCEEDED` | 서비스 전체 일일 분석 한도 초과 | `retryAfterSeconds`, `retryAt` |
+| `RATE_LIMITED` | 짧은 시간에 요청이 몰림(IP 단위) | `retryAfterSeconds`, `limit`, `windowSeconds` |
+| `CONCURRENCY_LIMIT` | 같은 설치에 진행 중인 분석이 있음 | `retryAfterSeconds`, `limit` |
+
+일일 한도는 **KST 자정**에 리셋된다(`retryAt`은 항상 `+09:00` 표기). 한도값은 서버 환경변수로
+조정되므로 클라가 숫자를 하드코딩하지 않고 `details.limit`을 그대로 보여준다.
+
+`RATE_LIMITED`는 IP 단위 burst 제한이며 `POST /v1/installations`와 `POST /v1/analysis/jobs`에
+걸린다. 일일 쿼터와는 별개 카운터라, 남은 일일 횟수가 있어도 잠깐 몰리면 나올 수 있다.
+공용망·NAT에서는 같은 IP를 여러 사용자가 공유할 수 있으므로 "잠시 후 다시 시도"로 안내한다.
+서버는 IP 원문을 저장하지 않고 해시 버킷만 센다.
+
+`CONCURRENCY_LIMIT`은 같은 설치가 분석을 동시에 여러 개 돌리지 못하게 막는다(기본 1개).
+중복 클릭이 대부분이므로 진행 중인 Job의 완료를 기다렸다가 다시 시도하면 된다.
+
+### 서비스 일시 중단 (`503 SERVICE_PAUSED`)
+
+운영자가 분석을 즉시 중단한 상태다(비용·장애 대응). 사용자 잘못이 아니므로 `429`와 구분한다.
+재시도 시각을 줄 수 없으므로 `Retry-After`가 없다 — 클라는 "지금은 분석을 이용할 수 없습니다"
+계열로 안내하고 자동 재시도 루프를 돌리지 않는다.
 
 ---
 
@@ -62,15 +109,27 @@ X-Device-Token: ...
 
 | 필드 | 필수 | 설명 |
 |---|:---:|---|
-| `file` | ✅ | PNG/JPEG/WEBP 러프 콘티 이미지, 최대 20MB. MIME과 파일 시그니처를 함께 검증한다. |
+| `file` | ✅ | PNG/JPEG/WEBP 러프 콘티 이미지, 최대 20MB. MIME·파일 시그니처·헤더의 실제 픽셀 크기를 검증한다. |
 | `source` | ✅ | `capture \| file \| clipboard` |
-| `width`, `height` | — | 원본 픽셀 크기 |
+| `width`, `height` | — | 원본 픽셀 크기(참고값). 서버가 헤더에서 실제 크기를 읽으면 **그 값이 우선한다** |
 
 응답 `202`:
 
 ```json
 { "jobId": "job_...", "status": "queued", "createdAt": "2026-07-16T..." }
 ```
+
+### 업로드 방어
+
+- **`413 PAYLOAD_TOO_LARGE`** — body가 20MB를 넘으면 `Content-Length` 단계에서 끊는다. 전체를 다 받은 뒤 거절하지 않는다. (`Content-Length`가 없거나 거짓이면 파싱 후 `400 INVALID_INPUT`으로 잡힌다.)
+- MIME 값을 믿지 않고 **파일 시그니처**를 확인한다. 불일치는 `400 INVALID_INPUT`.
+- 헤더에서 **실제 픽셀 크기**를 읽어 상한(기본 5천만 픽셀)을 넘으면 `400 INVALID_INPUT`. 파일 크기 상한만으로는 막을 수 없다 — 잘 압축된 20MB 이미지가 수십억 픽셀을 선언할 수 있고 그걸 펼치는 것은 추론 서버다.
+- 클라가 보낸 `width`/`height`는 **참고값**이다. 헤더에서 읽어낸 값이 있으면 그 값을 기록한다.
+
+사용량 한도를 넘으면 Job을 만들지 않고 `429`(`DAILY_QUOTA_EXCEEDED`·`GLOBAL_QUOTA_EXCEEDED`·
+`CONCURRENCY_LIMIT`·`RATE_LIMITED`)를 반환한다 — 위 [사용량 제한](#사용량-제한-429) 참고.
+운영자가 분석을 중단했으면 `503 SERVICE_PAUSED`다. 한도는 입력 검증을 통과한 요청만 소비하며,
+입력 저장이 실패해 `503 STORAGE_UNAVAILABLE`이 나가면 소비한 쿼터를 돌려준다.
 
 ---
 
@@ -89,6 +148,12 @@ X-Device-Token: ...
 ```
 
 > ⚠ 동기 추론을 감싸므로 세분 단계(`detecting`/`skeleton`/…)는 제공하지 않는다. Phase 0은 4-상태만.
+
+`error`(status=`failed`)에는 `INFERENCE_FAILED`, `ANALYSIS_TIMEOUT`, `INPUT_STORAGE_FAILED`, `ABANDONED`가 들어간다.
+`ANALYSIS_TIMEOUT`은 추론이 상한 시간(`ANALYSIS_TIMEOUT_MS`, 기본 120초) 안에 응답하지 않은 경우다 — 추론이 거절한 `INFERENCE_FAILED`와 구분한다.
+`ABANDONED`는 배포·태스크 교체로 실행 중이던 Job이 유실된 경우다 — 러너가 아직 프로세스 내
+fire-and-forget이라 생길 수 있고, 서버가 주기적으로 정리해 무응답 대신 명시적 실패로 만든다.
+클라는 "다시 시도"를 안내하면 된다.
 
 ---
 
@@ -261,6 +326,38 @@ BFF가 보관해 둔 값을 서버측에서 읽는다 — 클라이언트가 값
 ## 관리자 품질 검토
 
 `GET /v1/admin/review/jobs/{jobId}`는 `X-Beta-Admin-Token`이 필요하다. 5분짜리 원본 서명 URL, 인물·스켈레톤·후보·선택·피드백을 반환하고 접근을 감사 테이블에 기록한다.
+
+---
+
+## 운영 스위치 (kill switch)
+
+토큰이 틀리면 다른 관리자 경로와 마찬가지로 `404`로 응답한다(경로 존재를 숨긴다).
+
+`GET /v1/admin/flags`
+
+```json
+{
+  "analysisEnabled": true,
+  "reason": null,
+  "updatedAt": null,
+  "globalDaily": { "day": "2026-08-11", "used": 42, "limit": 0 }
+}
+```
+
+`PUT /v1/admin/flags/analysis_enabled`
+
+```json
+{ "enabled": false, "reason": "Gemini 비용 급증" }
+```
+```json
+{ "analysisEnabled": false, "reason": "Gemini 비용 급증",
+  "updatedAt": "2026-08-11T...", "propagationSeconds": 5 }
+```
+
+값은 DB(`service_flags`)에 있어 **재배포 없이** 모든 태스크에 반영된다. 각 태스크는 5초 캐시를
+쓰므로 전파에 최대 5초 걸린다. 꺼진 동안 `POST /v1/analysis/jobs`는 `503 SERVICE_PAUSED`를
+반환하며, 이미 접수된 Job의 폴링·결과 조회는 그대로 동작한다. 토글은 `admin_access_audit`에
+`pause_analysis`·`resume_analysis`로 남는다.
 
 > 도원 서버가 `409`(합성 단계, 실 BVH 미존재)를 주면 그대로 전달된다.
 

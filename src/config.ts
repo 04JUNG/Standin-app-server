@@ -37,12 +37,62 @@ export const config = {
   refineFeatureEnabled: env("REFINE_FEATURE_ENABLED", "false") === "true",
   // refine은 사용자가 저장을 기다리는 동기 경로다. 느려지면 베이스로 넘어간다(BFF-07).
   refineTimeoutMs: Number(process.env.REFINE_TIMEOUT_MS ?? 5000),
+  /**
+   * 분석 호출 상한(OB-04). 없으면 추론이 멈췄을 때 Job이 running에 영원히 남고,
+   * 동시 분석 한도가 1이라 그 설치는 스위퍼가 돌 때까지 아무것도 못 한다.
+   */
+  analysisTimeoutMs: Number(process.env.ANALYSIS_TIMEOUT_MS ?? 120_000),
+  /**
+   * 헬스체크의 추론 확인 상한. ⚠ 이게 없으면 추론이 멈출 때 /healthz도 같이 멈추고,
+   * ALB가 멀쩡한 BFF 태스크를 비정상으로 판단해 교체한다.
+   */
+  healthTimeoutMs: Number(process.env.HEALTH_TIMEOUT_MS ?? 3000),
+  /** 업로드 상한(bytes). body를 다 읽기 전에 이 값으로 먼저 끊는다. */
+  maxUploadBytes: Number(process.env.MAX_UPLOAD_BYTES ?? 20 * 1024 * 1024),
+  /**
+   * 허용할 최대 픽셀 수. 파일 크기 상한과 별개다 — 압축이 잘 되는 이미지는 20MB
+   * 안에서도 수십억 픽셀을 선언할 수 있고, 그걸 펼치는 건 추론 서버다.
+   */
+  maxImagePixels: Number(process.env.MAX_IMAGE_PIXELS ?? 50_000_000),
   // Explicit temporary demo mode. User/account endpoints remain protected.
   allowAnonymousAnalysis: env("ALLOW_ANONYMOUS_ANALYSIS", "false") === "true",
   betaDataBucket: env("BETA_DATA_BUCKET"),
   deploymentVersion: env("DEPLOYMENT_VERSION", "development"),
   consentVersion: env("BETA_CONSENT_VERSION", "2026-08-02"),
   betaReviewAdminToken: env("BETA_REVIEW_ADMIN_TOKEN"),
+
+  /**
+   * 사용량 제한(오픈베타). 초깃값은 스프린트 2026-08-11 §3 권장값이다.
+   *
+   * 0 이하는 "제한 없음"으로 읽는다 — 전체 일일 상한은 Gemini 비용 산정 전이라
+   * 기본 off로 두고, 숫자가 정해지면 env만 채워 켠다.
+   */
+  quotaInstallationDaily: Number(process.env.QUOTA_INSTALLATION_DAILY ?? 10),
+  quotaGlobalDaily: Number(process.env.QUOTA_GLOBAL_DAILY ?? 0),
+  // 설치별 동시 분석. 중복 클릭·폭주 방지가 목적이라 1이면 충분하다.
+  quotaInstallationConcurrent: Number(process.env.QUOTA_INSTALLATION_CONCURRENT ?? 1),
+  /**
+   * 이 시간이 지나도 queued/running인 Job은 유실로 본다.
+   *
+   * 러너가 프로세스 내 fire-and-forget이라 배포·태스크 교체 시 상태가 running인 채로 남는다.
+   * 동시 분석 한도가 1이면 그 설치는 영원히 막히므로, 오래된 Job은 세지 않고 실패로 정리한다.
+   */
+  analysisStaleAfterSeconds: Number(process.env.ANALYSIS_STALE_AFTER_SECONDS ?? 300),
+  // IP burst. NAT·공용망 사용자를 고려해 너무 낮게 잡지 않는다.
+  rateIpRegister: Number(process.env.RATE_IP_REGISTER ?? 5),
+  rateIpRegisterWindow: Number(process.env.RATE_IP_REGISTER_WINDOW ?? 3600),
+  rateIpAnalyze: Number(process.env.RATE_IP_ANALYZE ?? 5),
+  rateIpAnalyzeWindow: Number(process.env.RATE_IP_ANALYZE_WINDOW ?? 60),
+  /**
+   * X-Forwarded-For 오른쪽에서 신뢰하는 프록시 홉 수.
+   *
+   * 배포는 CloudFront(XFF에 client IP 기록) → ALB(CloudFront 엣지 IP 덧붙임)이라 1이다.
+   * 프록시가 없는 로컬은 0으로 둔다. ⚠ 이 값을 잘못 키우면 클라가 XFF를 위조해
+   * IP 제한을 우회할 수 있다.
+   */
+  trustedProxyHops: Number(process.env.TRUSTED_PROXY_HOPS ?? 1),
+  // IP는 원문 대신 해시로만 저장한다. 전용 값이 없으면 JWT 시크릿을 재사용한다.
+  ipHashSalt: env("IP_HASH_SALT") || env("JWT_SECRET", "dev-only-change-me"),
 
   // 인증(JWT)
   jwtSecret: env("JWT_SECRET", "dev-only-change-me"),

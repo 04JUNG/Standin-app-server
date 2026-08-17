@@ -4,10 +4,21 @@ import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
 import { errorEnvelope } from "../mapping.js";
 import { confirmSelections, saveFeedback } from "../analytics/store.js";
-import { storeInput, validateInputImage } from "../inputStorage.js";
-import { createJob, getOwnedJob, setJobInput, updateJob } from "./store.js";
+import { inspectInputImage, storeInput } from "../inputStorage.js";
+import { exceedsPixelBudget } from "../imageHeader.js";
+import { config } from "../config.js";
+import {
+  createJobWithLimits,
+  getOwnedJob,
+  refundAnalysisQuota,
+  setJobInput,
+  updateJob,
+} from "./store.js";
 import { runAnalysisJob } from "./runner.js";
 import { refineRoutes } from "../refine/routes.js";
+import { isAnalysisEnabled } from "../limits/flags.js";
+import { limitErrorResponse } from "../limits/http.js";
+import { isLimitExceeded } from "../limits/policy.js";
 
 export const jobsRoutes = new Hono<AppEnv>();
 
@@ -16,6 +27,14 @@ jobsRoutes.route("/", refineRoutes);
 
 // POST /v1/analysis/jobs — 이미지 업로드 → jobId 즉시 반환(추론은 백그라운드)
 jobsRoutes.post("/", async (c) => {
+  // 운영자 kill switch. 사용자 잘못이 아니므로 429가 아니라 503으로 구분한다.
+  // 20MB body를 읽기 전에 본다.
+  if (!(await isAnalysisEnabled())) {
+    return c.json(
+      errorEnvelope("SERVICE_PAUSED", "지금은 분석을 이용할 수 없습니다.", c.get("requestId")),
+      503,
+    );
+  }
   const body = await c.req.parseBody();
   const file = body["file"];
   if (!(file instanceof File)) {
@@ -27,15 +46,20 @@ jobsRoutes.post("/", async (c) => {
   if (
     !new Set(["image/png", "image/jpeg", "image/webp"]).has(file.type) ||
     file.size <= 0 ||
-    file.size > 20 * 1024 * 1024
+    file.size > config.maxUploadBytes
   ) {
+    // bodyLimit이 Content-Length로 먼저 끊지만(index.ts), 헤더가 없거나 거짓인
+    // 요청이 여기까지 올 수 있어 파싱 뒤에도 한 번 더 본다.
     return c.json(
       errorEnvelope("INVALID_INPUT", "PNG, JPG, WEBP 이미지만 20MB까지 허용됩니다.", c.get("requestId")),
       400,
     );
   }
+  // 바이트는 여기서 한 번만 읽어 검증·저장·추론이 나눠 쓴다.
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let actualSize;
   try {
-    await validateInputImage(file);
+    actualSize = inspectInputImage(bytes, file.type).size;
   } catch {
     return c.json(
       errorEnvelope(
@@ -43,6 +67,14 @@ jobsRoutes.post("/", async (c) => {
         "Image content does not match its MIME type.",
         c.get("requestId"),
       ),
+      400,
+    );
+  }
+  // 파일 크기 상한만으로는 decompression bomb을 못 막는다 — 압축이 잘 되는 이미지는
+  // 20MB 안에서도 수십억 픽셀을 선언할 수 있고, 그걸 펼치는 건 추론 서버다.
+  if (actualSize && exceedsPixelBudget(actualSize, config.maxImagePixels)) {
+    return c.json(
+      errorEnvelope("INVALID_INPUT", "이미지 해상도가 너무 큽니다.", c.get("requestId")),
       400,
     );
   }
@@ -58,22 +90,33 @@ jobsRoutes.post("/", async (c) => {
     const parsed = Number(value);
     return Number.isInteger(parsed) && parsed > 0 && parsed <= 100_000 ? parsed : null;
   };
-  const width = optionalDimension(body["width"]);
-  const height = optionalDimension(body["height"]);
+  // 헤더에서 읽은 값이 있으면 그걸 쓴다. 클라 값은 검증되지 않았고, jobs 테이블의
+  // COALESCE 때문에 한번 들어가면 실제 값이 덮어쓰지 못한다.
+  const width = actualSize?.width ?? optionalDimension(body["width"]);
+  const height = actualSize?.height ?? optionalDimension(body["height"]);
   const installationId = c.get("installationId")!;
-  const job = await createJob(c.get("userId") ?? null, null, {
-    installationId,
-    source,
-    mime: file.type || "application/octet-stream",
-    size: file.size,
-    width,
-    height,
-  });
+  // 사용량 한도는 입력 검증을 통과한 뒤에 소비한다 — 잘못된 요청이 쿼터를 깎으면 안 된다.
+  let job;
   try {
-    const stored = await storeInput(installationId, job.id, file);
+    job = await createJobWithLimits(c.get("userId") ?? null, {
+      installationId,
+      source,
+      mime: file.type || "application/octet-stream",
+      size: file.size,
+      width,
+      height,
+    });
+  } catch (error) {
+    if (isLimitExceeded(error)) return limitErrorResponse(c, error);
+    throw error;
+  }
+  try {
+    const stored = await storeInput(installationId, job.id, bytes, file.type);
     await setJobInput(job.id, { s3Key: stored.key, sha256: stored.sha256 });
   } catch {
     await updateJob(job.id, { status: "failed", errorCode: "INPUT_STORAGE_FAILED" });
+    // 우리 쪽 저장 장애다. 사용자의 오늘 쿼터를 깎은 채로 두지 않는다.
+    await refundAnalysisQuota(installationId).catch(() => {});
     return c.json(
       errorEnvelope("STORAGE_UNAVAILABLE", "입력 이미지를 안전하게 보관하지 못했습니다.", c.get("requestId")),
       503,

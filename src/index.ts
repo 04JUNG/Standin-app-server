@@ -3,19 +3,23 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { bodyLimit } from "hono/body-limit";
 import { randomUUID } from "node:crypto";
 import { config } from "./config.js";
 import { closeDb, initDb, runDataMaintenance } from "./db.js";
 import type { AppEnv } from "./env.js";
 import { health } from "./inference.js";
+import { errorEnvelope } from "./mapping.js";
 import { requireAuth } from "./auth/middleware.js";
 import { authRoutes } from "./auth/routes.js";
 import { usersRoutes } from "./users/routes.js";
 import { jobsRoutes } from "./jobs/routes.js";
+import { failStaleJobs } from "./jobs/store.js";
 import { poseRoutes } from "./pose/routes.js";
 import { analyticsRoutes } from "./analytics/routes.js";
 import { installationRoutes } from "./installations/routes.js";
 import { requireInstallation } from "./installations/middleware.js";
+import { rateLimitByIp } from "./limits/middleware.js";
 import { adminRoutes } from "./admin/routes.js";
 
 const app = new Hono<AppEnv>();
@@ -71,6 +75,8 @@ app.use(
       "X-Device-Token",
       "X-Beta-Admin-Token",
     ],
+    // 429 응답의 Retry-After를 웹뷰가 읽으려면 노출 목록에 있어야 한다(사용량 제한 안내).
+    exposeHeaders: ["Retry-After"],
     credentials: true,
     maxAge: 600,
   }),
@@ -84,10 +90,39 @@ app.get("/healthz", async (c) => {
 // /v1 계약 (클라 endpoints.ts와 맞물림)
 // 공개: /v1/auth/*  |  보호(requireAuth): users·analysis·pose-candidates
 app.route("/v1/auth", authRoutes);
+
+// 설치 등록은 공개 엔드포인트라 IP 제한이 유일한 방어선이다(무제한 발급 차단).
+// 동의 철회 삭제(DELETE /current/data)는 제한하지 않는다 — 메서드를 좁혀서 건다.
+app.on(
+  "POST",
+  "/v1/installations",
+  rateLimitByIp("ip_register", config.rateIpRegister, config.rateIpRegisterWindow),
+);
 app.route("/v1/installations", installationRoutes);
 
 app.use("/v1/users/*", requireAuth);
 app.use("/v1/analysis/*", requireInstallation);
+// 인증 뒤·본문 파싱 앞에 둔다. 미인증 요청이 IP 예산을 깎지 않게 하고,
+// 20MB body를 읽기 전에 거절하기 위해서다.
+app.on(
+  "POST",
+  "/v1/analysis/jobs",
+  rateLimitByIp("ip_analyze", config.rateIpAnalyze, config.rateIpAnalyzeWindow),
+  // parseBody()는 body를 통째로 메모리에 올린 뒤에야 크기를 알 수 있다. 그 전에
+  // Content-Length로 끊어 500MB 업로드를 다 받아놓고 거절하는 일이 없게 한다.
+  bodyLimit({
+    maxSize: config.maxUploadBytes,
+    onError: (c) =>
+      c.json(
+        errorEnvelope(
+          "PAYLOAD_TOO_LARGE",
+          "이미지가 너무 큽니다. 20MB 이하로 줄여 주세요.",
+          c.get("requestId"),
+        ),
+        413,
+      ),
+  }),
+);
 app.use("/v1/pose-candidates/*", requireInstallation);
 app.use("/v1/events/*", requireInstallation);
 
@@ -113,6 +148,18 @@ const maintenanceTimer = setInterval(() => {
   void runDataMaintenance().catch(() => console.error("[bff] data maintenance failed"));
 }, 24 * 60 * 60 * 1000);
 maintenanceTimer.unref();
+
+// 유실된 Job 정리. 24시간 주기 유지보수로는 너무 느리다 — 동시 분석 한도가 1이라
+// running인 채로 남은 Job 하나가 그 설치를 계속 막는다.
+const sweepStaleJobs = () =>
+  failStaleJobs()
+    .then((count) => {
+      if (count > 0) console.warn(JSON.stringify({ type: "stale_jobs_swept", count }));
+    })
+    .catch(() => console.error("[bff] stale job sweep failed"));
+void sweepStaleJobs();
+const staleJobTimer = setInterval(() => void sweepStaleJobs(), 60 * 1000);
+staleJobTimer.unref();
 
 // ECS는 태스크를 교체할 때 SIGTERM을 보낸다. 진행 중 요청을 마치고 커넥션을 정리한다.
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
