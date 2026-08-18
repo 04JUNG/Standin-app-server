@@ -80,6 +80,10 @@ docker compose down            # 종료 (DB는 pg-data 볼륨에 유지)
 | `QUOTA_INSTALLATION_CONCURRENT` | 1 | 설치별 동시 분석 개수 |
 | `ANALYSIS_STALE_AFTER_SECONDS` | 300 | 유실 Job 판정 시간 |
 | `ANALYSIS_TIMEOUT_MS` | 120000 | 추론 `/analyze` 상한 |
+| `JOB_EXECUTION_MODE` | `inline` | `inline` 또는 `sqs` 단계적 전환 스위치 |
+| `ANALYSIS_QUEUE_URL` | — | `sqs` 모드에서 사용할 SQS URL |
+| `WORKER_VISIBILITY_SECONDS` | 180 | SQS 메시지 visibility와 heartbeat 기준 |
+| `WORKER_LEASE_SECONDS` | 180 | DB의 worker 실행 lease |
 | `HEALTH_TIMEOUT_MS` | 3000 | `/healthz`의 추론 확인 상한 |
 | `MAX_UPLOAD_BYTES` | 20971520 | 업로드 상한(20MB) |
 | `MAX_IMAGE_PIXELS` | 50000000 | 허용 최대 픽셀 수 |
@@ -122,7 +126,8 @@ src/
 ├─ db.ts           PostgreSQL(pg): Pool·스키마 초기화(advisory lock)·쿼리 헬퍼
 ├─ limits/         사용량 제한(정책 계산·Postgres 카운터·429 번역)
 ├─ imageHeader.ts  업로드 이미지 헤더에서 실제 크기 읽기(위조·폭탄 방어)
-├─ jobs/           Job 생성·폴링·백그라운드 러너(동기추론→Job 래핑, Postgres)
+├─ jobs/           Job 생성·폴링·transactional outbox·SQS runner
+├─ worker.ts       SQS 수신·lease 획득·S3 입력 로드·추론 실행
 ├─ auth/           routes(register/login/verify/refresh/logout) · tokens · users(Postgres) · mailer
 │  └─ oauth/       소셜 로그인(google·kakao·naver) 레지스트리 + start/callback
 ├─ users/          GET /me
@@ -135,12 +140,12 @@ src/
 Phase 0 ✅  Job 래핑·BVH 프록시·헬스.
 Phase 1 ✅  인증(JWT+refresh 회전·argon2·/users/me·보호 라우트) + 유저·refresh·Job **PostgreSQL 영속**.
 Phase 2     rerun(excludeCandidateIds)·matchLevel 실데이터 보정·레이트리밋.
-Phase 3     큐(SQS 등)로 Job 실행 분리, 필요 시 추론 단계 스트리밍.
+Phase 3 ✅  transactional outbox + SQS Worker로 Job 실행 분리(`inline` 롤백 모드 유지).
 ```
 
 ## 알려진 TODO
 - `matchLevel` 임계값은 시드값 → `Standin-server/docs/SEARCH_EVAL`로 보정 필요.
 - 회원가입 하드닝: 레이트리밋·봇 방지 미포함(Phase 2). 이메일 인증은 구현됨.
 - 소셜 로그인은 provider 키가 있어야 동작(없으면 `PROVIDER_UNAVAILABLE`). 데스크톱 토큰 전달은 `OAUTH_SUCCESS_REDIRECT`(딥링크) 필요.
-- Job 실행이 아직 프로세스 내 fire-and-forget → 배포·재시작 시 진행 중 Job이 유실된다(큐로 교체 예정). 유실된 Job은 60초 주기 스위퍼가 `failed`/`ABANDONED`로 정리해 무응답과 동시 분석 한도 잠김을 막는다.
+- `JOB_EXECUTION_MODE=inline`은 롤백용 fire-and-forget 경로다. 운영 전환 후 `sqs` 모드와 Worker/DLQ 알람을 사용한다.
 - 추론 서버는 **무인증·내부용** → 공개 노출 금지, BFF만 공개 엣지.

@@ -116,3 +116,14 @@ export async function signedInputUrl(key: string): Promise<string | null> {
     { expiresIn: 300 },
   );
 }
+
+/** Worker가 S3의 원본을 읽어 추론 서버에 전달한다. 메시지에는 이미지 바이트를 넣지 않는다. */
+export async function loadInput(key: string): Promise<Blob> {
+  if (!config.betaDataBucket) throw new Error("BETA_DATA_BUCKET is required for queued jobs");
+  const response = await client.send(
+    new GetObjectCommand({ Bucket: config.betaDataBucket, Key: key }),
+  );
+  if (!response.Body) throw new Error("queued job input is empty");
+  const bytes = await response.Body.transformToByteArray();
+  return new Blob([bytes], { type: response.ContentType ?? "application/octet-stream" });
+}
