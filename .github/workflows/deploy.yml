@@ -17,6 +17,7 @@ env:
   ECR_REPOSITORY: standin/bff
   ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
   ECS_SERVICE: ${{ vars.ECS_SERVICE }}
+  ECS_WORKER_SERVICE: ${{ vars.ECS_WORKER_SERVICE }}
 
 jobs:
   deploy:
@@ -84,5 +85,34 @@ jobs:
         with:
           task-definition: ${{ steps.render.outputs.task-definition }}
           service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      - name: Download worker task definition
+        if: env.ECS_WORKER_SERVICE != ''
+        run: |
+          WORKER_TASK_DEFINITION=$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_WORKER_SERVICE" \
+            --query 'services[0].taskDefinition' \
+            --output text)
+          test "$WORKER_TASK_DEFINITION" != "None"
+          aws ecs describe-task-definition \
+            --task-definition "$WORKER_TASK_DEFINITION" \
+            --query taskDefinition > worker-taskdef.json
+
+      - uses: aws-actions/amazon-ecs-render-task-definition@v1
+        if: env.ECS_WORKER_SERVICE != ''
+        id: render_worker
+        with:
+          task-definition: worker-taskdef.json
+          container-name: analysis-worker
+          image: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+
+      - uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        if: env.ECS_WORKER_SERVICE != ''
+        with:
+          task-definition: ${{ steps.render_worker.outputs.task-definition }}
+          service: ${{ env.ECS_WORKER_SERVICE }}
           cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
