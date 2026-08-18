@@ -12,6 +12,7 @@ import { health } from "./inference.js";
 import { startInferenceWatch } from "./inferenceWatch.js";
 import { errorFields, log } from "./log.js";
 import { flush as flushAlerts, notify, notifyNow } from "./notify.js";
+import { flushOpsNow, recordRequest, startOpsFlush } from "./ops/collector.js";
 import { runWithContext } from "./requestContext.js";
 import { errorEnvelope } from "./mapping.js";
 import { requireAuth } from "./auth/middleware.js";
@@ -47,16 +48,21 @@ app.use("*", async (c, next) => {
   await runWithContext({ requestId, jobId }, async () => {
     // 라우트 **패턴**을 쓴다. 실제 경로를 넣으면 jobId마다 다른 값이 되어
     // 집계 카디널리티가 터진다.
-    const requestLine = (status: number, errorCode?: string) =>
+    const requestLine = (status: number, errorCode?: string) => {
+      const durationMs = Date.now() - startedAt;
+      const code = errorCode ?? (status >= 400 ? `HTTP_${status}` : undefined);
       log[status >= 500 ? "warn" : "info"]({
         type: "http_request",
         route: c.req.routePath,
         method: c.req.method,
         installationId: c.get("installationId"),
         status,
-        durationMs: Date.now() - startedAt,
-        ...(errorCode ? { errorCode } : status >= 400 ? { errorCode: `HTTP_${status}` } : {}),
+        durationMs,
+        ...(code ? { errorCode: code } : {}),
       });
+      // 로그와 같은 자리에서 지표도 센다. 두 곳에서 세면 반드시 어긋난다(계획 3단계).
+      recordRequest({ status, durationMs, route: c.req.routePath, errorCode: code });
+    };
 
     try {
       await next();
@@ -208,6 +214,8 @@ notify({
 
 // 추론 서버는 ALB에 붙어 있지 않아 밖에서 아무도 보지 않는다. BFF가 대신 지켜본다.
 const stopInferenceWatch = startInferenceWatch();
+// 요청 지표를 1분 롤업으로 저장하고 추론 서버 지표도 함께 긁어 온다(계획 3단계).
+const stopOpsFlush = startOpsFlush();
 
 const maintenanceTimer = setInterval(() => {
   void runDataMaintenance().catch((error) =>
@@ -261,11 +269,12 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, () => {
     log.info({ type: "shutdown", msg: `${signal} 수신 — 종료합니다.`, signal });
     stopInferenceWatch();
+    stopOpsFlush();
     server.close(() => {
-      // 버퍼에 남은 알림을 먼저 밀어낸다. 종료 신호 뒤에는 배치 창을 기다릴 수 없다.
-      void flushAlerts()
-        .catch(() => undefined)
-        .finally(() => void closeDb().finally(() => process.exit(0)));
+      // 버퍼에 남은 알림과 지표를 먼저 밀어낸다. 종료 신호 뒤에는 주기를 기다릴 수 없다.
+      void Promise.allSettled([flushAlerts(), flushOpsNow()]).finally(() =>
+        void closeDb().finally(() => process.exit(0)),
+      );
     });
   });
 }
