@@ -117,6 +117,19 @@ const SCHEMA = `
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS started_at TEXT;
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS completed_at TEXT;
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS inference_metadata_json TEXT;
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS lease_owner TEXT;
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS lease_expires_at TEXT;
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0;
+
+  -- DB commit과 SQS 전송 사이의 유실을 막는 transactional outbox.
+  CREATE TABLE IF NOT EXISTS job_outbox (
+    job_id           TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+    created_at       TEXT NOT NULL,
+    published_at     TEXT,
+    publish_attempts INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS idx_job_outbox_pending
+    ON job_outbox(created_at) WHERE published_at IS NULL;
 
   CREATE TABLE IF NOT EXISTS analysis_people (
     job_id          TEXT NOT NULL,

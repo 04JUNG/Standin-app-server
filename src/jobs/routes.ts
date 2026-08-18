@@ -15,6 +15,7 @@ import {
   updateJob,
 } from "./store.js";
 import { runAnalysisJob } from "./runner.js";
+import { dispatchPendingJobs } from "./queue.js";
 import { refineRoutes } from "../refine/routes.js";
 import { isAnalysisEnabled } from "../limits/flags.js";
 import { limitErrorResponse } from "../limits/http.js";
@@ -112,7 +113,11 @@ jobsRoutes.post("/", async (c) => {
   }
   try {
     const stored = await storeInput(installationId, job.id, bytes, file.type);
-    await setJobInput(job.id, { s3Key: stored.key, sha256: stored.sha256 });
+    await setJobInput(
+      job.id,
+      { s3Key: stored.key, sha256: stored.sha256 },
+      config.jobExecutionMode === "sqs",
+    );
   } catch {
     await updateJob(job.id, { status: "failed", errorCode: "INPUT_STORAGE_FAILED" });
     // 우리 쪽 저장 장애다. 사용자의 오늘 쿼터를 깎은 채로 두지 않는다.
@@ -122,7 +127,13 @@ jobsRoutes.post("/", async (c) => {
       503,
     );
   }
-  void runAnalysisJob(job.id, file); // fire-and-forget; free-form hints are not accepted in beta
+  if (config.jobExecutionMode === "sqs") {
+    void dispatchPendingJobs().catch(() =>
+      console.error(JSON.stringify({ type: "queue_dispatch", jobId: job.id, status: "failed" })),
+    );
+  } else {
+    void runAnalysisJob(job.id, file); // migration rollback path
+  }
   return c.json({ jobId: job.id, status: job.status, createdAt: job.createdAt }, 202);
 });
 

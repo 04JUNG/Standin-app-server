@@ -28,10 +28,15 @@ function logQualityMetrics(jobId: string, result: AnalysisResult): void {
   );
 }
 
-export async function runAnalysisJob(jobId: string, file: Blob, hint = ""): Promise<void> {
+export async function runAnalysisJob(
+  jobId: string,
+  file: Blob,
+  hint = "",
+  alreadyRunning = false,
+): Promise<void> {
   const startedAt = Date.now();
   if (!(await getJob(jobId))) return;
-  await updateJob(jobId, { status: "running" });
+  if (!alreadyRunning) await updateJob(jobId, { status: "running" });
   try {
     const cut = await analyze(file, hint);
     const result = mapCutResult(jobId, cut);
