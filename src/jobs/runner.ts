@@ -2,7 +2,10 @@
 // ⚠ Phase 0: 프로세스 내 비동기 실행(await 하지 않고 fire-and-forget).
 //    Phase 3: 큐(BullMQ/Redis 등)로 교체 — 이 함수 시그니처는 유지.
 import { InferenceTimeoutError, analyze } from "../inference.js";
+import { errorFields, log } from "../log.js";
 import { extractRefineContexts, mapCutResult } from "../mapping.js";
+import { notify } from "../notify.js";
+import { amendContext } from "../requestContext.js";
 import type { AnalysisResult } from "../types.js";
 import { getJob, persistAnalysisRecords, updateJob } from "./store.js";
 
@@ -15,22 +18,23 @@ import { getJob, persistAnalysisRecords, updateJob } from "./store.js";
 function logQualityMetrics(jobId: string, result: AnalysisResult): void {
   const people = result.candidatesByPerson;
   if (people.length === 0) return;
-  console.log(
-    JSON.stringify({
-      type: "analysis_quality",
-      jobId,
-      peopleCount: people.length,
-      softFallback: people.filter((p) => p.fallbackMode === "soft").length,
-      hardFallback: people.filter((p) => p.fallbackMode === "hard").length,
-      cropRetry: people.filter((p) => p.skeletonSource === "crop_retry").length,
-      refineAllowed: people.filter((p) => p.refineAllowed).length,
-    }),
-  );
+  log.info({
+    type: "analysis_quality",
+    jobId,
+    peopleCount: people.length,
+    softFallback: people.filter((p) => p.fallbackMode === "soft").length,
+    hardFallback: people.filter((p) => p.fallbackMode === "hard").length,
+    cropRetry: people.filter((p) => p.skeletonSource === "crop_retry").length,
+    refineAllowed: people.filter((p) => p.refineAllowed).length,
+  });
 }
 
 export async function runAnalysisJob(jobId: string, file: Blob, hint = ""): Promise<void> {
   const startedAt = Date.now();
   if (!(await getJob(jobId))) return;
+  // fire-and-forget으로 불리므로 요청 컨텍스트가 이미 끊겼을 수 있다. jobId만은
+  // 반드시 물고 가야 이 Job의 로그가 하나로 이어진다.
+  amendContext({ jobId });
   await updateJob(jobId, { status: "running" });
   try {
     const cut = await analyze(file, hint);
@@ -43,25 +47,33 @@ export async function runAnalysisJob(jobId: string, file: Blob, hint = ""): Prom
     // 운영 대응이 다르고, 클라도 다르게 안내한다.
     const errorCode = error instanceof InferenceTimeoutError ? "ANALYSIS_TIMEOUT" : "INFERENCE_FAILED";
     // 상태 기록까지 실패하면 Job이 running에 머문다. 로그로 남겨 추적 가능하게 한다.
-    await updateJob(jobId, { status: "failed", errorCode }).catch(() =>
-      console.error(
-        JSON.stringify({
-          type: "analysis_job",
-          jobId,
-          status: "failed",
-          durationMs: Date.now() - startedAt,
-          errorCode: "FAILURE_STATUS_PERSIST_FAILED",
-        }),
-      ),
-    );
-    console.error(
-      JSON.stringify({
+    await updateJob(jobId, { status: "failed", errorCode }).catch((persistError) =>
+      log.error({
         type: "analysis_job",
         jobId,
-        status: "failed",
+        jobStatus: "failed",
         durationMs: Date.now() - startedAt,
-        errorCode,
+        errorCode: "FAILURE_STATUS_PERSIST_FAILED",
+        ...errorFields(persistError),
       }),
     );
+    log.error({
+      type: "analysis_job",
+      jobId,
+      jobStatus: "failed",
+      durationMs: Date.now() - startedAt,
+      errorCode,
+      ...errorFields(error),
+    });
+    // 사유별로 접는다 — timeout이 쏟아지는 것과 추론이 거절하는 것은 다른 사건이다.
+    notify({
+      severity: "P2",
+      code: errorCode,
+      key: `P2:analysis:${errorCode}`,
+      message:
+        errorCode === "ANALYSIS_TIMEOUT"
+          ? "분석이 시간 초과로 실패했습니다. 추론 서버가 느리거나 멈춰 있습니다."
+          : "분석이 추론 서버 오류로 실패했습니다.",
+    });
   }
 }

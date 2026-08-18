@@ -1,6 +1,7 @@
 // 도원 추론 서버 호출을 한 곳에 격리한다(계약이 바뀌어도 여기만 수정).
 // 계약 원본: Standin-server/docs/API_CONTRACT.md
 import { config } from "./config.js";
+import { currentContext } from "./requestContext.js";
 
 /**
  * 추론 /analyze 응답의 인물 1명.
@@ -93,11 +94,20 @@ export class InferenceError extends Error {
   }
 }
 
+/**
+ * 추론 호출에 붙는 공통 헤더.
+ *
+ * `X-Request-Id`를 함께 넘기는 이유: 추론 서버가 같은 값을 자기 로그에 실어 주므로,
+ * 분석 한 건의 실패를 두 서버 로그에서 하나로 이어 볼 수 있다. 컨텍스트가 없는
+ * 경로(기동·타이머)에서는 헤더를 생략한다 — 없는 값을 지어내지 않는다.
+ */
 function authHeaders(): Record<string, string> {
   const h: Record<string, string> = {};
   if (config.inferenceServiceToken) {
     h["Authorization"] = `Bearer ${config.inferenceServiceToken}`;
   }
+  const requestId = currentContext()?.requestId;
+  if (requestId) h["X-Request-Id"] = requestId;
   return h;
 }
 
