@@ -5,6 +5,7 @@
 // 실제로 보관하지 못했다면 절대 refined=true로 기록하지 않는다.
 import { InferenceError, refine as refineUpstream } from "../inference.js";
 import { config } from "../config.js";
+import { log } from "../log.js";
 import {
   getRefinedBvh,
   putRefinedBvh,
@@ -63,7 +64,7 @@ const defaultDeps: RefineDeps = {
 };
 
 function logRefine(event: Record<string, unknown>): void {
-  console.log(JSON.stringify({ type: "refine", ...event }));
+  log.info({ type: "refine", ...event });
 }
 
 export async function runRefine(

@@ -9,12 +9,18 @@ import { config } from "./config.js";
 import { closeDb, initDb, runDataMaintenance } from "./db.js";
 import type { AppEnv } from "./env.js";
 import { health } from "./inference.js";
+import { startInferenceWatch } from "./inferenceWatch.js";
+import { errorFields, log } from "./log.js";
+import { flush as flushAlerts, notify, notifyNow } from "./notify.js";
+import { flushOpsNow, recordRequest, startOpsFlush } from "./ops/collector.js";
+import { runWithContext } from "./requestContext.js";
 import { errorEnvelope } from "./mapping.js";
 import { requireAuth } from "./auth/middleware.js";
 import { authRoutes } from "./auth/routes.js";
 import { usersRoutes } from "./users/routes.js";
 import { jobsRoutes } from "./jobs/routes.js";
 import { failStaleJobs } from "./jobs/store.js";
+import { dispatchPendingJobs } from "./jobs/queue.js";
 import { poseRoutes } from "./pose/routes.js";
 import { analyticsRoutes } from "./analytics/routes.js";
 import { installationRoutes } from "./installations/routes.js";
@@ -24,7 +30,13 @@ import { adminRoutes } from "./admin/routes.js";
 
 const app = new Hono<AppEnv>();
 
-// requestId 부여(오류봉투·로깅용)
+/**
+ * requestId 부여 + 요청 로그 한 줄(오류봉투·집계·알림의 공통 입구).
+ *
+ * `runWithContext`로 감싸는 이유: 이 안에서 await하는 모든 코드가 requestId를 자동으로
+ * 물고 다닌다. 로거가 알아서 싣고, 추론 호출도 `X-Request-Id`로 그대로 넘긴다 —
+ * 함수 시그니처마다 requestId를 끼워 넣지 않아도 두 서버의 로그가 이어진다.
+ */
 app.use("*", async (c, next) => {
   const requestId = `req_${randomUUID()}`;
   const startedAt = Date.now();
@@ -32,31 +44,65 @@ app.use("*", async (c, next) => {
   const pathJobId = c.req.path.match(/^\/v1\/analysis\/jobs\/(job_[0-9a-f-]+)/i)?.[1];
   const queryJobId = c.req.query("jobId");
   const jobId = pathJobId ?? (/^job_[0-9a-f-]+$/i.test(queryJobId ?? "") ? queryJobId : undefined);
-  try {
-    await next();
-    console.info(
-      JSON.stringify({
+
+  await runWithContext({ requestId, jobId }, async () => {
+    // 라우트 **패턴**을 쓴다. 실제 경로를 넣으면 jobId마다 다른 값이 되어
+    // 집계 카디널리티가 터진다.
+    const requestLine = (status: number, errorCode?: string) => {
+      const durationMs = Date.now() - startedAt;
+      const code = errorCode ?? (status >= 400 ? `HTTP_${status}` : undefined);
+      log[status >= 500 ? "warn" : "info"]({
         type: "http_request",
-        requestId,
-        ...(jobId ? { jobId } : {}),
-        status: c.res.status,
-        durationMs: Date.now() - startedAt,
-        ...(c.res.status >= 400 ? { errorCode: `HTTP_${c.res.status}` } : {}),
-      }),
-    );
-  } catch (error) {
-    console.error(
-      JSON.stringify({
-        type: "http_request",
-        requestId,
-        ...(jobId ? { jobId } : {}),
-        status: 500,
-        durationMs: Date.now() - startedAt,
-        errorCode: "INTERNAL_ERROR",
-      }),
-    );
-    throw error;
-  }
+        route: c.req.routePath,
+        method: c.req.method,
+        installationId: c.get("installationId"),
+        status,
+        durationMs,
+        ...(code ? { errorCode: code } : {}),
+      });
+      // 로그와 같은 자리에서 지표도 센다. 두 곳에서 세면 반드시 어긋난다(계획 3단계).
+      recordRequest({ status, durationMs, route: c.req.routePath, errorCode: code });
+    };
+
+    try {
+      await next();
+      requestLine(c.res.status);
+    } catch (error) {
+      // ⚠ 여기서 c.res를 읽으면 안 된다 — 응답이 아직 없으면 Hono가 404를 만들어 낸다.
+      //   실제 500 본문은 아래 onError가 만들고, 여기서는 한 줄만 남기고 다시 던진다.
+      requestLine(500, "INTERNAL_ERROR");
+      throw error;
+    }
+  });
+});
+
+/**
+ * 처리되지 않은 예외의 단일 종착지.
+ *
+ * 이게 없으면 Hono 기본 핸들러가 평문 500을 돌려주는데, 그건 클라가 기대하는
+ * `{error:{code}}` 봉투가 아니다(docs/API.md). 그리고 알림을 걸 지점도 사라진다.
+ */
+app.onError((error, c) => {
+  const route = c.req.routePath;
+  log.error({
+    type: "unhandled_error",
+    route,
+    method: c.req.method,
+    errorCode: "INTERNAL_ERROR",
+    ...errorFields(error),
+  });
+  // 라우트별로 접는다 — 한 엔드포인트가 터진 것과 서버 전체가 터진 것은 다른 사건이다.
+  notify({
+    severity: "P2",
+    code: "UNHANDLED_ERROR",
+    key: `P2:unhandled:${route}`,
+    message: `${c.req.method} ${route} 처리 중 예외가 발생했습니다.`,
+    context: { 예외: error instanceof Error ? error.name : "NonError" },
+  });
+  return c.json(
+    errorEnvelope("INTERNAL_ERROR", "일시적인 오류가 발생했습니다.", c.get("requestId")),
+    500,
+  );
 });
 
 // 클라는 Tauri 웹뷰라 출처가 이 서버와 다르다. CORS가 없으면 preflight가 404로 떨어져
@@ -134,39 +180,101 @@ app.route("/v1/admin", adminRoutes);
 
 // DB가 준비된 뒤에 요청을 받는다. 실패하면 기동하지 않는다 —
 // 스키마 없이 떠 있으면 모든 요청이 500이 되고 컨테이너는 healthy로 보인다.
-await initDb().catch((err) => {
-  console.error("[bff] DB 초기화 실패:", err);
+await initDb().catch(async (err) => {
+  log.error({ type: "startup", errorCode: "DB_INIT_FAILED", ...errorFields(err) });
+  // 곧 프로세스가 죽는다. 배치 창을 기다릴 수 없으므로 동기로 한 번 보낸다 —
+  // 이 알림을 놓치면 "태스크가 계속 재시작한다"는 사실을 아무도 모른다.
+  await notifyNow({
+    severity: "P1",
+    code: "DB_INIT_FAILED",
+    message: "BFF가 DB 초기화에 실패해 기동하지 못했습니다. 태스크가 반복 재시작합니다.",
+    context: { 원인: err instanceof Error ? err.name : "NonError" },
+  });
   process.exit(1);
 });
+if (config.jobExecutionMode === "sqs" && !config.analysisQueueUrl) {
+  throw new Error("ANALYSIS_QUEUE_URL is required when JOB_EXECUTION_MODE=sqs");
+}
 
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
-  console.log(`[bff] listening on http://localhost:${info.port}`);
-  console.log(`[bff] inference → ${config.inferenceBaseUrl}`);
+  log.info({
+    type: "startup",
+    msg: "listening",
+    port: info.port,
+    inference: config.inferenceBaseUrl,
+  });
 });
 
+notify({
+  severity: "P3",
+  code: "STARTUP",
+  message: `BFF 기동 — port ${config.port}`,
+  context: { version: config.deploymentVersion, env: process.env.NODE_ENV ?? "development" },
+});
+
+// 추론 서버는 ALB에 붙어 있지 않아 밖에서 아무도 보지 않는다. BFF가 대신 지켜본다.
+const stopInferenceWatch = startInferenceWatch();
+// 요청 지표를 1분 롤업으로 저장하고 추론 서버 지표도 함께 긁어 온다(계획 3단계).
+const stopOpsFlush = startOpsFlush();
+
 const maintenanceTimer = setInterval(() => {
-  void runDataMaintenance().catch(() => console.error("[bff] data maintenance failed"));
+  void runDataMaintenance().catch((error) =>
+    log.error({ type: "data_maintenance", errorCode: "MAINTENANCE_FAILED", ...errorFields(error) }),
+  );
 }, 24 * 60 * 60 * 1000);
 maintenanceTimer.unref();
 
 // 유실된 Job 정리. 24시간 주기 유지보수로는 너무 느리다 — 동시 분석 한도가 1이라
 // running인 채로 남은 Job 하나가 그 설치를 계속 막는다.
 const sweepStaleJobs = () =>
-  failStaleJobs()
+  (config.jobExecutionMode === "inline" ? failStaleJobs() : Promise.resolve(0))
     .then((count) => {
-      if (count > 0) console.warn(JSON.stringify({ type: "stale_jobs_swept", count }));
+      if (count === 0) return;
+      log.warn({ type: "stale_jobs_swept", count, errorCode: "STALE_JOBS" });
+      // 유실 Job은 사용자가 결과를 못 받았다는 뜻이다. 조용히 지나가면 안 된다.
+      notify({
+        severity: "P2",
+        code: "STALE_JOBS",
+        message: `${config.analysisStaleAfterSeconds}초 넘게 진행 중이던 Job ${count}건을 실패로 정리했습니다.`,
+      });
     })
-    .catch(() => console.error("[bff] stale job sweep failed"));
+    .catch((error) =>
+      log.error({ type: "stale_jobs_swept", errorCode: "SWEEP_FAILED", ...errorFields(error) }),
+    );
 void sweepStaleJobs();
 const staleJobTimer = setInterval(() => void sweepStaleJobs(), 60 * 1000);
 staleJobTimer.unref();
 
+// 요청 직후 전송이 실패해도 outbox를 주기적으로 재발행한다.
+const outboxTimer = setInterval(() => {
+  if (config.jobExecutionMode === "sqs") {
+    void dispatchPendingJobs().catch((error) => {
+      log.error({
+        type: "queue_dispatch",
+        errorCode: "QUEUE_DISPATCH_FAILED",
+        ...errorFields(error),
+      });
+      notify({
+        severity: "P2",
+        code: "QUEUE_DISPATCH_FAILED",
+        message: "BFF가 대기 중인 분석 작업을 SQS에 발행하지 못했습니다.",
+      });
+    });
+  }
+}, 5000);
+outboxTimer.unref();
+
 // ECS는 태스크를 교체할 때 SIGTERM을 보낸다. 진행 중 요청을 마치고 커넥션을 정리한다.
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, () => {
-    console.log(`[bff] ${signal} 수신 — 종료합니다.`);
+    log.info({ type: "shutdown", msg: `${signal} 수신 — 종료합니다.`, signal });
+    stopInferenceWatch();
+    stopOpsFlush();
     server.close(() => {
-      void closeDb().finally(() => process.exit(0));
+      // 버퍼에 남은 알림과 지표를 먼저 밀어낸다. 종료 신호 뒤에는 주기를 기다릴 수 없다.
+      void Promise.allSettled([flushAlerts(), flushOpsNow()]).finally(() =>
+        void closeDb().finally(() => process.exit(0)),
+      );
     });
   });
 }
