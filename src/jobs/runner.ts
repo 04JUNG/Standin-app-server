@@ -29,13 +29,18 @@ function logQualityMetrics(jobId: string, result: AnalysisResult): void {
   });
 }
 
-export async function runAnalysisJob(jobId: string, file: Blob, hint = ""): Promise<void> {
+export async function runAnalysisJob(
+  jobId: string,
+  file: Blob,
+  hint = "",
+  alreadyRunning = false,
+): Promise<void> {
   const startedAt = Date.now();
   if (!(await getJob(jobId))) return;
   // fire-and-forget으로 불리므로 요청 컨텍스트가 이미 끊겼을 수 있다. jobId만은
   // 반드시 물고 가야 이 Job의 로그가 하나로 이어진다.
   amendContext({ jobId });
-  await updateJob(jobId, { status: "running" });
+  if (!alreadyRunning) await updateJob(jobId, { status: "running" });
   try {
     const cut = await analyze(file, hint);
     const result = mapCutResult(jobId, cut);

@@ -19,6 +19,7 @@ import { authRoutes } from "./auth/routes.js";
 import { usersRoutes } from "./users/routes.js";
 import { jobsRoutes } from "./jobs/routes.js";
 import { failStaleJobs } from "./jobs/store.js";
+import { dispatchPendingJobs } from "./jobs/queue.js";
 import { poseRoutes } from "./pose/routes.js";
 import { analyticsRoutes } from "./analytics/routes.js";
 import { installationRoutes } from "./installations/routes.js";
@@ -185,6 +186,9 @@ await initDb().catch(async (err) => {
   });
   process.exit(1);
 });
+if (config.jobExecutionMode === "sqs" && !config.analysisQueueUrl) {
+  throw new Error("ANALYSIS_QUEUE_URL is required when JOB_EXECUTION_MODE=sqs");
+}
 
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   log.info({
@@ -215,7 +219,7 @@ maintenanceTimer.unref();
 // 유실된 Job 정리. 24시간 주기 유지보수로는 너무 느리다 — 동시 분석 한도가 1이라
 // running인 채로 남은 Job 하나가 그 설치를 계속 막는다.
 const sweepStaleJobs = () =>
-  failStaleJobs()
+  (config.jobExecutionMode === "inline" ? failStaleJobs() : Promise.resolve(0))
     .then((count) => {
       if (count === 0) return;
       log.warn({ type: "stale_jobs_swept", count, errorCode: "STALE_JOBS" });
@@ -232,6 +236,25 @@ const sweepStaleJobs = () =>
 void sweepStaleJobs();
 const staleJobTimer = setInterval(() => void sweepStaleJobs(), 60 * 1000);
 staleJobTimer.unref();
+
+// 요청 직후 전송이 실패해도 outbox를 주기적으로 재발행한다.
+const outboxTimer = setInterval(() => {
+  if (config.jobExecutionMode === "sqs") {
+    void dispatchPendingJobs().catch((error) => {
+      log.error({
+        type: "queue_dispatch",
+        errorCode: "QUEUE_DISPATCH_FAILED",
+        ...errorFields(error),
+      });
+      notify({
+        severity: "P2",
+        code: "QUEUE_DISPATCH_FAILED",
+        message: "BFF가 대기 중인 분석 작업을 SQS에 발행하지 못했습니다.",
+      });
+    });
+  }
+}, 5000);
+outboxTimer.unref();
 
 // ECS는 태스크를 교체할 때 SIGTERM을 보낸다. 진행 중 요청을 마치고 커넥션을 정리한다.
 for (const signal of ["SIGTERM", "SIGINT"] as const) {

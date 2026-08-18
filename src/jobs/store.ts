@@ -28,6 +28,7 @@ export interface Job {
   rerunOf: string | null;
   installationId: string | null;
   inputS3Key: string | null;
+  inputMime: string | null;
 }
 
 interface JobRow {
@@ -41,6 +42,7 @@ interface JobRow {
   rerun_of: string | null;
   installation_id: string | null;
   input_s3_key: string | null;
+  input_mime: string | null;
 }
 
 function toJob(r: JobRow): Job {
@@ -55,6 +57,7 @@ function toJob(r: JobRow): Job {
     rerunOf: r.rerun_of,
     installationId: r.installation_id,
     inputS3Key: r.input_s3_key,
+    inputMime: r.input_mime,
   };
 }
 
@@ -88,6 +91,7 @@ async function insertJob(
     rerunOf,
     installationId: input?.installationId ?? null,
     inputS3Key: null,
+    inputMime: input?.mime ?? null,
   };
   await executor.query(
     `INSERT INTO jobs
@@ -236,11 +240,57 @@ export async function getOwnedJob(id: string, installationId: string): Promise<J
 export async function setJobInput(
   id: string,
   input: { s3Key: string | null; sha256: string },
+  enqueue = false,
 ): Promise<void> {
-  await execute(
-    `UPDATE jobs SET input_s3_key = $2, input_sha256 = $3,
-       input_stored_at = $4, updated_at = $4 WHERE id = $1`,
-    [id, input.s3Key, input.sha256, new Date().toISOString()],
+  await transaction(async (client) => {
+    const now = new Date().toISOString();
+    await client.query(
+      `UPDATE jobs SET input_s3_key = $2, input_sha256 = $3,
+         input_stored_at = $4, updated_at = $4 WHERE id = $1`,
+      [id, input.s3Key, input.sha256, now],
+    );
+    if (enqueue) {
+      await client.query(
+        `INSERT INTO job_outbox (job_id, created_at)
+         VALUES ($1, $2) ON CONFLICT (job_id) DO NOTHING`,
+        [id, now],
+      );
+    }
+  });
+}
+
+/** SQS는 at-least-once다. lease를 원자적으로 획득한 worker 하나만 실행한다. */
+export async function claimJob(
+  id: string,
+  workerId: string,
+  leaseSeconds: number,
+): Promise<Job | undefined> {
+  const now = new Date();
+  const expires = new Date(now.getTime() + leaseSeconds * 1000).toISOString();
+  const rows = await queryOne<JobRow>(
+    `UPDATE jobs
+     SET status = 'running', started_at = COALESCE(started_at, $2), updated_at = $2,
+         lease_owner = $3, lease_expires_at = $4, attempt_count = attempt_count + 1
+     WHERE id = $1 AND input_s3_key IS NOT NULL
+       AND (status = 'queued' OR (status = 'running' AND (lease_expires_at IS NULL OR lease_expires_at < $2)))
+     RETURNING *`,
+    [id, now.toISOString(), workerId, expires],
+  );
+  return rows ? toJob(rows) : undefined;
+}
+
+export async function renewJobLease(
+  id: string,
+  workerId: string,
+  leaseSeconds: number,
+): Promise<boolean> {
+  const expires = new Date(Date.now() + leaseSeconds * 1000).toISOString();
+  return (
+    (await execute(
+      `UPDATE jobs SET lease_expires_at = $3, updated_at = $4
+       WHERE id = $1 AND lease_owner = $2 AND status = 'running'`,
+      [id, workerId, expires, new Date().toISOString()],
+    )) === 1
   );
 }
 

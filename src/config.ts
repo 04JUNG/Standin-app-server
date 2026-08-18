@@ -42,6 +42,11 @@ export const config = {
    * 동시 분석 한도가 1이라 그 설치는 스위퍼가 돌 때까지 아무것도 못 한다.
    */
   analysisTimeoutMs: Number(process.env.ANALYSIS_TIMEOUT_MS ?? 120_000),
+  /** inline은 기존 프로세스 내 실행, sqs는 영속 queue/worker 실행이다. */
+  jobExecutionMode: env("JOB_EXECUTION_MODE", "inline") as "inline" | "sqs",
+  analysisQueueUrl: env("ANALYSIS_QUEUE_URL"),
+  workerVisibilitySeconds: Number(process.env.WORKER_VISIBILITY_SECONDS ?? 180),
+  workerLeaseSeconds: Number(process.env.WORKER_LEASE_SECONDS ?? 180),
   /**
    * 헬스체크의 추론 확인 상한. ⚠ 이게 없으면 추론이 멈출 때 /healthz도 같이 멈추고,
    * ALB가 멀쩡한 BFF 태스크를 비정상으로 판단해 교체한다.
