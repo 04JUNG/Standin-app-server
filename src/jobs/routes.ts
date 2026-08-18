@@ -20,6 +20,8 @@ import { refineRoutes } from "../refine/routes.js";
 import { isAnalysisEnabled } from "../limits/flags.js";
 import { limitErrorResponse } from "../limits/http.js";
 import { isLimitExceeded } from "../limits/policy.js";
+import { errorFields, log } from "../log.js";
+import { notify } from "../notify.js";
 
 export const jobsRoutes = new Hono<AppEnv>();
 
@@ -128,9 +130,19 @@ jobsRoutes.post("/", async (c) => {
     );
   }
   if (config.jobExecutionMode === "sqs") {
-    void dispatchPendingJobs().catch(() =>
-      console.error(JSON.stringify({ type: "queue_dispatch", jobId: job.id, status: "failed" })),
-    );
+    void dispatchPendingJobs().catch((error) => {
+      log.error({
+        type: "queue_dispatch",
+        jobId: job.id,
+        errorCode: "QUEUE_DISPATCH_FAILED",
+        ...errorFields(error),
+      });
+      notify({
+        severity: "P2",
+        code: "QUEUE_DISPATCH_FAILED",
+        message: "새 분석 작업을 SQS에 즉시 발행하지 못했습니다. Outbox에서 재시도합니다.",
+      });
+    });
   } else {
     void runAnalysisJob(job.id, file); // migration rollback path
   }
