@@ -15,10 +15,13 @@ import {
   updateJob,
 } from "./store.js";
 import { runAnalysisJob } from "./runner.js";
+import { dispatchPendingJobs } from "./queue.js";
 import { refineRoutes } from "../refine/routes.js";
 import { isAnalysisEnabled } from "../limits/flags.js";
 import { limitErrorResponse } from "../limits/http.js";
 import { isLimitExceeded } from "../limits/policy.js";
+import { errorFields, log } from "../log.js";
+import { notify } from "../notify.js";
 
 export const jobsRoutes = new Hono<AppEnv>();
 
@@ -112,7 +115,11 @@ jobsRoutes.post("/", async (c) => {
   }
   try {
     const stored = await storeInput(installationId, job.id, bytes, file.type);
-    await setJobInput(job.id, { s3Key: stored.key, sha256: stored.sha256 });
+    await setJobInput(
+      job.id,
+      { s3Key: stored.key, sha256: stored.sha256 },
+      config.jobExecutionMode === "sqs",
+    );
   } catch {
     await updateJob(job.id, { status: "failed", errorCode: "INPUT_STORAGE_FAILED" });
     // 우리 쪽 저장 장애다. 사용자의 오늘 쿼터를 깎은 채로 두지 않는다.
@@ -122,7 +129,23 @@ jobsRoutes.post("/", async (c) => {
       503,
     );
   }
-  void runAnalysisJob(job.id, file); // fire-and-forget; free-form hints are not accepted in beta
+  if (config.jobExecutionMode === "sqs") {
+    void dispatchPendingJobs().catch((error) => {
+      log.error({
+        type: "queue_dispatch",
+        jobId: job.id,
+        errorCode: "QUEUE_DISPATCH_FAILED",
+        ...errorFields(error),
+      });
+      notify({
+        severity: "P2",
+        code: "QUEUE_DISPATCH_FAILED",
+        message: "새 분석 작업을 SQS에 즉시 발행하지 못했습니다. Outbox에서 재시도합니다.",
+      });
+    });
+  } else {
+    void runAnalysisJob(job.id, file); // migration rollback path
+  }
   return c.json({ jobId: job.id, status: job.status, createdAt: job.createdAt }, 202);
 });
 

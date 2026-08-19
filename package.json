@@ -11,11 +11,13 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
+    "start:worker": "node dist/worker.js",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --test dist/analytics/store.test.js dist/clientIp.test.js dist/imageHeader.test.js dist/inputStorage.test.js dist/limits/policy.test.js dist/mapping.test.js dist/refine/service.test.js"
+    "test": "npm run build && node --test dist/analytics/store.test.js dist/clientIp.test.js dist/imageHeader.test.js dist/inputStorage.test.js dist/jobs/queue.test.js dist/limits/policy.test.js dist/mapping.test.js dist/notify.test.js dist/ops/metrics.test.js dist/refine/service.test.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1101.0",
+    "@aws-sdk/client-sqs": "^3.1101.0",
     "@aws-sdk/s3-request-presigner": "^3.1101.0",
     "@hono/node-server": "^2.0.12",
     "@node-rs/argon2": "^2.0.2",

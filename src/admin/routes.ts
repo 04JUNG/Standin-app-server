@@ -8,6 +8,16 @@ import { getAnalysisFlag, setAnalysisEnabled } from "../limits/flags.js";
 import { dailyWindow } from "../limits/policy.js";
 import { currentUsage } from "../limits/store.js";
 import { errorEnvelope } from "../mapping.js";
+import { health } from "../inference.js";
+import { DASHBOARD_HTML } from "../ops/dashboard.js";
+import {
+  activeTasks,
+  hourSeries,
+  minuteSeries,
+  topErrors,
+  topRoutes,
+  totals,
+} from "../ops/store.js";
 
 export const adminRoutes = new Hono<AppEnv>();
 
@@ -18,8 +28,21 @@ function validAdminToken(value: string): boolean {
   return timingSafeEqual(actual, expected);
 }
 
+/**
+ * 대시보드만 쿼리스트링 토큰을 허용한다.
+ *
+ * 브라우저 주소창으로 여는 화면이라 헤더를 붙일 방법이 없다. 대신 페이지가 로드 즉시
+ * history.replaceState로 토큰을 주소에서 지우고 sessionStorage로 옮긴다 — 히스토리와
+ * 리퍼러에 남지 않는다. API(`/ops`)는 여전히 헤더만 받는다.
+ */
+const DASHBOARD_PATH = "/v1/admin/ops/dashboard";
+
 adminRoutes.use("*", async (c, next) => {
-  if (!validAdminToken(c.req.header("X-Beta-Admin-Token") ?? "")) {
+  const supplied =
+    c.req.header("X-Beta-Admin-Token") ??
+    (c.req.path === DASHBOARD_PATH ? c.req.query("token") ?? "" : "");
+  if (!validAdminToken(supplied)) {
+    // 401이 아니라 404다 — 관리자 API가 존재한다는 사실 자체를 노출하지 않는다.
     return c.json(errorEnvelope("NOT_FOUND", "not found", c.get("requestId")), 404);
   }
   await next();
@@ -44,6 +67,59 @@ async function audit(
     ],
   );
 }
+
+// GET /v1/admin/ops/dashboard — 의존성 없는 정적 대시보드 한 장.
+// 데이터는 담지 않는다. 화면이 열린 뒤 아래 /ops를 토큰 헤더로 호출해 채운다.
+adminRoutes.get("/ops/dashboard", (c) => c.html(DASHBOARD_HTML));
+
+/**
+ * GET /v1/admin/ops — 대시보드가 읽는 집계(계획 3단계).
+ *
+ * 합산은 전부 SQL에서 한다. 24시간이면 태스크당 1440행이라 앱으로 다 가져오면
+ * 대시보드를 한 번 여는 비용이 서비스보다 커진다.
+ */
+adminRoutes.get("/ops", async (c) => {
+  const now = Date.now();
+  const hourAgo = new Date(now - 60 * 60 * 1000).toISOString();
+  const dayAgo = new Date(now - 24 * 60 * 60 * 1000).toISOString();
+  const day = dailyWindow(now);
+
+  const [
+    bffMinutes, bffHours, bffTotals,
+    inferenceTotals, errors, routes, tasks,
+    flag, quotaUsed, inferenceHealthy, jobs,
+  ] = await Promise.all([
+    minuteSeries(hourAgo, "bff"),
+    hourSeries(dayAgo, "bff"),
+    totals(hourAgo, "bff"),
+    totals(hourAgo, "inference"),
+    topErrors(hourAgo),
+    topRoutes(hourAgo),
+    activeTasks(hourAgo),
+    getAnalysisFlag(),
+    currentUsage("global_day", "all", day),
+    health(),
+    query<{ status: string; count: string }>(
+      `SELECT status, count(*)::text AS count FROM jobs
+       WHERE created_at >= $1 GROUP BY status ORDER BY count(*) DESC`,
+      [hourAgo],
+    ),
+  ]);
+
+  return c.json({
+    now: new Date(now).toISOString(),
+    inferenceHealthy,
+    analysisEnabled: flag.enabled,
+    analysisReason: flag.reason,
+    tasks,
+    bff: { hour: bffTotals, minutes: bffMinutes, hours: bffHours },
+    inference: { hour: inferenceTotals },
+    topErrors: errors,
+    topRoutes: routes,
+    jobs: jobs.map((row) => ({ key: row.status, count: Number(row.count) })),
+    quota: { day: day.key, used: quotaUsed, limit: config.quotaGlobalDaily },
+  });
+});
 
 // GET /v1/admin/flags — 현재 운영 스위치와 오늘 전체 사용량.
 adminRoutes.get("/flags", async (c) => {

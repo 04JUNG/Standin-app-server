@@ -42,6 +42,11 @@ export const config = {
    * 동시 분석 한도가 1이라 그 설치는 스위퍼가 돌 때까지 아무것도 못 한다.
    */
   analysisTimeoutMs: Number(process.env.ANALYSIS_TIMEOUT_MS ?? 120_000),
+  /** inline은 기존 프로세스 내 실행, sqs는 영속 queue/worker 실행이다. */
+  jobExecutionMode: env("JOB_EXECUTION_MODE", "inline") as "inline" | "sqs",
+  analysisQueueUrl: env("ANALYSIS_QUEUE_URL"),
+  workerVisibilitySeconds: Number(process.env.WORKER_VISIBILITY_SECONDS ?? 180),
+  workerLeaseSeconds: Number(process.env.WORKER_LEASE_SECONDS ?? 180),
   /**
    * 헬스체크의 추론 확인 상한. ⚠ 이게 없으면 추론이 멈출 때 /healthz도 같이 멈추고,
    * ALB가 멀쩡한 BFF 태스크를 비정상으로 판단해 교체한다.
@@ -122,6 +127,33 @@ export const config = {
     kakao: { clientId: env("KAKAO_CLIENT_ID"), clientSecret: env("KAKAO_CLIENT_SECRET") },
     naver: { clientId: env("NAVER_CLIENT_ID"), clientSecret: env("NAVER_CLIENT_SECRET") },
   },
+
+  /**
+   * 장애 알림(디스코드 웹훅). 설계: 마스터독스 「관측성 — 로그·모니터링·디스코드 알림」 §5.
+   *
+   * ⚠ 웹훅 URL 자체가 비밀이다 — URL을 아는 누구나 그 채널에 글을 쓸 수 있다.
+   *   배포에서는 Secrets Manager의 `standin/discord`에서 주입한다.
+   * 비어 있으면 알림기는 조용히 no-op이다. 로컬은 웹훅 없이 그대로 돈다.
+   */
+  discord: {
+    webhookAlert: env("DISCORD_WEBHOOK_ALERT"), // P1
+    webhookWarn: env("DISCORD_WEBHOOK_WARN"), // P2
+    webhookOps: env("DISCORD_WEBHOOK_OPS"), // P3
+    // P1에 붙일 멘션(`@here` 등). 코드에 박지 않는다 — 야간 호출 정책은 팀이 정한다.
+    mention: env("DISCORD_ALERT_MENTION"),
+  },
+  /** 배치 창. 이 시간 안의 알림을 한 메시지로 묶는다. */
+  alertFlushMs: Number(process.env.ALERT_FLUSH_MS ?? 10_000),
+  /** 같은 키를 다시 보내지 않는 시간. 그 사이의 재발은 세었다가 "×N"으로 보고한다. */
+  alertSuppressSeconds: Number(process.env.ALERT_SUPPRESS_SECONDS ?? 300),
+  /** 한 메시지에 담을 임베드 상한. 초과분은 "외 N종"으로 접는다. */
+  alertMaxPerFlush: Number(process.env.ALERT_MAX_PER_FLUSH ?? 5),
+  /**
+   * 추론 서버 헬스 확인 주기와 P1 승격 임계. 일시적 흔들림으로 사람을 깨우지 않기 위해
+   * 연속 실패 횟수를 센다(기본 30초 × 3회 = 약 1분 30초).
+   */
+  inferenceWatchIntervalMs: Number(process.env.INFERENCE_WATCH_INTERVAL_MS ?? 30_000),
+  inferenceWatchFailureThreshold: Number(process.env.INFERENCE_WATCH_FAILURES ?? 3),
 
   // 이메일 인증 발송(SMTP). 미설정이면 콘솔에 링크 출력(dev).
   smtp: {

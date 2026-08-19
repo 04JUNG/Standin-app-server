@@ -117,6 +117,19 @@ const SCHEMA = `
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS started_at TEXT;
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS completed_at TEXT;
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS inference_metadata_json TEXT;
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS lease_owner TEXT;
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS lease_expires_at TEXT;
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0;
+
+  -- DB commit과 SQS 전송 사이의 유실을 막는 transactional outbox.
+  CREATE TABLE IF NOT EXISTS job_outbox (
+    job_id           TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+    created_at       TEXT NOT NULL,
+    published_at     TEXT,
+    publish_attempts INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS idx_job_outbox_pending
+    ON job_outbox(created_at) WHERE published_at IS NULL;
 
   CREATE TABLE IF NOT EXISTS analysis_people (
     job_id          TEXT NOT NULL,
@@ -255,6 +268,32 @@ const SCHEMA = `
     updated_at TEXT NOT NULL
   );
 
+  -- 운영 지표 1분 롤업(계획 3단계). 태스크마다 자기 행을 쓰고, 합치는 것은 조회 시점에 한다.
+  -- 지연시간은 p50/p95가 아니라 히스토그램으로 둔다 — 태스크별 p95를 평균 내는 것은
+  -- 통계적으로 의미가 없지만(p95의 평균은 p95가 아니다), 버킷 카운트는 더할 수 있다.
+  CREATE TABLE IF NOT EXISTS ops_metrics (
+    bucket_at    TEXT NOT NULL,      -- 분 경계 ISO
+    service      TEXT NOT NULL,      -- bff | inference
+    task_id      TEXT NOT NULL,      -- 태스크(프로세스) 식별자
+    requests     INTEGER NOT NULL DEFAULT 0,
+    errors_4xx   INTEGER NOT NULL DEFAULT 0,
+    errors_5xx   INTEGER NOT NULL DEFAULT 0,
+    duration_sum BIGINT  NOT NULL DEFAULT 0,
+    lat_50       INTEGER NOT NULL DEFAULT 0,
+    lat_100      INTEGER NOT NULL DEFAULT 0,
+    lat_250      INTEGER NOT NULL DEFAULT 0,
+    lat_500      INTEGER NOT NULL DEFAULT 0,
+    lat_1000     INTEGER NOT NULL DEFAULT 0,
+    lat_2500     INTEGER NOT NULL DEFAULT 0,
+    lat_5000     INTEGER NOT NULL DEFAULT 0,
+    lat_10000    INTEGER NOT NULL DEFAULT 0,
+    lat_30000    INTEGER NOT NULL DEFAULT 0,
+    lat_inf      INTEGER NOT NULL DEFAULT 0,
+    by_error     JSONB   NOT NULL DEFAULT '{}'::jsonb,
+    by_route     JSONB   NOT NULL DEFAULT '{}'::jsonb,
+    PRIMARY KEY (bucket_at, service, task_id)
+  );
+
   CREATE TABLE IF NOT EXISTS admin_access_audit (
     audit_id     TEXT PRIMARY KEY,
     reviewer     TEXT NOT NULL,
@@ -276,6 +315,7 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS analytics_events_installation ON analytics_events (installation_id, occurred_at);
   CREATE INDEX IF NOT EXISTS analytics_events_job ON analytics_events (job_id);
   CREATE INDEX IF NOT EXISTS candidates_job_rank ON analysis_candidates (job_id, person_index, rank);
+  CREATE INDEX IF NOT EXISTS ops_metrics_bucket ON ops_metrics (bucket_at);
 
   CREATE OR REPLACE VIEW analytics_job_funnel AS
   SELECT
@@ -444,6 +484,11 @@ export async function runDataMaintenance(): Promise<void> {
     await refreshAggregatesAndRetention(client);
     await client.query("DELETE FROM usage_counters WHERE expires_at < $1", [
       Math.floor(Date.now() / 1000),
+    ]);
+    // 분 롤업은 14일만 둔다. 그 이상 거슬러 올라가 분 단위를 볼 일이 없고,
+    // 태스크마다 분당 1행이라 방치하면 행 수가 가장 빨리 느는 테이블이 된다.
+    await client.query("DELETE FROM ops_metrics WHERE bucket_at < $1", [
+      new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
     ]);
   } finally {
     client.release();
