@@ -89,17 +89,16 @@ docker compose down            # 종료 (DB는 pg-data 볼륨에 유지)
 | `MAX_IMAGE_PIXELS` | 50000000 | 허용 최대 픽셀 수 |
 | `RATE_IP_REGISTER` / `_WINDOW` | 5 / 3600 | IP별 설치 발급 burst |
 | `RATE_IP_ANALYZE` / `_WINDOW` | 5 / 60 | IP별 분석 요청 burst |
-| `TRUSTED_PROXY_HOPS` | 1 | XFF 오른쪽에서 신뢰하는 프록시 홉 수 |
+| `TRUSTED_PROXY_HOPS` | -1 | XFF에서 client IP 오른쪽의 신뢰 주소 수(-1은 XFF 비활성화) |
 | `IP_HASH_SALT` | (`JWT_SECRET`) | IP 해시 솔트 |
 
 초과하면 `429` + `Retry-After`와 함께 재시도 가능 시각을 준다 → `docs/API.md`의 「사용량 제한」.
 
-⚠ `TRUSTED_PROXY_HOPS`는 배포 체인(`CloudFront → ALB → BFF`) 기준 **1**이고, 프록시가 없는
-로컬은 **0**이다. `0`이면 `X-Forwarded-For`를 아예 읽지 않고 소켓 주소를 쓴다 — 앞에 프록시가
-없으면 그 헤더는 클라가 직접 써 보낸 값이라 아무 것도 보장하지 않는다. `0`보다 크면 오른쪽에서
-그만큼 세어 들어간 자리를 쓰고, 클라가 채울 수 있는 왼쪽은 믿지 않는다. **이 값을 실제 프록시
-수보다 크게 잡으면 IP 제한이 통째로 우회된다.** IP는 원문 대신 `/64`(IPv6) 정규화 후 해시로만
-저장한다.
+⚠ `TRUSTED_PROXY_HOPS`는 배포 체인(`ALB → BFF`) 기준 **0**이고, 프록시가 없는 로컬은
+**-1**이다. ALB는 자신이 관측한 client IP를 XFF 오른쪽 끝에 append하므로, 클라가 채울 수 있는
+왼쪽 값은 믿지 않는다. CloudFront처럼 client IP 오른쪽에 주소가 하나 더 생기는 프록시를 넣으면
+값을 1로 바꾼다. **이 값을 실제 체인보다 크게 잡으면 IP 제한이 우회될 수 있다.** IP는 원문 대신
+`/64`(IPv6) 정규화 후 해시로만 저장한다.
 
 ### Kill switch
 
