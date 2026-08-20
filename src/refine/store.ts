@@ -7,12 +7,23 @@ export interface StoredRefineContext {
   scores: number[] | null;
   refineAllowed: boolean;
   refinableLimbs: string[];
+  // ── v2.5 policy lineage. 추론이 fail-closed로 재검증한다 ────────────────
+  skeletonState: string | null;
+  coverageClass: string | null;
+  slotOrigin: string | null;
+  skeletonSource: string | null;
+  lowerBodyObserved: boolean;
 }
 
 interface PersonRow {
   refine_allowed: boolean | null;
   refinable_limbs_json: string | null;
   refine_context_json: string | null;
+  skeleton_state: string | null;
+  coverage_class: string | null;
+  slot_origin: string | null;
+  skeleton_source: string | null;
+  lower_body_observed: boolean | null;
 }
 
 /**
@@ -26,7 +37,9 @@ export async function loadRefineContext(
   personIndex: number,
 ): Promise<StoredRefineContext | null> {
   const row = await queryOne<PersonRow>(
-    `SELECT refine_allowed, refinable_limbs_json, refine_context_json
+    `SELECT refine_allowed, refinable_limbs_json, refine_context_json,
+            skeleton_state, coverage_class, slot_origin, skeleton_source,
+            lower_body_observed
      FROM analysis_people WHERE job_id = $1 AND person_index = $2`,
     [jobId, personIndex],
   );
@@ -65,6 +78,13 @@ export async function loadRefineContext(
     scores: scores && scores.length === 17 ? scores : null,
     refineAllowed: row.refine_allowed === true,
     refinableLimbs,
+    // 마이그레이션 직전에 저장된 행은 이 컬럼들이 NULL이다. 그대로 보내면 추론이
+    // skeleton_policy로 떨어뜨린다 — 값을 지어내는 것보다 그 편이 맞다.
+    skeletonState: row.skeleton_state,
+    coverageClass: row.coverage_class,
+    slotOrigin: row.slot_origin,
+    skeletonSource: row.skeleton_source,
+    lowerBodyObserved: row.lower_body_observed === true,
   };
 }
 

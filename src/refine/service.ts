@@ -130,6 +130,13 @@ export async function runRefine(
       search_distance: candidate.distance,
       refine_allowed: context.refineAllowed,
       refinable_limbs: context.refinableLimbs,
+      // v2.5 policy lineage. 하나라도 빠지면 추론이 fail-closed로 전건 skeleton_policy를
+      // 돌려주는데, 그건 정상 스킵이라 오류로도 안 잡힌다 — refine이 조용히 꺼진다.
+      skeleton_state: context.skeletonState,
+      coverage_class: context.coverageClass,
+      slot_origin: context.slotOrigin,
+      skeleton_source: context.skeletonSource,
+      lower_body_observed: context.lowerBodyObserved,
     });
   } catch (error) {
     // timeout·5xx·404·422 모두 사용자에게는 "베이스를 쓴다"로 수렴한다. 운영 오류는 로그로만.
@@ -144,7 +151,11 @@ export async function runRefine(
   // refined=true인데 본문이 없다면 계약 위반이다. 추론 서버가 조정본을 넘기는 경로는
   // 이 필드 하나뿐이고(REFINE_HANDOFF §3 4단계에서 /refined/{handle}/bvh는 제거됐다),
   // 없는 걸 지어낼 방법이 없으므로 베이스로 안전 전환한다.
-  if (upstream.bvh === undefined) {
+  //
+  // ⚠ `=== undefined`로는 부족하다. 추론은 `bvh: null`을 **명시적으로** 보내고
+  //   (`bvh=res.bvh_text if res.refined else None`), null이 새어 나가면 아래
+  //   `TextEncoder().encode()`가 문자열 `"null"`을 조정본으로 S3에 올린다.
+  if (typeof upstream.bvh !== "string" || upstream.bvh.length === 0) {
     logRefine({ event: "refine_failed", jobId, personIndex, stage: "contract" });
     return skip("upstream_missing_bvh");
   }

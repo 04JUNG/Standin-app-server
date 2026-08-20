@@ -261,6 +261,12 @@ fire-and-forget이라 생길 수 있고, 서버가 주기적으로 정리해 무
 COCO-17 좌표와 안전정책(`refineAllowed`, `refinableLimbs`)은 **클라이언트가 보내지 않는다**. `/analyze` 때
 BFF가 보관해 둔 값을 서버측에서 읽는다 — 클라이언트가 값을 되돌려 보내면 refine 금지를 우회할 수 있기 때문이다.
 
+추론 refine v2.5부터는 여기에 **policy lineage**(`skeleton_state`·`coverage_class`·`slot_origin`·
+`skeleton_source`·`lower_body_observed`)가 함께 전달된다. 추론의 `structural_refine_allowed`가 다섯 값을
+전부 검사하고 하나라도 빠지면 fail-closed로 `skeleton_policy`를 돌려주는데, 그건 오류 응답이 아니라 정상
+스킵이라 로그에도 지표에도 안 남는다 — 즉 **전달이 끊기면 refine이 아무 신호 없이 꺼진다.** 값은 전부
+`/analyze` 때 `analysis_people`에 저장한 것이고, 없으면 지어내지 않고 `null` 그대로 보내 추론이 판단하게 둔다.
+
 응답:
 
 ```json
@@ -286,6 +292,11 @@ BFF가 보관해 둔 값을 서버측에서 읽는다 — 클라이언트가 값
 | `context_unavailable` | 보관된 refine 입력이 없거나 17×2가 아니다 |
 | `upstream_unavailable` | 추론 timeout·5xx. 베이스로 전환 |
 | `artifact_store_failed` | 조정은 됐지만 보관에 실패. **refined=true로 기록하지 않는다** |
+| `upstream_missing_bvh` | `refined=true`인데 `bvh` 본문이 없거나 `null`. 계약 위반이라 베이스로 전환 |
+
+추론이 돌려주는 사유에는 v2.5에서 `timeout`, `safety_gate`, `unchanged_geometry`, `low_observability`,
+`no_solvable_joints`, `final_collision_gate`, `final_extension_gate`가 추가됐다. 전부 `refined=false` +
+베이스 저장으로 수렴하므로 클라이언트 분기는 달라지지 않는다.
 
 같은 `(jobId, personIndex, candidateId)`는 멱등이다 — 다시 호출해도 추론을 재호출하지 않고 저장된 결과를 돌려준다.
 
@@ -320,6 +331,10 @@ BFF가 보관해 둔 값을 서버측에서 읽는다 — 클라이언트가 값
 조정본을 보관했다고 기록해 놓고 객체를 읽지 못하면 베이스로 안전 전환하고 `export_events`에
 `variant=base`, `fallback_reason=refined_object_missing`을 남긴다. 조정본도 원본과 HIERARCHY·채널 순서가
 같으므로 CSP 축 보정·드래그 로직은 달라지지 않는다.
+
+**`409 POSE_UNAVAILABLE`**: 추론이 릴리스 시점에 격리한 포즈(`pose_quarantined`)다. 후보 목록은 `/analyze`
+때 저장돼 있으므로 격리가 늘어나면 화면에 남아 있던 선택이 여기서 409로 돌아온다. **재시도로는 풀리지
+않는다** — 클라이언트는 재시도 버튼이 아니라 "다른 후보를 선택" 경로를 보여줘야 한다.
 
 ---
 

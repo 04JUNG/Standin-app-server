@@ -349,8 +349,9 @@ export async function persistAnalysisRecords(
           (job_id, person_index, bbox_json, tags_json, skeleton_json, confidence,
            candidate_count, candidate_shortfall_reason,
            skeleton_state, skeleton_source, coverage_class, fallback_mode,
+           slot_origin, lower_body_observed,
            refine_allowed, refinable_limbs_json, refine_context_json, raw_scores_json)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
         [
           jobId,
           person.personIndex,
@@ -364,6 +365,9 @@ export async function persistAnalysisRecords(
           person.skeletonSource,
           person.coverageClass,
           person.fallbackMode,
+          // v2.5 policy lineage. 공개 응답에는 없고 refine 호출에만 쓴다(BFF-03).
+          ctx?.slotOrigin ?? null,
+          ctx?.lowerBodyObserved === true,
           person.refineAllowed,
           JSON.stringify(person.refinableLimbs),
           // refine 입력은 서버측에만 둔다(BFF-04). 클라가 되돌려 보낸 값은 신뢰하지 않는다.
