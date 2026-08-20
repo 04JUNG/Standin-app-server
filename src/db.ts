@@ -157,6 +157,12 @@ const SCHEMA = `
   ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS refine_context_json TEXT;
   ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS raw_scores_json TEXT;
 
+  -- refine v2.5 policy lineage. 추론의 structural_refine_allowed가 slot_origin='vlm'과
+  -- skeleton_source='full_image'를 함께 요구하므로, 보내지 않으면 모든 refine이 조용히
+  -- skeleton_policy로 떨어진다. 공개 응답에는 나가지 않는 서버측 전용 값이다(BFF-03).
+  ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS slot_origin TEXT;
+  ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS lower_body_observed BOOLEAN NOT NULL DEFAULT FALSE;
+
   CREATE TABLE IF NOT EXISTS analysis_candidates (
     job_id               TEXT NOT NULL,
     person_index         INTEGER NOT NULL,

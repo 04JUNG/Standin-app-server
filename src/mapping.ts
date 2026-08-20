@@ -172,6 +172,15 @@ export interface RefineContext {
   rawScores: number[] | null;
   qualityReasons: string[];
   qualityTrace: Record<string, unknown>;
+  /**
+   * 인물 소유권 lineage. 추론은 `"vlm"`만 통과시킨다.
+   *
+   * 공개 `AnalysisPerson`에는 넣지 않는다 — 클라이언트가 쓸 일이 없고, 공개하면 클라가
+   * 되돌려 보내는 구조가 생겨 refine 금지를 우회할 수 있다(BFF-03·BFF-04).
+   */
+  slotOrigin: string | null;
+  /** 하체 관측 판정. 추론이 false면 모든 다리 조정을 막는다. */
+  lowerBodyObserved: boolean;
 }
 
 export function extractRefineContexts(cut: CutResult): RefineContext[] {
@@ -182,6 +191,12 @@ export function extractRefineContexts(cut: CutResult): RefineContext[] {
     rawScores: p.raw_scores ?? null,
     qualityReasons: p.quality_reasons ?? [],
     qualityTrace: p.quality_trace ?? {},
+    // 값을 좁히지 않고 그대로 옮긴다. 어휘의 단일 소스는 추론의 schema.py이고, 모르는 값은
+    // structural_refine_allowed가 fail-closed로 떨어뜨린다 — 여기서 한 번 더 해석하면
+    // 두 곳이 어휘를 알게 되고 추론이 값을 늘릴 때 조용히 어긋난다.
+    slotOrigin: typeof p.slot_origin === "string" ? p.slot_origin : null,
+    // 신규 필드가 없는 구 추론 응답은 하체 미관측으로 본다. 허용은 명시적일 때만.
+    lowerBodyObserved: p.lower_body_observed === true,
   }));
 }
 
