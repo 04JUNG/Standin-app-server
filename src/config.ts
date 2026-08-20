@@ -98,11 +98,11 @@ export const config = {
   /**
    * X-Forwarded-For 오른쪽에서 신뢰하는 프록시 홉 수.
    *
-   * 배포는 CloudFront(XFF에 client IP 기록) → ALB(CloudFront 엣지 IP 덧붙임)이라 1이다.
-   * 프록시가 없는 로컬은 0으로 둔다. ⚠ 이 값을 잘못 키우면 클라가 XFF를 위조해
+   * 배포는 ALB가 client IP를 XFF 오른쪽 끝에 기록하므로 0이다.
+   * 프록시가 없는 로컬은 -1로 둔다. ⚠ 이 값을 잘못 키우면 클라가 XFF를 위조해
    * IP 제한을 우회할 수 있다.
    */
-  trustedProxyHops: Number(process.env.TRUSTED_PROXY_HOPS ?? 1),
+  trustedProxyHops: Number(process.env.TRUSTED_PROXY_HOPS ?? -1),
   // IP는 원문 대신 해시로만 저장한다. 전용 값이 없으면 JWT 시크릿을 재사용한다.
   ipHashSalt: env("IP_HASH_SALT") || env("JWT_SECRET", "dev-only-change-me"),
 

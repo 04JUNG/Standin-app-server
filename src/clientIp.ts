@@ -1,8 +1,8 @@
 // 요청의 실제 client IP 판별과 버킷 키 생성.
 //
-// 체인은 [Client] → CloudFront → ALB → [ECS Fargate: 이 서버]다(Standin-infra).
-// CloudFront가 `X-Forwarded-For: <clientIp>`를 세우고 ALB가 CloudFront 엣지 IP를
-// 덧붙이므로 이 서버가 보는 값은 `<clientIp>, <cfEdgeIp>` — 오른쪽 1홉이 신뢰 구간이다.
+// 배포 체인은 [Client] → ALB → [ECS Fargate: 이 서버]다(Standin-infra).
+// ALB가 자신이 관측한 client IP를 XFF 오른쪽 끝에 append하므로, 클라가 앞쪽 값을
+// 위조해도 오른쪽 끝 주소는 신뢰할 수 있다.
 import { createHash } from "node:crypto";
 import type { Context } from "hono";
 import { getConnInfo } from "@hono/node-server/conninfo";
@@ -16,23 +16,25 @@ import type { AppEnv } from "./env.js";
  * 주장하면 제한을 통째로 우회한다. 우리가 신뢰하는 프록시 홉 수만큼 **오른쪽에서**
  * 세어 들어간 자리가 우리가 검증할 수 있는 마지막 주소다.
  *
- * hops가 0이면 우리 앞에 프록시가 없다는 뜻이므로 **헤더를 통째로 무시한다** —
- * 그 경우 XFF는 클라가 직접 써 보낸 값이라 아무 것도 보장하지 않는다.
+ * hops는 실제 client IP 오른쪽에 있는 신뢰 프록시 주소 수다. ALB 직결은 ALB 자신을
+ * XFF에 넣지 않으므로 0, CloudFront → ALB라면 CloudFront 주소 하나가 있어 1이다.
+ * 음수면 신뢰 프록시가 없는 로컬 실행으로 보고 헤더를 통째로 무시한다.
  *
  * @param header X-Forwarded-For 원문
- * @param hops 오른쪽에서 신뢰하는 프록시 수(배포=1, 프록시 없는 로컬=0)
+ * @param hops client IP 오른쪽의 신뢰 주소 수(ALB 직결=0, 프록시 없는 로컬=-1)
  * @returns 판별된 IP. 신뢰할 근거가 없으면 null(소켓 주소로 폴백)
  */
 export function forwardedClientIp(header: string | undefined, hops: number): string | null {
-  if (!header || hops <= 0) return null;
+  if (!header || !Number.isInteger(hops) || hops < 0) return null;
   const chain = header
     .split(",")
     .map((v) => stripPort(v.trim()))
     .filter(Boolean);
   if (chain.length === 0) return null;
   const index = chain.length - 1 - hops;
-  // 홉 수보다 체인이 짧으면(프록시 설정 불일치) 가장 왼쪽으로 떨어진다.
-  return chain[Math.max(0, index)] ?? null;
+  // 기대한 프록시 주소보다 체인이 짧으면 설정 불일치다. 위조 가능한 왼쪽 값으로
+  // 떨어지지 않고 소켓 주소를 사용한다.
+  return index >= 0 ? (chain[index] ?? null) : null;
 }
 
 /** `1.2.3.4:5678`·`[::1]:5678`·`[::1]` 형태를 주소만 남긴다. */
