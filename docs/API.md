@@ -75,6 +75,11 @@ Retry-After: 41230
 일일 한도는 **KST 자정**에 리셋된다(`retryAt`은 항상 `+09:00` 표기). 한도값은 서버 환경변수로
 조정되므로 클라가 숫자를 하드코딩하지 않고 `details.limit`을 그대로 보여준다.
 
+**환불되는 실패.** 쿼터는 "우리가 한 일"에 매기는 값이라, 분석이 아예 수행되지 않은 실패는
+소비한 1회를 되돌린다 — 입력 저장 실패(`INPUT_STORAGE_FAILED`)와 상류 VLM 혼잡
+(`ANALYSIS_UNAVAILABLE`)이다. 추론이 실제로 돌다가 늦어지거나(`ANALYSIS_TIMEOUT`) 거절한
+경우(`INFERENCE_FAILED`)는 환불하지 않는다.
+
 `RATE_LIMITED`는 IP 단위 burst 제한이며 `POST /v1/installations`와 `POST /v1/analysis/jobs`에
 걸린다. 일일 쿼터와는 별개 카운터라, 남은 일일 횟수가 있어도 잠깐 몰리면 나올 수 있다.
 공용망·NAT에서는 같은 IP를 여러 사용자가 공유할 수 있으므로 "잠시 후 다시 시도"로 안내한다.

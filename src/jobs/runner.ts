@@ -1,13 +1,13 @@
 // BFF의 핵심 역할: 동기 추론(/analyze)을 백그라운드로 호출해 Job으로 감싼다.
 // ⚠ Phase 0: 프로세스 내 비동기 실행(await 하지 않고 fire-and-forget).
 //    Phase 3: 큐(BullMQ/Redis 등)로 교체 — 이 함수 시그니처는 유지.
-import { analyze, analysisFailureCode } from "../inference.js";
+import { analyze, analysisFailureCode, shouldRefundQuota } from "../inference.js";
 import { errorFields, log } from "../log.js";
 import { extractRefineContexts, mapCutResult } from "../mapping.js";
 import { notify } from "../notify.js";
 import { amendContext } from "../requestContext.js";
 import type { AnalysisResult } from "../types.js";
-import { getJob, persistAnalysisRecords, updateJob } from "./store.js";
+import { failJob, getJob, persistAnalysisRecords, updateJob } from "./store.js";
 
 /**
  * 인물 단위 품질 분포를 job마다 남긴다(BFF-08).
@@ -60,7 +60,9 @@ export async function runAnalysisJob(
     // "추론이 거절했다"는 운영 대응이 다르고, 사용자에게 줄 안내도 다르다.
     const errorCode = analysisFailureCode(error);
     // 상태 기록까지 실패하면 Job이 running에 머문다. 로그로 남겨 추적 가능하게 한다.
-    await updateJob(jobId, { status: "failed", errorCode }).catch((persistError) =>
+    // 상류가 요청을 받아주지 않아 분석이 아예 수행되지 않았으면 하루 쿼터도 돌려준다.
+    const refundQuota = shouldRefundQuota(errorCode);
+    await failJob(jobId, errorCode, { refundQuota }).catch((persistError) =>
       log.error({
         type: "analysis_job",
         jobId,
@@ -76,6 +78,7 @@ export async function runAnalysisJob(
       jobStatus: "failed",
       durationMs: Date.now() - startedAt,
       errorCode,
+      quotaRefunded: refundQuota,
       ...errorFields(error),
     });
     // 사유별로 접는다 — timeout이 쏟아지는 것과 추론이 거절하는 것은 다른 사건이다.

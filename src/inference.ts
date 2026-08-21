@@ -120,6 +120,21 @@ export type AnalysisFailureCode =
  *   "다른 이미지로 다시 시도해 주세요"라는 안내를 받았다. 상류가 붐비는 동안에는 어떤
  *   이미지도 실패한다(2026-08-21, master-docs #6).
  */
+/**
+ * 실패한 분석의 하루 쿼터를 돌려줄 것인가.
+ *
+ * 기준은 **분석이 실제로 수행됐는가**다. 쿼터는 우리가 한 일에 매기는 값이므로, 상류가
+ * 요청을 받아주지도 않아 아무 일도 일어나지 않았다면 사용자의 하루 10회에서 깎을 근거가 없다.
+ * `INPUT_STORAGE_FAILED`(입력 저장 실패)에 이미 같은 논리가 적용돼 있다(jobs/routes.ts).
+ *
+ * `ANALYSIS_TIMEOUT`과 `INFERENCE_FAILED`는 뺀다 — 추론이 실제로 돌다가 늦어지거나
+ * 거절한 경우라 "아무 일도 없었다"고 볼 수 없다. 이 경계는 정책이므로 바꿀 수 있다
+ * (master-docs #6 「남는 질문」).
+ */
+export function shouldRefundQuota(code: AnalysisFailureCode): boolean {
+  return code === "ANALYSIS_UNAVAILABLE";
+}
+
 export function analysisFailureCode(error: unknown): AnalysisFailureCode {
   if (error instanceof InferenceTimeoutError) return "ANALYSIS_TIMEOUT";
   // 503은 HTTP 의미 그대로 "지금은 못 하지만 나중엔 된다"다. 추론이 이 상태로만

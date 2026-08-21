@@ -210,6 +210,36 @@ export async function refundAnalysisQuota(installationId: string): Promise<void>
 }
 
 /**
+ * Job을 실패로 닫는다. `refundQuota`면 이 Job이 소비한 하루 쿼터도 돌려준다.
+ *
+ * 상태 전이가 **실제로 일어난 경우에만** 환불한다. 리스가 만료되면 같은 Job을 두 워커가
+ * 잡을 수 있어서(claimJob), 조건 없이 환불하면 실패 한 번에 쿼터가 두 번 돌아간다.
+ * 이미 끝난(completed) Job을 실패로 덮어쓰지 않는 것도 같은 조건이 막아 준다.
+ *
+ * @returns 이 호출이 Job을 실패로 닫았는가
+ */
+export async function failJob(
+  id: string,
+  errorCode: string,
+  options: { refundQuota?: boolean } = {},
+): Promise<boolean> {
+  const now = new Date().toISOString();
+  const row = await queryOne<{ installation_id: string | null }>(
+    `UPDATE jobs SET status = 'failed', error_code = $2, updated_at = $3, completed_at = $3
+     WHERE id = $1 AND status NOT IN ('failed', 'completed')
+     RETURNING installation_id`,
+    [id, errorCode, now],
+  );
+  if (!row) return false;
+  if (options.refundQuota && row.installation_id) {
+    // best-effort. 환불이 실패했다고 실패 기록까지 되돌리면 Job이 running에 남아
+    // 그 설치는 동시 분석 한도에 막힌다 — 쿼터 1회보다 그쪽이 훨씬 아프다.
+    await refundAnalysisQuota(row.installation_id).catch(() => {});
+  }
+  return true;
+}
+
+/**
  * 유실된 Job을 실패로 정리한다.
  *
  * 러너는 프로세스 내 fire-and-forget이라(runner.ts) 배포·태스크 교체 시 상태가
