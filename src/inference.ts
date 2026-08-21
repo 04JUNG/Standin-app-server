@@ -41,6 +41,13 @@ export interface UpstreamPerson {
   valid_limbs?: string[];
   refinable_limbs?: string[];
   refine_allowed?: boolean;
+  /**
+   * VLM이 양쪽 골반·무릎·발목을 실제로 관측했는가. false면 추론이 모든 하체 조정을 막는다.
+   *
+   * 구 추론 응답에는 없다 → `false`로 좁힌다. 하체 refine만 닫히고 팔은 그대로 동작하므로
+   * 순차 배포 창에서 안전한 쪽으로 수렴한다.
+   */
+  lower_body_observed?: boolean;
   /** refine 입력. 17×2 픽셀 좌표. 클라가 아니라 BFF가 보관한다(BFF-04). */
   keypoints?: number[][] | null;
   /** 구조 마스킹·안전정책이 반영된 관절 점수(17). refine 입력. */
@@ -140,6 +147,17 @@ export async function analyze(file: Blob, hint = ""): Promise<CutResult> {
 // ── 포즈 미세조정(refine) ─────────────────────────────────────────────
 // 계약 원본: Standin-server/docs/REFINE_DESIGN.md, api/models.py의 RefineRequest/Response.
 
+/**
+ * POST /refine 요청.
+ *
+ * ⚠ `skeleton_state`·`coverage_class`·`slot_origin`·`skeleton_source`는 **선택 필드가
+ *   아니다.** 추론의 `structural_refine_allowed`가 네 값을 전부 검사하고(`slot_origin`은
+ *   `"vlm"`, `skeleton_source`는 `"full_image"`만 통과), `REFINE_V2_ENABLED`가 켜져 있으면
+ *   하나라도 빠질 때 fail-closed로 `reason="skeleton_policy"`를 돌려준다. 그건 오류 응답이
+ *   아니라 정상 스킵이라 로그에도 남지 않는다 — 즉 **빠뜨리면 refine이 조용히 꺼진다.**
+ *
+ *   전부 `/analyze` 때 DB에 넣어 둔 값이며 클라이언트가 되돌려 보내는 값이 아니다(BFF-04).
+ */
 export interface RefineUpstreamRequest {
   pose_id: string;
   view: string;
@@ -148,6 +166,12 @@ export interface RefineUpstreamRequest {
   search_distance: number | null;
   refine_allowed: boolean;
   refinable_limbs: string[];
+  // ── v2.5 policy lineage ─────────────────────────────────────────────
+  skeleton_state: string | null;
+  coverage_class: string | null;
+  slot_origin: string | null;
+  skeleton_source: string | null;
+  lower_body_observed: boolean;
 }
 
 export interface RefineUpstreamResponse {
@@ -164,13 +188,24 @@ export interface RefineUpstreamResponse {
    * 조정본을 얻는 **유일한** 경로다 — `/refined/{handle}/bvh`는 제거됐다
    * (REFINE_HANDOFF §3 4단계). `refined=false`면 없다.
    */
-  bvh?: string;
+  bvh?: string | null;
   backend: string;
   limbs: string[];
   limb_decisions: Record<string, unknown>;
   loss_base: number | null;
   loss_final: number | null;
   gain: number | null;
+  // ── v2.5 신규. 구 추론 응답에는 없으므로 optional로 받는다 ──────────────
+  /** 실행한 refine policy/code 버전. 예: "v2.5.3" */
+  refine_version?: string;
+  /**
+   * `improved | unchanged | reverted | not_attempted`.
+   *
+   * `reason` 하나로는 "안전 게이트가 되돌렸다"와 "애초에 시도하지 않았다"가 구분되지 않는다.
+   * 지표에서 품질 절벽을 보려면 이 값이 필요하다.
+   */
+  refine_outcome?: string;
+  diagnostics?: Record<string, unknown>;
 }
 
 /**

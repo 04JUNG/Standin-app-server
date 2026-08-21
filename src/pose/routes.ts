@@ -72,6 +72,32 @@ poseRoutes.get("/:id/export", async (c) => {
     });
     throw new Error("pose export upstream unavailable");
   }
+  // 추론이 릴리스 시점에 격리한 포즈다(409 pose_quarantined). 후보 목록은 `/analyze` 때
+  // 이미 저장돼 있으므로, 격리가 늘어나면 화면에 남아 있던 선택이 여기서 409로 돌아온다.
+  // 재시도로는 절대 풀리지 않으니 octet-stream으로 흘려보내면 안 된다 — 클라가 오류 JSON을
+  // BVH로 받아 저장하고, 사용자는 영원히 실패하는 재시도 버튼만 보게 된다.
+  if (upstream.status === 409) {
+    await upstream.text().catch(() => "");
+    await recordExport({
+      installationId,
+      jobId,
+      personIndex,
+      candidateId,
+      status: "failed",
+      errorCode: "POSE_UNAVAILABLE",
+      variant: "base",
+      fallbackReason: artifact.fallbackReason ?? undefined,
+    });
+    return c.json(
+      errorEnvelope(
+        "POSE_UNAVAILABLE",
+        "이 포즈는 더 이상 제공되지 않습니다. 다른 후보를 선택해 주세요.",
+        c.get("requestId"),
+      ),
+      409,
+    );
+  }
+
   await recordExport({
     installationId,
     jobId,

@@ -1,8 +1,27 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { InferenceError } from "../inference.js";
+import { InferenceError, type RefineUpstreamRequest } from "../inference.js";
 import { isRefineFailure, runRefine, type RefineDeps } from "./service.js";
-import type { RefinedArtifact } from "./store.js";
+import type { RefinedArtifact, StoredRefineContext } from "./store.js";
+
+/**
+ * `/analyze`가 저장해 둔 정상 인물 하나.
+ *
+ * lineage 네 값은 추론의 `structural_refine_allowed`가 통과시키는 **유일한** 조합이다
+ * (`slot_origin="vlm"`, `skeleton_source="full_image"`). 여기서 값을 바꾸면 추론이
+ * fail-closed로 떨어뜨리므로 테스트가 실제 계약을 흉내내지 못한다.
+ */
+const CONTEXT: StoredRefineContext = {
+  keypoints: Array.from({ length: 17 }, () => [0, 0]),
+  scores: Array.from({ length: 17 }, () => 0.9),
+  refineAllowed: true,
+  refinableLimbs: ["left_arm"],
+  skeletonState: "valid",
+  coverageClass: "full",
+  slotOrigin: "vlm",
+  skeletonSource: "full_image",
+  lowerBodyObserved: true,
+};
 
 const INPUT = {
   installationId: "inst-1",
@@ -22,12 +41,7 @@ function deps(overrides: Partial<RefineDeps> = {}) {
     featureEnabled: () => true,
     storageAvailable: () => true,
     loadCandidate: async () => ({ poseId: "pose-1", view: "front", distance: 0.21 }),
-    loadRefineContext: async () => ({
-      keypoints: Array.from({ length: 17 }, () => [0, 0]),
-      scores: Array.from({ length: 17 }, () => 0.9),
-      refineAllowed: true,
-      refinableLimbs: ["left_arm"],
-    }),
+    loadRefineContext: async () => ({ ...CONTEXT }),
     findRefinedArtifact: async () => null,
     saveRefinedArtifact: async (artifact) => {
       saved.push(artifact);
@@ -95,7 +109,7 @@ test("refine_allowed=false skips without calling the inference server", async ()
   let called = false;
   const { outcome } = await run({
     loadRefineContext: async () => ({
-      keypoints: Array.from({ length: 17 }, () => [0, 0]),
+      ...CONTEXT,
       scores: null,
       refineAllowed: false,
       refinableLimbs: [],
@@ -237,4 +251,109 @@ test("an unknown candidate is reported as a mismatch", async () => {
 test("a missing refine context skips instead of guessing", async () => {
   const { outcome } = await run({ loadRefineContext: async () => null });
   assert.equal(outcome.reasonCode, "context_unavailable");
+});
+
+
+// ── v2.5 policy lineage ─────────────────────────────────────────────────────
+// 추론의 structural_refine_allowed는 skeleton_state·coverage_class·slot_origin·
+// skeleton_source를 전부 검사하고, 하나라도 빠지면 fail-closed로 reason="skeleton_policy"를
+// 돌려준다. 그건 **오류가 아니라 정상 스킵**이라 5xx로도, 로그로도 안 잡힌다.
+// 즉 이 전달이 끊기면 refine 기능 전체가 아무 신호 없이 사라진다. 그래서 계약을 못으로 박는다.
+test("forwards the full policy lineage to the inference server", async () => {
+  let sent: RefineUpstreamRequest | null = null;
+  const { base } = deps({
+    refineUpstream: async (req) => {
+      sent = req;
+      return {
+        pose_id: "pose-1",
+        view: "front",
+        refined: false,
+        reason: "no_gain",
+        bvh_url: "/pose/pose-1/bvh",
+        backend: "none",
+        limbs: [],
+        limb_decisions: {},
+        loss_base: null,
+        loss_final: null,
+        gain: null,
+      };
+    },
+  });
+  await runRefine(INPUT, base);
+
+  const req = sent as RefineUpstreamRequest | null;
+  assert.ok(req, "refineUpstream이 호출되지 않았다");
+  assert.equal(req.skeleton_state, "valid");
+  assert.equal(req.coverage_class, "full");
+  assert.equal(req.slot_origin, "vlm");
+  assert.equal(req.skeleton_source, "full_image");
+  assert.equal(req.lower_body_observed, true);
+});
+
+// 마이그레이션 직전에 저장된 job은 lineage 컬럼이 NULL이다. 값을 지어내지 않고 그대로
+// 보내서 추론이 fail-closed로 판단하게 둔다 — 여기서 기본값을 채우면 그게 곧 fail-open이다.
+test("missing lineage is forwarded as null instead of being invented", async () => {
+  let sent: RefineUpstreamRequest | null = null;
+  const { base } = deps({
+    loadRefineContext: async () => ({
+      ...CONTEXT,
+      skeletonState: null,
+      coverageClass: null,
+      slotOrigin: null,
+      skeletonSource: null,
+      lowerBodyObserved: false,
+    }),
+    refineUpstream: async (req) => {
+      sent = req;
+      return {
+        pose_id: "pose-1",
+        view: "front",
+        refined: false,
+        reason: "skeleton_policy",
+        bvh_url: "/pose/pose-1/bvh",
+        backend: "none",
+        limbs: [],
+        limb_decisions: {},
+        loss_base: null,
+        loss_final: null,
+        gain: null,
+      };
+    },
+  });
+  await runRefine(INPUT, base);
+
+  const req = sent as RefineUpstreamRequest | null;
+  assert.ok(req);
+  assert.equal(req.slot_origin, null);
+  assert.equal(req.skeleton_source, null);
+  assert.equal(req.lower_body_observed, false);
+});
+
+// 추론은 refined=false일 때 `bvh: null`을 **명시적으로** 보낸다(undefined가 아니다).
+// null이 새어 나가면 TextEncoder가 문자열 "null"을 조정본으로 만들어 S3에 올린다.
+test("an explicit null bvh body is treated as a contract violation, not encoded", async () => {
+  const stored: Uint8Array[] = [];
+  const { outcome, saved } = await run({
+    refineUpstream: async () => ({
+      pose_id: "pose-1",
+      view: "front",
+      refined: true,
+      reason: "ok",
+      bvh_url: "/pose/pose-1/bvh",
+      bvh: null,
+      backend: "scipy",
+      limbs: ["left_arm"],
+      limb_decisions: {},
+      loss_base: 1,
+      loss_final: 0.5,
+      gain: 0.5,
+    }),
+    putRefinedBvh: async (_key, bytes) => {
+      stored.push(bytes);
+    },
+  });
+  assert.equal(outcome.refined, false);
+  assert.equal(outcome.reasonCode, "upstream_missing_bvh");
+  assert.equal(stored.length, 0, '"null" 문자열을 조정본으로 올리면 안 된다');
+  assert.equal(saved[0]?.objectKey, null);
 });
