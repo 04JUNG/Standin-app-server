@@ -139,7 +139,7 @@ Retry-After: 41230
 - 헤더에서 **실제 픽셀 크기**를 읽어 상한(기본 5천만 픽셀)을 넘으면 `400 INVALID_INPUT`. 파일 크기 상한만으로는 막을 수 없다 — 잘 압축된 20MB 이미지가 수십억 픽셀을 선언할 수 있고 그걸 펼치는 것은 추론 서버다.
 - 클라가 보낸 `width`/`height`는 **참고값**이다. 헤더에서 읽어낸 값이 있으면 그 값을 기록한다.
 
-사용량 한도를 넘으면 Job을 만들지 않고 `429`(`DAILY_QUOTA_EXCEEDED`·`GLOBAL_QUOTA_EXCEEDED`·
+사용량 한도를 넘으면 Job을 만들지 않고 `429`(`WEEKLY_QUOTA_EXCEEDED`·`GLOBAL_QUOTA_EXCEEDED`·
 `CONCURRENCY_LIMIT`·`RATE_LIMITED`)를 반환한다 — 위 [사용량 제한](#사용량-제한-429) 참고.
 운영자가 분석을 중단했으면 `503 SERVICE_PAUSED`다. 한도는 입력 검증을 통과한 요청만 소비하며,
 입력 저장이 실패해 `503 STORAGE_UNAVAILABLE`이 나가면 소비한 쿼터를 돌려준다.
