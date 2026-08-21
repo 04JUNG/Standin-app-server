@@ -101,6 +101,33 @@ export class InferenceError extends Error {
   }
 }
 
+/** Job이 실패로 끝난 사유. 클라이언트가 `error` 필드로 그대로 받는다(docs/API.md). */
+export type AnalysisFailureCode =
+  | "ANALYSIS_TIMEOUT"
+  | "ANALYSIS_UNAVAILABLE"
+  | "INFERENCE_FAILED";
+
+/**
+ * 추론 호출 실패를 Job 실패 사유로 분류한다.
+ *
+ * 셋을 나누는 이유는 **사용자가 할 수 있는 일이 다르기 때문**이다.
+ * - `ANALYSIS_UNAVAILABLE` — 상류(VLM)가 혼잡해 지금은 못 한다. 잠시 후 같은 이미지로
+ *   다시 하면 된다. 추론이 `503`으로 알려 준다(Standin-server docs/API_CONTRACT.md §7-1).
+ * - `ANALYSIS_TIMEOUT` — 추론이 상한 시간 안에 응답하지 않았다.
+ * - `INFERENCE_FAILED` — 그 외. 이미지를 바꾸거나 우리가 고쳐야 한다.
+ *
+ * ⚠ 이 구분이 없을 때 Gemini 과부하(503)가 `INFERENCE_FAILED`로 접혀서, 사용자는
+ *   "다른 이미지로 다시 시도해 주세요"라는 안내를 받았다. 상류가 붐비는 동안에는 어떤
+ *   이미지도 실패한다(2026-08-21, master-docs #6).
+ */
+export function analysisFailureCode(error: unknown): AnalysisFailureCode {
+  if (error instanceof InferenceTimeoutError) return "ANALYSIS_TIMEOUT";
+  // 503은 HTTP 의미 그대로 "지금은 못 하지만 나중엔 된다"다. 추론이 이 상태로만
+  // 답하도록 계약을 맞춰 뒀으므로 본문 code를 파싱하지 않고 상태로 판단한다.
+  if (error instanceof InferenceError && error.status === 503) return "ANALYSIS_UNAVAILABLE";
+  return "INFERENCE_FAILED";
+}
+
 /**
  * 추론 호출에 붙는 공통 헤더.
  *

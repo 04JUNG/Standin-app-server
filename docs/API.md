@@ -42,7 +42,7 @@ X-Device-Token: ...
 ```
 
 클라는 `message`를 직접 표시하지 않고 `code`를 사용자 메시지로 매핑한다.
-주요 코드: `INVALID_INPUT`/`PROVIDER_UNAVAILABLE`/`OAUTH_STATE_MISMATCH`/`EMAIL_REQUIRED`(400) · `UNAUTHENTICATED`/`INVALID_TOKEN`/`INVALID_CREDENTIALS`(401) · `EMAIL_NOT_VERIFIED`(403) · `NOT_FOUND`(404) · `NOT_READY`/`EMAIL_TAKEN`(409) · `PAYLOAD_TOO_LARGE`(413) · `DAILY_QUOTA_EXCEEDED`/`GLOBAL_QUOTA_EXCEEDED`(429) · `NOT_IMPLEMENTED`(501) · `OAUTH_FAILED`(502) · `STORAGE_UNAVAILABLE`(503) · `INFERENCE_FAILED`(Job status=failed).
+주요 코드: `INVALID_INPUT`/`PROVIDER_UNAVAILABLE`/`OAUTH_STATE_MISMATCH`/`EMAIL_REQUIRED`(400) · `UNAUTHENTICATED`/`INVALID_TOKEN`/`INVALID_CREDENTIALS`(401) · `EMAIL_NOT_VERIFIED`(403) · `NOT_FOUND`(404) · `NOT_READY`/`EMAIL_TAKEN`(409) · `PAYLOAD_TOO_LARGE`(413) · `DAILY_QUOTA_EXCEEDED`/`GLOBAL_QUOTA_EXCEEDED`(429) · `NOT_IMPLEMENTED`(501) · `OAUTH_FAILED`(502) · `STORAGE_UNAVAILABLE`(503) · `INFERENCE_FAILED`/`ANALYSIS_UNAVAILABLE`(Job status=failed).
 
 ### 사용량 제한 (`429`)
 
@@ -149,8 +149,10 @@ Retry-After: 41230
 
 > ⚠ 동기 추론을 감싸므로 세분 단계(`detecting`/`skeleton`/…)는 제공하지 않는다. Phase 0은 4-상태만.
 
-`error`(status=`failed`)에는 `INFERENCE_FAILED`, `ANALYSIS_TIMEOUT`, `INPUT_STORAGE_FAILED`, `ABANDONED`가 들어간다.
+`error`(status=`failed`)에는 `INFERENCE_FAILED`, `ANALYSIS_TIMEOUT`, `ANALYSIS_UNAVAILABLE`, `INPUT_STORAGE_FAILED`, `ABANDONED`가 들어간다.
 `ANALYSIS_TIMEOUT`은 추론이 상한 시간(`ANALYSIS_TIMEOUT_MS`, 기본 120초) 안에 응답하지 않은 경우다 — 추론이 거절한 `INFERENCE_FAILED`와 구분한다.
+`ANALYSIS_UNAVAILABLE`은 상류 VLM이 혼잡해 지금은 분석할 수 없는 경우다(추론이 `503`으로 알려 준다 — Standin-server `docs/API_CONTRACT.md` §7-1).
+**같은 이미지로 잠시 후 다시 시도하면 되는 상태**이므로, 클라는 "다른 이미지로 다시 시도"가 아니라 "잠시 후 다시 시도"를 안내한다.
 `ABANDONED`는 배포·태스크 교체로 실행 중이던 Job이 유실된 경우다 — 러너가 아직 프로세스 내
 fire-and-forget이라 생길 수 있고, 서버가 주기적으로 정리해 무응답 대신 명시적 실패로 만든다.
 클라는 "다시 시도"를 안내하면 된다.
