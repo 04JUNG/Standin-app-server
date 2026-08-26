@@ -20,6 +20,15 @@ export const CLIENT_EVENT_PROPERTIES: Record<string, readonly string[]> = {
   export_completed: ["fileCount", "surface"],
   export_failed: ["code", "surface"],
   capture_failed: ["code", "surface"],
+  // 자동 업데이트 계열(클라 ADR-011). 업데이터는 실사용에서 검증된 적이 없는 경로라
+  // 성공만 세면 "왜 옛 버전에 남아 있는가"에 답할 수 없다.
+  //
+  // ⚠ 클라이언트보다 **먼저** 배포해야 한다. 여기 없는 이름이 배치에 하나라도 섞이면
+  // routes.ts가 배치 전체를 400으로 거절하고, 클라이언트는 4xx를 영구 거절로 보고
+  // 배치를 버린다 — 같이 실린 다른 이벤트까지 사라진다.
+  update_check: ["trigger", "result"],
+  update_installed: ["fromVersion", "toVersion"],
+  update_failed: ["phase", "reason"],
 } as const;
 
 export function sanitizeEventProperties(

@@ -322,7 +322,11 @@ BFF가 보관해 둔 값을 서버측에서 읽는다 — 클라이언트가 값
 ## 행동·선택·피드백
 
 - `POST /v1/events/batch`: 최대 100개의 `eventId`, `sequence`, `occurredAt`, 이벤트명, `jobId`, 허용 속성을 받는다. `eventId`로 중복 제거한다.
-- 허용 이벤트: `app_started`, `input_confirmed`, `results_viewed`, `candidate_selected`, `selection_confirmed`.
+- 허용 이벤트는 `src/analytics/store.ts`의 `CLIENT_EVENT_PROPERTIES`가 기준이다.
+  - 흐름: `app_started`, `input_confirmed`, `results_viewed`, `candidate_selected`, `selection_confirmed`
+  - 실패·이탈: `analysis_failed`, `rerun_requested`, `export_completed`, `export_failed`, `capture_failed`
+  - 자동 업데이트: `update_check`, `update_installed`, `update_failed`
+- ⚠ **허용 목록에 없는 이름이 배치에 하나라도 섞이면 배치 전체를 `400 INVALID_INPUT`으로 거절한다.** 클라이언트는 4xx를 영구 거절로 보고 그 배치를 버리므로, 같이 실린 정상 이벤트까지 사라진다. **클라이언트에 새 이벤트를 넣기 전에 이 목록을 먼저 배포한다.** 목록에 항목을 더하는 것은 구버전 클라이언트에 영향이 없다.
 - `PUT /v1/analysis/jobs/{jobId}/selections`: `[{personIndex,candidateId}]`를 멱등 저장하며 해당 작업에서 노출된 후보인지 검증한다.
 - `POST /v1/analysis/jobs/{jobId}/feedback`: `good | person_missing | skeleton_wrong | candidates_irrelevant | export_problem | other`만 허용한다.
 
