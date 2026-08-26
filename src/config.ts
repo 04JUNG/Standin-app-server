@@ -1,4 +1,6 @@
 // 환경설정 단일 소스. dev는 셸 env 또는 `tsx --env-file=.env`로 주입.
+import { parseExemptList } from "./limits/policy.js";
+
 function env(key: string, def = ""): string {
   return process.env[key] ?? def;
 }
@@ -74,13 +76,24 @@ export const config = {
   betaReviewAdminToken: env("BETA_REVIEW_ADMIN_TOKEN"),
 
   /**
-   * 사용량 제한(오픈베타). 초깃값은 스프린트 2026-08-11 §3 권장값이다.
+   * 사용량 제한(오픈베타). 전체 일일 상한의 초깃값은 스프린트 2026-08-11 §3 권장값이다.
+   *
+   * 설치별 한도는 **주 단위**다. 하루 10회는 "오늘 몰아서 여러 컷"이라는 실제 사용 방식과
+   * 맞지 않았다 — 작가는 작업하는 날에 몰아 쓰고 며칠은 아예 안 쓴다. 창을 주로 넓히면
+   * 같은 총량으로도 그 리듬을 막지 않는다.
    *
    * 0 이하는 "제한 없음"으로 읽는다 — 전체 일일 상한은 Gemini 비용 산정 전이라
    * 기본 off로 두고, 숫자가 정해지면 env만 채워 켠다.
    */
-  quotaInstallationDaily: Number(process.env.QUOTA_INSTALLATION_DAILY ?? 10),
+  quotaInstallationWeekly: Number(process.env.QUOTA_INSTALLATION_WEEKLY ?? 100),
   quotaGlobalDaily: Number(process.env.QUOTA_GLOBAL_DAILY ?? 0),
+  /**
+   * 사용량 쿼터를 적용하지 않을 설치 ID(콤마 구분). 개발자 단말용이다.
+   *
+   * 자기 한도에 막힌 개발자는 정작 한도를 확인해야 할 때 확인하지 못한다. 설치 ID는 앱
+   * 설정 화면에 그대로 표시되므로 그 값을 넣는다. 인증(기기 토큰)을 통과한 뒤에만 적용된다.
+   */
+  quotaExemptInstallations: parseExemptList(env("QUOTA_EXEMPT_INSTALLATIONS")),
   // 설치별 동시 분석. 중복 클릭·폭주 방지가 목적이라 1이면 충분하다.
   quotaInstallationConcurrent: Number(process.env.QUOTA_INSTALLATION_CONCURRENT ?? 1),
   /**
