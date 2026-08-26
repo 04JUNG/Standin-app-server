@@ -8,10 +8,13 @@ import {
   LimitExceededError,
   dailyWindow,
   isDisabled,
+  isQuotaExempt,
   kstIsoString,
   secondsUntil,
+  weeklyWindow,
 } from "../limits/policy.js";
 import { refund, tryConsume } from "../limits/store.js";
+import { log } from "../log.js";
 import type { RefineContext } from "../mapping.js";
 import type { AnalysisResult } from "../types.js";
 
@@ -144,10 +147,18 @@ export async function createJobWithLimits(
 ): Promise<Job> {
   const nowMs = Date.now();
   const day = dailyWindow(nowMs);
+  const week = weeklyWindow(nowMs);
+  // 개발자 단말은 세지 않는다. 자기 한도에 막히면 정작 한도를 확인해야 할 때 확인하지 못한다.
+  // 인증(requireInstallation)을 통과한 뒤에만 여기 오므로 ID를 흉내 내 우회할 수 없다.
+  const exempt = isQuotaExempt(input.installationId, config.quotaExemptInstallations);
+  if (exempt) {
+    // 우회는 조용히 일어나면 안 된다 — 지표에서 "한도가 안 걸리네"의 원인을 찾을 수 있어야 한다.
+    log.info({ type: "quota_exempt", installationId: input.installationId });
+  }
   return transaction(async (client) => {
     await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [input.installationId]);
 
-    if (!isDisabled(config.quotaInstallationConcurrent)) {
+    if (!exempt && !isDisabled(config.quotaInstallationConcurrent)) {
       // 오래된 Job은 세지 않는다 — 배포로 유실된 running Job이 설치를 영구히 막는다.
       const cutoff = new Date(nowMs - config.analysisStaleAfterSeconds * 1000).toISOString();
       const res = await client.query(
@@ -163,24 +174,24 @@ export async function createJobWithLimits(
       }
     }
 
-    if (!isDisabled(config.quotaInstallationDaily)) {
+    if (!exempt && !isDisabled(config.quotaInstallationWeekly)) {
       const ok = await tryConsume(
-        "installation_day",
+        "installation_week",
         input.installationId,
-        day,
-        config.quotaInstallationDaily,
+        week,
+        config.quotaInstallationWeekly,
         client,
       );
       if (!ok) {
         throw new LimitExceededError(
-          "DAILY_QUOTA_EXCEEDED",
-          secondsUntil(day.resetAtMs, nowMs),
-          { limit: config.quotaInstallationDaily, retryAt: kstIsoString(day.resetAtMs) },
+          "WEEKLY_QUOTA_EXCEEDED",
+          secondsUntil(week.resetAtMs, nowMs),
+          { limit: config.quotaInstallationWeekly, retryAt: kstIsoString(week.resetAtMs) },
         );
       }
     }
 
-    if (!isDisabled(config.quotaGlobalDaily)) {
+    if (!exempt && !isDisabled(config.quotaGlobalDaily)) {
       const ok = await tryConsume("global_day", "all", day, config.quotaGlobalDaily, client);
       if (!ok) {
         throw new LimitExceededError(
@@ -196,17 +207,49 @@ export async function createJobWithLimits(
 }
 
 /**
- * 커밋 뒤에 요청이 실패했을 때 소비한 일일 쿼터를 돌려준다(예: 입력 저장 실패).
+ * 커밋 뒤에 요청이 실패했을 때 소비한 쿼터를 돌려준다(예: 입력 저장 실패, 상류 혼잡).
  * best-effort — 실패해도 요청 처리를 막지 않는다.
  */
 export async function refundAnalysisQuota(installationId: string): Promise<void> {
-  const day = dailyWindow(Date.now());
-  if (!isDisabled(config.quotaInstallationDaily)) {
-    await refund("installation_day", installationId, day);
+  // 애초에 세지 않은 설치에는 돌려줄 것도 없다.
+  if (isQuotaExempt(installationId, config.quotaExemptInstallations)) return;
+  const nowMs = Date.now();
+  if (!isDisabled(config.quotaInstallationWeekly)) {
+    await refund("installation_week", installationId, weeklyWindow(nowMs));
   }
   if (!isDisabled(config.quotaGlobalDaily)) {
-    await refund("global_day", "all", day);
+    await refund("global_day", "all", dailyWindow(nowMs));
   }
+}
+
+/**
+ * Job을 실패로 닫는다. `refundQuota`면 이 Job이 소비한 하루 쿼터도 돌려준다.
+ *
+ * 상태 전이가 **실제로 일어난 경우에만** 환불한다. 리스가 만료되면 같은 Job을 두 워커가
+ * 잡을 수 있어서(claimJob), 조건 없이 환불하면 실패 한 번에 쿼터가 두 번 돌아간다.
+ * 이미 끝난(completed) Job을 실패로 덮어쓰지 않는 것도 같은 조건이 막아 준다.
+ *
+ * @returns 이 호출이 Job을 실패로 닫았는가
+ */
+export async function failJob(
+  id: string,
+  errorCode: string,
+  options: { refundQuota?: boolean } = {},
+): Promise<boolean> {
+  const now = new Date().toISOString();
+  const row = await queryOne<{ installation_id: string | null }>(
+    `UPDATE jobs SET status = 'failed', error_code = $2, updated_at = $3, completed_at = $3
+     WHERE id = $1 AND status NOT IN ('failed', 'completed')
+     RETURNING installation_id`,
+    [id, errorCode, now],
+  );
+  if (!row) return false;
+  if (options.refundQuota && row.installation_id) {
+    // best-effort. 환불이 실패했다고 실패 기록까지 되돌리면 Job이 running에 남아
+    // 그 설치는 동시 분석 한도에 막힌다 — 쿼터 1회보다 그쪽이 훨씬 아프다.
+    await refundAnalysisQuota(row.installation_id).catch(() => {});
+  }
+  return true;
 }
 
 /**

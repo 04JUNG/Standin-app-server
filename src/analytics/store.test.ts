@@ -70,6 +70,28 @@ test("failure events are accepted with their code-only properties", () => {
   );
 });
 
+test("update events are accepted so a client release does not poison the batch", () => {
+  // 이 세 이름이 허용 목록에 없으면 routes.ts가 배치 전체를 400으로 거절하고,
+  // 클라이언트가 그 배치를 통째로 버린다. 같이 실린 분석·저장 이벤트까지 사라진다.
+  assert.deepEqual(
+    sanitizeEventProperties("update_check", { trigger: "startup", result: "available" }),
+    { trigger: "startup", result: "available" },
+  );
+  assert.deepEqual(
+    sanitizeEventProperties("update_installed", { fromVersion: "0.1.1-beta.4", toVersion: "0.1.2" }),
+    { fromVersion: "0.1.1-beta.4", toVersion: "0.1.2" },
+  );
+  assert.deepEqual(
+    sanitizeEventProperties("update_failed", { phase: "download", reason: "NETWORK" }),
+    { phase: "download", reason: "NETWORK" },
+  );
+});
+
+test("unknown event names are still rejected", () => {
+  // 허용 목록이 열려버리면 자유 텍스트가 그대로 쌓인다.
+  assert.equal(sanitizeEventProperties("update_whatever", { trigger: "startup" }), null);
+});
+
 test("input confirmation records which surface started the flow", () => {
   assert.deepEqual(
     sanitizeEventProperties("input_confirmed", {
