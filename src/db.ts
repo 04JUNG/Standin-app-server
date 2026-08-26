@@ -258,7 +258,7 @@ const SCHEMA = `
   -- 사용량 카운터(설치별 일일 쿼터·전체 상한·IP burst). 정본은 여기다 —
   -- 프로세스 메모리에 세면 태스크 수만큼 한도가 늘어나고 배포마다 초기화된다.
   CREATE TABLE IF NOT EXISTS usage_counters (
-    scope        TEXT NOT NULL,      -- installation_day | global_day | ip_register | ip_analyze
+    scope        TEXT NOT NULL,      -- installation_week | global_day | ip_register | ip_analyze
     subject      TEXT NOT NULL,      -- installationId | 'all' | IP 해시
     window_start TEXT NOT NULL,      -- KST 일자('2026-08-11') 또는 고정창 시작 unix초
     count        INTEGER NOT NULL DEFAULT 0,
