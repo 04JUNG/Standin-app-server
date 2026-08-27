@@ -42,7 +42,7 @@ X-Device-Token: ...
 ```
 
 클라는 `message`를 직접 표시하지 않고 `code`를 사용자 메시지로 매핑한다.
-주요 코드: `INVALID_INPUT`/`PROVIDER_UNAVAILABLE`/`OAUTH_STATE_MISMATCH`/`EMAIL_REQUIRED`(400) · `UNAUTHENTICATED`/`INVALID_TOKEN`/`INVALID_CREDENTIALS`(401) · `EMAIL_NOT_VERIFIED`(403) · `NOT_FOUND`(404) · `NOT_READY`/`EMAIL_TAKEN`(409) · `PAYLOAD_TOO_LARGE`(413) · `DAILY_QUOTA_EXCEEDED`/`GLOBAL_QUOTA_EXCEEDED`(429) · `NOT_IMPLEMENTED`(501) · `OAUTH_FAILED`(502) · `STORAGE_UNAVAILABLE`(503) · `INFERENCE_FAILED`(Job status=failed).
+주요 코드: `INVALID_INPUT`/`PROVIDER_UNAVAILABLE`/`OAUTH_STATE_MISMATCH`/`EMAIL_REQUIRED`(400) · `UNAUTHENTICATED`/`INVALID_TOKEN`/`INVALID_CREDENTIALS`(401) · `EMAIL_NOT_VERIFIED`(403) · `NOT_FOUND`(404) · `NOT_READY`/`EMAIL_TAKEN`(409) · `PAYLOAD_TOO_LARGE`(413) · `WEEKLY_QUOTA_EXCEEDED`/`GLOBAL_QUOTA_EXCEEDED`(429) · `NOT_IMPLEMENTED`(501) · `OAUTH_FAILED`(502) · `STORAGE_UNAVAILABLE`(503) · `INFERENCE_FAILED`/`ANALYSIS_UNAVAILABLE`(Job status=failed).
 
 ### 사용량 제한 (`429`)
 
@@ -57,9 +57,9 @@ Retry-After: 41230
 ```json
 {
   "error": {
-    "code": "DAILY_QUOTA_EXCEEDED",
-    "message": "오늘 사용할 수 있는 분석 횟수를 모두 사용했습니다.",
-    "details": { "retryAfterSeconds": 41230, "limit": 10, "retryAt": "2026-08-12T00:00:00.000+09:00" },
+    "code": "WEEKLY_QUOTA_EXCEEDED",
+    "message": "이번 주에 사용할 수 있는 분석 횟수를 모두 사용했습니다.",
+    "details": { "retryAfterSeconds": 213000, "limit": 100, "retryAt": "2026-08-24T00:00:00.000+09:00" },
     "requestId": "req_..."
   }
 }
@@ -67,16 +67,29 @@ Retry-After: 41230
 
 | code | 의미 | `details` |
 |---|---|---|
-| `DAILY_QUOTA_EXCEEDED` | 설치별 일일 분석 한도 초과 | `retryAfterSeconds`, `limit`, `retryAt` |
+| `WEEKLY_QUOTA_EXCEEDED` | 설치별 **주간** 분석 한도 초과 | `retryAfterSeconds`, `limit`, `retryAt` |
 | `GLOBAL_QUOTA_EXCEEDED` | 서비스 전체 일일 분석 한도 초과 | `retryAfterSeconds`, `retryAt` |
 | `RATE_LIMITED` | 짧은 시간에 요청이 몰림(IP 단위) | `retryAfterSeconds`, `limit`, `windowSeconds` |
 | `CONCURRENCY_LIMIT` | 같은 설치에 진행 중인 분석이 있음 | `retryAfterSeconds`, `limit` |
 
-일일 한도는 **KST 자정**에 리셋된다(`retryAt`은 항상 `+09:00` 표기). 한도값은 서버 환경변수로
-조정되므로 클라가 숫자를 하드코딩하지 않고 `details.limit`을 그대로 보여준다.
+설치별 한도는 **주 단위**이고 **KST 월요일 자정**에 리셋된다. 하루 단위로 끊으면 "작업하는 날에
+몰아서 여러 컷"이라는 실제 사용 방식을 막는다 — 같은 총량이라도 창이 넓으면 그 리듬을 막지 않는다.
+전체 상한(`GLOBAL_QUOTA_EXCEEDED`)은 비용 방어용이라 여전히 일 단위(KST 자정)다.
+`retryAt`은 항상 `+09:00` 표기이며, 리셋이 여러 날 뒤일 수 있으므로 클라는 "내일"로 단정하지 않는다.
+한도값은 서버 환경변수로 조정되므로 클라가 숫자를 하드코딩하지 않고 `details.limit`을 그대로 보여준다.
+
+**쿼터를 적용하지 않는 설치.** 개발자 단말은 `QUOTA_EXEMPT_INSTALLATIONS`(콤마 구분)에 설치 ID를
+넣어 제외한다. 자기 한도에 막힌 개발자는 정작 한도를 확인해야 할 때 확인하지 못한다. 설치 ID는
+앱 설정 화면에 표시된다. 제외되는 것은 **주간 한도·전체 상한·동시 분석**이고, IP burst
+(`RATE_LIMITED`)는 그대로 적용된다 — 그건 인증 이전 단계라 헤더 값만으로 우회를 열어 줄 수 없다.
+
+**환불되는 실패.** 쿼터는 "우리가 한 일"에 매기는 값이라, 분석이 아예 수행되지 않은 실패는
+소비한 1회를 되돌린다 — 입력 저장 실패(`INPUT_STORAGE_FAILED`)와 상류 VLM 혼잡
+(`ANALYSIS_UNAVAILABLE`)이다. 추론이 실제로 돌다가 늦어지거나(`ANALYSIS_TIMEOUT`) 거절한
+경우(`INFERENCE_FAILED`)는 환불하지 않는다.
 
 `RATE_LIMITED`는 IP 단위 burst 제한이며 `POST /v1/installations`와 `POST /v1/analysis/jobs`에
-걸린다. 일일 쿼터와는 별개 카운터라, 남은 일일 횟수가 있어도 잠깐 몰리면 나올 수 있다.
+걸린다. 주간 쿼터와는 별개 카운터라, 남은 횟수가 있어도 잠깐 몰리면 나올 수 있다.
 공용망·NAT에서는 같은 IP를 여러 사용자가 공유할 수 있으므로 "잠시 후 다시 시도"로 안내한다.
 서버는 IP 원문을 저장하지 않고 해시 버킷만 센다.
 
@@ -126,7 +139,7 @@ Retry-After: 41230
 - 헤더에서 **실제 픽셀 크기**를 읽어 상한(기본 5천만 픽셀)을 넘으면 `400 INVALID_INPUT`. 파일 크기 상한만으로는 막을 수 없다 — 잘 압축된 20MB 이미지가 수십억 픽셀을 선언할 수 있고 그걸 펼치는 것은 추론 서버다.
 - 클라가 보낸 `width`/`height`는 **참고값**이다. 헤더에서 읽어낸 값이 있으면 그 값을 기록한다.
 
-사용량 한도를 넘으면 Job을 만들지 않고 `429`(`DAILY_QUOTA_EXCEEDED`·`GLOBAL_QUOTA_EXCEEDED`·
+사용량 한도를 넘으면 Job을 만들지 않고 `429`(`WEEKLY_QUOTA_EXCEEDED`·`GLOBAL_QUOTA_EXCEEDED`·
 `CONCURRENCY_LIMIT`·`RATE_LIMITED`)를 반환한다 — 위 [사용량 제한](#사용량-제한-429) 참고.
 운영자가 분석을 중단했으면 `503 SERVICE_PAUSED`다. 한도는 입력 검증을 통과한 요청만 소비하며,
 입력 저장이 실패해 `503 STORAGE_UNAVAILABLE`이 나가면 소비한 쿼터를 돌려준다.
@@ -149,8 +162,10 @@ Retry-After: 41230
 
 > ⚠ 동기 추론을 감싸므로 세분 단계(`detecting`/`skeleton`/…)는 제공하지 않는다. Phase 0은 4-상태만.
 
-`error`(status=`failed`)에는 `INFERENCE_FAILED`, `ANALYSIS_TIMEOUT`, `INPUT_STORAGE_FAILED`, `ABANDONED`가 들어간다.
+`error`(status=`failed`)에는 `INFERENCE_FAILED`, `ANALYSIS_TIMEOUT`, `ANALYSIS_UNAVAILABLE`, `INPUT_STORAGE_FAILED`, `ABANDONED`가 들어간다.
 `ANALYSIS_TIMEOUT`은 추론이 상한 시간(`ANALYSIS_TIMEOUT_MS`, 기본 120초) 안에 응답하지 않은 경우다 — 추론이 거절한 `INFERENCE_FAILED`와 구분한다.
+`ANALYSIS_UNAVAILABLE`은 상류 VLM이 혼잡해 지금은 분석할 수 없는 경우다(추론이 `503`으로 알려 준다 — Standin-server `docs/API_CONTRACT.md` §7-1).
+**같은 이미지로 잠시 후 다시 시도하면 되는 상태**이므로, 클라는 "다른 이미지로 다시 시도"가 아니라 "잠시 후 다시 시도"를 안내한다.
 `ABANDONED`는 배포·태스크 교체로 실행 중이던 Job이 유실된 경우다 — 러너가 아직 프로세스 내
 fire-and-forget이라 생길 수 있고, 서버가 주기적으로 정리해 무응답 대신 명시적 실패로 만든다.
 클라는 "다시 시도"를 안내하면 된다.
@@ -307,7 +322,11 @@ BFF가 보관해 둔 값을 서버측에서 읽는다 — 클라이언트가 값
 ## 행동·선택·피드백
 
 - `POST /v1/events/batch`: 최대 100개의 `eventId`, `sequence`, `occurredAt`, 이벤트명, `jobId`, 허용 속성을 받는다. `eventId`로 중복 제거한다.
-- 허용 이벤트: `app_started`, `input_confirmed`, `results_viewed`, `candidate_selected`, `selection_confirmed`.
+- 허용 이벤트는 `src/analytics/store.ts`의 `CLIENT_EVENT_PROPERTIES`가 기준이다.
+  - 흐름: `app_started`, `input_confirmed`, `results_viewed`, `candidate_selected`, `selection_confirmed`
+  - 실패·이탈: `analysis_failed`, `rerun_requested`, `export_completed`, `export_failed`, `capture_failed`
+  - 자동 업데이트: `update_check`, `update_installed`, `update_failed`
+- ⚠ **허용 목록에 없는 이름이 배치에 하나라도 섞이면 배치 전체를 `400 INVALID_INPUT`으로 거절한다.** 클라이언트는 4xx를 영구 거절로 보고 그 배치를 버리므로, 같이 실린 정상 이벤트까지 사라진다. **클라이언트에 새 이벤트를 넣기 전에 이 목록을 먼저 배포한다.** 목록에 항목을 더하는 것은 구버전 클라이언트에 영향이 없다.
 - `PUT /v1/analysis/jobs/{jobId}/selections`: `[{personIndex,candidateId}]`를 멱등 저장하며 해당 작업에서 노출된 후보인지 검증한다.
 - `POST /v1/analysis/jobs/{jobId}/feedback`: `good | person_missing | skeleton_wrong | candidates_irrelevant | export_problem | other`만 허용한다.
 

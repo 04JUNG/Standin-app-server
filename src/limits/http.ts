@@ -10,7 +10,7 @@ import type { LimitCode, LimitExceededError } from "./policy.js";
  */
 const MESSAGES: Record<LimitCode, string> = {
   RATE_LIMITED: "요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.",
-  DAILY_QUOTA_EXCEEDED: "오늘 사용할 수 있는 분석 횟수를 모두 사용했습니다.",
+  WEEKLY_QUOTA_EXCEEDED: "이번 주에 사용할 수 있는 분석 횟수를 모두 사용했습니다.",
   CONCURRENCY_LIMIT: "이미 진행 중인 분석이 있습니다. 완료된 뒤에 다시 시도해 주세요.",
   GLOBAL_QUOTA_EXCEEDED: "오늘 베타 전체 분석 한도에 도달했습니다. 내일 다시 시도해 주세요.",
 };

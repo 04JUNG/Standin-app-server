@@ -34,9 +34,37 @@ export function kstIsoString(ms: number): string {
   return new Date(ms + KST_OFFSET_MS).toISOString().replace("Z", "+09:00");
 }
 
-/** 일일 쿼터 창(KST 하루). */
+/** 일일 쿼터 창(KST 하루). 전체 서비스 상한이 이 창을 쓴다. */
 export function dailyWindow(nowMs: number): UsageWindow {
   return { key: kstDayKey(nowMs), resetAtMs: nextKstMidnightMs(nowMs) };
+}
+
+/**
+ * KST 기준 그 주가 시작한 **월요일**의 날짜('2026-08-17').
+ *
+ * 주 경계를 월요일에 두는 이유: 사용자가 "이번 주"라고 말할 때의 감각과 맞아야 남은
+ * 횟수를 스스로 셀 수 있다. 창을 7일 슬라이딩으로 두면 "언제 리셋되는지"를 사용자에게
+ * 설명할 수 없다.
+ *
+ * epoch(1970-01-01)은 목요일이라 +3을 더해 월요일을 0으로 맞춘다.
+ */
+export function kstWeekKey(nowMs: number): string {
+  return new Date(kstWeekStartDay(nowMs) * DAY_MS).toISOString().slice(0, 10);
+}
+
+function kstWeekStartDay(nowMs: number): number {
+  const day = Math.floor((nowMs + KST_OFFSET_MS) / DAY_MS);
+  return day - ((day + 3) % 7);
+}
+
+/** 다음 주가 시작하는 KST 월요일 자정(ms). */
+export function nextKstWeekStartMs(nowMs: number): number {
+  return (kstWeekStartDay(nowMs) + 7) * DAY_MS - KST_OFFSET_MS;
+}
+
+/** 주간 쿼터 창(KST 월요일~일요일). 설치별 분석 한도가 이 창을 쓴다. */
+export function weeklyWindow(nowMs: number): UsageWindow {
+  return { key: kstWeekKey(nowMs), resetAtMs: nextKstWeekStartMs(nowMs) };
 }
 
 /**
@@ -62,7 +90,7 @@ export function secondsUntil(targetMs: number, nowMs: number): number {
 
 export type LimitCode =
   | "RATE_LIMITED"
-  | "DAILY_QUOTA_EXCEEDED"
+  | "WEEKLY_QUOTA_EXCEEDED"
   | "CONCURRENCY_LIMIT"
   | "GLOBAL_QUOTA_EXCEEDED";
 
@@ -80,4 +108,29 @@ export class LimitExceededError extends Error {
 
 export function isLimitExceeded(e: unknown): e is LimitExceededError {
   return e instanceof LimitExceededError;
+}
+
+/**
+ * 쿼터를 적용하지 않을 설치 목록을 env 문자열에서 읽는다(콤마 구분).
+ *
+ * 개발자 단말이 테스트 중에 자기 한도에 막히면, 정작 한도를 확인해야 할 때 확인하지 못한다.
+ * 설치 ID는 앱 설정 화면에 그대로 표시된다.
+ */
+export function parseExemptList(raw: string): ReadonlySet<string> {
+  return new Set(
+    raw
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean),
+  );
+}
+
+/**
+ * 이 설치에 사용량 쿼터를 적용하지 않는가.
+ *
+ * ⚠ 인증을 통과한 뒤에만 물어야 한다. 설치 ID는 헤더로 오는 값이라, 인증 전에 이걸로
+ *   분기하면 남의 ID를 흉내 내 한도를 우회할 수 있다(기기 토큰이 실제 자격 증명이다).
+ */
+export function isQuotaExempt(installationId: string, exempt: ReadonlySet<string>): boolean {
+  return exempt.has(installationId);
 }

@@ -75,7 +75,8 @@ docker compose down            # 종료 (DB는 pg-data 볼륨에 유지)
 
 | env | 기본값 | 의미 |
 |---|---:|---|
-| `QUOTA_INSTALLATION_DAILY` | 10 | 설치별 일일 분석 횟수(KST 자정 리셋) |
+| `QUOTA_INSTALLATION_WEEKLY` | 100 | 설치별 **주간** 분석 횟수(KST 월요일 자정 리셋) |
+| `QUOTA_EXEMPT_INSTALLATIONS` | (없음) | 쿼터를 적용하지 않을 설치 ID(콤마 구분, 개발자 단말) |
 | `QUOTA_GLOBAL_DAILY` | 0 | 서비스 전체 일일 분석 상한(비용 산정 전이라 기본 off) |
 | `QUOTA_INSTALLATION_CONCURRENT` | 1 | 설치별 동시 분석 개수 |
 | `ANALYSIS_STALE_AFTER_SECONDS` | 300 | 유실 Job 판정 시간 |
