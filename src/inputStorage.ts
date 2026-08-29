@@ -38,6 +38,10 @@ function hasExpectedSignature(bytes: Uint8Array, mime: string): boolean {
   return false;
 }
 
+function installationObjectPrefix(installationId: string): string {
+  return `installations/${installationId}/`;
+}
+
 export async function storeInput(
   installationId: string,
   jobId: string,
@@ -81,9 +85,8 @@ export function inspectInputImage(bytes: Uint8Array, mime: string): InspectedIma
   return { size: readImageSize(bytes, mime) };
 }
 
-export async function deleteInstallationObjects(installationId: string): Promise<void> {
+async function deleteByPrefix(prefix: string): Promise<void> {
   if (!config.betaDataBucket) return;
-  const prefix = `installations/${installationId}/`;
   let continuationToken: string | undefined;
   do {
     const page = await client.send(
@@ -108,12 +111,37 @@ export async function deleteInstallationObjects(installationId: string): Promise
   } while (continuationToken);
 }
 
-export async function signedInputUrl(key: string): Promise<string | null> {
+export async function deleteInstallationObjects(installationId: string): Promise<void> {
+  await deleteByPrefix(installationObjectPrefix(installationId));
+}
+
+/**
+ * Job 하나가 남긴 S3 객체 전부를 지운다 — 입력 원본(`input.*`)과 조정본(`refined/**`).
+ *
+ * 둘이 같은 prefix 아래 있는 것은 우연이 아니다. refineStorage.refinedObjectKey가
+ * 의도적으로 이 경로를 쓴다. 그래서 여기 하나로 끝나고 refineStorage에 별도 삭제
+ * 함수를 둘 이유가 없다.
+ *
+ * refinedObjectKey는 세그먼트에 safeSegment()를 거치고 storeInput은 거치지 않지만,
+ * installationId·jobId 모두 randomUUID 파생이라 safeSegment가 항등이다. 두 prefix는
+ * 실제로 같은 문자열이 된다.
+ */
+export async function deleteJobObjects(installationId: string, jobId: string): Promise<void> {
+  await deleteByPrefix(`${installationObjectPrefix(installationId)}jobs/${jobId}/`);
+}
+
+/**
+ * 입력 원본의 presigned GET URL. 기본 300초.
+ *
+ * 작업 기록 상세는 사용자가 후보를 비교하는 동안 300초보다 오래 열려 있으므로 그
+ * 경로만 더 긴 TTL을 넘긴다. 관리자 리뷰 화면은 인자 없이 호출해 기존 값을 유지한다.
+ */
+export async function signedInputUrl(key: string, expiresIn = 300): Promise<string | null> {
   if (!config.betaDataBucket) return null;
   return getSignedUrl(
     client,
     new GetObjectCommand({ Bucket: config.betaDataBucket, Key: key }),
-    { expiresIn: 300 },
+    { expiresIn },
   );
 }
 

@@ -4,13 +4,15 @@ import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
 import { errorEnvelope } from "../mapping.js";
 import { confirmSelections, saveFeedback } from "../analytics/store.js";
-import { inspectInputImage, storeInput } from "../inputStorage.js";
+import { deleteJobObjects, inspectInputImage, signedInputUrl, storeInput } from "../inputStorage.js";
 import { exceedsPixelBudget } from "../imageHeader.js";
 import { config } from "../config.js";
 import { parseHistoryQuery, toHistoryPage } from "./history.js";
 import {
   createJobWithLimits,
+  deleteOwnedJob,
   getOwnedJob,
+  listConfirmedSelections,
   listJobHistory,
   refundAnalysisQuota,
   setJobInput,
@@ -26,6 +28,9 @@ import { errorFields, log } from "../log.js";
 import { notify } from "../notify.js";
 
 export const jobsRoutes = new Hono<AppEnv>();
+
+/** 기록 상세는 후보를 비교하는 동안 기본 300초보다 오래 열려 있다. */
+const RESULT_INPUT_URL_TTL_SECONDS = 900;
 
 // POST /:jobId/people/:personIndex/refine. 같은 prefix라 여기 붙이고 파일만 나눈다.
 jobsRoutes.route("/", refineRoutes);
@@ -190,7 +195,64 @@ jobsRoutes.get("/:id/result", async (c) => {
   if (job.status !== "completed" || !job.result) {
     return c.json(errorEnvelope("NOT_READY", `job status: ${job.status}`, c.get("requestId")), 409);
   }
-  return c.json(job.result);
+  // 입력 원본을 여기에 얹는다. 결과는 Job당 사실상 한 번만 조회되고 presign은 네트워크
+  // 없는 서명이라 비용이 없다 — 이것 하나 때문에 엔드포인트를 늘리지 않는다.
+  // 버킷 lifecycle이 90일이라 오래된 Job은 키가 있어도 객체가 없을 수 있고, 키 자체가
+  // 없으면 null이다. 화면이 "보관 기간이 지났다"를 구분해 안내한다.
+  const inputUrl = job.inputS3Key
+    ? await signedInputUrl(job.inputS3Key, RESULT_INPUT_URL_TTL_SECONDS)
+    : null;
+  return c.json({
+    ...job.result,
+    inputUrl,
+    inputUrlExpiresInSeconds: inputUrl ? RESULT_INPUT_URL_TTL_SECONDS : null,
+  });
+});
+
+// GET /v1/analysis/jobs/:id/selections — 확정 선택(PUT의 짝).
+// 상태 폴링(GET /:id)에 얹지 않는다. 그 라우트는 분석 중 750ms마다 불리는 hot path다.
+jobsRoutes.get("/:id/selections", async (c) => {
+  const job = await getOwnedJob(c.req.param("id"), c.get("installationId")!);
+  if (!job) {
+    return c.json(errorEnvelope("NOT_FOUND", "unknown jobId", c.get("requestId")), 404);
+  }
+  return c.json({ selections: await listConfirmedSelections(job.id) });
+});
+
+// DELETE /v1/analysis/jobs/:id — 기록에서 작업 하나를 지운다.
+jobsRoutes.delete("/:id", async (c) => {
+  const jobId = c.req.param("id");
+  const installationId = c.get("installationId")!;
+  const outcome = await deleteOwnedJob(jobId, installationId);
+  if (!outcome.ok) {
+    if (outcome.reason === "in_progress") {
+      return c.json(
+        errorEnvelope(
+          "JOB_IN_PROGRESS",
+          "진행 중인 분석은 삭제할 수 없습니다. 끝난 뒤에 다시 시도해 주세요.",
+          c.get("requestId"),
+        ),
+        409,
+      );
+    }
+    return c.json(errorEnvelope("NOT_FOUND", "unknown jobId", c.get("requestId")), 404);
+  }
+
+  // DB를 먼저 지우고 S3는 best-effort로 뒤따른다. 순서를 뒤집으면 커밋이 실패했을 때
+  // input_s3_key는 살아 있는데 객체가 없는 Job이 남아, 사용자에게는 아무 신호 없이
+  // "원본 없음"이 된다. 반대로 여기서 실패해 남는 것은 lifecycle 90일이 어차피 지우는
+  // 고아 객체 하나뿐이다.
+  try {
+    await deleteJobObjects(installationId, jobId);
+  } catch (error) {
+    log.error({ type: "job_object_delete_failed", jobId, ...errorFields(error) });
+    notify({
+      severity: "P3",
+      code: "JOB_OBJECT_DELETE_FAILED",
+      message: "작업 삭제 후 S3 객체가 남았습니다.",
+    });
+  }
+  return c.json({ deleted: true });
 });
 
 jobsRoutes.put("/:id/selections", async (c) => {

@@ -42,7 +42,7 @@ X-Device-Token: ...
 ```
 
 클라는 `message`를 직접 표시하지 않고 `code`를 사용자 메시지로 매핑한다.
-주요 코드: `INVALID_INPUT`/`PROVIDER_UNAVAILABLE`/`OAUTH_STATE_MISMATCH`/`EMAIL_REQUIRED`(400) · `UNAUTHENTICATED`/`INVALID_TOKEN`/`INVALID_CREDENTIALS`(401) · `EMAIL_NOT_VERIFIED`(403) · `NOT_FOUND`(404) · `NOT_READY`/`EMAIL_TAKEN`(409) · `PAYLOAD_TOO_LARGE`(413) · `WEEKLY_QUOTA_EXCEEDED`/`GLOBAL_QUOTA_EXCEEDED`(429) · `NOT_IMPLEMENTED`(501) · `OAUTH_FAILED`(502) · `STORAGE_UNAVAILABLE`(503) · `INFERENCE_FAILED`/`ANALYSIS_UNAVAILABLE`(Job status=failed).
+주요 코드: `INVALID_INPUT`/`PROVIDER_UNAVAILABLE`/`OAUTH_STATE_MISMATCH`/`EMAIL_REQUIRED`(400) · `UNAUTHENTICATED`/`INVALID_TOKEN`/`INVALID_CREDENTIALS`(401) · `EMAIL_NOT_VERIFIED`(403) · `NOT_FOUND`(404) · `NOT_READY`/`EMAIL_TAKEN`/`JOB_IN_PROGRESS`(409) · `PAYLOAD_TOO_LARGE`(413) · `WEEKLY_QUOTA_EXCEEDED`/`GLOBAL_QUOTA_EXCEEDED`(429) · `NOT_IMPLEMENTED`(501) · `OAUTH_FAILED`(502) · `STORAGE_UNAVAILABLE`(503) · `INFERENCE_FAILED`/`ANALYSIS_UNAVAILABLE`(Job status=failed).
 
 ### 사용량 제한 (`429`)
 
@@ -146,6 +146,93 @@ Retry-After: 41230
 
 ---
 
+## GET /v1/analysis/jobs 🔒
+
+작업 기록 목록. 최신순(`createdAt DESC`), 커서 페이지네이션.
+
+| 쿼리 | 기본 | 설명 |
+|---|---|---|
+| `limit` | 20 | 1~50 정수. 범위 밖은 클램프하지 않고 `400 INVALID_INPUT`. |
+| `cursor` | — | 이전 응답의 `nextCursor`. 손상된 값은 `400 INVALID_INPUT`. |
+| `status` | — | `queued \| running \| completed \| failed` 중 하나로 거른다. |
+
+```json
+{
+  "items": [
+    {
+      "jobId": "job_...",
+      "status": "completed",
+      "createdAt": "...",
+      "completedAt": "...",
+      "errorCode": null,
+      "source": "capture",
+      "personCount": 2,
+      "selectionCount": 2,
+      "hasSelection": true,
+      "thumbnailUrl": "/v1/pose-candidates/{poseId}/thumbnail?view=front",
+      "inputAvailable": true,
+      "inputWidth": 1920,
+      "inputHeight": 1080
+    }
+  ],
+  "nextCursor": "eyJ..." 
+}
+```
+
+`nextCursor`가 `null`이면 마지막 페이지다.
+
+> ⚠ `thumbnailUrl`은 **입력 러프가 아니라 매칭된 포즈 후보**의 썸네일 경로다. 확정 선택한
+> 후보를 우선 쓰고, 없으면 첫 인물의 1순위로 폴백한다. 후보가 없는 Job(실패 등)은 `null`.
+> 원본을 20건 내려보내면 수십 MB가 되지만 후보 썸네일은 이미 하루 캐시되는 작은 PNG다.
+> 인증 헤더가 필요하므로 절대 URL이 아닌 상대 경로를 준다.
+
+> ⚠ `inputAvailable`은 입력 원본이 S3에 남아 있는지다. **DB의 Job은 365일, S3 객체는
+> lifecycle 90일**이라 그 사이 구간의 Job은 목록에 나오지만 원본은 제공되지 않는다.
+
+> ⚠ 이 경로에는 IP 속도 제한이 없다(제한은 `POST /v1/analysis/jobs`에만 붙는다).
+> 부하 상한은 `limit` 최대 50으로만 강제된다.
+
+---
+
+## DELETE /v1/analysis/jobs/{jobId} 🔒
+
+기록에서 작업 하나를 지운다. Job 행과 파생 데이터(인물·후보·확정 선택·피드백·내보내기
+기록·분석 이벤트·조정본 대장), 그리고 S3의 입력 원본과 조정본을 모두 지운다.
+
+```json
+{ "deleted": true }
+```
+
+- 진행 중(`queued`/`running`)이면 `409 JOB_IN_PROGRESS`. 삭제를 허용하면 워커가 남긴
+  인물·후보 행이 회수 불가능한 고아가 되고, 설치별 동시 분석 한도가 무의미해진다.
+- 남의 Job이거나 없는 Job이면 `404 NOT_FOUND`.
+- DB를 먼저 커밋하고 S3 삭제는 best-effort다. S3가 실패해도 응답은 성공이며, 남는 것은
+  lifecycle 90일이 어차피 지우는 고아 객체뿐이다.
+- ⚠ `analytics_events`도 함께 지운다. `daily_analytics_aggregates`는 기동마다 과거 일자를
+  **재계산**하므로, 개별 삭제는 지나간 날짜의 집계 수치를 소급해서 낮춘다.
+
+계정(설치) 전체 삭제는 `DELETE /v1/installations/current/data`가 담당한다.
+
+---
+
+## GET /v1/analysis/jobs/{jobId}/selections 🔒
+
+확정 선택 조회. `PUT .../selections`의 짝이며, 작업 기록 상세가 이전 선택을 화면에
+되살릴 때 쓴다.
+
+```json
+{
+  "selections": [
+    { "personIndex": 0, "candidateId": "pose-1::front", "rank": 1, "confirmedAt": "..." }
+  ]
+}
+```
+
+상태 폴링(`GET /{jobId}`)에 얹지 않은 이유는 그 경로가 분석 중 750ms마다 불리는
+hot path이기 때문이다.
+
+---
+
 ## GET /v1/analysis/jobs/{jobId}
 
 상태 폴링.
@@ -176,9 +263,16 @@ fire-and-forget이라 생길 수 있고, 서버가 주기적으로 정리해 무
 
 완료 시 결과. 미완료면 `409 NOT_READY`.
 
+`inputUrl`은 입력 원본의 presigned GET URL(900초)이다. 작업 기록 상세가 원본 미리보기에
+쓴다. 키가 없거나 버킷이 설정되지 않았으면 `null`이고, 그때는 `inputUrlExpiresInSeconds`도
+`null`이다. **S3 lifecycle이 90일**이라 그보다 오래된 Job은 `null`이 되며, 화면은 "보관
+기간이 지났다"로 안내한다.
+
 ```json
 {
   "jobId": "job_...",
+  "inputUrl": "https://... | null",
+  "inputUrlExpiresInSeconds": 900,
   "image": { "width": 1280, "height": 720 },
   "inferenceMetadata": {
     "deploymentVersion": "git-sha",
