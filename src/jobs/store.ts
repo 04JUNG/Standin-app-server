@@ -3,7 +3,8 @@
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { config } from "../config.js";
-import { execute, pool, queryOne, transaction } from "../db.js";
+import { execute, pool, query, queryOne, transaction } from "../db.js";
+import type { HistoryQuery, JobHistoryRow } from "./history.js";
 import {
   LimitExceededError,
   dailyWindow,
@@ -278,6 +279,53 @@ export async function getOwnedJob(id: string, installationId: string): Promise<J
     [id, installationId],
   );
   return row ? toJob(row) : undefined;
+}
+
+/**
+ * 작업 기록 목록. 반드시 `installation_id`로 스코핑한다 — 분석 경로에는 JWT가 없어
+ * `user_id`가 사실상 항상 null이므로 그걸로 거르면 남의 작업이 그대로 노출된다.
+ *
+ * 집계는 LATERAL 세 개로 한 번에 가져온다(N+1 회피). 셋 다 기존 PK/인덱스를 탄다:
+ * analysis_people·confirmed_selections는 PK `(job_id, person_index)`, analysis_candidates는
+ * `candidates_job_rank`. `result_json`은 건당 수십~수백 KB라 SELECT에 넣지 않는다.
+ *
+ * `limit + 1`건을 가져와 다음 페이지 유무를 판정한다(전체 COUNT는 365일치 스캔이라 쓰지 않음).
+ */
+export async function listJobHistory(
+  installationId: string,
+  { limit, cursor, status }: HistoryQuery,
+): Promise<JobHistoryRow[]> {
+  return query<JobHistoryRow>(
+    `SELECT j.id, j.status, j.created_at, j.completed_at, j.error_code, j.source,
+            j.input_width, j.input_height, (j.input_s3_key IS NOT NULL) AS has_input,
+            p.person_count, s.selection_count, t.thumb_pose_id, t.thumb_view
+     FROM jobs j
+     LEFT JOIN LATERAL (
+       SELECT count(*)::int AS person_count
+       FROM analysis_people ap WHERE ap.job_id = j.id
+     ) p ON TRUE
+     LEFT JOIN LATERAL (
+       SELECT count(*)::int AS selection_count
+       FROM confirmed_selections cs WHERE cs.job_id = j.id
+     ) s ON TRUE
+     LEFT JOIN LATERAL (
+       -- 확정 선택한 후보를 우선 쓰고, 없으면 첫 인물의 1순위로 폴백한다.
+       SELECT ac.pose_id AS thumb_pose_id, ac.view AS thumb_view
+       FROM analysis_candidates ac
+       LEFT JOIN confirmed_selections cs
+         ON cs.job_id = ac.job_id AND cs.person_index = ac.person_index
+        AND cs.candidate_id = ac.candidate_id
+       WHERE ac.job_id = j.id
+       ORDER BY (cs.candidate_id IS NULL), ac.person_index, ac.rank
+       LIMIT 1
+     ) t ON TRUE
+     WHERE j.installation_id = $1
+       AND ($2::text IS NULL OR j.status = $2)
+       AND ($3::text IS NULL OR (j.created_at, j.id) < ($3, $4))
+     ORDER BY j.created_at DESC, j.id DESC
+     LIMIT $5`,
+    [installationId, status, cursor?.createdAt ?? null, cursor?.id ?? null, limit + 1],
+  );
 }
 
 export async function setJobInput(
