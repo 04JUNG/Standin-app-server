@@ -85,6 +85,9 @@ async function insertJob(
 ): Promise<Job> {
   const now = new Date().toISOString();
   const job: Job = {
+    // ⚠ `job_` 접두는 클라이언트와 공유하는 계약이다. 데스크톱 앱이 라우트의 jobId가
+    // 자기가 만든 것인지 서버가 준 것인지를 이 접두 하나로 가른다(클라 ADR-012).
+    // 형식을 바꾸면 앱의 작업 기록 재진입이 조용히 라이브 분석 경로로 떨어진다.
     id: `job_${randomUUID()}`,
     userId,
     status: "queued",
