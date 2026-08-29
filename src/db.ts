@@ -318,6 +318,11 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS oauth_codes_expires_at ON oauth_codes (expires_at);
   CREATE INDEX IF NOT EXISTS jobs_user_id ON jobs (user_id);
   CREATE INDEX IF NOT EXISTS jobs_installation_id ON jobs (installation_id);
+  -- 작업 기록 목록의 커서 페이지네이션((created_at, id) 비교 + ORDER BY DESC) 전용.
+  -- jobs_installation_id는 이 복합의 접두라 중복이지만, DROP은 동시성 카운트 쿼리의
+  -- 플랜에 영향을 주고 되돌리려면 재배포가 필요하므로 별도 정리 작업으로 미룬다.
+  CREATE INDEX IF NOT EXISTS jobs_installation_created
+    ON jobs (installation_id, created_at DESC, id DESC);
   CREATE INDEX IF NOT EXISTS analytics_events_installation ON analytics_events (installation_id, occurred_at);
   CREATE INDEX IF NOT EXISTS analytics_events_job ON analytics_events (job_id);
   CREATE INDEX IF NOT EXISTS candidates_job_rank ON analysis_candidates (job_id, person_index, rank);

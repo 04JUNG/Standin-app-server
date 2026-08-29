@@ -7,9 +7,11 @@ import { confirmSelections, saveFeedback } from "../analytics/store.js";
 import { inspectInputImage, storeInput } from "../inputStorage.js";
 import { exceedsPixelBudget } from "../imageHeader.js";
 import { config } from "../config.js";
+import { parseHistoryQuery, toHistoryPage } from "./history.js";
 import {
   createJobWithLimits,
   getOwnedJob,
+  listJobHistory,
   refundAnalysisQuota,
   setJobInput,
   updateJob,
@@ -147,6 +149,21 @@ jobsRoutes.post("/", async (c) => {
     void runAnalysisJob(job.id, file); // migration rollback path
   }
   return c.json({ jobId: job.id, status: job.status, createdAt: job.createdAt }, 202);
+});
+
+// GET /v1/analysis/jobs — 작업 기록 목록(커서 페이지네이션).
+// `/:id`보다 위에 둔다. Hono는 정적/파라미터를 구분하지만 읽는 순서를 맞춘다.
+jobsRoutes.get("/", async (c) => {
+  const parsed = parseHistoryQuery({
+    limit: c.req.query("limit"),
+    cursor: c.req.query("cursor"),
+    status: c.req.query("status"),
+  });
+  if (!parsed.ok) {
+    return c.json(errorEnvelope("INVALID_INPUT", parsed.message, c.get("requestId")), 400);
+  }
+  const rows = await listJobHistory(c.get("installationId")!, parsed.query);
+  return c.json(toHistoryPage(rows, parsed.query.limit));
 });
 
 // GET /v1/analysis/jobs/:id — 상태 폴링
