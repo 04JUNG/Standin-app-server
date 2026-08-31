@@ -85,6 +85,9 @@ async function insertJob(
 ): Promise<Job> {
   const now = new Date().toISOString();
   const job: Job = {
+    // ⚠ `job_` 접두는 클라이언트와 공유하는 계약이다. 데스크톱 앱이 라우트의 jobId가
+    // 자기가 만든 것인지 서버가 준 것인지를 이 접두 하나로 가른다(클라 ADR-012).
+    // 형식을 바꾸면 앱의 작업 기록 재진입이 조용히 라이브 분석 경로로 떨어진다.
     id: `job_${randomUUID()}`,
     userId,
     status: "queued",
@@ -326,6 +329,78 @@ export async function listJobHistory(
      LIMIT $5`,
     [installationId, status, cursor?.createdAt ?? null, cursor?.id ?? null, limit + 1],
   );
+}
+
+export type DeleteJobOutcome =
+  | { ok: true; inputS3Key: string | null }
+  | { ok: false; reason: "not_found" | "in_progress" };
+
+/**
+ * 작업 기록에서 Job 하나를 지운다. S3 객체는 호출부가 이어서 지운다.
+ *
+ * **진행 중(queued/running)이면 거절한다.** 두 가지가 실제로 깨지기 때문이다.
+ *
+ * 1. persistAnalysisRecords는 analysis_people·analysis_candidates를 FK 없이 INSERT한다.
+ *    지운 뒤 워커가 완료하면 존재하지 않는 job_id의 행이 남고, 보존 정리 쿼리는
+ *    `job_id IN (SELECT id FROM jobs ...)` 형태라 그 행은 영구히 회수되지 않는다.
+ * 2. createJobWithLimits의 동시 분석 카운트가 status IN ('queued','running') 행 수다.
+ *    삭제로 슬롯이 즉시 비면 워커가 도는 중에 새 분석이 시작돼 한도가 무의미해진다.
+ *
+ * 유실된 Job은 failStaleJobs()가 failed로 닫으므로 사용자가 영구히 막히지는 않는다.
+ *
+ * 삭제 순서는 installations/store.ts의 deleteRows 규약을 그대로 따른다.
+ */
+export async function deleteOwnedJob(
+  id: string,
+  installationId: string,
+): Promise<DeleteJobOutcome> {
+  return transaction(async (client) => {
+    // 소유·상태 판정과 삭제 사이에 워커가 상태를 바꾸지 못하게 잠근다.
+    const owned = await client.query<{ status: JobStatus; input_s3_key: string | null }>(
+      "SELECT status, input_s3_key FROM jobs WHERE id = $1 AND installation_id = $2 FOR UPDATE",
+      [id, installationId],
+    );
+    const job = owned.rows[0];
+    if (!job) return { ok: false, reason: "not_found" };
+    if (job.status === "queued" || job.status === "running") {
+      return { ok: false, reason: "in_progress" };
+    }
+
+    await client.query("DELETE FROM export_events WHERE job_id = $1", [id]);
+    await client.query("DELETE FROM job_feedback WHERE job_id = $1", [id]);
+    await client.query("DELETE FROM confirmed_selections WHERE job_id = $1", [id]);
+    await client.query("DELETE FROM analytics_events WHERE job_id = $1", [id]);
+    await client.query("DELETE FROM admin_access_audit WHERE job_id = $1", [id]);
+    await client.query("DELETE FROM refined_artifacts WHERE job_id = $1", [id]);
+    await client.query("DELETE FROM analysis_candidates WHERE job_id = $1", [id]);
+    await client.query("DELETE FROM analysis_people WHERE job_id = $1", [id]);
+    // job_outbox는 jobs(id) ON DELETE CASCADE로 함께 지워진다.
+    await client.query("DELETE FROM jobs WHERE id = $1", [id]);
+
+    return { ok: true, inputS3Key: job.input_s3_key };
+  });
+}
+
+/** 확정 선택 목록. 작업 기록 상세가 이전 선택을 화면에 되살릴 때 쓴다. */
+export async function listConfirmedSelections(
+  jobId: string,
+): Promise<Array<{ personIndex: number; candidateId: string; rank: number; confirmedAt: string }>> {
+  const rows = await query<{
+    person_index: number;
+    candidate_id: string;
+    rank: number;
+    confirmed_at: string;
+  }>(
+    `SELECT person_index, candidate_id, rank, confirmed_at
+     FROM confirmed_selections WHERE job_id = $1 ORDER BY person_index`,
+    [jobId],
+  );
+  return rows.map((r) => ({
+    personIndex: r.person_index,
+    candidateId: r.candidate_id,
+    rank: r.rank,
+    confirmedAt: r.confirmed_at,
+  }));
 }
 
 export async function setJobInput(
