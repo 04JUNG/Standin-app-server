@@ -53,8 +53,19 @@ export interface AnalysisResult {
    * 클라이언트가 자기 판단으로 refine을 호출하지 않게 하려면 서버가 알려 줘야 한다.
    * 추론 endpoint가 살아 있어도 BFF flag가 꺼져 있으면 여기서 false가 나간다.
    */
-  capabilities: { refine: boolean };
+  capabilities: {
+    refine: boolean;
+    /**
+     * FBX 저장을 노출해도 되는가. converter는 추론 서버와 별개로 배포되므로 refine과 함께
+     * 켜지지 않는다. 클라이언트가 자기 판단으로 format=fbx를 보내면 converter가 없는
+     * 배포에서 전건 실패한다 — 그래서 서버가 알려 준다.
+     */
+    fbxExport: boolean;
+  };
 }
+
+/** 사용자가 고르는 저장 포맷. BVH는 클립스튜디오 3.1.0 이상에서만 열린다. */
+export type ExportFormat = "bvh" | "fbx";
 
 export interface AnalysisPerson {
   personIndex: number;

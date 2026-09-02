@@ -314,7 +314,7 @@ fire-and-forget이라 생길 수 있고, 서버가 주기적으로 정리해 무
     }
   ],
   "notes": [],
-  "capabilities": { "refine": false }
+  "capabilities": { "refine": false, "fbxExport": false }
 }
 ```
 
@@ -354,6 +354,13 @@ fire-and-forget이라 생길 수 있고, 서버가 주기적으로 정리해 무
 
 이 BFF가 refine을 노출하는가(`REFINE_FEATURE_ENABLED`). 추론 endpoint가 살아 있어도 이 값이 `false`면
 클라이언트는 refine을 호출하지 않는다.
+
+### `capabilities.fbxExport`
+
+이 BFF가 FBX 저장을 노출하는가. `CONVERTER_BASE_URL`과 `FBX_EXPORT_ENABLED=true`가 **둘 다** 있어야
+`true`다. converter는 추론 서버와 별개로 배포되므로 refine과 함께 켜지지 않는다 — 클라이언트가 자기
+판단으로 `format=fbx`를 보내면 converter가 없는 배포에서 전건 실패한다. `false`면 저장 포맷 선택에서
+FBX를 고를 수 없게 하고 BVH로 저장한다.
 
 후보가 5개 미만이면 실제 개수만 반환하고 `candidateShortfallReason`을 기록한다. `id`는 작업에서 실제 노출된 후보를 유일하게 식별하며, `poseId`는 BVH 원본 포즈 식별자다.
 
@@ -432,9 +439,12 @@ BFF가 보관해 둔 값을 서버측에서 읽는다 — 클라이언트가 값
 
 ---
 
-## GET /v1/pose-candidates/{poseId}/export?jobId=...&personIndex=...&candidateId=...
+## GET /v1/pose-candidates/{poseId}/export?jobId=...&personIndex=...&candidateId=...&format=bvh|fbx
 
-작업에서 실제 노출된 후보인지 확인한 뒤 BVH를 반환한다. 요청·성공·실패를 서버에서 직접 기록한다.
+작업에서 실제 노출된 후보인지 확인한 뒤 최종 포즈 파일을 반환한다. 요청·성공·실패를 서버에서 직접 기록한다.
+
+`format`은 `bvh`(기본) 또는 `fbx`다. 값을 생략하면 `bvh`로 읽는다 — 구버전 클라이언트가 계속 동작해야
+하기 때문이다.
 
 **무엇을 내보낼지는 이 엔드포인트가 정한다.** 해당 `(jobId, personIndex, candidateId)`에 유효한 조정본이
 있으면 private S3에 보관된 조정본을, 없으면 도원 서버(`GET /pose/{id}/bvh`)의 베이스 BVH를 프록시한다.
@@ -448,6 +458,38 @@ BFF가 보관해 둔 값을 서버측에서 읽는다 — 클라이언트가 값
 **`409 POSE_UNAVAILABLE`**: 추론이 릴리스 시점에 격리한 포즈(`pose_quarantined`)다. 후보 목록은 `/analyze`
 때 저장돼 있으므로 격리가 늘어나면 화면에 남아 있던 선택이 여기서 409로 돌아온다. **재시도로는 풀리지
 않는다** — 클라이언트는 재시도 버튼이 아니라 "다른 후보를 선택" 경로를 보여줘야 한다.
+
+### `format=fbx` — V3.2 FBX 변환
+
+최종 BVH 바이트를 확정하는 규칙은 위와 **똑같다**. 그 뒤에 내부 Converter API `POST /convert`를 인물마다
+한 번 호출해 rigged FBX를 받는다(`character_id=standin-master-v2`, `frame=0`, `output_mode=rigged_rest`,
+`apply_root_translation=false`, `mirror=false`).
+
+응답을 내보내기 전에 세 가지를 대조한다. 하나라도 어긋나면 그 FBX는 **폐기**한다.
+
+```text
+X-Standin-Source-BVH-SHA256 == sha256(우리가 보낸 최종 BVH)
+X-Standin-Artifact-SHA256   == sha256(응답 본문)
+X-Standin-Solver-Version    == chain-transport-v3.2
+```
+
+성공하면 `converter` 구조화 로그(`convert_completed`)에 `conversionId`·`finalBvhSha256`·
+`fbxArtifactSha256`·`artifactKind`를 남긴다. converter의 CloudWatch 로그와 잇는 키가 `conversionId`다.
+
+mirror는 **converter가 한 번만** 적용한다. BFF가 BVH rotation을 직접 미러링하지 않고, CSP 단계도 같은
+반전을 다시 하지 않는다. 현재는 사용자에게 노출하지 않아 항상 `false`다.
+
+| 상태 | 코드 | 재시도 |
+|---|---|---|
+| `409` | `FBX_UNAVAILABLE` | converter가 꺼진 배포. BVH로 저장 |
+| `409` | `CONVERTER_REJECTED` | ✗ 같은 입력은 계속 거부된다 |
+| `409` | `CONVERTER_INTEGRITY` | ✗ lineage 불일치. 운영 확인 필요 |
+| `503` | `CONVERTER_UNAVAILABLE` | ○ |
+| `504` | `CONVERTER_TIMEOUT` | ○ |
+| `502` | `CONVERTER_FAILED` | ○ |
+
+FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.** 사용자가 고른 포맷과 저장된 파일이 달라지면
+클립스튜디오에서 열리지 않는 이유를 알 방법이 없다.
 
 ---
 
