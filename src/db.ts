@@ -221,6 +221,9 @@ const SCHEMA = `
   -- 조회 실패로 베이스가 나간 경우와 처음부터 베이스인 경우를 지표에서 구분할 수 없다.
   ALTER TABLE export_events ADD COLUMN IF NOT EXISTS variant TEXT;
   ALTER TABLE export_events ADD COLUMN IF NOT EXISTS fallback_reason TEXT;
+  -- 사용자가 고른 저장 포맷(bvh|fbx). 이게 없으면 FBX 변환 실패율을 BVH 저장과 섞어
+  -- 집계하게 되고, converter를 켠 효과를 지표로 확인할 수 없다.
+  ALTER TABLE export_events ADD COLUMN IF NOT EXISTS format TEXT;
 
   /* 조정본 artifact 대장(BFF-06).
      object_key는 추론 컨테이너의 로컬 handle이 아니라 **S3 object key**다 — 태스크가
