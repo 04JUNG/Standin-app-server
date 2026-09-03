@@ -62,7 +62,10 @@ docker compose down            # 종료 (DB는 pg-data 볼륨에 유지)
 | `POST` | `/v1/auth/logout` | ✅ refresh 폐기 |
 | `GET` | `/v1/users/me` 🔒 | ✅ 현재 유저(세션 복원) |
 | `POST` | `/v1/analysis/jobs` 🔒 | ✅ Job 생성 → `/analyze` 백그라운드 호출 (설치별 일일 쿼터 적용, 초과 시 `429`) |
+| `GET` | `/v1/analysis/jobs` 🔒 | ✅ 작업 기록 목록(커서 페이지네이션, `limit`/`cursor`/`status`) |
 | `GET` | `/v1/analysis/jobs/:id` 🔒 | ✅ 상태 폴링 |
+| `DELETE` | `/v1/analysis/jobs/:id` 🔒 | ✅ 기록에서 삭제(진행 중이면 `409`, S3 객체까지) |
+| `GET` | `/v1/analysis/jobs/:id/selections` 🔒 | ✅ 확정 선택 조회(기록 상세 복원용) |
 | `GET` | `/v1/analysis/jobs/:id/result` 🔒 | ✅ 결과(+matchLevel 매핑) |
 | `POST` | `/v1/analysis/jobs/:id/rerun` 🔒 | 🚧 Phase 2 stub(501) |
 | `GET` | `/v1/pose-candidates/:id/export` 🔒 | ✅ BVH 프록시 |

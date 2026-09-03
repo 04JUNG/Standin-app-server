@@ -3,7 +3,8 @@
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { config } from "../config.js";
-import { execute, pool, queryOne, transaction } from "../db.js";
+import { execute, pool, query, queryOne, transaction } from "../db.js";
+import type { HistoryQuery, JobHistoryRow } from "./history.js";
 import {
   LimitExceededError,
   dailyWindow,
@@ -84,6 +85,9 @@ async function insertJob(
 ): Promise<Job> {
   const now = new Date().toISOString();
   const job: Job = {
+    // ⚠ `job_` 접두는 클라이언트와 공유하는 계약이다. 데스크톱 앱이 라우트의 jobId가
+    // 자기가 만든 것인지 서버가 준 것인지를 이 접두 하나로 가른다(클라 ADR-012).
+    // 형식을 바꾸면 앱의 작업 기록 재진입이 조용히 라이브 분석 경로로 떨어진다.
     id: `job_${randomUUID()}`,
     userId,
     status: "queued",
@@ -278,6 +282,125 @@ export async function getOwnedJob(id: string, installationId: string): Promise<J
     [id, installationId],
   );
   return row ? toJob(row) : undefined;
+}
+
+/**
+ * 작업 기록 목록. 반드시 `installation_id`로 스코핑한다 — 분석 경로에는 JWT가 없어
+ * `user_id`가 사실상 항상 null이므로 그걸로 거르면 남의 작업이 그대로 노출된다.
+ *
+ * 집계는 LATERAL 세 개로 한 번에 가져온다(N+1 회피). 셋 다 기존 PK/인덱스를 탄다:
+ * analysis_people·confirmed_selections는 PK `(job_id, person_index)`, analysis_candidates는
+ * `candidates_job_rank`. `result_json`은 건당 수십~수백 KB라 SELECT에 넣지 않는다.
+ *
+ * `limit + 1`건을 가져와 다음 페이지 유무를 판정한다(전체 COUNT는 365일치 스캔이라 쓰지 않음).
+ */
+export async function listJobHistory(
+  installationId: string,
+  { limit, cursor, status }: HistoryQuery,
+): Promise<JobHistoryRow[]> {
+  return query<JobHistoryRow>(
+    `SELECT j.id, j.status, j.created_at, j.completed_at, j.error_code, j.source,
+            j.input_width, j.input_height, (j.input_s3_key IS NOT NULL) AS has_input,
+            p.person_count, s.selection_count, t.thumb_pose_id, t.thumb_view
+     FROM jobs j
+     LEFT JOIN LATERAL (
+       SELECT count(*)::int AS person_count
+       FROM analysis_people ap WHERE ap.job_id = j.id
+     ) p ON TRUE
+     LEFT JOIN LATERAL (
+       SELECT count(*)::int AS selection_count
+       FROM confirmed_selections cs WHERE cs.job_id = j.id
+     ) s ON TRUE
+     LEFT JOIN LATERAL (
+       -- 확정 선택한 후보를 우선 쓰고, 없으면 첫 인물의 1순위로 폴백한다.
+       SELECT ac.pose_id AS thumb_pose_id, ac.view AS thumb_view
+       FROM analysis_candidates ac
+       LEFT JOIN confirmed_selections cs
+         ON cs.job_id = ac.job_id AND cs.person_index = ac.person_index
+        AND cs.candidate_id = ac.candidate_id
+       WHERE ac.job_id = j.id
+       ORDER BY (cs.candidate_id IS NULL), ac.person_index, ac.rank
+       LIMIT 1
+     ) t ON TRUE
+     WHERE j.installation_id = $1
+       AND ($2::text IS NULL OR j.status = $2)
+       AND ($3::text IS NULL OR (j.created_at, j.id) < ($3, $4))
+     ORDER BY j.created_at DESC, j.id DESC
+     LIMIT $5`,
+    [installationId, status, cursor?.createdAt ?? null, cursor?.id ?? null, limit + 1],
+  );
+}
+
+export type DeleteJobOutcome =
+  | { ok: true; inputS3Key: string | null }
+  | { ok: false; reason: "not_found" | "in_progress" };
+
+/**
+ * 작업 기록에서 Job 하나를 지운다. S3 객체는 호출부가 이어서 지운다.
+ *
+ * **진행 중(queued/running)이면 거절한다.** 두 가지가 실제로 깨지기 때문이다.
+ *
+ * 1. persistAnalysisRecords는 analysis_people·analysis_candidates를 FK 없이 INSERT한다.
+ *    지운 뒤 워커가 완료하면 존재하지 않는 job_id의 행이 남고, 보존 정리 쿼리는
+ *    `job_id IN (SELECT id FROM jobs ...)` 형태라 그 행은 영구히 회수되지 않는다.
+ * 2. createJobWithLimits의 동시 분석 카운트가 status IN ('queued','running') 행 수다.
+ *    삭제로 슬롯이 즉시 비면 워커가 도는 중에 새 분석이 시작돼 한도가 무의미해진다.
+ *
+ * 유실된 Job은 failStaleJobs()가 failed로 닫으므로 사용자가 영구히 막히지는 않는다.
+ *
+ * 삭제 순서는 installations/store.ts의 deleteRows 규약을 그대로 따른다.
+ */
+export async function deleteOwnedJob(
+  id: string,
+  installationId: string,
+): Promise<DeleteJobOutcome> {
+  return transaction(async (client) => {
+    // 소유·상태 판정과 삭제 사이에 워커가 상태를 바꾸지 못하게 잠근다.
+    const owned = await client.query<{ status: JobStatus; input_s3_key: string | null }>(
+      "SELECT status, input_s3_key FROM jobs WHERE id = $1 AND installation_id = $2 FOR UPDATE",
+      [id, installationId],
+    );
+    const job = owned.rows[0];
+    if (!job) return { ok: false, reason: "not_found" };
+    if (job.status === "queued" || job.status === "running") {
+      return { ok: false, reason: "in_progress" };
+    }
+
+    await client.query("DELETE FROM export_events WHERE job_id = $1", [id]);
+    await client.query("DELETE FROM job_feedback WHERE job_id = $1", [id]);
+    await client.query("DELETE FROM confirmed_selections WHERE job_id = $1", [id]);
+    await client.query("DELETE FROM analytics_events WHERE job_id = $1", [id]);
+    await client.query("DELETE FROM admin_access_audit WHERE job_id = $1", [id]);
+    await client.query("DELETE FROM refined_artifacts WHERE job_id = $1", [id]);
+    await client.query("DELETE FROM analysis_candidates WHERE job_id = $1", [id]);
+    await client.query("DELETE FROM analysis_people WHERE job_id = $1", [id]);
+    // job_outbox는 jobs(id) ON DELETE CASCADE로 함께 지워진다.
+    await client.query("DELETE FROM jobs WHERE id = $1", [id]);
+
+    return { ok: true, inputS3Key: job.input_s3_key };
+  });
+}
+
+/** 확정 선택 목록. 작업 기록 상세가 이전 선택을 화면에 되살릴 때 쓴다. */
+export async function listConfirmedSelections(
+  jobId: string,
+): Promise<Array<{ personIndex: number; candidateId: string; rank: number; confirmedAt: string }>> {
+  const rows = await query<{
+    person_index: number;
+    candidate_id: string;
+    rank: number;
+    confirmed_at: string;
+  }>(
+    `SELECT person_index, candidate_id, rank, confirmed_at
+     FROM confirmed_selections WHERE job_id = $1 ORDER BY person_index`,
+    [jobId],
+  );
+  return rows.map((r) => ({
+    personIndex: r.person_index,
+    candidateId: r.candidate_id,
+    rank: r.rank,
+    confirmedAt: r.confirmed_at,
+  }));
 }
 
 export async function setJobInput(
