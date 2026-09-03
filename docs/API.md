@@ -459,7 +459,7 @@ BFF가 보관해 둔 값을 서버측에서 읽는다 — 클라이언트가 값
 때 저장돼 있으므로 격리가 늘어나면 화면에 남아 있던 선택이 여기서 409로 돌아온다. **재시도로는 풀리지
 않는다** — 클라이언트는 재시도 버튼이 아니라 "다른 후보를 선택" 경로를 보여줘야 한다.
 
-### `format=fbx` — V3.2 FBX 변환
+### `format=fbx` — V3.2.5 FBX 변환
 
 최종 BVH 바이트를 확정하는 규칙은 위와 **똑같다**. 그 뒤에 내부 Converter API `POST /convert`를 인물마다
 한 번 호출해 rigged FBX를 받는다(`character_id=standin-master-v2`, `frame=0`, `output_mode=rigged_rest`,
@@ -470,7 +470,7 @@ BFF가 보관해 둔 값을 서버측에서 읽는다 — 클라이언트가 값
 ```text
 X-Standin-Source-BVH-SHA256 == sha256(우리가 보낸 최종 BVH)
 X-Standin-Artifact-SHA256   == sha256(응답 본문)
-X-Standin-Solver-Version    == chain-transport-v3.2
+X-Standin-Solver-Version    == chain-transport-v3.2.5
 ```
 
 성공하면 `converter` 구조화 로그(`convert_completed`)에 `conversionId`·`finalBvhSha256`·

@@ -10,7 +10,7 @@ import { createHash } from "node:crypto";
 import { config } from "../config.js";
 
 /** 이 BFF가 인정하는 유일한 solver. 다른 값이 오면 배포가 어긋난 것이다. */
-export const EXPECTED_SOLVER_VERSION = "chain-transport-v3.2";
+export const EXPECTED_SOLVER_VERSION = "chain-transport-v3.2.5";
 
 /** converter가 강제하는 고정 옵션(app.py의 INVALID_OPTION 검사와 동일). */
 const FIXED_FRAME = 0;
