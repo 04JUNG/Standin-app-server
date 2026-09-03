@@ -262,7 +262,7 @@ poseRoutes.get("/:id/export", async (c) => {
   return bytesResponse(conversion.fbx, `${poseId}.fbx`);
 });
 
-// GET /v1/pose-candidates/:id/thumbnail?view=front — 인증된 PNG 프록시
+// GET /v1/pose-candidates/:id/thumbnail?view=front — 인증된 썸네일 프록시
 poseRoutes.get("/:id/thumbnail", async (c) => {
   const view = c.req.query("view");
   if (!view) {
@@ -280,7 +280,11 @@ poseRoutes.get("/:id/thumbnail", async (c) => {
   return new Response(upstream.body, {
     status: upstream.status,
     headers: {
-      "Content-Type": upstream.headers.get("Content-Type") ?? "image/png",
+      // 폴백을 image/png로 두지 않는다. 번들 썸네일은 2026-09-03부터 JPEG이고,
+      // 틀린 MIME은 클라이언트의 data URL에 그대로 실려 WebView가 그리지 못할 수 있다.
+      // 상류가 값을 주지 않는 비정상 상황이라면 스니핑에 맡기는 편이 낫다.
+      "Content-Type":
+        upstream.headers.get("Content-Type") ?? "application/octet-stream",
       "Cache-Control":
         upstream.headers.get("Cache-Control") ?? "private, max-age=86400",
     },
