@@ -470,7 +470,7 @@ BFF가 보관해 둔 값을 서버측에서 읽는다 — 클라이언트가 값
 ```text
 X-Standin-Source-BVH-SHA256 == sha256(우리가 보낸 최종 BVH)
 X-Standin-Artifact-SHA256   == sha256(응답 본문)
-X-Standin-Solver-Version    == chain-transport-v3.2
+X-Standin-Solver-Version    == chain-transport-v3.2.5
 ```
 
 성공하면 `converter` 구조화 로그(`convert_completed`)에 `conversionId`·`finalBvhSha256`·

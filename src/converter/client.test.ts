@@ -9,7 +9,7 @@ import { ConverterError, convertBvhToFbx, sha256Hex } from "./client.js";
 
 const BVH = new TextEncoder().encode("HIERARCHY\nROOT Hips\nMOTION\nFrames: 1\n");
 const FBX = new Uint8Array([0x4b, 0x61, 0x79, 0x64, 0x61, 0x72, 0x61, 0x20]);
-const SOLVER = "chain-transport-v3.2";
+const SOLVER = "chain-transport-v3.2.5";
 
 function sha(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
