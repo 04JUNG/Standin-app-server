@@ -248,6 +248,28 @@ export interface RefineUpstreamResponse {
    */
   refine_outcome?: string;
   diagnostics?: Record<string, unknown>;
+  /**
+   * 최종 결과를 후보와 같은 렌더러로 그린 256×256 PNG(base64 인라인).
+   *
+   * `refined=true`면 조정본을, `false`면 베이스 BVH를 렌더한 그림이다 — 둘 다
+   * 사용자가 고른 후보의 `view`를 유지한다. 추론 서버는 이걸 저장하지 않으므로
+   * 받는 즉시 보관하지 않으면 재진입에서 다시 얻을 수 없다(BVH와 같은 이유, INF-03).
+   *
+   * 구 추론 응답에는 없으므로 optional이다.
+   */
+  thumbnail?: RefineUpstreamThumbnail | null;
+}
+
+/** `/refine` 응답에 실려 오는 PNG. 필드 값을 믿지 않고 저장 전에 검증한다. */
+export interface RefineUpstreamThumbnail {
+  view?: string;
+  media_type?: string;
+  encoding?: string;
+  /** base64 PNG 바이트. */
+  data?: string;
+  width?: number;
+  height?: number;
+  renderer_version?: string;
 }
 
 /**
@@ -286,11 +308,18 @@ export async function getPoseBvh(poseId: string): Promise<Response> {
 export async function getPoseThumbnail(
   poseId: string,
   view: string,
+  /**
+   * 클라이언트가 보낸 `If-None-Match`. 그대로 상류에 넘겨야 304 왕복이 성립한다.
+   * 넘기지 않으면 추론이 매번 200으로 본문을 다시 보내고, 캐시 검증이 무의미해진다.
+   */
+  ifNoneMatch?: string,
 ): Promise<Response> {
   const params = new URLSearchParams({ view });
+  const headers: Record<string, string> = { ...authHeaders() };
+  if (ifNoneMatch) headers["If-None-Match"] = ifNoneMatch;
   return fetch(
     `${config.inferenceBaseUrl}/pose/${encodeURIComponent(poseId)}/thumbnail?${params}`,
-    { headers: authHeaders() },
+    { headers },
   );
 }
 

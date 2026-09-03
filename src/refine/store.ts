@@ -110,6 +110,8 @@ export interface RefinedArtifact {
   refined: boolean;
   reason: string;
   objectKey: string | null;
+  /** 미리보기 PNG의 S3 key. 없으면 null — 화면이 후보 썸네일로 폴백한다. */
+  thumbnailKey: string | null;
   limbs: string[];
 }
 
@@ -121,6 +123,7 @@ interface ArtifactRow {
   refined: boolean;
   reason: string;
   object_key: string | null;
+  thumbnail_key: string | null;
   limbs_json: string;
 }
 
@@ -140,6 +143,8 @@ function toArtifact(row: ArtifactRow): RefinedArtifact {
     refined: row.refined,
     reason: row.reason,
     objectKey: row.object_key,
+    // 컬럼 추가 전에 저장된 행은 undefined로 온다. 없는 것과 같게 다룬다.
+    thumbnailKey: row.thumbnail_key ?? null,
     limbs,
   };
 }
@@ -166,11 +171,13 @@ export async function findRefinedArtifact(
 export async function saveRefinedArtifact(artifact: RefinedArtifact): Promise<void> {
   await execute(
     `INSERT INTO refined_artifacts
-      (job_id, person_index, candidate_id, pose_id, refined, reason, object_key, limbs_json, created_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      (job_id, person_index, candidate_id, pose_id, refined, reason, object_key,
+       thumbnail_key, limbs_json, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
      ON CONFLICT (job_id, person_index, candidate_id) DO UPDATE SET
        pose_id = EXCLUDED.pose_id, refined = EXCLUDED.refined, reason = EXCLUDED.reason,
-       object_key = EXCLUDED.object_key, limbs_json = EXCLUDED.limbs_json`,
+       object_key = EXCLUDED.object_key, thumbnail_key = EXCLUDED.thumbnail_key,
+       limbs_json = EXCLUDED.limbs_json`,
     [
       artifact.jobId,
       artifact.personIndex,
@@ -179,6 +186,7 @@ export async function saveRefinedArtifact(artifact: RefinedArtifact): Promise<vo
       artifact.refined,
       artifact.reason,
       artifact.objectKey,
+      artifact.thumbnailKey,
       JSON.stringify(artifact.limbs),
       new Date().toISOString(),
     ],

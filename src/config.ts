@@ -46,6 +46,34 @@ export const config = {
    *   복구 경로가 실전에서 한 번도 관측되지 않는다.
    */
   refineTimeoutMs: Number(process.env.REFINE_TIMEOUT_MS ?? 9000),
+
+  /**
+   * 내부 Converter API(V3.2 BVH→FBX). 추론 서버와 **다른 서비스**다 — 별도 ECS service,
+   * 별도 포트(8001), Blender 자식 프로세스. ⚠ 추론 서버와 마찬가지로 공개 노출 금지.
+   *
+   * 비어 있으면 FBX export를 노출하지 않는다. Phase 5 문서 기준으로 AWS 리소스와 private
+   * endpoint가 아직 확정되지 않았으므로 기본값은 "꺼짐"이다. 배포되면 이 값만 채운다.
+   */
+  converterBaseUrl: env("CONVERTER_BASE_URL"),
+  /**
+   * FBX export 노출 스위치. converterBaseUrl과 **둘 다** 있어야 켜진다.
+   *
+   * URL만 보고 켜면 endpoint를 미리 채워 두는 것만으로 사용자에게 기능이 열린다.
+   * 반대로 flag만 보고 켜면 URL 없이 켜져 전건 실패한다. 둘을 함께 요구하는 이유다.
+   */
+  fbxExportEnabled: env("FBX_EXPORT_ENABLED", "false") === "true",
+  /**
+   * converter 호출 상한. converter 자체 변환 timeout이 30초이므로 **그보다 커야** 한다.
+   *
+   * 같거나 작으면 converter가 504와 conversion_id를 만들기 전에 여기서 끊는다. 그러면
+   * 양쪽 로그를 conversion_id로 이을 수 없어 어느 변환이 늦었는지 추적하지 못한다.
+   */
+  converterTimeoutMs: Number(process.env.CONVERTER_TIMEOUT_MS ?? 35_000),
+  /**
+   * 변환에 쓸 캐릭터. 현재 registry에는 승인된 것이 하나뿐이라 클라이언트에 고르게 하지
+   * 않는다. 늘어나면 converter `GET /characters`를 프록시해 노출한다.
+   */
+  converterCharacterId: env("CONVERTER_CHARACTER_ID", "standin-master-v2"),
   /**
    * 분석 호출 상한(OB-04). 없으면 추론이 멈췄을 때 Job이 running에 영원히 남고,
    * 동시 분석 한도가 1이라 그 설치는 스위퍼가 돌 때까지 아무것도 못 한다.

@@ -2,6 +2,7 @@
 //  - 추론의 원시 distance → 클라 UI 라벨(matchLevel)
 //  - 추론의 {detail} → 클라 오류봉투 {error:{code,...}}
 import { config } from "./config.js";
+import { converterEnabled } from "./converter/client.js";
 import type { CutResult, UpstreamPerson } from "./inference.js";
 import type {
   AnalysisPerson,
@@ -129,7 +130,7 @@ export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
       featureVersion: cut.inference_metadata.feature_version,
     },
     notes: cut.notes ?? [],
-    capabilities: { refine: config.refineFeatureEnabled },
+    capabilities: { refine: config.refineFeatureEnabled, fbxExport: converterEnabled() },
     // 인물 순서는 추론이 최종 box.x1 기준 왼쪽→오른쪽으로 고정해 보낸다.
     // BFF는 다른 기준으로 다시 정렬하지 않는다(요구서 §3-1).
     candidatesByPerson: (cut.people ?? []).map((p) => {

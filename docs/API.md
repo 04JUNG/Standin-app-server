@@ -42,7 +42,7 @@ X-Device-Token: ...
 ```
 
 클라는 `message`를 직접 표시하지 않고 `code`를 사용자 메시지로 매핑한다.
-주요 코드: `INVALID_INPUT`/`PROVIDER_UNAVAILABLE`/`OAUTH_STATE_MISMATCH`/`EMAIL_REQUIRED`(400) · `UNAUTHENTICATED`/`INVALID_TOKEN`/`INVALID_CREDENTIALS`(401) · `EMAIL_NOT_VERIFIED`(403) · `NOT_FOUND`(404) · `NOT_READY`/`EMAIL_TAKEN`(409) · `PAYLOAD_TOO_LARGE`(413) · `WEEKLY_QUOTA_EXCEEDED`/`GLOBAL_QUOTA_EXCEEDED`(429) · `NOT_IMPLEMENTED`(501) · `OAUTH_FAILED`(502) · `STORAGE_UNAVAILABLE`(503) · `INFERENCE_FAILED`/`ANALYSIS_UNAVAILABLE`(Job status=failed).
+주요 코드: `INVALID_INPUT`/`PROVIDER_UNAVAILABLE`/`OAUTH_STATE_MISMATCH`/`EMAIL_REQUIRED`(400) · `UNAUTHENTICATED`/`INVALID_TOKEN`/`INVALID_CREDENTIALS`(401) · `EMAIL_NOT_VERIFIED`(403) · `NOT_FOUND`(404) · `NOT_READY`/`EMAIL_TAKEN`/`JOB_IN_PROGRESS`(409) · `PAYLOAD_TOO_LARGE`(413) · `WEEKLY_QUOTA_EXCEEDED`/`GLOBAL_QUOTA_EXCEEDED`(429) · `NOT_IMPLEMENTED`(501) · `OAUTH_FAILED`(502) · `STORAGE_UNAVAILABLE`(503) · `INFERENCE_FAILED`/`ANALYSIS_UNAVAILABLE`(Job status=failed).
 
 ### 사용량 제한 (`429`)
 
@@ -146,6 +146,93 @@ Retry-After: 41230
 
 ---
 
+## GET /v1/analysis/jobs 🔒
+
+작업 기록 목록. 최신순(`createdAt DESC`), 커서 페이지네이션.
+
+| 쿼리 | 기본 | 설명 |
+|---|---|---|
+| `limit` | 20 | 1~50 정수. 범위 밖은 클램프하지 않고 `400 INVALID_INPUT`. |
+| `cursor` | — | 이전 응답의 `nextCursor`. 손상된 값은 `400 INVALID_INPUT`. |
+| `status` | — | `queued \| running \| completed \| failed` 중 하나로 거른다. |
+
+```json
+{
+  "items": [
+    {
+      "jobId": "job_...",
+      "status": "completed",
+      "createdAt": "...",
+      "completedAt": "...",
+      "errorCode": null,
+      "source": "capture",
+      "personCount": 2,
+      "selectionCount": 2,
+      "hasSelection": true,
+      "thumbnailUrl": "/v1/pose-candidates/{poseId}/thumbnail?view=front",
+      "inputAvailable": true,
+      "inputWidth": 1920,
+      "inputHeight": 1080
+    }
+  ],
+  "nextCursor": "eyJ..." 
+}
+```
+
+`nextCursor`가 `null`이면 마지막 페이지다.
+
+> ⚠ `thumbnailUrl`은 **입력 러프가 아니라 매칭된 포즈 후보**의 썸네일 경로다. 확정 선택한
+> 후보를 우선 쓰고, 없으면 첫 인물의 1순위로 폴백한다. 후보가 없는 Job(실패 등)은 `null`.
+> 원본을 20건 내려보내면 수십 MB가 되지만 후보 썸네일은 이미 하루 캐시되는 작은 PNG다.
+> 인증 헤더가 필요하므로 절대 URL이 아닌 상대 경로를 준다.
+
+> ⚠ `inputAvailable`은 입력 원본이 S3에 남아 있는지다. **DB의 Job은 365일, S3 객체는
+> lifecycle 90일**이라 그 사이 구간의 Job은 목록에 나오지만 원본은 제공되지 않는다.
+
+> ⚠ 이 경로에는 IP 속도 제한이 없다(제한은 `POST /v1/analysis/jobs`에만 붙는다).
+> 부하 상한은 `limit` 최대 50으로만 강제된다.
+
+---
+
+## DELETE /v1/analysis/jobs/{jobId} 🔒
+
+기록에서 작업 하나를 지운다. Job 행과 파생 데이터(인물·후보·확정 선택·피드백·내보내기
+기록·분석 이벤트·조정본 대장), 그리고 S3의 입력 원본과 조정본을 모두 지운다.
+
+```json
+{ "deleted": true }
+```
+
+- 진행 중(`queued`/`running`)이면 `409 JOB_IN_PROGRESS`. 삭제를 허용하면 워커가 남긴
+  인물·후보 행이 회수 불가능한 고아가 되고, 설치별 동시 분석 한도가 무의미해진다.
+- 남의 Job이거나 없는 Job이면 `404 NOT_FOUND`.
+- DB를 먼저 커밋하고 S3 삭제는 best-effort다. S3가 실패해도 응답은 성공이며, 남는 것은
+  lifecycle 90일이 어차피 지우는 고아 객체뿐이다.
+- ⚠ `analytics_events`도 함께 지운다. `daily_analytics_aggregates`는 기동마다 과거 일자를
+  **재계산**하므로, 개별 삭제는 지나간 날짜의 집계 수치를 소급해서 낮춘다.
+
+계정(설치) 전체 삭제는 `DELETE /v1/installations/current/data`가 담당한다.
+
+---
+
+## GET /v1/analysis/jobs/{jobId}/selections 🔒
+
+확정 선택 조회. `PUT .../selections`의 짝이며, 작업 기록 상세가 이전 선택을 화면에
+되살릴 때 쓴다.
+
+```json
+{
+  "selections": [
+    { "personIndex": 0, "candidateId": "pose-1::front", "rank": 1, "confirmedAt": "..." }
+  ]
+}
+```
+
+상태 폴링(`GET /{jobId}`)에 얹지 않은 이유는 그 경로가 분석 중 750ms마다 불리는
+hot path이기 때문이다.
+
+---
+
 ## GET /v1/analysis/jobs/{jobId}
 
 상태 폴링.
@@ -176,9 +263,16 @@ fire-and-forget이라 생길 수 있고, 서버가 주기적으로 정리해 무
 
 완료 시 결과. 미완료면 `409 NOT_READY`.
 
+`inputUrl`은 입력 원본의 presigned GET URL(900초)이다. 작업 기록 상세가 원본 미리보기에
+쓴다. 키가 없거나 버킷이 설정되지 않았으면 `null`이고, 그때는 `inputUrlExpiresInSeconds`도
+`null`이다. **S3 lifecycle이 90일**이라 그보다 오래된 Job은 `null`이 되며, 화면은 "보관
+기간이 지났다"로 안내한다.
+
 ```json
 {
   "jobId": "job_...",
+  "inputUrl": "https://... | null",
+  "inputUrlExpiresInSeconds": 900,
   "image": { "width": 1280, "height": 720 },
   "inferenceMetadata": {
     "deploymentVersion": "git-sha",
@@ -220,7 +314,7 @@ fire-and-forget이라 생길 수 있고, 서버가 주기적으로 정리해 무
     }
   ],
   "notes": [],
-  "capabilities": { "refine": false }
+  "capabilities": { "refine": false, "fbxExport": false }
 }
 ```
 
@@ -261,6 +355,13 @@ fire-and-forget이라 생길 수 있고, 서버가 주기적으로 정리해 무
 이 BFF가 refine을 노출하는가(`REFINE_FEATURE_ENABLED`). 추론 endpoint가 살아 있어도 이 값이 `false`면
 클라이언트는 refine을 호출하지 않는다.
 
+### `capabilities.fbxExport`
+
+이 BFF가 FBX 저장을 노출하는가. `CONVERTER_BASE_URL`과 `FBX_EXPORT_ENABLED=true`가 **둘 다** 있어야
+`true`다. converter는 추론 서버와 별개로 배포되므로 refine과 함께 켜지지 않는다 — 클라이언트가 자기
+판단으로 `format=fbx`를 보내면 converter가 없는 배포에서 전건 실패한다. `false`면 저장 포맷 선택에서
+FBX를 고를 수 없게 하고 BVH로 저장한다.
+
 후보가 5개 미만이면 실제 개수만 반환하고 `candidateShortfallReason`을 기록한다. `id`는 작업에서 실제 노출된 후보를 유일하게 식별하며, `poseId`는 BVH 원본 포즈 식별자다.
 
 ---
@@ -292,7 +393,8 @@ BFF가 보관해 둔 값을 서버측에서 읽는다 — 클라이언트가 값
   "refined": true,
   "reasonCode": "ok_partial",
   "adjustedLimbs": ["left_arm"],
-  "exportUrl": "/v1/pose-candidates/stand_solo/export?jobId=job_...&personIndex=0&candidateId=stand_solo%3A%3Afront"
+  "exportUrl": "/v1/pose-candidates/stand_solo/export?jobId=job_...&personIndex=0&candidateId=stand_solo%3A%3Afront",
+  "thumbnailUrl": "/v1/analysis/jobs/job_.../people/0/refine/thumbnail?candidateId=stand_solo%3A%3Afront"
 }
 ```
 
@@ -317,6 +419,31 @@ BFF가 보관해 둔 값을 서버측에서 읽는다 — 클라이언트가 값
 
 오류: 접근 권한 없는 job은 `404 NOT_FOUND`, 그 인물에게 노출되지 않은 후보는 `409 INVALID_SELECTION`.
 
+### `thumbnailUrl`
+
+저장 직전 확인 화면(클라 `ADR-010`)이 쓰는 미리보기 PNG 경로. 없으면 `null`이고, 그때 화면은 후보
+썸네일로 폴백한다 — **그림이 없는 것은 오류가 아니다.**
+
+`refined`와 독립이다. 추론은 `refined=false`일 때 실제로 저장될 **베이스 BVH**를 후보 썸네일과 같은
+렌더러(`warm-mannequin-v1`)·같은 `view`로 그려 주므로, 확인 화면은 조정 여부와 무관하게 "저장될 것"의
+그림을 얻는다. 반대로 조정에 성공했는데 그림만 없을 수도 있다.
+
+BFF는 받은 PNG를 조정본 BVH와 **같은 prefix**(`installations/{id}/jobs/{jobId}/refined/{personIndex}/…`,
+확장자만 `.png`)에 보관한다. 추론 서버는 PNG를 저장하지 않고 멱등 캐시가 추론 재호출을 막으므로,
+보관하지 않으면 작업 기록에서 다시 열었을 때 그림이 사라진다.
+
+계약에 어긋난 PNG(잘못된 시그니처·`media_type`·`encoding`, 1 MB 초과)는 보관하지 않고 버린다.
+미리보기는 "이게 저장된다"고 주장하는 그림이라, 확신이 없으면 아무것도 보여주지 않는 편이 맞다.
+
+## GET /v1/analysis/jobs/{jobId}/people/{personIndex}/refine/thumbnail?candidateId=… 🔒
+
+위 `thumbnailUrl`이 가리키는 경로. `image/png`를 그대로 돌려준다.
+
+POST와 **같은 두 단계 소유권 검사**를 거친다 — job이 이 installation의 것인지, 그리고 그 인물에게
+실제로 노출된 후보인지. 미리보기도 사용자 입력에서 파생된 private artifact다.
+
+보관된 그림이 없으면 `404 NOT_FOUND`다. 빈 200을 주면 클라이언트가 깨진 이미지를 그린다.
+
 ---
 
 ## 행동·선택·피드백
@@ -338,9 +465,12 @@ BFF가 보관해 둔 값을 서버측에서 읽는다 — 클라이언트가 값
 
 ---
 
-## GET /v1/pose-candidates/{poseId}/export?jobId=...&personIndex=...&candidateId=...
+## GET /v1/pose-candidates/{poseId}/export?jobId=...&personIndex=...&candidateId=...&format=bvh|fbx
 
-작업에서 실제 노출된 후보인지 확인한 뒤 BVH를 반환한다. 요청·성공·실패를 서버에서 직접 기록한다.
+작업에서 실제 노출된 후보인지 확인한 뒤 최종 포즈 파일을 반환한다. 요청·성공·실패를 서버에서 직접 기록한다.
+
+`format`은 `bvh`(기본) 또는 `fbx`다. 값을 생략하면 `bvh`로 읽는다 — 구버전 클라이언트가 계속 동작해야
+하기 때문이다.
 
 **무엇을 내보낼지는 이 엔드포인트가 정한다.** 해당 `(jobId, personIndex, candidateId)`에 유효한 조정본이
 있으면 private S3에 보관된 조정본을, 없으면 도원 서버(`GET /pose/{id}/bvh`)의 베이스 BVH를 프록시한다.
@@ -354,6 +484,38 @@ BFF가 보관해 둔 값을 서버측에서 읽는다 — 클라이언트가 값
 **`409 POSE_UNAVAILABLE`**: 추론이 릴리스 시점에 격리한 포즈(`pose_quarantined`)다. 후보 목록은 `/analyze`
 때 저장돼 있으므로 격리가 늘어나면 화면에 남아 있던 선택이 여기서 409로 돌아온다. **재시도로는 풀리지
 않는다** — 클라이언트는 재시도 버튼이 아니라 "다른 후보를 선택" 경로를 보여줘야 한다.
+
+### `format=fbx` — V3.2 FBX 변환
+
+최종 BVH 바이트를 확정하는 규칙은 위와 **똑같다**. 그 뒤에 내부 Converter API `POST /convert`를 인물마다
+한 번 호출해 rigged FBX를 받는다(`character_id=standin-master-v2`, `frame=0`, `output_mode=rigged_rest`,
+`apply_root_translation=false`, `mirror=false`).
+
+응답을 내보내기 전에 세 가지를 대조한다. 하나라도 어긋나면 그 FBX는 **폐기**한다.
+
+```text
+X-Standin-Source-BVH-SHA256 == sha256(우리가 보낸 최종 BVH)
+X-Standin-Artifact-SHA256   == sha256(응답 본문)
+X-Standin-Solver-Version    == chain-transport-v3.2.5
+```
+
+성공하면 `converter` 구조화 로그(`convert_completed`)에 `conversionId`·`finalBvhSha256`·
+`fbxArtifactSha256`·`artifactKind`를 남긴다. converter의 CloudWatch 로그와 잇는 키가 `conversionId`다.
+
+mirror는 **converter가 한 번만** 적용한다. BFF가 BVH rotation을 직접 미러링하지 않고, CSP 단계도 같은
+반전을 다시 하지 않는다. 현재는 사용자에게 노출하지 않아 항상 `false`다.
+
+| 상태 | 코드 | 재시도 |
+|---|---|---|
+| `409` | `FBX_UNAVAILABLE` | converter가 꺼진 배포. BVH로 저장 |
+| `409` | `CONVERTER_REJECTED` | ✗ 같은 입력은 계속 거부된다 |
+| `409` | `CONVERTER_INTEGRITY` | ✗ lineage 불일치. 운영 확인 필요 |
+| `503` | `CONVERTER_UNAVAILABLE` | ○ |
+| `504` | `CONVERTER_TIMEOUT` | ○ |
+| `502` | `CONVERTER_FAILED` | ○ |
+
+FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.** 사용자가 고른 포맷과 저장된 파일이 달라지면
+클립스튜디오에서 열리지 않는 이유를 알 방법이 없다.
 
 ---
 

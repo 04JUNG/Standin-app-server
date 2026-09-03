@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { execute, queryOne, transaction } from "../db.js";
+import type { ExportFormat } from "../types.js";
 
 export const CLIENT_EVENT_PROPERTIES: Record<string, readonly string[]> = {
   app_started: ["appVersion", "osName", "osVersion", "architecture", "locale"],
@@ -179,12 +180,14 @@ export async function recordExport(event: {
   variant?: "refined" | "base";
   /** 조정본을 쓰려다 베이스로 내려온 사유. 정상 베이스와 구분하기 위한 값이다. */
   fallbackReason?: string;
+  /** 사용자가 고른 저장 포맷. FBX 변환 실패를 BVH 저장과 섞어 세지 않기 위한 값이다. */
+  format?: ExportFormat;
 }): Promise<void> {
   await execute(
     `INSERT INTO export_events
       (event_id, installation_id, job_id, person_index, candidate_id, status, occurred_at,
-       error_code, variant, fallback_reason)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+       error_code, variant, fallback_reason, format)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
     [
       `export_${randomUUID()}`,
       event.installationId,
@@ -196,6 +199,7 @@ export async function recordExport(event: {
       event.errorCode ?? null,
       event.variant ?? null,
       event.fallbackReason ?? null,
+      event.format ?? null,
     ],
   );
 }
