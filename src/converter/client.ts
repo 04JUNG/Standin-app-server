@@ -9,8 +9,15 @@
 import { createHash } from "node:crypto";
 import { config } from "../config.js";
 
-/** 이 BFF가 인정하는 유일한 solver. 다른 값이 오면 배포가 어긋난 것이다. */
-export const EXPECTED_SOLVER_VERSION = "chain-transport-v3.2";
+/**
+ * 이 BFF가 인정하는 유일한 solver. 다른 값이 오면 배포가 어긋난 것이다.
+ *
+ * ⚠ Standin-server의 `converter/protocol.py`의 `SOLVER_VERSION`과 **글자 그대로**
+ *   같아야 한다. 정확히 일치를 요구하므로 patch 버전이 올라가면 여기도 같이 올린다.
+ *   그러지 않으면 converter가 변환에 성공(200)해도 BFF가 CONVERTER_INTEGRITY로
+ *   폐기하고 사용자는 409를 받는다 — Blender가 실제로 돈 뒤라 낭비도 크다.
+ */
+export const EXPECTED_SOLVER_VERSION = "chain-transport-v3.2.5";
 
 /** converter가 강제하는 고정 옵션(app.py의 INVALID_OPTION 검사와 동일). */
 const FIXED_FRAME = 0;
