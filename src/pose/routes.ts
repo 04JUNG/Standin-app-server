@@ -276,17 +276,30 @@ poseRoutes.get("/:id/thumbnail", async (c) => {
     );
   }
 
-  const upstream = await getPoseThumbnail(c.req.param("id"), view);
-  return new Response(upstream.body, {
-    status: upstream.status,
-    headers: {
-      // 폴백을 image/png로 두지 않는다. 번들 썸네일은 2026-09-03부터 JPEG이고,
-      // 틀린 MIME은 클라이언트의 data URL에 그대로 실려 WebView가 그리지 못할 수 있다.
-      // 상류가 값을 주지 않는 비정상 상황이라면 스니핑에 맡기는 편이 낫다.
-      "Content-Type":
-        upstream.headers.get("Content-Type") ?? "application/octet-stream",
-      "Cache-Control":
-        upstream.headers.get("Cache-Control") ?? "private, max-age=86400",
-    },
-  });
+  const upstream = await getPoseThumbnail(
+    c.req.param("id"),
+    view,
+    c.req.header("if-none-match"),
+  );
+
+  const headers: Record<string, string> = {
+    // 폴백을 image/png로 두지 않는다. 번들 썸네일은 2026-09-03부터 JPEG이고,
+    // 틀린 MIME은 클라이언트의 data URL에 그대로 실려 WebView가 그리지 못할 수 있다.
+    // 상류가 값을 주지 않는 비정상 상황이라면 스니핑에 맡기는 편이 낫다.
+    "Content-Type":
+      upstream.headers.get("Content-Type") ?? "application/octet-stream",
+    "Cache-Control":
+      upstream.headers.get("Cache-Control") ?? "private, max-age=86400",
+  };
+
+  // ⚠ ETag를 반드시 실어 보낸다. 이게 빠지면 클라이언트가 검증자를 갖지 못해
+  //   `max-age` 동안 옛 이미지를 계속 쓴다 — 썸네일 URL은 포즈·시점마다 고정인데
+  //   내용은 번들 교체로 바뀌므로, 검증자가 없으면 렌더가 바뀌어도 반영되지 않는다.
+  const etag = upstream.headers.get("ETag");
+  if (etag) headers["ETag"] = etag;
+
+  // 304에는 본문이 없다. upstream.body를 그대로 넘기면 런타임이 거부한다.
+  if (upstream.status === 304) return new Response(null, { status: 304, headers });
+
+  return new Response(upstream.body, { status: upstream.status, headers });
 });
