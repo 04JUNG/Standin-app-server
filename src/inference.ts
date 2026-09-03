@@ -286,11 +286,18 @@ export async function getPoseBvh(poseId: string): Promise<Response> {
 export async function getPoseThumbnail(
   poseId: string,
   view: string,
+  /**
+   * 클라이언트가 보낸 `If-None-Match`. 그대로 상류에 넘겨야 304 왕복이 성립한다.
+   * 넘기지 않으면 추론이 매번 200으로 본문을 다시 보내고, 캐시 검증이 무의미해진다.
+   */
+  ifNoneMatch?: string,
 ): Promise<Response> {
   const params = new URLSearchParams({ view });
+  const headers: Record<string, string> = { ...authHeaders() };
+  if (ifNoneMatch) headers["If-None-Match"] = ifNoneMatch;
   return fetch(
     `${config.inferenceBaseUrl}/pose/${encodeURIComponent(poseId)}/thumbnail?${params}`,
-    { headers: authHeaders() },
+    { headers },
   );
 }
 
