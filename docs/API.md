@@ -393,7 +393,8 @@ BFF가 보관해 둔 값을 서버측에서 읽는다 — 클라이언트가 값
   "refined": true,
   "reasonCode": "ok_partial",
   "adjustedLimbs": ["left_arm"],
-  "exportUrl": "/v1/pose-candidates/stand_solo/export?jobId=job_...&personIndex=0&candidateId=stand_solo%3A%3Afront"
+  "exportUrl": "/v1/pose-candidates/stand_solo/export?jobId=job_...&personIndex=0&candidateId=stand_solo%3A%3Afront",
+  "thumbnailUrl": "/v1/analysis/jobs/job_.../people/0/refine/thumbnail?candidateId=stand_solo%3A%3Afront"
 }
 ```
 
@@ -417,6 +418,31 @@ BFF가 보관해 둔 값을 서버측에서 읽는다 — 클라이언트가 값
 같은 `(jobId, personIndex, candidateId)`는 멱등이다 — 다시 호출해도 추론을 재호출하지 않고 저장된 결과를 돌려준다.
 
 오류: 접근 권한 없는 job은 `404 NOT_FOUND`, 그 인물에게 노출되지 않은 후보는 `409 INVALID_SELECTION`.
+
+### `thumbnailUrl`
+
+저장 직전 확인 화면(클라 `ADR-010`)이 쓰는 미리보기 PNG 경로. 없으면 `null`이고, 그때 화면은 후보
+썸네일로 폴백한다 — **그림이 없는 것은 오류가 아니다.**
+
+`refined`와 독립이다. 추론은 `refined=false`일 때 실제로 저장될 **베이스 BVH**를 후보 썸네일과 같은
+렌더러(`warm-mannequin-v1`)·같은 `view`로 그려 주므로, 확인 화면은 조정 여부와 무관하게 "저장될 것"의
+그림을 얻는다. 반대로 조정에 성공했는데 그림만 없을 수도 있다.
+
+BFF는 받은 PNG를 조정본 BVH와 **같은 prefix**(`installations/{id}/jobs/{jobId}/refined/{personIndex}/…`,
+확장자만 `.png`)에 보관한다. 추론 서버는 PNG를 저장하지 않고 멱등 캐시가 추론 재호출을 막으므로,
+보관하지 않으면 작업 기록에서 다시 열었을 때 그림이 사라진다.
+
+계약에 어긋난 PNG(잘못된 시그니처·`media_type`·`encoding`, 1 MB 초과)는 보관하지 않고 버린다.
+미리보기는 "이게 저장된다"고 주장하는 그림이라, 확신이 없으면 아무것도 보여주지 않는 편이 맞다.
+
+## GET /v1/analysis/jobs/{jobId}/people/{personIndex}/refine/thumbnail?candidateId=… 🔒
+
+위 `thumbnailUrl`이 가리키는 경로. `image/png`를 그대로 돌려준다.
+
+POST와 **같은 두 단계 소유권 검사**를 거친다 — job이 이 installation의 것인지, 그리고 그 인물에게
+실제로 노출된 후보인지. 미리보기도 사용자 입력에서 파생된 private artifact다.
+
+보관된 그림이 없으면 `404 NOT_FOUND`다. 빈 200을 주면 클라이언트가 깨진 이미지를 그린다.
 
 ---
 

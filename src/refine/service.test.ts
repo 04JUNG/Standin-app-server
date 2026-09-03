@@ -33,10 +33,25 @@ const INPUT = {
 /** 추론이 돌려주는 조정본 본문. 계약상 LF 개행이다. */
 const BASE_BVH = "HIERARCHY\nROOT Hips\nMOTION\nFrames: 1\nFrame Time: 0.033333\n0.0\n";
 
+/** 계약대로 base64 인라인된 1×1 PNG. 시그니처가 맞아야 통과한다. */
+const PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+const THUMBNAIL = {
+  view: "front",
+  media_type: "image/png",
+  encoding: "base64",
+  data: PNG_BASE64,
+  width: 256,
+  height: 256,
+  renderer_version: "warm-mannequin-v1",
+};
+
 /** 저장된 artifact를 메모리에 모아 두는 기본 deps. 각 테스트가 필요한 것만 덮어쓴다. */
 function deps(overrides: Partial<RefineDeps> = {}) {
   const saved: RefinedArtifact[] = [];
   const uploaded: string[] = [];
+  const thumbnails: Array<{ key: string; bytes: Uint8Array }> = [];
   const base: RefineDeps = {
     featureEnabled: () => true,
     storageAvailable: () => true,
@@ -63,16 +78,24 @@ function deps(overrides: Partial<RefineDeps> = {}) {
     putRefinedBvh: async (key) => {
       uploaded.push(key);
     },
+    putRefinedThumbnail: async (key, bytes) => {
+      thumbnails.push({ key, bytes });
+    },
     ...overrides,
   };
-  return { base, saved, uploaded };
+  return { base, saved, uploaded, thumbnails };
 }
 
 async function run(overrides: Partial<RefineDeps> = {}) {
-  const { base, saved, uploaded } = deps(overrides);
+  const { base, saved, uploaded, thumbnails } = deps(overrides);
   const outcome = await runRefine(INPUT, base);
   assert.equal(isRefineFailure(outcome), false, "unexpected candidate mismatch");
-  return { outcome: outcome as Exclude<typeof outcome, { error: string }>, saved, uploaded };
+  return {
+    outcome: outcome as Exclude<typeof outcome, { error: string }>,
+    saved,
+    uploaded,
+    thumbnails,
+  };
 }
 
 test("applies refine and persists the artifact under the installation prefix", async () => {
@@ -227,6 +250,7 @@ test("an existing artifact short-circuits the whole flow", async () => {
       refined: true,
       reason: "ok",
       objectKey: "installations/inst-1/jobs/job-1/refined/0/pose-1__front.bvh",
+      thumbnailKey: "installations/inst-1/jobs/job-1/refined/0/pose-1__front.png",
       limbs: ["left_arm"],
     }),
     refineUpstream: async () => {
@@ -239,6 +263,135 @@ test("an existing artifact short-circuits the whole flow", async () => {
   assert.equal(called, false);
   assert.equal(uploaded.length, 0);
   assert.equal(saved.length, 0);
+  // 재진입에서 그림이 나오는 근거. 추론을 다시 부르지 않으므로 보관해 둔 것만 있다.
+  assert.equal(outcome.thumbnailAvailable, true);
+});
+
+// ── 확인 화면 미리보기(ADR-010) ──────────────────────────────────────────────
+// 추론은 PNG를 저장하지 않는다. 여기서 보관하지 않으면 작업 기록에서 다시 열었을 때
+// 그림이 사라진다 — 멱등 캐시가 추론 재호출을 막기 때문이다.
+
+test("the refined thumbnail is stored beside the bvh under the same prefix", async () => {
+  const { outcome, thumbnails } = await run({
+    refineUpstream: async () => ({
+      pose_id: "pose-1",
+      view: "front",
+      refined: true,
+      reason: "ok_partial",
+      bvh_url: "/pose/pose-1/bvh",
+      bvh: BASE_BVH,
+      backend: "scipy",
+      limbs: ["left_arm"],
+      limb_decisions: {},
+      loss_base: 1,
+      loss_final: 0.5,
+      gain: 0.5,
+      thumbnail: THUMBNAIL,
+    }),
+  });
+  assert.equal(outcome.thumbnailAvailable, true);
+  assert.equal(
+    thumbnails[0]?.key,
+    "installations/inst-1/jobs/job-1/refined/0/pose-1__front.png",
+    "BVH와 같은 prefix라야 삭제 스윕과 lifecycle이 그대로 걸린다",
+  );
+  assert.deepEqual(
+    thumbnails[0]?.bytes,
+    new Uint8Array(Buffer.from(PNG_BASE64, "base64")),
+    "받은 PNG 바이트가 그대로 보관돼야 한다",
+  );
+});
+
+// refined=false여도 그림은 있다 — 추론이 실제로 저장될 베이스 BVH를 같은 렌더러로 그린다.
+// 확인 화면은 조정 여부와 무관하게 "저장될 것"을 보여줘야 하므로 이쪽도 보관한다.
+test("a base result still persists its thumbnail", async () => {
+  const { outcome, uploaded, thumbnails } = await run({
+    refineUpstream: async () => ({
+      pose_id: "pose-1",
+      view: "front",
+      refined: false,
+      reason: "no_gain",
+      bvh_url: "/pose/pose-1/bvh",
+      backend: "none",
+      limbs: [],
+      limb_decisions: {},
+      loss_base: null,
+      loss_final: null,
+      gain: null,
+      thumbnail: THUMBNAIL,
+    }),
+  });
+  assert.equal(outcome.refined, false);
+  assert.equal(outcome.thumbnailAvailable, true);
+  assert.equal(uploaded.length, 0, "조정본이 없으므로 BVH는 올리지 않는다");
+  assert.equal(thumbnails.length, 1);
+});
+
+// 그림이 없다고 저장이 막히면 안 된다(요구서 §3). BVH 보관 실패와는 성격이 다르다.
+test("a thumbnail upload failure does not change the refine result", async () => {
+  const { outcome, saved } = await run({
+    refineUpstream: async () => ({
+      pose_id: "pose-1",
+      view: "front",
+      refined: true,
+      reason: "ok_partial",
+      bvh_url: "/pose/pose-1/bvh",
+      bvh: BASE_BVH,
+      backend: "scipy",
+      limbs: ["left_arm"],
+      limb_decisions: {},
+      loss_base: 1,
+      loss_final: 0.5,
+      gain: 0.5,
+      thumbnail: THUMBNAIL,
+    }),
+    putRefinedThumbnail: async () => {
+      throw new Error("s3 down");
+    },
+  });
+  assert.equal(outcome.refined, true, "그림을 못 올렸다고 조정을 버리지 않는다");
+  assert.equal(outcome.thumbnailAvailable, false);
+  assert.equal(saved[0]?.refined, true);
+  assert.equal(saved[0]?.thumbnailKey, null);
+});
+
+// 미리보기는 "저장될 포즈가 이것"이라고 주장하는 그림이다. 계약에 어긋나면 보여주지 않는다.
+test("a thumbnail that violates the contract is dropped, not stored", async () => {
+  for (const [label, thumbnail] of [
+    ["PNG가 아닌 바이트", { ...THUMBNAIL, data: Buffer.from("not a png").toString("base64") }],
+    ["다른 media_type", { ...THUMBNAIL, media_type: "image/jpeg" }],
+    ["다른 encoding", { ...THUMBNAIL, encoding: "hex" }],
+    ["빈 data", { ...THUMBNAIL, data: "" }],
+  ] as const) {
+    const { outcome, thumbnails } = await run({
+      refineUpstream: async () => ({
+        pose_id: "pose-1",
+        view: "front",
+        refined: true,
+        reason: "ok_partial",
+        bvh_url: "/pose/pose-1/bvh",
+        bvh: BASE_BVH,
+        backend: "scipy",
+        limbs: ["left_arm"],
+        limb_decisions: {},
+        loss_base: 1,
+        loss_final: 0.5,
+        gain: 0.5,
+        thumbnail,
+      }),
+    });
+    assert.equal(outcome.refined, true, label);
+    assert.equal(outcome.thumbnailAvailable, false, label);
+    assert.equal(thumbnails.length, 0, label);
+  }
+});
+
+// 구 추론(썸네일 이전 버전)과도 붙어야 한다. 필드가 없는 것은 오류가 아니다.
+test("an upstream response without a thumbnail is still a normal result", async () => {
+  const { outcome, thumbnails } = await run();
+  assert.equal(outcome.refined, true);
+  assert.equal(outcome.thumbnailAvailable, false);
+  assert.equal(thumbnails.length, 0);
 });
 
 test("an unknown candidate is reported as a mismatch", async () => {
