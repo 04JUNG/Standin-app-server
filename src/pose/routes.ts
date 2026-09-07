@@ -7,6 +7,7 @@ import { getPoseBvh, getPoseThumbnail } from "../inference.js";
 import { errorEnvelope } from "../mapping.js";
 import { recordExport, validateExportCandidate } from "../analytics/store.js";
 import { resolveExportArtifact } from "../refine/service.js";
+import { checkCharacter } from "../characters/service.js";
 import type { ExportFormat } from "../types.js";
 import {
   ConverterError,
@@ -110,6 +111,41 @@ poseRoutes.get("/:id/export", async (c) => {
     );
   }
 
+  /**
+   * 저장할 체형(ADR-013). 없으면 지금까지처럼 배포 기본값을 쓴다.
+   *
+   * BVH에는 적용하지 않는다 — 동작만 담는 포맷이라 체형이 들어갈 자리가 없다. 그렇다고
+   * 400으로 막지는 않는다: 클라와 BFF는 따로 배포되므로 구버전 클라가 실어 보내는 순간
+   * 저장이 통째로 깨진다. 무시하는 쪽이 아무도 손해 보지 않는다.
+   */
+  const requestedCharacterId = format === "fbx" ? (c.req.query("characterId") ?? "") : "";
+  if (requestedCharacterId) {
+    const check = await checkCharacter(requestedCharacterId);
+    // ⚠ 조용히 기본 체형으로 바꾸지 않는다. 고른 체형과 파일이 일치하는 것이 이 기능의
+    //   전부다 — 대체하면 사용자는 다른 인형을 받고도 알 방법이 없다.
+    if (check === "unknown") {
+      return c.json(
+        errorEnvelope(
+          "INVALID_CHARACTER",
+          "지원하지 않는 모델입니다. 모델 화면에서 다시 골라 주세요.",
+          c.get("requestId"),
+        ),
+        400,
+      );
+    }
+    if (check === "unavailable") {
+      return c.json(
+        errorEnvelope(
+          "CHARACTER_UNAVAILABLE",
+          "선택한 모델을 지금은 사용할 수 없습니다. 다른 모델을 고르거나 기본 모델로 저장해 주세요.",
+          c.get("requestId"),
+        ),
+        409,
+      );
+    }
+  }
+  const characterId = requestedCharacterId || config.converterCharacterId;
+
   await recordExport({
     installationId,
     jobId,
@@ -202,6 +238,7 @@ poseRoutes.get("/:id/export", async (c) => {
       // MVP에서 mirror는 converter가 한 번만 적용하고, 우리는 아직 사용자에게 노출하지
       // 않는다(핸드오프 §3). 노출하게 되면 사용자의 명시값을 여기로 넘긴다.
       mirror: false,
+      characterId,
     });
   } catch (error) {
     const converterError =
@@ -246,7 +283,7 @@ poseRoutes.get("/:id/export", async (c) => {
     sourceBvhSha256: conversion.sourceBvhSha256,
     fbxArtifactSha256: conversion.artifactSha256,
     solverVersion: conversion.solverVersion,
-    characterId: config.converterCharacterId,
+    characterId,
     mirror: false,
   });
   await recordExport({

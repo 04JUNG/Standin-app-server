@@ -70,8 +70,11 @@ export const config = {
    */
   converterTimeoutMs: Number(process.env.CONVERTER_TIMEOUT_MS ?? 35_000),
   /**
-   * 변환에 쓸 캐릭터. 현재 registry에는 승인된 것이 하나뿐이라 클라이언트에 고르게 하지
-   * 않는다. 늘어나면 converter `GET /characters`를 프록시해 노출한다.
+   * **기본** 캐릭터. 클라이언트가 `characterId`를 보내지 않으면 이 값으로 변환한다(ADR-013).
+   *
+   * 목록은 `GET /v1/models`가 converter `GET /characters`를 프록시해 노출하고, 표현(한국어
+   * 이름·성별)은 `src/characters/catalog.ts`가 소유한다. ⚠ 이 값은 그 목록에 **available로
+   * 들어 있어야 한다** — 기본값을 못 만드는 배포에서는 모든 FBX 저장이 실패한다.
    */
   converterCharacterId: env("CONVERTER_CHARACTER_ID", "standin-master-v2"),
   /**

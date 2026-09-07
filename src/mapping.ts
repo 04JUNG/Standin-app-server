@@ -130,7 +130,14 @@ export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
       featureVersion: cut.inference_metadata.feature_version,
     },
     notes: cut.notes ?? [],
-    capabilities: { refine: config.refineFeatureEnabled, fbxExport: converterEnabled() },
+    // ⚠ 이 값은 **분석 시점**의 배포 상태다. 결과는 그대로 저장돼 나중에 다시 조회되므로
+    // (작업 기록 재진입) 응답 직전에 지금 값으로 덮어쓴다 — capabilities는 이 Job의 성질이
+    // 아니라 서버의 성질이다. 여기서는 저장용 기본값만 채운다.
+    capabilities: {
+      refine: config.refineFeatureEnabled,
+      fbxExport: converterEnabled(),
+      characterSelection: false,
+    },
     // 인물 순서는 추론이 최종 box.x1 기준 왼쪽→오른쪽으로 고정해 보낸다.
     // BFF는 다른 기준으로 다시 정렬하지 않는다(요구서 §3-1).
     candidatesByPerson: (cut.people ?? []).map((p) => {

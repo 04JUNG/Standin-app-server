@@ -20,6 +20,7 @@ import {
 } from "./store.js";
 import { runAnalysisJob } from "./runner.js";
 import { dispatchPendingJobs } from "./queue.js";
+import { currentCapabilities } from "../characters/service.js";
 import { refineRoutes } from "../refine/routes.js";
 import { isAnalysisEnabled } from "../limits/flags.js";
 import { limitErrorResponse } from "../limits/http.js";
@@ -202,8 +203,12 @@ jobsRoutes.get("/:id/result", async (c) => {
   const inputUrl = job.inputS3Key
     ? await signedInputUrl(job.inputS3Key, RESULT_INPUT_URL_TTL_SECONDS)
     : null;
+  // capabilities는 이 Job이 아니라 **지금 서버**의 성질이다. 저장된 값을 그대로 쓰면
+  // 기록에서 다시 연 작업이 몇 주 전 배포 상태를 보고, 지금 되는 기능을 못 쓰거나
+  // 없어진 기능을 쓰려 든다. 조회 시점 값으로 덮어쓴다.
   return c.json({
     ...job.result,
+    capabilities: await currentCapabilities(),
     inputUrl,
     inputUrlExpiresInSeconds: inputUrl ? RESULT_INPUT_URL_TTL_SECONDS : null,
   });

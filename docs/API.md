@@ -362,6 +362,16 @@ fire-and-forget이라 생길 수 있고, 서버가 주기적으로 정리해 무
 판단으로 `format=fbx`를 보내면 converter가 없는 배포에서 전건 실패한다. `false`면 저장 포맷 선택에서
 FBX를 고를 수 없게 하고 BVH로 저장한다.
 
+### `capabilities.characterSelection`
+
+이 BFF가 export의 `characterId`를 존중하는가. `fbxExport`가 켜져 있고 **동시에** 기본 체형 말고 고를 수
+있는 체형이 하나 이상 있을 때만 `true`다. 모델 목록(`GET /v1/models`)과 export 처리는 따로 배포될 수
+있으므로 `fbxExport`와 따로 둔다 — 목록만 먼저 나가면 클라이언트가 고른 체형과 다른 FBX가 저장된다.
+converter를 부르지 못하면 `false`다(없는 기능이라고 말하는 쪽이 안전하다).
+
+⚠ `capabilities`는 이 Job이 아니라 **지금 서버**의 성질이다. 분석 시점에 굳어 있으면 작업 기록에서 다시
+연 작업이 몇 주 전 배포 상태를 보게 되므로, `/result` 응답 직전에 조회 시점 값으로 덮어쓴다.
+
 후보가 5개 미만이면 실제 개수만 반환하고 `candidateShortfallReason`을 기록한다. `id`는 작업에서 실제 노출된 후보를 유일하게 식별하며, `poseId`는 BVH 원본 포즈 식별자다.
 
 ---
@@ -465,6 +475,63 @@ POST와 **같은 두 단계 소유권 검사**를 거친다 — job이 이 insta
 
 ---
 
+## GET /v1/models 🔒
+
+저장할 체형(모델) 목록. 클라이언트의 모델 화면과 선택 UI가 이것으로 그려진다
+(Standin-client `docs/adr/ADR-013-model-selection.md`).
+
+```json
+{
+  "characters": [
+    {
+      "characterId": "standin-master-v2",
+      "displayName": "기본 남성",
+      "gender": "male",
+      "availability": "available",
+      "source": "builtin",
+      "isDefault": true,
+      "rigProfile": "mixamo",
+      "revision": "v2",
+      "previewUrl": null,
+      "description": "표준 남성 체형입니다."
+    },
+    {
+      "characterId": "standin-female-v2-lbs",
+      "displayName": "기본 여성",
+      "gender": "female",
+      "availability": "coming_soon",
+      "source": "builtin",
+      "isDefault": false,
+      "rigProfile": null,
+      "revision": null,
+      "previewUrl": null,
+      "description": "표준 여성 체형입니다."
+    }
+  ],
+  "defaultCharacterId": "standin-master-v2"
+}
+```
+
+**가용 여부는 converter가, 표현은 BFF가 정한다.** converter `GET /characters`는 artifact를 실제로
+resolve 해 본 것만 돌려주므로 그것이 `availability`의 유일한 근거다. 반면 converter의 `display_name`은
+"Standin Master V2" 같은 내부 코드명이고 성별·설명은 아예 없다 — 화면 문구를 Python 저장소에 넣을
+이유가 없으므로 `src/characters/catalog.ts`가 소유한다.
+
+⚠ **converter가 지금 못 만드는 체형도 목록에서 빼지 않고 `coming_soon`으로 내린다.** 빼 버리면
+앱에는 "모델 선택이라는 기능이 없다"로 보인다. `coming_soon`으로 보내면 앱이 회색 "준비 중" 카드를
+그려서, 기능은 있고 준비 중이라는 것이 드러난다. 반대로 converter에만 있고 우리 표에 없는 캐릭터도
+코드명 그대로 내보낸다 — 등록된 줄도 모르는 것보다 낫다.
+
+`previewUrl`은 아직 항상 `null`이다. 앱이 자기가 커밋한 이미지를 쓴다.
+
+**`503 CONVERTER_UNAVAILABLE`**: converter가 꺼져 있거나(`FBX_EXPORT_ENABLED`·`CONVERTER_BASE_URL`)
+도달할 수 없다. 빈 배열이 아니라 503인 이유는 빈 배열이 "모델이 하나도 없다"로 읽히기 때문이다.
+클라이언트는 404·501·503을 "이 배포엔 이 기능이 없다"로 보고 자기 폴백 목록을 그린다.
+
+`Cache-Control: public, max-age=300`.
+
+---
+
 ## GET /v1/pose-candidates/{poseId}/export?jobId=...&personIndex=...&candidateId=...&format=bvh|fbx
 
 작업에서 실제 노출된 후보인지 확인한 뒤 최종 포즈 파일을 반환한다. 요청·성공·실패를 서버에서 직접 기록한다.
@@ -485,11 +552,29 @@ POST와 **같은 두 단계 소유권 검사**를 거친다 — job이 이 insta
 때 저장돼 있으므로 격리가 늘어나면 화면에 남아 있던 선택이 여기서 409로 돌아온다. **재시도로는 풀리지
 않는다** — 클라이언트는 재시도 버튼이 아니라 "다른 후보를 선택" 경로를 보여줘야 한다.
 
+### `characterId` — 저장할 체형
+
+`format=fbx`일 때만 읽는다. 생략하면 배포 기본값(`CONVERTER_CHARACTER_ID`)으로 변환한다.
+
+| 상황 | 응답 |
+|---|---|
+| 목록에 있고 지금 만들 수 있음 | 그 체형으로 변환 |
+| 우리가 모르는 값 | `400 INVALID_CHARACTER` |
+| 아는 체형인데 지금 못 만듦(artifact 미배포) | `409 CHARACTER_UNAVAILABLE` |
+| `format=bvh`에 함께 옴 | **무시한다**(400 아님) |
+
+BVH에서 무시하는 이유: BVH는 동작만 담아 체형이 들어갈 자리가 없는데, 클라이언트와 BFF는 따로
+배포되므로 400으로 막으면 구버전 클라이언트의 저장이 통째로 깨진다.
+
+⚠ **조용히 기본 체형으로 대체하지 않는다.** 고른 체형과 파일이 일치하는 것이 이 기능의 전부다 —
+대체하면 사용자는 다른 인형을 받고도 알 방법이 없다. 두 오류 모두 재시도로 풀리지 않으므로
+클라이언트는 "다른 모델 선택" 또는 "기본 모델로 저장" 경로를 보여준다.
+
 ### `format=fbx` — V3.2 FBX 변환
 
 최종 BVH 바이트를 확정하는 규칙은 위와 **똑같다**. 그 뒤에 내부 Converter API `POST /convert`를 인물마다
-한 번 호출해 rigged FBX를 받는다(`character_id=standin-master-v2`, `frame=0`, `output_mode=rigged_rest`,
-`apply_root_translation=false`, `mirror=false`).
+한 번 호출해 rigged FBX를 받는다(`character_id`는 위 규칙으로 정한 값, `frame=0`,
+`output_mode=rigged_rest`, `apply_root_translation=false`, `mirror=false`).
 
 응답을 내보내기 전에 세 가지를 대조한다. 하나라도 어긋나면 그 FBX는 **폐기**한다.
 
