@@ -128,6 +128,61 @@ function defaultDeps(): ConverterDeps {
   };
 }
 
+/** converter `GET /characters`의 한 줄. 지금 실제로 만들 수 있는 캐릭터만 온다. */
+export interface ConverterCharacter {
+  characterId: string;
+  displayName: string;
+  rigProfile: string | null;
+  revision: string | null;
+}
+
+/**
+ * converter가 **지금 만들 수 있는** 캐릭터 목록.
+ *
+ * converter는 artifact를 실제로 resolve 해 본 것만 돌려준다(`list_public(available_only=True)`).
+ * 즉 이 목록에 없다 = registry에 있어도 지금은 못 만든다. 그 판단을 BFF가 흉내 내지 않고
+ * 그대로 가져다 쓴다 — artifact URI·SHA 검증은 converter만 할 수 있다.
+ */
+export async function fetchConverterCharacters(
+  overrides: Partial<ConverterDeps> = {},
+): Promise<ConverterCharacter[]> {
+  const deps = { ...defaultDeps(), ...overrides };
+  if (!deps.baseUrl) {
+    throw new ConverterError("CONVERTER_DISABLED", "converter base url is not configured");
+  }
+
+  let res: Response;
+  try {
+    res = await deps.fetch(`${deps.baseUrl}/characters`, {
+      signal: AbortSignal.timeout(deps.timeoutMs),
+    });
+  } catch (error) {
+    const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+    throw new ConverterError(
+      timedOut ? "CONVERTER_TIMEOUT" : "CONVERTER_UNAVAILABLE",
+      timedOut ? "converter characters request timed out" : "converter is unreachable",
+    );
+  }
+
+  if (!res.ok) throw mapUpstreamFailure(res.status, await res.text().catch(() => ""));
+
+  const body = (await res.json().catch(() => null)) as { characters?: unknown } | null;
+  const rows = Array.isArray(body?.characters) ? body.characters : [];
+  return rows.flatMap((row): ConverterCharacter[] => {
+    const item = (row ?? {}) as Record<string, unknown>;
+    const characterId = typeof item.character_id === "string" ? item.character_id : "";
+    if (!characterId) return [];
+    return [
+      {
+        characterId,
+        displayName: typeof item.display_name === "string" ? item.display_name : "",
+        rigProfile: typeof item.rig_profile === "string" ? item.rig_profile : null,
+        revision: typeof item.revision === "string" ? item.revision : null,
+      },
+    ];
+  });
+}
+
 /**
  * 최종 BVH 바이트 → V3.2 FBX.
  *

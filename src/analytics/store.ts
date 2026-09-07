@@ -2,9 +2,16 @@ import { randomUUID } from "node:crypto";
 import { execute, queryOne, transaction } from "../db.js";
 import type { ExportFormat } from "../types.js";
 
+/**
+ * 이벤트 이름 → 저장할 속성 키.
+ *
+ * ⚠ 이름과 속성은 **엄격함이 다르다.** 모르는 이름은 배치 전체를 400으로 거절하지만(routes.ts),
+ * 모르는 속성 키는 `sanitizeEventProperties`가 조용히 버린다. 그래서 속성을 빠뜨리면
+ * 아무도 오류를 보지 못한 채 지표만 비어 있게 된다.
+ */
 export const CLIENT_EVENT_PROPERTIES: Record<string, readonly string[]> = {
   app_started: ["appVersion", "osName", "osVersion", "architecture", "locale"],
-  input_confirmed: ["source", "width", "height", "size", "mime", "surface"],
+  input_confirmed: ["source", "width", "height", "size", "mime", "surface", "characterId"],
   results_viewed: ["surface", "peopleCount", "candidateCount"],
   candidate_selected: [
     "personIndex",
@@ -18,7 +25,10 @@ export const CLIENT_EVENT_PROPERTIES: Record<string, readonly string[]> = {
   // 값은 전부 코드형 열거라 자유 텍스트가 섞이지 않는다.
   analysis_failed: ["reason", "surface", "elapsedMs"],
   rerun_requested: ["surface", "selectedCount", "peopleCount"],
-  export_completed: ["fileCount", "surface"],
+  // characterId·format은 **저장 결과의 성질**이다. 없으면 "FBX를 실제로 쓰는가",
+  // "여성 체형을 고르는가"를 지표에서 알 수 없다. 모르는 키는 400이 아니라 조용히
+  // 버려지므로(sanitizeEventProperties), 빠져 있어도 아무도 눈치채지 못한다.
+  export_completed: ["fileCount", "surface", "format", "characterId"],
   export_failed: ["code", "surface"],
   capture_failed: ["code", "surface"],
   // 자동 업데이트 계열(클라 ADR-011). 업데이터는 실사용에서 검증된 적이 없는 경로라
