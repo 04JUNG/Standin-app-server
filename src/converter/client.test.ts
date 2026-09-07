@@ -5,7 +5,12 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import { ConverterError, convertBvhToFbx, sha256Hex } from "./client.js";
+import {
+  ConverterError,
+  convertBvhToFbx,
+  fetchConverterCharacters,
+  sha256Hex,
+} from "./client.js";
 
 const BVH = new TextEncoder().encode("HIERARCHY\nROOT Hips\nMOTION\nFrames: 1\n");
 const FBX = new Uint8Array([0x4b, 0x61, 0x79, 0x64, 0x61, 0x72, 0x61, 0x20]);
@@ -141,4 +146,63 @@ test("base url이 없으면 호출 자체를 하지 않는다", async () => {
     (e: unknown) => e instanceof ConverterError && e.code === "CONVERTER_DISABLED",
   );
   assert.equal(called, false);
+});
+
+test("캐릭터 목록의 snake_case를 계약 이름으로 옮긴다", async () => {
+  const rows = await fetchConverterCharacters(
+    deps((async () =>
+      new Response(
+        JSON.stringify({
+          characters: [
+            {
+              character_id: "standin-master-v2",
+              display_name: "Standin Master V2",
+              rig_profile: "mixamo",
+              revision: "v2",
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      )) as typeof fetch),
+  );
+
+  assert.deepEqual(rows, [
+    {
+      characterId: "standin-master-v2",
+      displayName: "Standin Master V2",
+      rigProfile: "mixamo",
+      revision: "v2",
+    },
+  ]);
+});
+
+test("character_id가 없는 줄은 버린다 — 주소로 쓸 수 없는 캐릭터다", async () => {
+  const rows = await fetchConverterCharacters(
+    deps((async () =>
+      new Response(JSON.stringify({ characters: [{ display_name: "이름만" }, null] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })) as typeof fetch),
+  );
+
+  assert.deepEqual(rows, []);
+});
+
+test("목록 조회 실패도 재시도 가능 여부로 갈라 준다", async () => {
+  // 503은 재시도가 의미 있고(배포 중), 400은 아니다. export 실패와 같은 판단을 쓴다.
+  await assert.rejects(
+    fetchConverterCharacters(deps((async () => new Response("", { status: 503 })) as typeof fetch)),
+    (error: unknown) =>
+      error instanceof ConverterError && error.code === "CONVERTER_UNAVAILABLE",
+  );
+
+  await assert.rejects(
+    fetchConverterCharacters(
+      deps((async () => {
+        throw new Error("ECONNREFUSED");
+      }) as typeof fetch),
+    ),
+    (error: unknown) =>
+      error instanceof ConverterError && error.code === "CONVERTER_UNAVAILABLE",
+  );
 });
