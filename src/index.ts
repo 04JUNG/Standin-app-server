@@ -21,6 +21,7 @@ import { usersRoutes } from "./users/routes.js";
 import { jobsRoutes } from "./jobs/routes.js";
 import { failStaleJobs } from "./jobs/store.js";
 import { dispatchPendingJobs } from "./jobs/queue.js";
+import { characterRoutes } from "./characters/routes.js";
 import { poseRoutes } from "./pose/routes.js";
 import { analyticsRoutes } from "./analytics/routes.js";
 import { installationRoutes } from "./installations/routes.js";
@@ -169,11 +170,15 @@ app.on(
       ),
   }),
 );
+// 모델 목록도 설치 인증 뒤에 둔다. 분석·저장과 같은 계약이라 클라이언트가 같은
+// 헤더로 부른다(auth: false = Bearer 없음, X-Installation-Id/X-Device-Token).
+app.use("/v1/models", requireInstallation);
 app.use("/v1/pose-candidates/*", requireInstallation);
 app.use("/v1/events/*", requireInstallation);
 
 app.route("/v1/users", usersRoutes);
 app.route("/v1/analysis/jobs", jobsRoutes);
+app.route("/v1/models", characterRoutes);
 app.route("/v1/pose-candidates", poseRoutes);
 app.route("/v1/events", analyticsRoutes);
 app.route("/v1/admin", adminRoutes);
