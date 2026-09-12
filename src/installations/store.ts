@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import type { PoolClient } from "pg";
-import { execute, queryOne, transaction } from "../db.js";
+import { execute, query, queryOne, transaction } from "../db.js";
+import type { RosterQuery, RosterRow } from "../admin/installationList.js";
 
 export interface InstallationMetadata {
   consentVersion: string;
@@ -121,6 +122,40 @@ export interface InstallationSummary {
   consentVersion: string;
   revokedAt: string | null;
   deletionRequestedAt: string | null;
+}
+
+/**
+ * 설치 명부. 최근 접속 순으로 한 페이지씩 준다.
+ *
+ * Job 집계는 **페이지에 실제로 실린 행에 대해서만** LATERAL로 센다. 전체를 GROUP BY로
+ * 말아 두고 자르면 설치가 늘수록 한 페이지를 여는 비용이 전체 Job 수에 비례한다.
+ *
+ * 철회·삭제 요청 설치도 기본으로 포함한다 — 그 설치의 남은 기록이야말로 삭제 스윕이
+ * 제대로 돌았는지 확인하는 자리다. 가릴 때는 `activeOnly=true`를 쓴다.
+ */
+export async function listInstallations({
+  limit,
+  cursor,
+  activeOnly,
+}: RosterQuery): Promise<RosterRow[]> {
+  return query<RosterRow>(
+    `SELECT i.id, i.created_at, i.last_seen_at, i.app_version, i.os_name, i.os_version,
+            i.locale, i.consent_version, i.revoked_at, i.deletion_requested_at,
+            j.job_count, j.failed_count, j.last_job_at
+     FROM installations i
+     LEFT JOIN LATERAL (
+       SELECT count(*)::int AS job_count,
+              count(*) FILTER (WHERE status = 'failed')::int AS failed_count,
+              max(created_at) AS last_job_at
+       FROM jobs WHERE jobs.installation_id = i.id
+     ) j ON TRUE
+     WHERE ($1::boolean IS NOT TRUE
+            OR (i.revoked_at IS NULL AND i.deletion_requested_at IS NULL))
+       AND ($2::text IS NULL OR (i.last_seen_at, i.id) < ($2, $3))
+     ORDER BY i.last_seen_at DESC, i.id DESC
+     LIMIT $4`,
+    [activeOnly, cursor?.lastSeenAt ?? null, cursor?.id ?? null, limit + 1],
+  );
 }
 
 export async function getInstallationSummary(

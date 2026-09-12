@@ -8,7 +8,8 @@ import { getAnalysisFlag, setAnalysisEnabled } from "../limits/flags.js";
 import { dailyWindow } from "../limits/policy.js";
 import { currentUsage } from "../limits/store.js";
 import { errorEnvelope } from "../mapping.js";
-import { getInstallationSummary } from "../installations/store.js";
+import { getInstallationSummary, listInstallations } from "../installations/store.js";
+import { parseRosterQuery, toRosterPage } from "./installationList.js";
 import { isInstallationId, parseHistoryQuery, toHistoryPage } from "../jobs/history.js";
 import { listJobHistory } from "../jobs/store.js";
 import { health } from "../inference.js";
@@ -172,6 +173,30 @@ adminRoutes.put("/flags/analysis_enabled", async (c) => {
     updatedAt: flag.updatedAt,
     propagationSeconds: 5,
   });
+});
+
+/**
+ * GET /v1/admin/review/installations — 설치 명부.
+ *
+ * 아래 작업 기록 조회는 설치 id를 이미 알아야 쓴다. id를 처음 얻을 길이 S3 prefix를
+ * 훑는 것뿐이었는데, 어떤 설치가 있는지 알자고 사용자 원본 이미지 버킷을 여는 것은
+ * 접근 범위가 과하다. 최근 접속 순으로 명부를 준다.
+ *
+ * Job 수·실패 수를 함께 실어 "누구를 열어 볼지"를 이 목록에서 정할 수 있게 한다.
+ * 여기서 한 번 더 좁히지 않으면 운영자가 설치를 하나씩 열어 보게 된다.
+ */
+adminRoutes.get("/review/installations", async (c) => {
+  const parsed = parseRosterQuery({
+    limit: c.req.query("limit"),
+    cursor: c.req.query("cursor"),
+    activeOnly: c.req.query("activeOnly"),
+  });
+  if (!parsed.ok) {
+    return c.json(errorEnvelope("INVALID_INPUT", parsed.message, c.get("requestId")), 400);
+  }
+  const rows = await listInstallations(parsed.query);
+  await audit(c, "review_installation_list", {});
+  return c.json(toRosterPage(rows, parsed.query.limit));
 });
 
 /**

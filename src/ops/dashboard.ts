@@ -104,8 +104,13 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
           <option value="queued">queued</option>
         </select>
         <button id="lookupGo">조회</button>
+        <button class="ghost" id="rosterGo">설치 목록</button>
+        <label class="sub" style="display:inline-flex;gap:6px;align-items:center">
+          <input type="checkbox" id="rosterActive" style="width:auto;min-width:0"> 철회·삭제요청 숨기기
+        </label>
         <span id="lookupMsg" class="sub"></span>
       </div>
+      <div id="rosterOut"></div>
       <div id="lookupOut"></div>
     </div>
     <p class="sub">
@@ -332,6 +337,70 @@ async function lookupGo(cursor) {
     $("lookupOut").innerHTML = "";
   }
 }
+
+// ── 설치 명부 ────────────────────────────────────────────────
+//
+// id를 외워 두거나 S3 prefix를 훑지 않고도 "누가 있나"에서 시작할 수 있게 한다.
+let roster = { items: [], nextCursor: null };
+
+async function rosterFetch(cursor) {
+  const query = "limit=20" +
+    ($("rosterActive").checked ? "&activeOnly=true" : "") +
+    (cursor ? "&cursor=" + encodeURIComponent(cursor) : "");
+  const res = await fetch("/v1/admin/review/installations?" + query, {
+    headers: { "X-Beta-Admin-Token": token },
+  });
+  if (!res.ok) throw new Error(res.status === 404 ? "토큰이 거절됐습니다." : "명부 조회 실패 " + res.status);
+  return res.json();
+}
+
+function rosterRender() {
+  if (!roster.items.length) {
+    $("rosterOut").innerHTML = '<p class="empty">설치가 없습니다.</p>';
+    return;
+  }
+  const rows = roster.items.map((item) =>
+    '<tr><td><button class="ghost" data-pick="' + esc(item.installationId) + '">조회</button></td>' +
+    '<td class="mono" title="' + esc(item.installationId) + '">' + esc(item.installationId.slice(5, 17)) + "…</td>" +
+    "<td>" + when(item.lastSeenAt) + "</td>" +
+    '<td class="sub">' + esc(item.appVersion || "?") + " · " + esc(item.osName || "?") + "</td>" +
+    '<td class="num">' + item.jobCount + "</td>" +
+    '<td class="num' + (item.failedCount ? " err" : "") + '">' + item.failedCount + "</td>" +
+    "<td>" + (item.lastJobAt ? when(item.lastJobAt) : '<span class="sub">없음</span>') + "</td>" +
+    "<td>" + (item.revokedAt ? pill("철회", "bad") : item.deletionRequestedAt ? pill("삭제 요청", "warn") : "") + "</td></tr>"
+  ).join("");
+
+  $("rosterOut").innerHTML =
+    '<div class="scroll" style="margin-top:12px"><table><thead><tr><th></th><th>설치</th><th>마지막 접속</th>' +
+    '<th>앱 · OS</th><th class="num">Job</th><th class="num">실패</th><th>마지막 분석</th><th></th>' +
+    "</tr></thead><tbody>" + rows + "</tbody></table></div>" +
+    (roster.nextCursor ? '<p style="margin:10px 0 0"><button class="ghost" id="rosterMore">설치 더 보기</button></p>' : "");
+
+  $("rosterOut").querySelectorAll("button[data-pick]").forEach((button) => {
+    button.addEventListener("click", () => {
+      $("lookupId").value = button.dataset.pick;
+      lookupGo(null);
+    });
+  });
+  if ($("rosterMore")) $("rosterMore").addEventListener("click", () => rosterGo(roster.nextCursor));
+}
+
+async function rosterGo(cursor) {
+  $("lookupMsg").textContent = "명부 조회 중…";
+  try {
+    const data = await rosterFetch(cursor);
+    roster.nextCursor = data.nextCursor;
+    roster.items = cursor ? roster.items.concat(data.items) : data.items;
+    $("lookupMsg").textContent = "설치 " + roster.items.length + "곳" + (data.nextCursor ? " (더 있음)" : "");
+    rosterRender();
+  } catch (error) {
+    $("lookupMsg").innerHTML = '<span class="err">' + esc(error.message) + "</span>";
+    $("rosterOut").innerHTML = "";
+  }
+}
+
+$("rosterGo").addEventListener("click", () => rosterGo(null));
+$("rosterActive").addEventListener("change", () => { if (roster.items.length) rosterGo(null); });
 
 $("lookupGo").addEventListener("click", () => lookupGo(null));
 $("lookupId").addEventListener("keydown", (event) => { if (event.key === "Enter") lookupGo(null); });

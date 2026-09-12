@@ -608,6 +608,28 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 
 모든 관리자 경로는 `X-Beta-Admin-Token` 헤더가 필요하고, 접근은 `admin_access_audit`에 기록된다.
 
+### 설치 명부
+
+`GET /v1/admin/review/installations`
+
+어떤 설치가 있는지 최근 접속 순으로 준다. 쿼리는 `limit`(1~50, 기본 20) · `cursor` · `activeOnly`(`true`면 철회·삭제 요청 설치를 뺀다. 기본은 `false` — 그 설치에 기록이 남아 있는지 확인하는 자리이기도 하다).
+
+```json
+{
+  "items": [
+    { "installationId": "inst_...", "createdAt": "2026-09-01T...", "lastSeenAt": "2026-09-11T...",
+      "appVersion": "0.1.1-beta.7", "osName": "windows", "osVersion": "11", "locale": "ko",
+      "consentVersion": "2026-08-02", "revokedAt": null, "deletionRequestedAt": null,
+      "jobCount": 12, "failedCount": 1, "lastJobAt": "2026-09-04T00:29:24.879Z" }
+  ],
+  "nextCursor": "eyJ..."
+}
+```
+
+`jobCount`·`failedCount`는 **그 페이지에 실린 행에 대해서만** 센다(LATERAL). 전체를 GROUP BY로 말면 설치가 늘수록 한 페이지를 여는 비용이 전체 Job 수에 비례한다.
+
+정렬 기준이 `lastSeenAt`이라 페이지를 넘기는 도중 값이 바뀌면 그 행이 첫 페이지로 올라간다. 고정 스냅샷 대신 "지금 기준"을 보여 주는 선택이다. `lastJobAt`이 `null`이면 접속만 하고 분석은 돌리지 않은 설치다.
+
 ### 설치 단위 작업 기록
 
 `GET /v1/admin/review/installations/{installationId}/jobs`
