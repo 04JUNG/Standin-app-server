@@ -102,6 +102,62 @@ async function deleteRows(client: PoolClient, installationId: string): Promise<v
   await client.query("DELETE FROM jobs WHERE installation_id = $1", [installationId]);
 }
 
+/**
+ * 관리자 검토 화면이 목록 위에 띄우는 설치 요약.
+ *
+ * 토큰 해시는 뽑지 않는다 — 검토자에게 필요한 것은 "어떤 클라이언트가, 언제까지
+ * 살아 있었나"뿐이고, 해시는 있어 봐야 재현에 쓸 수 없으면서 유출 표면만 넓힌다.
+ * 탈퇴·철회한 설치도 돌려준다. `revoked_at`이 찍힌 설치의 남은 Job이야말로
+ * 삭제 스윕이 제대로 돌았는지 확인하는 자리이기 때문이다.
+ */
+export interface InstallationSummary {
+  installationId: string;
+  createdAt: string;
+  lastSeenAt: string;
+  appVersion: string;
+  osName: string;
+  osVersion: string;
+  locale: string;
+  consentVersion: string;
+  revokedAt: string | null;
+  deletionRequestedAt: string | null;
+}
+
+export async function getInstallationSummary(
+  installationId: string,
+): Promise<InstallationSummary | null> {
+  const row = await queryOne<{
+    id: string;
+    created_at: string;
+    last_seen_at: string;
+    app_version: string;
+    os_name: string;
+    os_version: string;
+    locale: string;
+    consent_version: string;
+    revoked_at: string | null;
+    deletion_requested_at: string | null;
+  }>(
+    `SELECT id, created_at, last_seen_at, app_version, os_name, os_version,
+            locale, consent_version, revoked_at, deletion_requested_at
+     FROM installations WHERE id = $1`,
+    [installationId],
+  );
+  if (!row) return null;
+  return {
+    installationId: row.id,
+    createdAt: row.created_at,
+    lastSeenAt: row.last_seen_at,
+    appVersion: row.app_version,
+    osName: row.os_name,
+    osVersion: row.os_version,
+    locale: row.locale,
+    consentVersion: row.consent_version,
+    revokedAt: row.revoked_at,
+    deletionRequestedAt: row.deletion_requested_at,
+  };
+}
+
 export async function revokeAndDeleteInstallationData(installationId: string): Promise<void> {
   await transaction(async (client) => {
     await deleteRows(client, installationId);

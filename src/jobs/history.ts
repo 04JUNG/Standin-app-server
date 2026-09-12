@@ -31,6 +31,18 @@ const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const JOB_ID = /^job_[0-9a-f-]{36}$/;
 
 /**
+ * 설치 id. `createInstallation`이 `inst_${randomUUID()}`로 만든다.
+ *
+ * 관리자 조회는 이 값을 경로 파라미터로 받는다. 형태가 다르면 조회할 것도 없으므로
+ * SQL에 닿기 전에 여기서 거른다 — 오타 한 번에 365일치 인덱스를 스캔하지 않는다.
+ */
+const INSTALLATION_ID = /^inst_[0-9a-f-]{36}$/;
+
+export function isInstallationId(value: string): boolean {
+  return typeof value === "string" && INSTALLATION_ID.test(value);
+}
+
+/**
  * 손상된 커서는 `null`을 돌려주고 라우트가 400으로 거절한다.
  *
  * 조용히 첫 페이지로 폴백하면 클라이언트의 "더 보기"가 같은 페이지를 영원히 다시 받으며
