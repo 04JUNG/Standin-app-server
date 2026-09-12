@@ -606,7 +606,44 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 
 ## 관리자 품질 검토
 
-`GET /v1/admin/review/jobs/{jobId}`는 `X-Beta-Admin-Token`이 필요하다. 5분짜리 원본 서명 URL, 인물·스켈레톤·후보·선택·피드백을 반환하고 접근을 감사 테이블에 기록한다.
+모든 관리자 경로는 `X-Beta-Admin-Token` 헤더가 필요하고, 접근은 `admin_access_audit`에 기록된다.
+
+### 설치 단위 작업 기록
+
+`GET /v1/admin/review/installations/{installationId}/jobs`
+
+특정 설치가 무엇을 돌렸고 무엇이 실패했는지 훑는다. 쿼리는 사용자용 `GET /v1/analysis/jobs`와 같다 — `limit`(1~50, 기본 20) · `cursor` · `status`(`queued`|`running`|`completed`|`failed`).
+
+```json
+{
+  "installation": {
+    "installationId": "inst_...", "createdAt": "2026-08-01T...", "lastSeenAt": "2026-09-11T...",
+    "appVersion": "0.4.2", "osName": "windows", "osVersion": "11", "locale": "ko-KR",
+    "consentVersion": "2026-08-02", "revokedAt": null, "deletionRequestedAt": null
+  },
+  "items": [
+    { "jobId": "job_...", "status": "failed", "createdAt": "2026-09-11T...", "completedAt": null,
+      "errorCode": "INFERENCE_TIMEOUT", "source": "capture", "personCount": 0, "selectionCount": 0,
+      "hasSelection": false, "thumbnailUrl": null, "inputAvailable": true,
+      "inputWidth": 1920, "inputHeight": 1080 }
+  ],
+  "nextCursor": "eyJ..."
+}
+```
+
+`items`는 사용자 화면과 같은 모양이다. 검토자가 사용자와 다른 것을 보면 "지금 사용자에게 뭐가 보이나"를 판단할 수 없기 때문이다. 두 가지만 다르게 읽는다.
+
+- `thumbnailUrl`은 **설치 토큰이 필요한 경로**다. 관리자 토큰으로는 열리지 않는다.
+- 원본 러프는 목록에 없다. `inputAvailable: true`인 Job을 아래 상세로 열면 서명 URL이 나온다. 목록에 20건치 서명 URL을 달면 한 번의 조회가 그 설치의 사진 전부를 꺼내는 열쇠가 된다.
+
+| 상태 | 언제 |
+|---|---|
+| `400 INVALID_INPUT` | installationId 형식이 아니거나 `limit`·`cursor`·`status`가 잘못됐다 |
+| `404 NOT_FOUND` | 없는 설치. 기록이 0건인 설치는 `items: []`로 구분된다 |
+
+### Job 상세
+
+`GET /v1/admin/review/jobs/{jobId}`는 5분짜리 원본 서명 URL, 인물·스켈레톤·후보·선택·피드백을 반환한다.
 
 ---
 
