@@ -127,7 +127,7 @@ export interface SignalRow {
   jobs: number;
   zero_people_jobs: number;
   shortfall_jobs: number;
-  avg_best_score: number | null;
+  avg_best_distance: number | null;
   avg_people: number | null;
 }
 
@@ -143,8 +143,14 @@ export interface SignalGroup {
   zeroPeopleRate: number | null;
   /** 후보가 모자랐던 Job 비율(`candidate_shortfall_reason`). */
   shortfallRate: number | null;
-  /** 그 Job에서 가장 높았던 후보 점수의 평균. 두 그룹의 차이가 곧 임계값 단서다. */
-  avgBestScore: number | null;
+  /**
+   * 그 Job에서 **가장 가까운 후보의 거리** 평균. 낮을수록 좋다.
+   *
+   * 점수(`rerank_score`)가 아니라 거리인 이유: 추론이 `knn_geometric`을 직접 불러
+   * rerank 경로를 쓰지 않으므로 `rerank_score`는 항상 비어 있다. 두 집단의 거리
+   * 차이가 곧 matchLevel 임계값(0.25/0.45)을 보정할 근거다.
+   */
+  avgBestDistance: number | null;
   avgPeople: number | null;
   matchLevels: Array<{ level: string; count: number; share: number | null }>;
 }
@@ -165,10 +171,10 @@ function group(row: SignalRow | undefined, levels: MatchLevelRow[]): SignalGroup
     jobs,
     zeroPeopleRate: rate(row?.zero_people_jobs ?? 0, jobs),
     shortfallRate: rate(row?.shortfall_jobs ?? 0, jobs),
-    avgBestScore:
-      row?.avg_best_score === null || row?.avg_best_score === undefined
+    avgBestDistance:
+      row?.avg_best_distance === null || row?.avg_best_distance === undefined
         ? null
-        : Math.round(Number(row.avg_best_score) * 1000) / 1000,
+        : Math.round(Number(row.avg_best_distance) * 1000) / 1000,
     avgPeople:
       row?.avg_people === null || row?.avg_people === undefined
         ? null
