@@ -49,6 +49,13 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
   #gate { display:none; padding:40px 20px; max-width:460px; margin:0 auto; }
   #gate.show { display:block; }
   #app.hide { display:none; }
+  .lookup { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .lookup input { min-width:340px; flex:1; }
+  select { font:inherit; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:7px 10px; }
+  button.ghost { background:transparent; color:var(--muted); border:1px solid var(--line); padding:3px 9px; font-size:12px; font-weight:500; }
+  button.ghost:hover { color:var(--text); border-color:var(--accent); }
+  .err { color:var(--bad); }
+  .mono { font-family:ui-monospace,"Cascadia Mono",Consolas,monospace; font-size:12px; }
 </style>
 </head>
 <body>
@@ -84,6 +91,22 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
     <div class="row">
       <div class="card"><h2>분석 Job (1시간)</h2><div class="scroll" id="jobs"></div></div>
       <div class="card"><h2>사용량</h2><div id="quota"></div></div>
+    </div>
+    <div class="card">
+      <h2>설치 조회 — 이 설치가 무엇을 돌렸나</h2>
+      <div class="lookup">
+        <input id="lookupId" placeholder="inst_00000000-0000-4000-8000-000000000000" autocomplete="off" spellcheck="false">
+        <select id="lookupStatus">
+          <option value="">전체</option>
+          <option value="failed">failed</option>
+          <option value="completed">completed</option>
+          <option value="running">running</option>
+          <option value="queued">queued</option>
+        </select>
+        <button id="lookupGo">조회</button>
+        <span id="lookupMsg" class="sub"></span>
+      </div>
+      <div id="lookupOut"></div>
     </div>
     <p class="sub">
       지연시간은 히스토그램에서 읽은 값이라 버킷 상한까지만 정확하다("이 값 이하"라는 뜻).
@@ -178,6 +201,141 @@ async function tick() {
     $("gateError").textContent = error.message;
   }
 }
+
+// ── 설치 조회 ────────────────────────────────────────────────
+//
+// 위 집계는 "서비스가 지금 어떤가"를 답하고, 여기는 "이 사용자에게 무슨 일이
+// 있었나"를 답한다. 30초 자동 갱신은 이 영역을 건드리지 않는다 — render()가
+// 자기 id들만 다시 그리므로, 조회 결과가 눈앞에서 사라지지 않는다.
+const LOOKUP_LIMIT = 20;
+let lookup = { id: "", status: "", items: [], nextCursor: null, installation: null };
+
+function when(iso) {
+  if (!iso) return "—";
+  const at = new Date(iso);
+  return isNaN(at.getTime()) ? esc(iso) : at.toLocaleString("ko-KR", { hour12: false });
+}
+
+function took(item) {
+  if (!item.createdAt || !item.completedAt) return "—";
+  const elapsed = new Date(item.completedAt) - new Date(item.createdAt);
+  return isFinite(elapsed) && elapsed >= 0 ? ms(elapsed) : "—";
+}
+
+/** completed인데 인물이 0명이면 실패는 아니지만 봐야 할 건이라 따로 표시한다. */
+function jobStatus(item) {
+  if (item.status === "failed") return pill("failed", "bad");
+  if (item.status === "completed") {
+    return item.personCount === 0 ? pill("완료 · 인물 0", "warn") : pill("completed", "ok");
+  }
+  return pill(esc(item.status), "warn");
+}
+
+async function lookupFetch(cursor) {
+  const query = "limit=" + LOOKUP_LIMIT +
+    (lookup.status ? "&status=" + encodeURIComponent(lookup.status) : "") +
+    (cursor ? "&cursor=" + encodeURIComponent(cursor) : "");
+  const res = await fetch(
+    "/v1/admin/review/installations/" + encodeURIComponent(lookup.id) + "/jobs?" + query,
+    { headers: { "X-Beta-Admin-Token": token } },
+  );
+  if (!res.ok) {
+    // 404가 둘을 겸한다 — 토큰 거절(미들웨어)과 없는 설치(라우트). 메시지로 가른다.
+    const body = await res.json().catch(() => null);
+    const message = body && body.error ? body.error.message : "";
+    if (res.status === 404) throw new Error(message === "not found" ? "토큰이 거절됐습니다." : "그런 설치가 없습니다.");
+    if (res.status === 400) throw new Error(message || "입력이 올바르지 않습니다.");
+    throw new Error("조회 실패 " + res.status);
+  }
+  return res.json();
+}
+
+/** 원본 러프는 상세 조회에서만 나온다(목록에 서명 URL을 달지 않는 이유는 API 문서 참고). */
+async function openInput(jobId, button) {
+  const label = button.textContent;
+  button.textContent = "여는 중";
+  try {
+    const res = await fetch("/v1/admin/review/jobs/" + encodeURIComponent(jobId), {
+      headers: { "X-Beta-Admin-Token": token },
+    });
+    if (!res.ok) throw new Error("상세 조회 실패 " + res.status);
+    const detail = await res.json();
+    if (!detail.inputUrl) throw new Error("원본이 남아 있지 않습니다");
+    window.open(detail.inputUrl, "_blank", "noopener");
+    button.textContent = label;
+  } catch (error) {
+    button.textContent = label;
+    $("lookupMsg").innerHTML = '<span class="err">' + esc(error.message) + "</span>";
+  }
+}
+
+function lookupRender() {
+  const install = lookup.installation;
+  const head = install
+    ? '<div class="sub" style="margin:12px 0 8px">' +
+      '<span class="mono">' + esc(install.installationId) + "</span> · " +
+      esc(install.appVersion || "?") + " · " + esc(install.osName || "?") + " " + esc(install.osVersion || "") +
+      " · 마지막 접속 " + when(install.lastSeenAt) +
+      (install.revokedAt ? " · " + pill("철회됨", "bad") : "") +
+      (install.deletionRequestedAt ? " · " + pill("삭제 요청", "warn") : "") +
+      "</div>"
+    : "";
+
+  if (!lookup.items.length) {
+    $("lookupOut").innerHTML = head + '<p class="empty">해당 조건의 기록이 없습니다.</p>';
+    return;
+  }
+
+  const rows = lookup.items.map((item) =>
+    "<tr><td>" + jobStatus(item) + "</td>" +
+    '<td class="mono" title="' + esc(item.jobId) + '">' + esc(String(item.jobId).slice(0, 12)) + "…</td>" +
+    "<td>" + when(item.createdAt) + "</td>" +
+    '<td class="num">' + took(item) + "</td>" +
+    '<td class="' + (item.errorCode ? "err mono" : "sub") + '">' + esc(item.errorCode || "—") + "</td>" +
+    '<td class="num">' + (item.personCount || 0) + "</td>" +
+    '<td class="num">' + (item.selectionCount || 0) + "</td>" +
+    "<td>" + (item.inputAvailable
+      ? '<button class="ghost" data-input="' + esc(item.jobId) + '">원본 ' + (item.inputWidth || "?") + "×" + (item.inputHeight || "?") + "</button>"
+      : '<span class="sub" title="버킷 lifecycle 90일">만료</span>') + "</td></tr>"
+  ).join("");
+
+  $("lookupOut").innerHTML = head +
+    '<div class="scroll"><table><thead><tr><th>상태</th><th>Job</th><th>만든 시각</th>' +
+    '<th class="num">소요</th><th>에러코드</th><th class="num">인물</th><th class="num">선택</th><th>원본</th>' +
+    "</tr></thead><tbody>" + rows + "</tbody></table></div>" +
+    (lookup.nextCursor ? '<p style="margin:12px 0 0"><button class="ghost" id="lookupMore">더 보기</button></p>' : "");
+
+  $("lookupOut").querySelectorAll("button[data-input]").forEach((button) => {
+    button.addEventListener("click", () => openInput(button.dataset.input, button));
+  });
+  if ($("lookupMore")) $("lookupMore").addEventListener("click", () => lookupGo(lookup.nextCursor));
+}
+
+async function lookupGo(cursor) {
+  // s3 ls에서 복사하면 prefix 끝에 슬래시가 붙어 온다. 그대로 두면 경로가
+  // installations/inst_…//jobs 가 되어 라우트에 걸리지 않는다.
+  const id = $("lookupId").value.trim().replace(/\/+$/, "");
+  if (!id) { $("lookupMsg").innerHTML = '<span class="err">installationId를 입력하세요.</span>'; return; }
+  $("lookupId").value = id;
+  lookup.id = id;
+  lookup.status = $("lookupStatus").value;
+  $("lookupMsg").textContent = "조회 중…";
+  try {
+    const data = await lookupFetch(cursor);
+    lookup.installation = data.installation;
+    lookup.nextCursor = data.nextCursor;
+    lookup.items = cursor ? lookup.items.concat(data.items) : data.items;
+    $("lookupMsg").textContent = lookup.items.length + "건" + (data.nextCursor ? " (더 있음)" : "");
+    lookupRender();
+  } catch (error) {
+    $("lookupMsg").innerHTML = '<span class="err">' + esc(error.message) + "</span>";
+    $("lookupOut").innerHTML = "";
+  }
+}
+
+$("lookupGo").addEventListener("click", () => lookupGo(null));
+$("lookupId").addEventListener("keydown", (event) => { if (event.key === "Enter") lookupGo(null); });
+$("lookupStatus").addEventListener("change", () => { if (lookup.id) lookupGo(null); });
 
 $("enter").addEventListener("click", () => {
   token = $("token").value.trim();
