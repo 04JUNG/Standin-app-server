@@ -8,10 +8,11 @@ import { getAnalysisFlag, setAnalysisEnabled } from "../limits/flags.js";
 import { dailyWindow } from "../limits/policy.js";
 import { currentUsage } from "../limits/store.js";
 import { errorEnvelope } from "../mapping.js";
-import { getInstallationSummary } from "../installations/store.js";
+import { getInstallationSummary, listInstallations } from "../installations/store.js";
+import { parseRosterQuery, toRosterPage } from "./installationList.js";
 import { isInstallationId, parseHistoryQuery, toHistoryPage } from "../jobs/history.js";
 import { listJobHistory } from "../jobs/store.js";
-import { health } from "../inference.js";
+import { getPoseThumbnail, health } from "../inference.js";
 import { DASHBOARD_HTML } from "../ops/dashboard.js";
 import {
   activeTasks,
@@ -175,6 +176,30 @@ adminRoutes.put("/flags/analysis_enabled", async (c) => {
 });
 
 /**
+ * GET /v1/admin/review/installations — 설치 명부.
+ *
+ * 아래 작업 기록 조회는 설치 id를 이미 알아야 쓴다. id를 처음 얻을 길이 S3 prefix를
+ * 훑는 것뿐이었는데, 어떤 설치가 있는지 알자고 사용자 원본 이미지 버킷을 여는 것은
+ * 접근 범위가 과하다. 최근 접속 순으로 명부를 준다.
+ *
+ * Job 수·실패 수를 함께 실어 "누구를 열어 볼지"를 이 목록에서 정할 수 있게 한다.
+ * 여기서 한 번 더 좁히지 않으면 운영자가 설치를 하나씩 열어 보게 된다.
+ */
+adminRoutes.get("/review/installations", async (c) => {
+  const parsed = parseRosterQuery({
+    limit: c.req.query("limit"),
+    cursor: c.req.query("cursor"),
+    activeOnly: c.req.query("activeOnly"),
+  });
+  if (!parsed.ok) {
+    return c.json(errorEnvelope("INVALID_INPUT", parsed.message, c.get("requestId")), 400);
+  }
+  const rows = await listInstallations(parsed.query);
+  await audit(c, "review_installation_list", {});
+  return c.json(toRosterPage(rows, parsed.query.limit));
+});
+
+/**
  * GET /v1/admin/review/installations/:id/jobs — 설치 하나의 작업 기록.
  *
  * 이 목록이 없으면 아래 `/review/jobs/:id`를 쓰기 위해 jobId를 이미 알고 있어야 한다.
@@ -235,7 +260,7 @@ adminRoutes.get("/review/jobs/:id", async (c) => {
   );
   if (!job) return c.json(errorEnvelope("NOT_FOUND", "unknown jobId", c.get("requestId")), 404);
 
-  const [people, candidates, selections, feedback] = await Promise.all([
+  const [people, candidates, selections, feedback, refinedRows] = await Promise.all([
     query("SELECT * FROM analysis_people WHERE job_id = $1 ORDER BY person_index", [jobId]),
     query(
       "SELECT * FROM analysis_candidates WHERE job_id = $1 ORDER BY person_index, rank",
@@ -243,7 +268,45 @@ adminRoutes.get("/review/jobs/:id", async (c) => {
     ),
     query("SELECT * FROM confirmed_selections WHERE job_id = $1 ORDER BY person_index", [jobId]),
     queryOne<{ reason: string }>("SELECT reason FROM job_feedback WHERE job_id = $1", [jobId]),
+    query<{
+      person_index: number;
+      candidate_id: string;
+      pose_id: string;
+      refined: boolean;
+      reason: string;
+      object_key: string | null;
+      thumbnail_key: string | null;
+      limbs_json: string;
+      created_at: string;
+    }>(
+      `SELECT person_index, candidate_id, pose_id, refined, reason, object_key,
+              thumbnail_key, limbs_json, created_at
+       FROM refined_artifacts WHERE job_id = $1 ORDER BY person_index, candidate_id`,
+      [jobId],
+    ),
   ]);
+
+  /**
+   * refine 산출물은 키만 DB에 있고 본체는 betaData 버킷에 있다. 검토 화면이 바로
+   * 볼 수 있게 서명해 내려보낸다.
+   *
+   * `refined=false`인 행도 뺴지 않는다 — 왜 조정하지 않았는지(`reason`)가 조정 결과
+   * 만큼이나 중요하다. 그 경우 키가 비어 URL은 null이 된다.
+   */
+  const refined = await Promise.all(
+    refinedRows.map(async (row) => ({
+      personIndex: row.person_index,
+      candidateId: row.candidate_id,
+      poseId: row.pose_id,
+      refined: row.refined,
+      reason: row.reason,
+      limbs: JSON.parse(row.limbs_json || "[]"),
+      createdAt: row.created_at,
+      bvhUrl: row.object_key ? await signedInputUrl(row.object_key) : null,
+      thumbnailUrl: row.thumbnail_key ? await signedInputUrl(row.thumbnail_key) : null,
+    })),
+  );
+
   await audit(c, "review_job", { jobId });
   return c.json({
     jobId: job.id,
@@ -257,6 +320,36 @@ adminRoutes.get("/review/jobs/:id", async (c) => {
     people,
     candidates,
     selections,
+    refined,
     feedback: feedback?.reason ?? null,
   });
+});
+
+/**
+ * GET /v1/admin/review/pose-candidates/:id/thumbnail?view=front — 관리자용 썸네일.
+ *
+ * 사용자 경로(`/v1/pose-candidates/:id/thumbnail`)는 설치 토큰을 요구하므로 검토자가
+ * 열 수 없다. 후보 그림을 못 보면 "이 결과가 말이 되는가"를 판단할 수 없어 상세
+ * 화면의 값이 절반으로 준다.
+ *
+ * 프록시 본체는 사용자 경로와 같은 `getPoseThumbnail`이다. 포즈 라이브러리는 사용자
+ * 데이터가 아니라 공용 자산이라 서명 URL을 만들 것도 없다.
+ */
+adminRoutes.get("/review/pose-candidates/:id/thumbnail", async (c) => {
+  const view = c.req.query("view");
+  if (!view) {
+    return c.json(
+      errorEnvelope("INVALID_INPUT", "view 쿼리 파라미터가 필요합니다.", c.get("requestId")),
+      400,
+    );
+  }
+  const upstream = await getPoseThumbnail(c.req.param("id"), view, c.req.header("if-none-match"));
+  const headers: Record<string, string> = {
+    "Content-Type": upstream.headers.get("Content-Type") ?? "application/octet-stream",
+    "Cache-Control": upstream.headers.get("Cache-Control") ?? "private, max-age=86400",
+  };
+  const etag = upstream.headers.get("ETag");
+  if (etag) headers["ETag"] = etag;
+  if (upstream.status === 304) return new Response(null, { status: 304, headers });
+  return new Response(upstream.body, { status: upstream.status, headers });
 });

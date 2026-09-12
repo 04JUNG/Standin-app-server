@@ -56,6 +56,15 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
   button.ghost:hover { color:var(--text); border-color:var(--accent); }
   .err { color:var(--bad); }
   .mono { font-family:ui-monospace,"Cascadia Mono",Consolas,monospace; font-size:12px; }
+  .detail { border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-top:14px; background:var(--bg); }
+  .detail h3 { font-size:13px; margin:16px 0 8px; font-weight:600; }
+  .shot { max-width:320px; width:100%; border:1px solid var(--line); border-radius:8px; display:block; }
+  .cands { display:grid; gap:10px; grid-template-columns:repeat(auto-fill,minmax(118px,1fr)); }
+  .cand { border:1px solid var(--line); border-radius:8px; padding:8px; }
+  .cand.sel { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset; }
+  .cand img { width:100%; aspect-ratio:3/4; object-fit:contain; background:var(--panel); border-radius:6px; }
+  .cand .sub { font-size:11px; }
+  .side { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); align-items:start; }
 </style>
 </head>
 <body>
@@ -104,9 +113,15 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
           <option value="queued">queued</option>
         </select>
         <button id="lookupGo">조회</button>
+        <button class="ghost" id="rosterGo">설치 목록</button>
+        <label class="sub" style="display:inline-flex;gap:6px;align-items:center">
+          <input type="checkbox" id="rosterActive" style="width:auto;min-width:0"> 철회·삭제요청 숨기기
+        </label>
         <span id="lookupMsg" class="sub"></span>
       </div>
+      <div id="rosterOut"></div>
       <div id="lookupOut"></div>
+      <div id="detailOut"></div>
     </div>
     <p class="sub">
       지연시간은 히스토그램에서 읽은 값이라 버킷 상한까지만 정확하다("이 값 이하"라는 뜻).
@@ -250,22 +265,136 @@ async function lookupFetch(cursor) {
   return res.json();
 }
 
-/** 원본 러프는 상세 조회에서만 나온다(목록에 서명 URL을 달지 않는 이유는 API 문서 참고). */
-async function openInput(jobId, button) {
+// ── Job 상세 ─────────────────────────────────────────────────
+//
+// 원본 러프 · 후보 결과 · 확정 선택 · refine 산출물을 한 화면에 놓는다. 넷을 따로
+// 보면 "이 결과가 말이 되는가"를 판단할 수 없다 — 원본과 후보를 나란히 놓아야
+// 매칭이 맞는지 알고, 선택과 refine을 겹쳐 봐야 사용자가 무엇을 들고 갔는지 안다.
+
+/** 후보 썸네일은 blob으로 싣는다. img 태그는 관리자 토큰 헤더를 실을 수 없다. */
+let detailBlobUrls = [];
+
+function releaseDetailBlobs() {
+  detailBlobUrls.forEach((url) => URL.revokeObjectURL(url));
+  detailBlobUrls = [];
+}
+
+async function fillCandidateThumb(img) {
+  const poseId = img.dataset.pose, view = img.dataset.view;
+  try {
+    const res = await fetch(
+      "/v1/admin/review/pose-candidates/" + encodeURIComponent(poseId) + "/thumbnail?view=" + encodeURIComponent(view),
+      { headers: { "X-Beta-Admin-Token": token } },
+    );
+    if (!res.ok) throw new Error(String(res.status));
+    const url = URL.createObjectURL(await res.blob());
+    detailBlobUrls.push(url);
+    img.src = url;
+  } catch {
+    img.insertAdjacentHTML("afterend", '<div class="sub">썸네일 없음</div>');
+    img.remove();
+  }
+}
+
+function groupBy(rows, key) {
+  const out = new Map();
+  (rows || []).forEach((row) => {
+    const bucket = out.get(row[key]) || [];
+    bucket.push(row);
+    out.set(row[key], bucket);
+  });
+  return out;
+}
+
+function candidateCard(row, selectedId) {
+  const chosen = row.candidate_id === selectedId;
+  const score = [
+    row.distance === null || row.distance === undefined ? null : "d " + Number(row.distance).toFixed(3),
+    row.rerank_score === null || row.rerank_score === undefined ? null : "r " + Number(row.rerank_score).toFixed(3),
+  ].filter(Boolean).join(" · ");
+  return '<div class="cand' + (chosen ? " sel" : "") + '">' +
+    '<img data-pose="' + esc(row.pose_id) + '" data-view="' + esc(row.view) + '" alt="">' +
+    '<div class="sub" style="margin-top:6px">#' + row.rank + " · " + esc(row.match_level || "?") + "</div>" +
+    '<div class="sub mono" title="' + esc(row.pose_id) + '">' + esc(String(row.pose_id).slice(0, 16)) + "</div>" +
+    (score ? '<div class="sub">' + esc(score) + "</div>" : "") +
+    (chosen ? '<div style="margin-top:4px">' + pill("선택됨", "ok") + "</div>" : "") +
+    "</div>";
+}
+
+function refineCard(row) {
+  return '<div class="cand">' +
+    (row.thumbnailUrl ? '<img src="' + esc(row.thumbnailUrl) + '" alt="">' : '<div class="sub">미리보기 없음</div>') +
+    '<div style="margin:6px 0 4px">' + (row.refined ? pill("조정됨", "ok") : pill("조정 안 함", "warn")) + "</div>" +
+    '<div class="sub mono" title="' + esc(row.poseId) + '">' + esc(String(row.poseId).slice(0, 16)) + "</div>" +
+    '<div class="sub">' + esc(row.reason || "—") + "</div>" +
+    (row.limbs && row.limbs.length ? '<div class="sub">' + esc(row.limbs.join(", ")) + "</div>" : "") +
+    (row.bvhUrl ? '<div class="sub" style="margin-top:4px"><a href="' + esc(row.bvhUrl) + '" target="_blank" rel="noopener">BVH</a></div>' : "") +
+    "</div>";
+}
+
+function detailRender(detail) {
+  releaseDetailBlobs();
+  const byPerson = groupBy(detail.candidates, "person_index");
+  const refinedByPerson = groupBy(detail.refined, "personIndex");
+  const chosen = new Map((detail.selections || []).map((s) => [s.person_index, s.candidate_id]));
+
+  const people = (detail.people || []).map((person) => {
+    const index = person.person_index;
+    const candidates = byPerson.get(index) || [];
+    const refined = refinedByPerson.get(index) || [];
+    const selectedId = chosen.get(index);
+    return "<h3>인물 " + index + " · 후보 " + candidates.length + "개" +
+      (person.confidence ? " · 신뢰도 " + esc(person.confidence) : "") +
+      (selectedId ? " · " + pill("선택 있음", "ok") : " · " + pill("선택 없음", "warn")) +
+      (person.candidate_shortfall_reason ? ' <span class="sub">' + esc(person.candidate_shortfall_reason) + "</span>" : "") +
+      "</h3>" +
+      (candidates.length
+        ? '<div class="cands">' + candidates.map((row) => candidateCard(row, selectedId)).join("") + "</div>"
+        : '<p class="empty">후보가 없습니다.</p>') +
+      (refined.length
+        ? "<h3>refine 결과</h3><div class=\"cands\">" + refined.map(refineCard).join("") + "</div>"
+        : "");
+  }).join("");
+
+  $("detailOut").innerHTML =
+    '<div class="detail">' +
+    '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+    '<span class="mono">' + esc(detail.jobId) + "</span>" + jobStatus({ status: detail.status, personCount: (detail.people || []).length }) +
+    '<span class="sub">' + when(detail.createdAt) + "</span>" +
+    '<button class="ghost" id="detailClose" style="margin-left:auto">닫기</button></div>' +
+    '<div class="side" style="margin-top:12px"><div><h3>원본 러프</h3>' +
+    (detail.inputUrl
+      ? '<img class="shot" src="' + esc(detail.inputUrl) + '" alt=""><p class="sub">서명 URL은 ' + (detail.inputUrlExpiresInSeconds || 300) + "초 뒤 만료된다.</p>"
+      : '<p class="empty">원본이 남아 있지 않습니다(90일 lifecycle).</p>') +
+    "</div><div>" +
+    (detail.feedback ? "<h3>사용자 피드백</h3><p>" + esc(detail.feedback) + "</p>" : "") +
+    (detail.inferenceMetadata
+      ? '<h3>추론 메타</h3><details><summary class="sub">펼치기</summary><pre class="mono" style="white-space:pre-wrap">' +
+        esc(JSON.stringify(detail.inferenceMetadata, null, 2)) + "</pre></details>"
+      : "") +
+    "</div></div>" + people + "</div>";
+
+  $("detailOut").querySelectorAll(".cand img[data-pose]").forEach(fillCandidateThumb);
+  $("detailClose").addEventListener("click", () => {
+    releaseDetailBlobs();
+    $("detailOut").innerHTML = "";
+  });
+  $("detailOut").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function openDetail(jobId, button) {
   const label = button.textContent;
   button.textContent = "여는 중";
   try {
     const res = await fetch("/v1/admin/review/jobs/" + encodeURIComponent(jobId), {
       headers: { "X-Beta-Admin-Token": token },
     });
-    if (!res.ok) throw new Error("상세 조회 실패 " + res.status);
-    const detail = await res.json();
-    if (!detail.inputUrl) throw new Error("원본이 남아 있지 않습니다");
-    window.open(detail.inputUrl, "_blank", "noopener");
-    button.textContent = label;
+    if (!res.ok) throw new Error(res.status === 404 ? "그 Job을 찾을 수 없습니다." : "상세 조회 실패 " + res.status);
+    detailRender(await res.json());
   } catch (error) {
-    button.textContent = label;
     $("lookupMsg").innerHTML = '<span class="err">' + esc(error.message) + "</span>";
+  } finally {
+    button.textContent = label;
   }
 }
 
@@ -295,18 +424,19 @@ function lookupRender() {
     '<td class="num">' + (item.personCount || 0) + "</td>" +
     '<td class="num">' + (item.selectionCount || 0) + "</td>" +
     "<td>" + (item.inputAvailable
-      ? '<button class="ghost" data-input="' + esc(item.jobId) + '">원본 ' + (item.inputWidth || "?") + "×" + (item.inputHeight || "?") + "</button>"
-      : '<span class="sub" title="버킷 lifecycle 90일">만료</span>') + "</td></tr>"
+      ? '<span class="sub">' + (item.inputWidth || "?") + "×" + (item.inputHeight || "?") + "</span>"
+      : '<span class="sub" title="버킷 lifecycle 90일">만료</span>') + "</td>" +
+    '<td><button class="ghost" data-detail="' + esc(item.jobId) + '">상세</button></td></tr>'
   ).join("");
 
   $("lookupOut").innerHTML = head +
     '<div class="scroll"><table><thead><tr><th>상태</th><th>Job</th><th>만든 시각</th>' +
-    '<th class="num">소요</th><th>에러코드</th><th class="num">인물</th><th class="num">선택</th><th>원본</th>' +
+    '<th class="num">소요</th><th>에러코드</th><th class="num">인물</th><th class="num">선택</th><th>원본</th><th></th>' +
     "</tr></thead><tbody>" + rows + "</tbody></table></div>" +
     (lookup.nextCursor ? '<p style="margin:12px 0 0"><button class="ghost" id="lookupMore">더 보기</button></p>' : "");
 
-  $("lookupOut").querySelectorAll("button[data-input]").forEach((button) => {
-    button.addEventListener("click", () => openInput(button.dataset.input, button));
+  $("lookupOut").querySelectorAll("button[data-detail]").forEach((button) => {
+    button.addEventListener("click", () => openDetail(button.dataset.detail, button));
   });
   if ($("lookupMore")) $("lookupMore").addEventListener("click", () => lookupGo(lookup.nextCursor));
 }
@@ -332,6 +462,70 @@ async function lookupGo(cursor) {
     $("lookupOut").innerHTML = "";
   }
 }
+
+// ── 설치 명부 ────────────────────────────────────────────────
+//
+// id를 외워 두거나 S3 prefix를 훑지 않고도 "누가 있나"에서 시작할 수 있게 한다.
+let roster = { items: [], nextCursor: null };
+
+async function rosterFetch(cursor) {
+  const query = "limit=20" +
+    ($("rosterActive").checked ? "&activeOnly=true" : "") +
+    (cursor ? "&cursor=" + encodeURIComponent(cursor) : "");
+  const res = await fetch("/v1/admin/review/installations?" + query, {
+    headers: { "X-Beta-Admin-Token": token },
+  });
+  if (!res.ok) throw new Error(res.status === 404 ? "토큰이 거절됐습니다." : "명부 조회 실패 " + res.status);
+  return res.json();
+}
+
+function rosterRender() {
+  if (!roster.items.length) {
+    $("rosterOut").innerHTML = '<p class="empty">설치가 없습니다.</p>';
+    return;
+  }
+  const rows = roster.items.map((item) =>
+    '<tr><td><button class="ghost" data-pick="' + esc(item.installationId) + '">조회</button></td>' +
+    '<td class="mono" title="' + esc(item.installationId) + '">' + esc(item.installationId.slice(5, 17)) + "…</td>" +
+    "<td>" + when(item.lastSeenAt) + "</td>" +
+    '<td class="sub">' + esc(item.appVersion || "?") + " · " + esc(item.osName || "?") + "</td>" +
+    '<td class="num">' + item.jobCount + "</td>" +
+    '<td class="num' + (item.failedCount ? " err" : "") + '">' + item.failedCount + "</td>" +
+    "<td>" + (item.lastJobAt ? when(item.lastJobAt) : '<span class="sub">없음</span>') + "</td>" +
+    "<td>" + (item.revokedAt ? pill("철회", "bad") : item.deletionRequestedAt ? pill("삭제 요청", "warn") : "") + "</td></tr>"
+  ).join("");
+
+  $("rosterOut").innerHTML =
+    '<div class="scroll" style="margin-top:12px"><table><thead><tr><th></th><th>설치</th><th>마지막 접속</th>' +
+    '<th>앱 · OS</th><th class="num">Job</th><th class="num">실패</th><th>마지막 분석</th><th></th>' +
+    "</tr></thead><tbody>" + rows + "</tbody></table></div>" +
+    (roster.nextCursor ? '<p style="margin:10px 0 0"><button class="ghost" id="rosterMore">설치 더 보기</button></p>' : "");
+
+  $("rosterOut").querySelectorAll("button[data-pick]").forEach((button) => {
+    button.addEventListener("click", () => {
+      $("lookupId").value = button.dataset.pick;
+      lookupGo(null);
+    });
+  });
+  if ($("rosterMore")) $("rosterMore").addEventListener("click", () => rosterGo(roster.nextCursor));
+}
+
+async function rosterGo(cursor) {
+  $("lookupMsg").textContent = "명부 조회 중…";
+  try {
+    const data = await rosterFetch(cursor);
+    roster.nextCursor = data.nextCursor;
+    roster.items = cursor ? roster.items.concat(data.items) : data.items;
+    $("lookupMsg").textContent = "설치 " + roster.items.length + "곳" + (data.nextCursor ? " (더 있음)" : "");
+    rosterRender();
+  } catch (error) {
+    $("lookupMsg").innerHTML = '<span class="err">' + esc(error.message) + "</span>";
+    $("rosterOut").innerHTML = "";
+  }
+}
+
+$("rosterGo").addEventListener("click", () => rosterGo(null));
+$("rosterActive").addEventListener("change", () => { if (roster.items.length) rosterGo(null); });
 
 $("lookupGo").addEventListener("click", () => lookupGo(null));
 $("lookupId").addEventListener("keydown", (event) => { if (event.key === "Enter") lookupGo(null); });
