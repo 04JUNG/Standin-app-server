@@ -316,6 +316,10 @@ const SCHEMA = `
     occurred_at  TEXT NOT NULL
   );
 
+  -- 설치 단위 열람(GET /v1/admin/review/installations/:id/jobs)의 대상. Job 하나를 연
+  -- 것이 아니므로 job_id가 비고, 대신 이 칸이 찬다.
+  ALTER TABLE admin_access_audit ADD COLUMN IF NOT EXISTS installation_id TEXT;
+
   CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower ON users (lower(email));
   CREATE UNIQUE INDEX IF NOT EXISTS users_provider ON users (provider, provider_id)
     WHERE provider_id IS NOT NULL;
@@ -489,6 +493,11 @@ async function refreshAggregatesAndRetention(client: PoolClient): Promise<void> 
   await client.query(`DELETE FROM confirmed_selections WHERE job_id IN (${oldJobs})`);
   await client.query("DELETE FROM analytics_events WHERE occurred_at::timestamptz < now() - interval '365 days'");
   await client.query(`DELETE FROM admin_access_audit WHERE job_id IN (${oldJobs})`);
+  // job_id가 빈 감사 행(kill switch 토글, 설치 단위 열람)은 위 삭제에 딸려 가지 않아
+  // 그대로 쌓인다. 대상이 없는 행은 시간으로 자른다.
+  await client.query(
+    "DELETE FROM admin_access_audit WHERE job_id IS NULL AND occurred_at::timestamptz < now() - interval '365 days'",
+  );
   // S3 객체 자체는 버킷 lifecycle(90일)과 동의 철회 삭제 스윕이 지운다. 여기서는 대장만 정리한다.
   await client.query(`DELETE FROM refined_artifacts WHERE job_id IN (${oldJobs})`);
   await client.query(`DELETE FROM analysis_candidates WHERE job_id IN (${oldJobs})`);
