@@ -11,6 +11,16 @@ import { errorEnvelope } from "../mapping.js";
 import { getInstallationSummary, listInstallations } from "../installations/store.js";
 import { parseRosterQuery, toRosterPage } from "./installationList.js";
 import { DEFAULT_REVIEWER, matchReviewer, parseReviewers } from "./reviewers.js";
+import { parseWindowDays, toCohorts, toDropoff, toFunnel } from "./product.js";
+import {
+  clientStageCounts,
+  cohortCounts,
+  dropoffSignals,
+  funnelCounts,
+  matchLevelSplit,
+  noSelectionFeedback,
+  rerunJobCount,
+} from "./productStore.js";
 import { isInstallationId, parseHistoryQuery, toHistoryPage } from "../jobs/history.js";
 import { listJobHistory } from "../jobs/store.js";
 import { getPoseThumbnail, health } from "../inference.js";
@@ -178,6 +188,47 @@ adminRoutes.put("/flags/analysis_enabled", async (c) => {
     reason: flag.reason,
     updatedAt: flag.updatedAt,
     propagationSeconds: 5,
+  });
+});
+
+/**
+ * GET /v1/admin/product — 제품 지표(퍼널 · 코호트 · 이탈 신호).
+ *
+ * 위쪽 `/ops`가 "서비스가 지금 살아 있나"를 답한다면 여기는 "제품이 자라고 있나"를
+ * 답한다. 셋을 한 응답에 담는 이유는 화면에서 이어 읽히기 때문이다 — 퍼널에서 어디가
+ * 새는지 보고, 코호트에서 누가 거기 멈췄는지 세고, 신호에서 그들이 무엇이 달랐는지로
+ * 내려간다. 따로 부르면 세 번 왕복하면서 기간이 어긋날 수 있다.
+ */
+adminRoutes.get("/product", async (c) => {
+  const parsed = parseWindowDays(c.req.query("days"));
+  if (!parsed.ok) {
+    return c.json(errorEnvelope("INVALID_INPUT", parsed.message, c.get("requestId")), 400);
+  }
+  const { days } = parsed;
+  const [funnelRow, clientStages, cohortRow, signals, levels, feedback, rerunJobs] =
+    await Promise.all([
+      funnelCounts(days),
+      clientStageCounts(days),
+      cohortCounts(days),
+      dropoffSignals(days),
+      matchLevelSplit(days),
+      noSelectionFeedback(days),
+      rerunJobCount(days),
+    ]);
+
+  await audit(c, "review_product_metrics", {});
+  return c.json({
+    windowDays: days,
+    since: new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString(),
+    funnel: toFunnel(funnelRow),
+    jobsFailed: funnelRow.jobs_failed,
+    clientStages: clientStages.map((stage) => ({
+      event: stage.event_name,
+      events: stage.events,
+      installations: stage.installations,
+    })),
+    cohorts: toCohorts(cohortRow),
+    dropoff: toDropoff(signals, levels, feedback, rerunJobs),
   });
 });
 
