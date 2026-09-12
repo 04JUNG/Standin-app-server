@@ -81,7 +81,9 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
     <span id="inference"></span>
     <span id="analysis"></span>
     <span id="tasks" class="sub"></span>
-    <span style="margin-left:auto" class="sub">갱신 <span id="updated">—</span></span>
+    <span style="margin-left:auto" class="sub" title="열람 기록이 이 이름으로 남는다">
+      <span id="reviewer">—</span> · 갱신 <span id="updated">—</span>
+    </span>
   </header>
   <main>
     <div class="row" id="cards"></div>
@@ -186,6 +188,7 @@ function render(data) {
   $("analysis").innerHTML = data.analysisEnabled ? pill("분석 켜짐", "ok") : pill("분석 중단됨", "warn");
   $("tasks").textContent = "태스크 BFF " + (data.tasks.bff || 0) + " · 추론 " + (data.tasks.inference || 0);
   $("updated").textContent = new Date(data.now).toLocaleTimeString("ko-KR");
+  $("reviewer").textContent = data.reviewer || "—";
 
   $("cards").innerHTML = [
     ['요청 (1시간)', bff.requests, ""],
