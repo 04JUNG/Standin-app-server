@@ -84,8 +84,9 @@ test("코호트는 비중을 내고 문제 그룹을 표시한다", () => {
 test("이탈 신호는 선택 여부로 갈라 비교한다", () => {
   const dropoff = toDropoff(
     [
-      { selected: true, jobs: 40, zero_people_jobs: 0, shortfall_jobs: 2, avg_best_score: 0.8123, avg_people: 1.5 },
-      { selected: false, jobs: 60, zero_people_jobs: 12, shortfall_jobs: 18, avg_best_score: 0.5567, avg_people: 0.9 },
+      // 거리는 낮을수록 좋다 — 고른 쪽이 더 가깝다.
+      { selected: true, jobs: 40, zero_people_jobs: 0, shortfall_jobs: 2, avg_best_distance: 0.1823, avg_people: 1.5 },
+      { selected: false, jobs: 60, zero_people_jobs: 12, shortfall_jobs: 18, avg_best_distance: 0.4567, avg_people: 0.9 },
     ],
     [
       { selected: true, match_level: "exact", count: 30 },
@@ -97,8 +98,8 @@ test("이탈 신호는 선택 여부로 갈라 비교한다", () => {
     9,
   );
 
-  assert.equal(dropoff.selected.avgBestScore, 0.812);
-  assert.equal(dropoff.notSelected.avgBestScore, 0.557);
+  assert.equal(dropoff.selected.avgBestDistance, 0.182);
+  assert.equal(dropoff.notSelected.avgBestDistance, 0.457);
   // 인물 0명이 이탈 쪽에만 쏠린다 — 화면에서 바로 눈에 띄어야 하는 차이
   assert.equal(dropoff.selected.zeroPeopleRate, 0);
   assert.equal(dropoff.notSelected.zeroPeopleRate, 20);
@@ -113,13 +114,13 @@ test("이탈 신호는 선택 여부로 갈라 비교한다", () => {
 test("한쪽 집단이 비어 있어도 깨지지 않는다", () => {
   // 기간 내 선택이 하나도 없으면 SQL이 그 행을 내지 않는다.
   const dropoff = toDropoff(
-    [{ selected: false, jobs: 3, zero_people_jobs: 1, shortfall_jobs: 0, avg_best_score: null, avg_people: null }],
+    [{ selected: false, jobs: 3, zero_people_jobs: 1, shortfall_jobs: 0, avg_best_distance: null, avg_people: null }],
     [],
     [],
     0,
   );
   assert.equal(dropoff.selected.jobs, 0);
-  assert.equal(dropoff.selected.avgBestScore, null);
+  assert.equal(dropoff.selected.avgBestDistance, null);
   assert.deepEqual(dropoff.selected.matchLevels, []);
   assert.equal(dropoff.notSelected.zeroPeopleRate, 33.3);
 });

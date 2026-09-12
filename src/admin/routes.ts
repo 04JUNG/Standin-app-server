@@ -12,6 +12,8 @@ import { getInstallationSummary, listInstallations } from "../installations/stor
 import { parseRosterQuery, toRosterPage } from "./installationList.js";
 import { DEFAULT_REVIEWER, matchReviewer, parseReviewers } from "./reviewers.js";
 import { parseWindowDays, toCohorts, toDropoff, toFunnel } from "./product.js";
+import { toColumnHealth, toDistanceBuckets, toStageGaps } from "./instrumentation.js";
+import { toFirstRunFunnel, toRetry } from "./adoption.js";
 import {
   clientStageCounts,
   cohortCounts,
@@ -20,6 +22,15 @@ import {
   matchLevelSplit,
   noSelectionFeedback,
   rerunJobCount,
+  columnHealth,
+  serverStageCounts,
+  distanceBuckets,
+  firstRunFunnel,
+  captureFailures,
+  topCaptureFailures,
+  attemptCurve,
+  firstSelectionAttempt,
+  rerunRatio,
 } from "./productStore.js";
 import { isInstallationId, parseHistoryQuery, toHistoryPage } from "../jobs/history.js";
 import { listJobHistory } from "../jobs/store.js";
@@ -205,16 +216,33 @@ adminRoutes.get("/product", async (c) => {
     return c.json(errorEnvelope("INVALID_INPUT", parsed.message, c.get("requestId")), 400);
   }
   const { days } = parsed;
-  const [funnelRow, clientStages, cohortRow, signals, levels, feedback, rerunJobs] =
-    await Promise.all([
-      funnelCounts(days),
-      clientStageCounts(days),
-      cohortCounts(days),
-      dropoffSignals(days),
-      matchLevelSplit(days),
-      noSelectionFeedback(days),
-      rerunJobCount(days),
-    ]);
+  const [
+    funnelRow, clientStages, cohortRow, signals, levels, feedback, rerunJobs,
+    columns, serverStages, buckets,
+  ] = await Promise.all([
+    funnelCounts(days),
+    clientStageCounts(days),
+    cohortCounts(days),
+    dropoffSignals(days),
+    matchLevelSplit(days),
+    noSelectionFeedback(days),
+    rerunJobCount(days),
+    columnHealth(days),
+    serverStageCounts(days),
+    distanceBuckets(days),
+  ]);
+
+  const [firstRun, captures, topCaptures, curve, firstSelection, reruns] = await Promise.all([
+    firstRunFunnel(days),
+    captureFailures(days),
+    topCaptureFailures(days),
+    attemptCurve(days),
+    firstSelectionAttempt(days),
+    rerunRatio(days),
+  ]);
+
+  const clientByName: Record<string, number> = {};
+  for (const stage of clientStages) clientByName[stage.event_name] = stage.events;
 
   await audit(c, "review_product_metrics", {});
   return c.json({
@@ -229,6 +257,31 @@ adminRoutes.get("/product", async (c) => {
     })),
     cohorts: toCohorts(cohortRow),
     dropoff: toDropoff(signals, levels, feedback, rerunJobs),
+    /**
+     * 지표를 믿어도 되는지부터 보여 준다. 2026-09-13에 `rerank_score`가 전부 비어
+     * 있는 것을 눈으로 찾느라 한참 걸렸는데, 그 사실이 화면에 있었으면 바로 끝났다.
+     */
+    instrumentation: {
+      columns: toColumnHealth(columns),
+      stageGaps: toStageGaps(serverStages, clientByName),
+      distanceBuckets: toDistanceBuckets(buckets),
+    },
+    /** ① 설치하고 첫 러프까지. 퍼널의 가장 큰 구멍이 여기다. */
+    firstRun: {
+      ...toFirstRunFunnel(firstRun),
+      captureFailures: captures.map((row) => ({
+        code: row.code ?? "(코드 없음)",
+        events: row.events,
+        installations: row.installations,
+      })),
+      // 한 사람이 계속 막힌 것과 여러 사람이 한 번씩 막힌 것은 대응이 다르다.
+      topFailingInstalls: topCaptures.map((row) => ({
+        installationId: row.installation_id,
+        events: row.events,
+      })),
+    },
+    /** ② 몇 번째에 건지나. */
+    retry: toRetry(curve, firstSelection, reruns.reruns, reruns.jobs),
   });
 });
 
