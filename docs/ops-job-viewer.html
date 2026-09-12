@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Standin 작업 기록 뷰어</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg:#0f1115; --panel:#171a21; --line:#262b36; --text:#e6e9ef;
+    --muted:#98a2b3; --ok:#2f9e44; --warn:#f08c00; --bad:#e03131; --accent:#4dabf7;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f7f9; --panel:#fff; --line:#e4e7ec; --text:#101828; --muted:#667085; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 ui-sans-serif,system-ui,"Segoe UI",sans-serif; }
+  header { padding:16px 20px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  h1 { font-size:16px; margin:0; font-weight:600; }
+  main { padding:20px; display:grid; gap:16px; max-width:1200px; margin:0 auto; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+  .card h2 { font-size:12px; margin:0 0 8px; color:var(--muted); font-weight:600; letter-spacing:.03em; }
+  .row { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); }
+  .big { font-size:28px; font-weight:650; font-variant-numeric:tabular-nums; }
+  .sub { color:var(--muted); font-size:12px; }
+  .pill { display:inline-flex; align-items:center; gap:6px; padding:3px 9px; border-radius:999px; font-size:12px; font-weight:600; }
+  .pill.ok { background:color-mix(in srgb,var(--ok) 18%,transparent); color:var(--ok); }
+  .pill.warn { background:color-mix(in srgb,var(--warn) 18%,transparent); color:var(--warn); }
+  .pill.bad { background:color-mix(in srgb,var(--bad) 18%,transparent); color:var(--bad); }
+  .pill.mute { background:color-mix(in srgb,var(--muted) 18%,transparent); color:var(--muted); }
+  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+  th,td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-size:12px; font-weight:600; white-space:nowrap; }
+  td.num, th.num { text-align:right; }
+  .scroll { overflow-x:auto; }
+  .empty { color:var(--muted); padding:12px 0; }
+  button { font:inherit; background:var(--accent); color:#04121f; border:0; border-radius:8px; padding:7px 14px; font-weight:600; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--muted); border:1px solid var(--line); padding:3px 9px; font-size:12px; font-weight:500; }
+  button.ghost:hover { color:var(--text); border-color:var(--accent); }
+  button.chip { background:transparent; color:var(--muted); border:1px solid var(--line); padding:5px 12px; font-size:13px; }
+  button.chip[aria-pressed="true"] { background:color-mix(in srgb,var(--accent) 18%,transparent); color:var(--accent); border-color:var(--accent); }
+  input, textarea { font:inherit; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:8px 10px; width:100%; }
+  textarea { min-height:120px; font-family:ui-monospace,"Cascadia Mono",Consolas,monospace; font-size:12px; resize:vertical; }
+  code { font-family:ui-monospace,"Cascadia Mono",Consolas,monospace; font-size:12px; }
+  .cmd { display:flex; gap:8px; align-items:center; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:8px 10px; overflow-x:auto; }
+  .cmd code { white-space:nowrap; }
+  .mono { font-family:ui-monospace,"Cascadia Mono",Consolas,monospace; font-size:12px; }
+  .filters { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .err { color:var(--bad); }
+  .grid2 { display:grid; gap:10px 24px; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); }
+  .grid2 div span { display:block; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Standin 작업 기록 뷰어</h1>
+  <span class="sub">네트워크를 쓰지 않습니다 — 붙여넣은 JSON만 읽습니다</span>
+</header>
+
+<main>
+  <div class="card">
+    <h2>1 · 명령 만들기</h2>
+    <div class="row" style="grid-template-columns:2fr 1fr; margin-bottom:10px">
+      <input id="instId" placeholder="inst_00000000-0000-4000-8000-000000000000" autocomplete="off" spellcheck="false">
+      <select id="statusPick" style="font:inherit;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px">
+        <option value="">전체</option>
+        <option value="failed">failed</option>
+        <option value="completed">completed</option>
+        <option value="running">running</option>
+        <option value="queued">queued</option>
+      </select>
+    </div>
+    <div class="cmd"><code id="cmd">installationId를 입력하세요</code><button class="ghost" id="copyCmd" style="margin-left:auto">복사</button></div>
+    <p class="sub" style="margin:8px 0 0">
+      토큰은 <code>TOKEN=$(aws secretsmanager get-secret-value --secret-id standin/production/beta-review-token --region ap-northeast-2 --query SecretString --output text)</code>로 담아 둡니다.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>2 · 응답 붙여넣기</h2>
+    <textarea id="input" placeholder='{"installation":{...},"items":[...],"nextCursor":null}' spellcheck="false"></textarea>
+    <p style="margin:10px 0 0"><button id="parse">표로 보기</button> <span id="parseMsg" class="sub"></span></p>
+  </div>
+
+  <div id="out"></div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v).replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+
+let filter = "";
+
+/** 상태별 색. completed인데 인물이 0명이면 실패는 아니지만 볼 일이 있는 건이라 따로 센다. */
+function statusPill(item) {
+  if (item.status === "failed") return '<span class="pill bad">failed</span>';
+  if (item.status === "completed") {
+    return item.personCount === 0
+      ? '<span class="pill warn" title="완료됐지만 인물을 찾지 못했습니다">완료 · 인물 0</span>'
+      : '<span class="pill ok">completed</span>';
+  }
+  return '<span class="pill mute">' + esc(item.status) + "</span>";
+}
+
+function when(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? esc(iso) : d.toLocaleString("ko-KR", { hour12: false });
+}
+
+function took(item) {
+  if (!item.createdAt || !item.completedAt) return "—";
+  const ms = new Date(item.completedAt) - new Date(item.createdAt);
+  if (!Number.isFinite(ms) || ms < 0) return "—";
+  return ms >= 1000 ? (ms / 1000).toFixed(1) + "s" : ms + "ms";
+}
+
+function curlDetail(jobId) {
+  return 'curl -s "https://api.standinpose.com/v1/admin/review/jobs/' + jobId + '" -H "X-Beta-Admin-Token: $TOKEN"';
+}
+
+async function copy(text, button) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // file:// 에서 클립보드 권한이 없을 수 있다. 그때는 선택 가능한 상태로 보여만 준다.
+    window.prompt("복사하세요", text);
+    return;
+  }
+  if (!button) return;
+  const original = button.textContent;
+  button.textContent = "복사됨";
+  setTimeout(() => { button.textContent = original; }, 1200);
+}
+
+function summary(installation, items) {
+  const count = (s) => items.filter((i) => i.status === s).length;
+  const emptyPeople = items.filter((i) => i.status === "completed" && i.personCount === 0).length;
+  const cards = [
+    ["전체", items.length, ""],
+    ["실패", count("failed"), "errorCode 있음"],
+    ["완료", count("completed"), emptyPeople ? emptyPeople + "건은 인물 0" : ""],
+    ["진행 중", count("queued") + count("running"), "queued + running"],
+  ].map(([title, value, sub]) =>
+    '<div class="card"><h2>' + title + '</h2><div class="big">' + value + '</div><div class="sub">' + esc(sub) + "</div></div>"
+  ).join("");
+
+  let head = "";
+  if (installation) {
+    const flags = [];
+    if (installation.revokedAt) flags.push('<span class="pill bad">철회됨 ' + when(installation.revokedAt) + "</span>");
+    if (installation.deletionRequestedAt) flags.push('<span class="pill warn">삭제 요청 ' + when(installation.deletionRequestedAt) + "</span>");
+    head =
+      '<div class="card"><h2>설치</h2><div class="mono" style="margin-bottom:10px">' + esc(installation.installationId) + " " + flags.join(" ") + "</div>" +
+      '<div class="grid2">' +
+      [
+        ["처음 등록", when(installation.createdAt)],
+        ["마지막 접속", when(installation.lastSeenAt)],
+        ["앱 버전", installation.appVersion],
+        ["OS", (installation.osName || "?") + " " + (installation.osVersion || "")],
+        ["로케일", installation.locale],
+        ["동의 버전", installation.consentVersion],
+      ].map(([k, v]) => '<div><span class="sub">' + k + '</span><span>' + esc(v ?? "—") + "</span></div>").join("") +
+      "</div></div>";
+  }
+  return head + '<div class="row">' + cards + "</div>";
+}
+
+function tableHtml(items) {
+  const shown = filter ? items.filter((i) => i.status === filter) : items;
+  if (!shown.length) return '<p class="empty">해당 상태의 기록이 없습니다.</p>';
+  return '<div class="scroll"><table><thead><tr>' +
+    "<th>상태</th><th>Job</th><th>만든 시각</th><th class=\"num\">소요</th><th>에러코드</th><th>소스</th>" +
+    "<th class=\"num\">인물</th><th class=\"num\">선택</th><th>입력</th><th></th>" +
+    "</tr></thead><tbody>" +
+    shown.map((item) =>
+      "<tr>" +
+      "<td>" + statusPill(item) + "</td>" +
+      '<td class="mono" title="' + esc(item.jobId) + '">' + esc(String(item.jobId).slice(0, 12)) + "…</td>" +
+      "<td>" + when(item.createdAt) + "</td>" +
+      '<td class="num">' + took(item) + "</td>" +
+      '<td class="' + (item.errorCode ? "err mono" : "sub") + '">' + esc(item.errorCode ?? "—") + "</td>" +
+      "<td>" + esc(item.source ?? "—") + "</td>" +
+      '<td class="num">' + (item.personCount ?? 0) + "</td>" +
+      '<td class="num">' + (item.selectionCount ?? 0) + "</td>" +
+      "<td>" + (item.inputAvailable
+        ? '<span class="sub">' + (item.inputWidth ?? "?") + "×" + (item.inputHeight ?? "?") + "</span>"
+        : '<span class="sub" title="버킷 lifecycle이 90일이라 오래된 건은 원본이 없습니다">만료</span>') + "</td>" +
+      '<td><button class="ghost" data-job="' + esc(item.jobId) + '">상세 curl</button></td>' +
+      "</tr>"
+    ).join("") +
+    "</tbody></table></div>";
+}
+
+function filterBar(items) {
+  const states = ["", "failed", "completed", "running", "queued"];
+  const label = { "": "전체", failed: "실패", completed: "완료", running: "진행", queued: "대기" };
+  return '<div class="filters">' + states.map((s) => {
+    const n = s ? items.filter((i) => i.status === s).length : items.length;
+    return '<button class="chip" data-filter="' + s + '" aria-pressed="' + (filter === s) + '">' + label[s] + " " + n + "</button>";
+  }).join("") + "</div>";
+}
+
+function render(installation, items, nextCursor) {
+  $("out").innerHTML =
+    summary(installation, items) +
+    '<div class="card"><h2>작업 기록</h2>' + filterBar(items) +
+    '<div style="margin-top:12px">' + tableHtml(items) + "</div>" +
+    (nextCursor
+      ? '<p class="sub" style="margin:12px 0 0">다음 페이지가 있습니다 — 위 명령 끝에 <code>&amp;cursor=' + esc(nextCursor) + "</code>를 붙여 다시 부르세요.</p>"
+      : '<p class="sub" style="margin:12px 0 0">마지막 페이지입니다.</p>') +
+    '<p class="sub" style="margin:6px 0 0">썸네일은 설치 토큰이 필요한 경로라 관리자 토큰으로 열리지 않습니다. 원본 러프는 「상세 curl」로 5분짜리 서명 URL을 받습니다.</p>' +
+    "</div>";
+
+  $("out").querySelectorAll("button[data-filter]").forEach((button) => {
+    button.addEventListener("click", () => { filter = button.dataset.filter; render(installation, items, nextCursor); });
+  });
+  $("out").querySelectorAll("button[data-job]").forEach((button) => {
+    button.addEventListener("click", () => copy(curlDetail(button.dataset.job), button));
+  });
+}
+
+/**
+ * 터미널에서 긁어 온 응답은 온전한 JSON이 아닌 경우가 많다. 두 가지를 복구한다.
+ *
+ * - 줄바꿈: 접힌 줄을 그대로 복사하면 개행이 섞인다. JSON 문자열 안에는 개행이
+ *   원래 올 수 없으므로 전부 지워도 안전하다(들여쓴 출력도 마찬가지).
+ * - 잘린 앞머리: `{"installation":`이 빠진 채 `{"installationId":...`부터 복사되면
+ *   앞 객체만 완결된 JSON으로 읽히고 뒤의 `,"items"`에서 깨진다. 되붙여 준다.
+ */
+function tolerantParse(raw) {
+  const text = raw.replace(/\r?\n/g, "");
+  try {
+    return { data: JSON.parse(text) };
+  } catch (error) {
+    if (/^\s*\{\s*"installationId"/.test(text)) {
+      try {
+        return { data: JSON.parse('{"installation":' + text), repaired: '잘려 있던 앞머리 {"installation": 을 복원했습니다.' };
+      } catch { /* 복구 실패 — 원래 오류를 그대로 보여준다 */ }
+    }
+    return { error };
+  }
+}
+
+function parse() {
+  const raw = $("input").value.trim();
+  if (!raw) { $("parseMsg").textContent = "붙여넣은 내용이 없습니다."; return; }
+  const parsed = tolerantParse(raw);
+  const data = parsed.data;
+  if (parsed.error) {
+    $("parseMsg").innerHTML = '<span class="err">JSON을 읽지 못했습니다 — ' + esc(parsed.error.message) +
+      '</span><br><span class="sub">터미널에서 긁는 대신 <code>| clip</code>으로 복사하면 이 문제가 없습니다.</span>';
+    return;
+  }
+  // 에러 봉투를 그대로 붙여넣는 경우가 흔하다. 어디서 막힌 것인지 여기서 번역해 준다.
+  if (data && data.error) {
+    const code = data.error.code;
+    const hint = code === "NOT_FOUND" && data.error.message === "not found"
+      ? "토큰이 거절됐습니다(미들웨어에서 잘림). $TOKEN을 확인하세요."
+      : code === "NOT_FOUND" ? "그런 설치가 없습니다. id를 확인하세요."
+      : code === "INVALID_INPUT" ? "형식 문제입니다 — id 끝에 슬래시가 붙지 않았는지 보세요."
+      : esc(data.error.message ?? "");
+    $("parseMsg").innerHTML = '<span class="err">' + esc(code) + " · " + hint + "</span>";
+    $("out").innerHTML = "";
+    return;
+  }
+  const items = Array.isArray(data) ? data : data.items;
+  if (!Array.isArray(items)) {
+    $("parseMsg").innerHTML = '<span class="err">items 배열이 없습니다. 목록 응답 전체를 붙여넣으세요.</span>';
+    return;
+  }
+  filter = "";
+  $("parseMsg").innerHTML = items.length + "건 읽었습니다." +
+    (parsed.repaired ? ' <span class="sub">' + esc(parsed.repaired) + "</span>" : "");
+  render(Array.isArray(data) ? null : data.installation, items, Array.isArray(data) ? null : data.nextCursor);
+}
+
+function buildCommand() {
+  const id = $("instId").value.trim().replace(/\/+$/, ""); // s3 ls에서 복사하면 끝에 슬래시가 붙는다
+  if (!id) { $("cmd").textContent = "installationId를 입력하세요"; return; }
+  const status = $("statusPick").value;
+  $("cmd").textContent =
+    'curl -s "https://api.standinpose.com/v1/admin/review/installations/' + id + "/jobs?limit=20" +
+    (status ? "&status=" + status : "") + '" -H "X-Beta-Admin-Token: $TOKEN"';
+}
+
+$("parse").addEventListener("click", parse);
+$("input").addEventListener("paste", () => setTimeout(parse, 0));
+$("instId").addEventListener("input", buildCommand);
+$("statusPick").addEventListener("change", buildCommand);
+$("copyCmd").addEventListener("click", (event) => {
+  const text = $("cmd").textContent;
+  if (text.startsWith("curl")) copy(text, event.currentTarget);
+});
+</script>
+</body>
+</html>

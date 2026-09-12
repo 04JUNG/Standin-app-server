@@ -108,12 +108,22 @@ docker compose down            # 종료 (DB는 pg-data 볼륨에 유지)
 
 성공·실패와 에러코드는 S3가 아니라 RDS에 있다. S3에는 파일(원본 이미지·조정본 BVH)만 있다.
 
+브라우저가 가장 빠르다 — 운영 대시보드(`/v1/admin/ops/dashboard?token=...`) 맨 아래 「설치 조회」
+패널에서 **설치 목록**으로 누가 있는지 보고, 한 곳을 골라 작업 기록을 연다.
+
+curl로도 같은 것을 본다.
+
 ```bash
+# 어떤 설치가 있나 (최근 접속 순, Job·실패 수 포함)
+curl -s "$BFF/v1/admin/review/installations?limit=20" -H "X-Beta-Admin-Token: $TOKEN"
 # 설치 하나의 작업 기록 (status=failed로 실패만 추릴 수 있다)
 curl -s "$BFF/v1/admin/review/installations/$INSTALLATION_ID/jobs?status=failed&limit=20" -H "X-Beta-Admin-Token: $TOKEN"
 # 그중 한 건의 상세 — 원본 이미지 서명 URL(5분)·후보·선택까지
 curl -s "$BFF/v1/admin/review/jobs/$JOB_ID" -H "X-Beta-Admin-Token: $TOKEN"
 ```
+
+받아 둔 응답을 표로 보려면 [docs/ops-job-viewer.html](docs/ops-job-viewer.html)을 브라우저로 연다.
+네트워크를 쓰지 않고 붙여넣은 JSON만 읽는다 — 대시보드를 열 수 없는 자리나, 나중에 다시 볼 때 쓴다.
 
 전체 추이는 `GET /v1/admin/ops`와 대시보드(`/v1/admin/ops/dashboard`)로 본다. 자세한 응답은
 [docs/API.md](docs/API.md)의 「관리자 품질 검토」 절.
