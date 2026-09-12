@@ -525,8 +525,8 @@ function signalRows(dropoff) {
     ["완료된 Job", dropoff.selected.jobs, dropoff.notSelected.jobs],
     ["인물 0명 비율", pct(dropoff.selected.zeroPeopleRate), pct(dropoff.notSelected.zeroPeopleRate)],
     ["후보 부족 비율", pct(dropoff.selected.shortfallRate), pct(dropoff.notSelected.shortfallRate)],
-    ["최고 후보 점수(평균)", dropoff.selected.avgBestScore === null ? "—" : dropoff.selected.avgBestScore,
-      dropoff.notSelected.avgBestScore === null ? "—" : dropoff.notSelected.avgBestScore],
+    ["최고 후보 거리(평균, 낮을수록 좋음)", dropoff.selected.avgBestDistance === null ? "—" : dropoff.selected.avgBestDistance,
+      dropoff.notSelected.avgBestDistance === null ? "—" : dropoff.notSelected.avgBestDistance],
     ["인물 수(평균)", dropoff.selected.avgPeople === null ? "—" : dropoff.selected.avgPeople,
       dropoff.notSelected.avgPeople === null ? "—" : dropoff.notSelected.avgPeople],
   ];
@@ -543,9 +543,62 @@ function levelList(title, levels) {
   ).join("") + "</tbody></table>";
 }
 
+/**
+ * ⓪ 계측 건강도를 맨 위에 둔다.
+ *
+ * 비어 있는 컬럼을 모르고 지표를 읽으면 "점수 평균 null"만 보고 한참 헤맨다.
+ * 지표를 믿어도 되는지가 지표보다 먼저다.
+ */
+function instrumentationBlock(inst) {
+  if (!inst) return "";
+  const empty = inst.columns.filter((column) => column.empty);
+  const gaps = inst.stageGaps.filter((gap) => gap.gap !== 0);
+
+  const warn = empty.length
+    ? '<p class="sub"><span class="gap">비어 있는 컬럼 ' + empty.length + "개</span> — " +
+      empty.map((column) => esc(column.label)).join(", ") + ". 이 컬럼에 기대는 지표는 지금 의미가 없다.</p>"
+    : '<p class="sub">비어 있는 컬럼 없음.</p>';
+
+  const columnTable = '<div class="scroll"><table><thead><tr><th>컬럼</th><th class="num">행</th>' +
+    '<th class="num">빈 값</th><th class="num">비율</th></tr></thead><tbody>' +
+    inst.columns.map((column) =>
+      "<tr><td" + (column.empty ? ' class="gap"' : "") + ">" + esc(column.label) + "</td>" +
+      '<td class="num">' + column.rows + '</td><td class="num">' + column.nulls + "</td>" +
+      '<td class="num' + (column.empty ? " gap" : "") + '">' + pct(column.nullRate) + "</td></tr>"
+    ).join("") + "</tbody></table></div>";
+
+  const gapTable = '<div class="scroll"><table><thead><tr><th>단계</th><th class="num">서버</th>' +
+    '<th class="num">클라</th><th class="num">차이</th><th>해석</th></tr></thead><tbody>' +
+    inst.stageGaps.map((gap) =>
+      "<tr><td>" + esc(gap.stage) + '</td><td class="num">' + gap.server + '</td><td class="num">' + gap.client + "</td>" +
+      '<td class="num' + (gap.gap !== 0 ? " gap" : "") + '">' + (gap.gap > 0 ? "+" : "") + gap.gap + "</td>" +
+      '<td class="sub">' + esc(gap.note) + "</td></tr>"
+    ).join("") + "</tbody></table></div>";
+
+  return "<h3>⓪ 계측 건강도 — 지표를 믿어도 되는가</h3>" + warn +
+    '<div class="side">' + columnTable + gapTable + "</div>" +
+    (gaps.length ? '<p class="sub">서버와 클라이언트가 어긋난 단계가 ' + gaps.length + "개다. 음수는 이벤트 유실, 양수는 서버에 닿지 못한 시도를 뜻한다.</p>" : "");
+}
+
+/** 거리 구간별 선택률 — matchLevel 임계값(0.25/0.45)을 보정할 근거다. */
+function distanceTable(buckets) {
+  if (!buckets || !buckets.length) return "";
+  const peak = Math.max(1, ...buckets.map((bucket) => bucket.jobs));
+  return "<h3>거리 구간별 선택률 — 어디서 고르기를 멈추나</h3>" +
+    '<div class="scroll"><table><thead><tr><th>최단 거리</th><th class="num">Job</th>' +
+    '<th class="num">선택</th><th class="num">선택률</th><th></th></tr></thead><tbody>' +
+    buckets.map((bucket) =>
+      "<tr><td>" + esc(bucket.bucket) + '</td><td class="num">' + bucket.jobs + "</td>" +
+      '<td class="num">' + bucket.selected + '</td><td class="num">' + pct(bucket.selectionRate) + "</td>" +
+      '<td style="width:30%"><div class="bar" style="width:' + Math.round((bucket.jobs / peak) * 100) + '%"></div></td></tr>'
+    ).join("") + "</tbody></table></div>" +
+    '<p class="sub">현재 matchLevel 임계값은 0.25(high) · 0.45(medium)이고 코드에 "실데이터로 보정할 것"이라 적혀 있다. 선택률이 꺾이는 구간이 곧 보정할 자리다.</p>';
+}
+
 function productRender(data) {
   const drop = data.dropoff;
   $("productOut").innerHTML =
+    instrumentationBlock(data.instrumentation) +
     '<h3>① 퍼널 — 어디서 새는가</h3>' + funnelTable(data.funnel) +
     '<p class="sub">실패한 Job ' + data.jobsFailed + "건. 설치 수는 사람, 건수는 부하다 — 한 사람이 열 번 돌린 것과 열 사람이 한 번씩 돌린 것을 같게 보지 않으려고 함께 센다.</p>" +
     '<h3>② 코호트 — 누가 어디서 멈췄나</h3>' + cohortCards(data.cohorts) +
@@ -553,6 +606,7 @@ function productRender(data) {
     '<div class="side"><div class="scroll">' + signalRows(drop) + "</div>" +
     '<div class="scroll">' + levelList("1순위 후보 match_level · 선택함", drop.selected.matchLevels) +
     levelList("1순위 후보 match_level · 선택 안 함", drop.notSelected.matchLevels) + "</div></div>" +
+    distanceTable(data.instrumentation ? data.instrumentation.distanceBuckets : null) +
     '<p class="sub" style="margin-top:10px">다시 돌린 Job ' + drop.rerunJobs + "건." +
     (drop.feedback.length
       ? " 선택하지 않은 Job의 피드백: " + drop.feedback.map((f) => esc(f.reason) + "(" + f.count + ")").join(", ")

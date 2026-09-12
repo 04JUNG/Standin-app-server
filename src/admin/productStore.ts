@@ -2,6 +2,7 @@
 // 여는 비용이 서비스보다 커진다(`ops/store.ts`와 같은 원칙).
 import { query, queryOne } from "../db.js";
 import type { FunnelRow, MatchLevelRow, SignalRow } from "./product.js";
+import type { ColumnHealthRow, DistanceBucketRow } from "./instrumentation.js";
 
 /** 기간 경계. `created_at`이 TEXT라 ISO 문자열 비교가 곧 시간 비교다. */
 function since(days: number): string {
@@ -137,7 +138,7 @@ export async function dropoffSignals(days: number): Promise<SignalRow[]> {
        count(*)::int AS jobs,
        count(*) FILTER (WHERE p.person_count = 0)::int AS zero_people_jobs,
        count(*) FILTER (WHERE p.shortfall > 0)::int AS shortfall_jobs,
-       avg(c.best_score) AS avg_best_score,
+       avg(c.best_distance) AS avg_best_distance,
        avg(p.person_count) AS avg_people
      FROM scoped s
      LEFT JOIN LATERAL (
@@ -146,7 +147,9 @@ export async function dropoffSignals(days: number): Promise<SignalRow[]> {
        FROM analysis_people ap WHERE ap.job_id = s.id
      ) p ON TRUE
      LEFT JOIN LATERAL (
-       SELECT max(ac.rerank_score) AS best_score
+       -- 점수가 아니라 거리다. 프로덕션 파이프라인은 knn_geometric을 직접 불러
+       -- rerank_score를 채우지 않는다(rerank는 쓰이지 않는 선택 경로다).
+       SELECT min(ac.distance) AS best_distance
        FROM analysis_candidates ac WHERE ac.job_id = s.id
      ) c ON TRUE
      GROUP BY s.selected`,
@@ -184,6 +187,111 @@ export async function noSelectionFeedback(
      GROUP BY f.reason
      ORDER BY count(*) DESC
      LIMIT 10`,
+    [since(days)],
+  );
+}
+
+/**
+ * 계측 건강도 — 지표가 기대는 컬럼이 실제로 채워지고 있는가.
+ *
+ * `rerank_score`가 전부 비어 있는 것을 눈으로 찾느라 한참 걸렸다. 비어 있다는 사실
+ * 자체를 화면에 올려 두면 다음 사람은 그 단계를 건너뛴다.
+ */
+export async function columnHealth(days: number): Promise<ColumnHealthRow[]> {
+  const from = since(days);
+  const [candidates, people, jobs, exports] = await Promise.all([
+    queryOne<{ rows: number; rerank_nulls: number; distance_nulls: number }>(
+      `SELECT count(*)::int AS rows,
+              count(*) FILTER (WHERE ac.rerank_score IS NULL)::int AS rerank_nulls,
+              count(*) FILTER (WHERE ac.distance IS NULL)::int AS distance_nulls
+       FROM analysis_candidates ac JOIN jobs j ON j.id = ac.job_id
+       WHERE j.created_at >= $1`,
+      [from],
+    ),
+    queryOne<{ rows: number; confidence_nulls: number; skeleton_nulls: number }>(
+      `SELECT count(*)::int AS rows,
+              count(*) FILTER (WHERE ap.confidence IS NULL)::int AS confidence_nulls,
+              count(*) FILTER (WHERE ap.skeleton_json IS NULL)::int AS skeleton_nulls
+       FROM analysis_people ap JOIN jobs j ON j.id = ap.job_id
+       WHERE j.created_at >= $1`,
+      [from],
+    ),
+    queryOne<{ rows: number; size_nulls: number; completed_nulls: number }>(
+      `SELECT count(*)::int AS rows,
+              count(*) FILTER (WHERE input_width IS NULL)::int AS size_nulls,
+              count(*) FILTER (WHERE status = 'completed' AND completed_at IS NULL)::int AS completed_nulls
+       FROM jobs WHERE created_at >= $1`,
+      [from],
+    ),
+    queryOne<{ rows: number; format_nulls: number; variant_nulls: number }>(
+      `SELECT count(*)::int AS rows,
+              count(*) FILTER (WHERE format IS NULL)::int AS format_nulls,
+              count(*) FILTER (WHERE variant IS NULL)::int AS variant_nulls
+       FROM export_events WHERE status = 'completed' AND occurred_at >= $1`,
+      [from],
+    ),
+  ]);
+
+  return [
+    { label: "analysis_candidates.rerank_score", rows: candidates?.rows ?? 0, nulls: candidates?.rerank_nulls ?? 0 },
+    { label: "analysis_candidates.distance", rows: candidates?.rows ?? 0, nulls: candidates?.distance_nulls ?? 0 },
+    { label: "analysis_people.confidence", rows: people?.rows ?? 0, nulls: people?.confidence_nulls ?? 0 },
+    { label: "analysis_people.skeleton_json", rows: people?.rows ?? 0, nulls: people?.skeleton_nulls ?? 0 },
+    { label: "jobs.input_width", rows: jobs?.rows ?? 0, nulls: jobs?.size_nulls ?? 0 },
+    { label: "jobs.completed_at (완료인데 비어 있음)", rows: jobs?.rows ?? 0, nulls: jobs?.completed_nulls ?? 0 },
+    { label: "export_events.format", rows: exports?.rows ?? 0, nulls: exports?.format_nulls ?? 0 },
+    { label: "export_events.variant (조정본/베이스)", rows: exports?.rows ?? 0, nulls: exports?.variant_nulls ?? 0 },
+  ];
+}
+
+/** 서버 기록 쪽 단계 수. 클라이언트 이벤트와 짝지어 어긋남을 본다. */
+export async function serverStageCounts(days: number): Promise<Record<string, number>> {
+  const from = since(days);
+  const row = await queryOne<{ jobs: number; failed: number; selections: number; exports: number }>(
+    `SELECT
+       (SELECT count(*)::int FROM jobs WHERE created_at >= $1) AS jobs,
+       (SELECT count(*)::int FROM jobs WHERE created_at >= $1 AND status = 'failed') AS failed,
+       (SELECT count(DISTINCT cs.job_id)::int FROM confirmed_selections cs
+         JOIN jobs j ON j.id = cs.job_id WHERE j.created_at >= $1) AS selections,
+       (SELECT count(DISTINCT e.job_id)::int FROM export_events e
+         WHERE e.status = 'completed' AND e.occurred_at >= $1) AS exports`,
+    [from],
+  );
+  return { jobs: row?.jobs ?? 0, failed: row?.failed ?? 0, selections: row?.selections ?? 0, exports: row?.exports ?? 0 };
+}
+
+/**
+ * 거리 구간별 선택률.
+ *
+ * Job마다 **가장 가까운 후보의 distance**로 구간을 정한다. 사용자가 고르는 기준은
+ * 평균이 아니라 "제일 나은 하나가 쓸 만한가"이기 때문이다.
+ */
+export async function distanceBuckets(days: number): Promise<DistanceBucketRow[]> {
+  return query<DistanceBucketRow>(
+    `WITH scoped AS (
+       SELECT j.id, (cs.job_id IS NOT NULL) AS selected
+       FROM jobs j
+       LEFT JOIN (SELECT DISTINCT job_id FROM confirmed_selections) cs ON cs.job_id = j.id
+       WHERE j.created_at >= $1 AND j.status = 'completed' AND j.installation_id IS NOT NULL
+     ),
+     best AS (
+       SELECT s.id, s.selected, (SELECT min(ac.distance) FROM analysis_candidates ac
+                                  WHERE ac.job_id = s.id) AS best
+       FROM scoped s
+     )
+     SELECT
+       CASE
+         WHEN best IS NULL THEN '없음'
+         WHEN best <= 0.15 THEN '≤0.15'
+         WHEN best <= 0.25 THEN '≤0.25'
+         WHEN best <= 0.35 THEN '≤0.35'
+         WHEN best <= 0.45 THEN '≤0.45'
+         ELSE '>0.45'
+       END AS bucket,
+       count(*)::int AS jobs,
+       count(*) FILTER (WHERE selected)::int AS selected
+     FROM best
+     GROUP BY 1`,
     [since(days)],
   );
 }

@@ -12,6 +12,7 @@ import { getInstallationSummary, listInstallations } from "../installations/stor
 import { parseRosterQuery, toRosterPage } from "./installationList.js";
 import { DEFAULT_REVIEWER, matchReviewer, parseReviewers } from "./reviewers.js";
 import { parseWindowDays, toCohorts, toDropoff, toFunnel } from "./product.js";
+import { toColumnHealth, toDistanceBuckets, toStageGaps } from "./instrumentation.js";
 import {
   clientStageCounts,
   cohortCounts,
@@ -20,6 +21,9 @@ import {
   matchLevelSplit,
   noSelectionFeedback,
   rerunJobCount,
+  columnHealth,
+  serverStageCounts,
+  distanceBuckets,
 } from "./productStore.js";
 import { isInstallationId, parseHistoryQuery, toHistoryPage } from "../jobs/history.js";
 import { listJobHistory } from "../jobs/store.js";
@@ -205,16 +209,24 @@ adminRoutes.get("/product", async (c) => {
     return c.json(errorEnvelope("INVALID_INPUT", parsed.message, c.get("requestId")), 400);
   }
   const { days } = parsed;
-  const [funnelRow, clientStages, cohortRow, signals, levels, feedback, rerunJobs] =
-    await Promise.all([
-      funnelCounts(days),
-      clientStageCounts(days),
-      cohortCounts(days),
-      dropoffSignals(days),
-      matchLevelSplit(days),
-      noSelectionFeedback(days),
-      rerunJobCount(days),
-    ]);
+  const [
+    funnelRow, clientStages, cohortRow, signals, levels, feedback, rerunJobs,
+    columns, serverStages, buckets,
+  ] = await Promise.all([
+    funnelCounts(days),
+    clientStageCounts(days),
+    cohortCounts(days),
+    dropoffSignals(days),
+    matchLevelSplit(days),
+    noSelectionFeedback(days),
+    rerunJobCount(days),
+    columnHealth(days),
+    serverStageCounts(days),
+    distanceBuckets(days),
+  ]);
+
+  const clientByName: Record<string, number> = {};
+  for (const stage of clientStages) clientByName[stage.event_name] = stage.events;
 
   await audit(c, "review_product_metrics", {});
   return c.json({
@@ -229,6 +241,15 @@ adminRoutes.get("/product", async (c) => {
     })),
     cohorts: toCohorts(cohortRow),
     dropoff: toDropoff(signals, levels, feedback, rerunJobs),
+    /**
+     * 지표를 믿어도 되는지부터 보여 준다. 2026-09-13에 `rerank_score`가 전부 비어
+     * 있는 것을 눈으로 찾느라 한참 걸렸는데, 그 사실이 화면에 있었으면 바로 끝났다.
+     */
+    instrumentation: {
+      columns: toColumnHealth(columns),
+      stageGaps: toStageGaps(serverStages, clientByName),
+      distanceBuckets: toDistanceBuckets(buckets),
+    },
   });
 });
 
