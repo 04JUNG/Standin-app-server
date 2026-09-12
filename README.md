@@ -104,6 +104,20 @@ docker compose down            # 종료 (DB는 pg-data 볼륨에 유지)
 값을 1로 바꾼다. **이 값을 실제 체인보다 크게 잡으면 IP 제한이 우회될 수 있다.** IP는 원문 대신
 `/64`(IPv6) 정규화 후 해시로만 저장한다.
 
+### 사용자가 뭘 돌렸는지 본다
+
+성공·실패와 에러코드는 S3가 아니라 RDS에 있다. S3에는 파일(원본 이미지·조정본 BVH)만 있다.
+
+```bash
+# 설치 하나의 작업 기록 (status=failed로 실패만 추릴 수 있다)
+curl -s "$BFF/v1/admin/review/installations/$INSTALLATION_ID/jobs?status=failed&limit=20" -H "X-Beta-Admin-Token: $TOKEN"
+# 그중 한 건의 상세 — 원본 이미지 서명 URL(5분)·후보·선택까지
+curl -s "$BFF/v1/admin/review/jobs/$JOB_ID" -H "X-Beta-Admin-Token: $TOKEN"
+```
+
+전체 추이는 `GET /v1/admin/ops`와 대시보드(`/v1/admin/ops/dashboard`)로 본다. 자세한 응답은
+[docs/API.md](docs/API.md)의 「관리자 품질 검토」 절.
+
 ### Kill switch
 
 운영자가 분석을 즉시 중단·재개한다. 값은 DB(`service_flags`)에 있어 **재배포가 필요 없고**,

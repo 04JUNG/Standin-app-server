@@ -5,6 +5,7 @@ import {
   HISTORY_LIMIT_MAX,
   decodeCursor,
   encodeCursor,
+  isInstallationId,
   parseHistoryQuery,
   toHistoryItem,
   toHistoryPage,
@@ -122,4 +123,15 @@ test("limit+1건이 오면 초과분은 버리고 nextCursor를 낸다", () => {
 test("마지막 페이지의 nextCursor는 null이다", () => {
   assert.equal(toHistoryPage([row()], 20).nextCursor, null);
   assert.equal(toHistoryPage([], 20).nextCursor, null);
+});
+
+test("설치 id는 발급 형태만 통과한다", () => {
+  assert.equal(isInstallationId("inst_00000000-0000-4000-8000-000000000001"), true);
+  // Job id를 그대로 붙여 넣는 실수가 가장 흔하다.
+  assert.equal(isInstallationId(JOB_ID), false);
+  assert.equal(isInstallationId("inst_"), false);
+  assert.equal(isInstallationId(""), false);
+  // 경로 파라미터로 들어오므로 SQL·LIKE 메타문자가 섞여도 형태에서 걸려야 한다.
+  assert.equal(isInstallationId("inst_00000000-0000-4000-8000-000000000001'--"), false);
+  assert.equal(isInstallationId("inst_%"), false);
 });
