@@ -65,6 +65,11 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
   .cand img { width:100%; aspect-ratio:3/4; object-fit:contain; background:var(--panel); border-radius:6px; }
   .cand .sub { font-size:11px; }
   .side { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); align-items:start; }
+  .bar { height:6px; background:var(--accent); border-radius:3px; min-width:2px; }
+  .cohort { background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+  .cohort.hot { border-color:var(--warn); }
+  .cohort .big { font-size:22px; }
+  .gap { color:var(--bad); font-weight:600; }
 </style>
 </head>
 <body>
@@ -102,6 +107,20 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
     <div class="row">
       <div class="card"><h2>분석 Job (1시간)</h2><div class="scroll" id="jobs"></div></div>
       <div class="card"><h2>사용량</h2><div id="quota"></div></div>
+    </div>
+    <div class="card">
+      <h2>제품 지표 — 퍼널 · 코호트 · 이탈 신호</h2>
+      <div class="lookup">
+        <select id="productDays">
+          <option value="7">최근 7일</option>
+          <option value="14">최근 14일</option>
+          <option value="30">최근 30일</option>
+          <option value="90">최근 90일</option>
+        </select>
+        <button class="ghost" id="productGo">불러오기</button>
+        <span id="productMsg" class="sub"></span>
+      </div>
+      <div id="productOut"></div>
     </div>
     <div class="card">
       <h2>설치 조회 — 이 설치가 무엇을 돌렸나</h2>
@@ -465,6 +484,104 @@ async function lookupGo(cursor) {
     $("lookupOut").innerHTML = "";
   }
 }
+
+// ── 제품 지표 ────────────────────────────────────────────────
+//
+// 퍼널에서 어디가 새는지 보고, 코호트에서 누가 거기 멈췄는지 세고, 신호에서 그들이
+// 무엇이 달랐는지로 내려간다. 세 블록의 순서가 곧 읽는 순서다.
+
+function pct(value) { return value === null || value === undefined ? "—" : value + "%"; }
+
+function funnelTable(stages) {
+  const first = stages[0] ? stages[0].installations : 0;
+  return '<div class="scroll"><table><thead><tr><th>단계</th><th class="num">설치</th>' +
+    '<th class="num">건수</th><th class="num">직전 대비</th><th class="num">투입 대비</th><th></th>' +
+    "</tr></thead><tbody>" +
+    stages.map((stage, index) => {
+      // 직전 대비가 크게 꺾이는 칸이 곧 새는 자리다. 60% 미만이면 눈에 띄게 둔다.
+      const leaky = stage.fromPrevious !== null && stage.fromPrevious < 60;
+      const width = first ? Math.max(1, Math.round((stage.installations / first) * 100)) : 0;
+      return "<tr><td>" + esc(stage.label) + "</td>" +
+        '<td class="num">' + stage.installations + "</td>" +
+        '<td class="num">' + (stage.jobs === null ? "—" : stage.jobs) + "</td>" +
+        '<td class="num' + (leaky ? " gap" : "") + '">' + pct(stage.fromPrevious) + "</td>" +
+        '<td class="num">' + pct(stage.fromStarted) + "</td>" +
+        '<td style="width:38%"><div class="bar" style="width:' + width + '%"></div></td></tr>';
+    }).join("") +
+    "</tbody></table></div>";
+}
+
+function cohortCards(cohorts) {
+  return '<div class="row">' + cohorts.map((item) =>
+    '<div class="cohort' + (item.highlight ? " hot" : "") + '">' +
+    '<h2>' + esc(item.label) + "</h2>" +
+    '<div class="big">' + item.count + '</div>' +
+    '<div class="sub">' + pct(item.share) + " · " + esc(item.hint) + "</div></div>"
+  ).join("") + "</div>";
+}
+
+function signalRows(dropoff) {
+  const lines = [
+    ["완료된 Job", dropoff.selected.jobs, dropoff.notSelected.jobs],
+    ["인물 0명 비율", pct(dropoff.selected.zeroPeopleRate), pct(dropoff.notSelected.zeroPeopleRate)],
+    ["후보 부족 비율", pct(dropoff.selected.shortfallRate), pct(dropoff.notSelected.shortfallRate)],
+    ["최고 후보 점수(평균)", dropoff.selected.avgBestScore === null ? "—" : dropoff.selected.avgBestScore,
+      dropoff.notSelected.avgBestScore === null ? "—" : dropoff.notSelected.avgBestScore],
+    ["인물 수(평균)", dropoff.selected.avgPeople === null ? "—" : dropoff.selected.avgPeople,
+      dropoff.notSelected.avgPeople === null ? "—" : dropoff.notSelected.avgPeople],
+  ];
+  return "<table><thead><tr><th>지표</th><th class=\"num\">선택함</th><th class=\"num\">선택 안 함</th></tr></thead><tbody>" +
+    lines.map((line) =>
+      "<tr><td>" + esc(line[0]) + '</td><td class="num">' + esc(line[1]) + '</td><td class="num">' + esc(line[2]) + "</td></tr>"
+    ).join("") + "</tbody></table>";
+}
+
+function levelList(title, levels) {
+  if (!levels.length) return "<h3>" + title + '</h3><p class="empty">없음</p>';
+  return "<h3>" + title + "</h3><table><tbody>" + levels.map((level) =>
+    "<tr><td>" + esc(level.level) + '</td><td class="num">' + level.count + '</td><td class="num sub">' + pct(level.share) + "</td></tr>"
+  ).join("") + "</tbody></table>";
+}
+
+function productRender(data) {
+  const drop = data.dropoff;
+  $("productOut").innerHTML =
+    '<h3>① 퍼널 — 어디서 새는가</h3>' + funnelTable(data.funnel) +
+    '<p class="sub">실패한 Job ' + data.jobsFailed + "건. 설치 수는 사람, 건수는 부하다 — 한 사람이 열 번 돌린 것과 열 사람이 한 번씩 돌린 것을 같게 보지 않으려고 함께 센다.</p>" +
+    '<h3>② 코호트 — 누가 어디서 멈췄나</h3>' + cohortCards(data.cohorts) +
+    '<h3>③ 이탈 신호 — 선택한 쪽과 무엇이 달랐나</h3>' +
+    '<div class="side"><div class="scroll">' + signalRows(drop) + "</div>" +
+    '<div class="scroll">' + levelList("1순위 후보 match_level · 선택함", drop.selected.matchLevels) +
+    levelList("1순위 후보 match_level · 선택 안 함", drop.notSelected.matchLevels) + "</div></div>" +
+    '<p class="sub" style="margin-top:10px">다시 돌린 Job ' + drop.rerunJobs + "건." +
+    (drop.feedback.length
+      ? " 선택하지 않은 Job의 피드백: " + drop.feedback.map((f) => esc(f.reason) + "(" + f.count + ")").join(", ")
+      : " 선택하지 않은 Job에 달린 피드백은 없다.") + "</p>" +
+    '<details style="margin-top:10px"><summary class="sub">클라이언트 이벤트 대조 — 서버 기록과 어긋나면 계측 유실이다</summary>' +
+    '<div class="scroll" style="margin-top:8px"><table><thead><tr><th>이벤트</th><th class="num">건수</th><th class="num">설치</th></tr></thead><tbody>' +
+    data.clientStages.map((stage) =>
+      "<tr><td>" + esc(stage.event) + '</td><td class="num">' + stage.events + '</td><td class="num">' + stage.installations + "</td></tr>"
+    ).join("") + "</tbody></table></div></details>";
+}
+
+async function productGo() {
+  $("productMsg").textContent = "불러오는 중…";
+  try {
+    const res = await fetch("/v1/admin/product?days=" + encodeURIComponent($("productDays").value), {
+      headers: { "X-Beta-Admin-Token": token },
+    });
+    if (!res.ok) throw new Error(res.status === 404 ? "토큰이 거절됐습니다." : "조회 실패 " + res.status);
+    const data = await res.json();
+    $("productMsg").textContent = "최근 " + data.windowDays + "일 · " + when(data.since) + " 이후";
+    productRender(data);
+  } catch (error) {
+    $("productMsg").innerHTML = '<span class="err">' + esc(error.message) + "</span>";
+    $("productOut").innerHTML = "";
+  }
+}
+
+$("productGo").addEventListener("click", productGo);
+$("productDays").addEventListener("change", () => { if ($("productOut").innerHTML) productGo(); });
 
 // ── 설치 명부 ────────────────────────────────────────────────
 //
