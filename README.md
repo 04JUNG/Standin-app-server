@@ -163,8 +163,48 @@ aws ecs update-service --region ap-northeast-2 --cluster "$ECS_CLUSTER" --servic
 3번을 빠뜨리면 돌고 있는 태스크가 옛 값을 계속 쓴다. 교체 뒤에는 각자 자기 토큰으로 열고,
 대시보드 우측 상단에 자기 이름이 뜨는지 확인한다 — 그 이름이 곧 열람 기록에 남는 이름이다.
 
-토큰 자체는 채팅에 붙여 넣지 말고 각자 `aws secretsmanager get-secret-value`로 가져가게 한다
-(팀원에게 그 시크릿 읽기 IAM이 필요하다).
+#### 나눠 주는 쪽
+
+**토큰 셋이 한 시크릿 안에 있으므로 팀원에게 시크릿 읽기 IAM을 주면 안 된다.** 읽을 수 있으면
+서로의 토큰도 보이고, 그 순간 감사 로그의 이름이 "누가 열었는가"를 보장하지 못한다. 시크릿은
+한 사람이 쥐고 각자에게 자기 것만 1:1로 건넨다.
+
+한 사람 것만 꺼낸다(키가 한글이면 대괄호 표기를 쓴다).
+
+```bash
+aws secretsmanager get-secret-value --secret-id standin/production/beta-review-token --region ap-northeast-2 --query SecretString --output text | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s)['도원']))"
+```
+
+토큰만 주면 상대가 주소를 조립하다 오타가 난다. **바로 열리는 주소**를 만들어 건네는 편이 낫다.
+
+```bash
+aws secretsmanager get-secret-value --secret-id standin/production/beta-review-token --region ap-northeast-2 --query SecretString --output text | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write('https://api.standinpose.com/v1/admin/ops/dashboard?token='+JSON.parse(s)['도원']))" | clip
+```
+
+비밀번호 관리자의 공유 항목이 가장 낫고, 여의치 않으면 1:1 DM이다. 단톡방은 피한다 — 거기
+올라가는 순간 누구 것인지 구분이 무의미해진다. 받은 사람은 자기 비밀번호 관리자에 저장한다.
+**AWS로는 자기 토큰을 다시 조회할 수 없다.**
+
+#### 주기적으로 갈 때
+
+토큰에는 **만료가 없다.** 시크릿에 자동 회전(`RotationEnabled`)을 걸어 두지 않았고, CDK의
+`generateSecretString`은 생성 시점에만 적용되므로 `cdk deploy`를 몇 번 돌려도 값은 그대로다.
+한 번 새면 영원히 유효하다는 뜻이다 — DM 기록, 스크린샷, 공용 PC 브라우저 어디든.
+
+그래서 사람이 빠질 때와, 그런 일이 없어도 분기에 한 번은 간다. 사람별 토큰이라 **그 사람 것만**
+갈면 된다.
+
+```bash
+# 1. 새 토큰 하나를 만들어 reviewers.json의 그 사람 항목만 바꾼다
+aws secretsmanager get-random-password --region ap-northeast-2 --password-length 48 --exclude-punctuation --query RandomPassword --output text
+```
+
+```bash
+# 2~3. 위 전환 순서의 put-secret-value → BFF 강제 재배포를 그대로 반복한다
+```
+
+옛 토큰은 재배포가 끝나는 순간 죽는다. 누가 언제 무엇을 열었는지는 `admin_access_audit`의
+`reviewer`·`occurred_at`으로 확인한다.
 
 전체 추이는 `GET /v1/admin/ops`와 대시보드(`/v1/admin/ops/dashboard`)로 본다. 자세한 응답은
 [docs/API.md](docs/API.md)의 「관리자 품질 검토」 절.
