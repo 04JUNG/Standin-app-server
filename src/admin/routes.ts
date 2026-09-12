@@ -1,4 +1,4 @@
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { Hono, type Context } from "hono";
 import { config } from "../config.js";
 import { execute, query, queryOne } from "../db.js";
@@ -10,6 +10,7 @@ import { currentUsage } from "../limits/store.js";
 import { errorEnvelope } from "../mapping.js";
 import { getInstallationSummary, listInstallations } from "../installations/store.js";
 import { parseRosterQuery, toRosterPage } from "./installationList.js";
+import { DEFAULT_REVIEWER, matchReviewer, parseReviewers } from "./reviewers.js";
 import { isInstallationId, parseHistoryQuery, toHistoryPage } from "../jobs/history.js";
 import { listJobHistory } from "../jobs/store.js";
 import { getPoseThumbnail, health } from "../inference.js";
@@ -25,12 +26,11 @@ import {
 
 export const adminRoutes = new Hono<AppEnv>();
 
-function validAdminToken(value: string): boolean {
-  if (!config.betaReviewAdminToken || !value) return false;
-  const actual = createHash("sha256").update(value).digest();
-  const expected = createHash("sha256").update(config.betaReviewAdminToken).digest();
-  return timingSafeEqual(actual, expected);
-}
+/**
+ * 검토자 목록은 기동 시 한 번만 만든다. 시크릿은 ECS가 태스크를 띄울 때 주입하므로
+ * 값을 바꾸면 어차피 재배포가 필요하다 — 요청마다 다시 파싱할 이유가 없다.
+ */
+const REVIEWERS = parseReviewers(config.betaReviewAdminToken);
 
 /**
  * 대시보드만 쿼리스트링 토큰을 허용한다.
@@ -45,10 +45,12 @@ adminRoutes.use("*", async (c, next) => {
   const supplied =
     c.req.header("X-Beta-Admin-Token") ??
     (c.req.path === DASHBOARD_PATH ? c.req.query("token") ?? "" : "");
-  if (!validAdminToken(supplied)) {
+  const reviewer = matchReviewer(REVIEWERS, supplied);
+  if (!reviewer) {
     // 401이 아니라 404다 — 관리자 API가 존재한다는 사실 자체를 노출하지 않는다.
     return c.json(errorEnvelope("NOT_FOUND", "not found", c.get("requestId")), 404);
   }
+  c.set("reviewer", reviewer);
   await next();
 });
 
@@ -70,7 +72,8 @@ async function audit(
      VALUES ($1,$2,$3,$4,$5,$6,$7)`,
     [
       `audit_${randomUUID()}`,
-      "beta-reviewer",
+      // 시크릿이 JSON이면 사람 이름, 단일 토큰이면 DEFAULT_REVIEWER가 들어온다.
+      c.get("reviewer") ?? DEFAULT_REVIEWER,
       action,
       target.jobId ?? null,
       target.installationId ?? null,
@@ -120,6 +123,9 @@ adminRoutes.get("/ops", async (c) => {
 
   return c.json({
     now: new Date(now).toISOString(),
+    // 화면에 누구로 보고 있는지 띄운다. 토큰을 나눠 쓰던 습관이 남아 있으면
+    // "내 이름으로 열람 기록이 남는다"는 사실이 눈에 보여야 한다.
+    reviewer: c.get("reviewer") ?? DEFAULT_REVIEWER,
     inferenceHealthy,
     analysisEnabled: flag.enabled,
     analysisReason: flag.reason,
