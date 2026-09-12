@@ -23,8 +23,14 @@ test("빈 값이면 아무도 통과하지 못한다", () => {
 
 test("규칙에 맞지 않는 항목만 버리고 나머지는 산다", () => {
   // 공백 이름, 빈 토큰, 문자열이 아닌 값
-  const reviewers = parseReviewers('{"정 현":"aaa","kim":"","lee":123,"park":"ddd"}');
+  const reviewers = parseReviewers('{"보 라":"aaa","kim":"","lee":123,"park":"ddd"}');
   assert.deepEqual(reviewers, [{ name: "park", token: "ddd" }]);
+});
+
+test("한글 이름을 받는다", () => {
+  const reviewers = parseReviewers('{"보라":"aaa","도원":"bbb","동원":"ccc"}');
+  assert.deepEqual(reviewers.map((r) => r.name), ["보라", "도원", "동원"]);
+  assert.equal(matchReviewer(reviewers, "bbb"), "도원");
 });
 
 test("깨진 JSON이어도 기동을 막지 않는다", () => {
