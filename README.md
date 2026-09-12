@@ -125,6 +125,43 @@ curl -s "$BFF/v1/admin/review/jobs/$JOB_ID" -H "X-Beta-Admin-Token: $TOKEN"
 받아 둔 응답을 표로 보려면 [docs/ops-job-viewer.html](docs/ops-job-viewer.html)을 브라우저로 연다.
 네트워크를 쓰지 않고 붙여넣은 JSON만 읽는다 — 대시보드를 열 수 없는 자리나, 나중에 다시 볼 때 쓴다.
 
+### 팀원에게 열어 줄 때는 사람별 토큰으로 준다
+
+이 화면은 **사용자가 올린 실제 사진과 그 결과**를 보여 준다. 토큰 하나를 여럿이 나눠 쓰면
+`admin_access_audit`에 전원이 `beta-reviewer`로 남아 누가 누구의 사진을 열었는지 복원할 수 없고,
+한 명이 팀을 떠날 때 전원의 토큰을 갈아야 한다.
+
+`standin/<env>/beta-review-token` 시크릿 값을 JSON으로 두면 앱이 사람별로 가른다.
+
+```json
+{ "jung": "48자-무작위", "kim": "48자-무작위", "park": "48자-무작위" }
+```
+
+값이 JSON이 아니면 예전처럼 단일 토큰으로 읽는다. **앱을 먼저 배포하고 시크릿을 나중에 바꿔도 된다.**
+
+전환 순서:
+
+```bash
+# 1. 사람 수만큼 토큰을 만든다(로그에 남기지 않는다)
+aws secretsmanager get-random-password --region ap-northeast-2 --password-length 48 --exclude-punctuation --query RandomPassword --output text
+```
+
+```bash
+# 2. 시크릿 값을 JSON으로 교체한다
+aws secretsmanager put-secret-value --region ap-northeast-2 --secret-id standin/production/beta-review-token --secret-string file://reviewers.json
+```
+
+```bash
+# 3. BFF를 강제 재배포한다 — ECS는 태스크를 띄울 때 시크릿을 읽는다
+aws ecs update-service --region ap-northeast-2 --cluster "$ECS_CLUSTER" --service "$BFF_SERVICE" --force-new-deployment
+```
+
+3번을 빠뜨리면 돌고 있는 태스크가 옛 값을 계속 쓴다. 교체 뒤에는 각자 자기 토큰으로 열고,
+대시보드 우측 상단에 자기 이름이 뜨는지 확인한다 — 그 이름이 곧 열람 기록에 남는 이름이다.
+
+토큰 자체는 채팅에 붙여 넣지 말고 각자 `aws secretsmanager get-secret-value`로 가져가게 한다
+(팀원에게 그 시크릿 읽기 IAM이 필요하다).
+
 전체 추이는 `GET /v1/admin/ops`와 대시보드(`/v1/admin/ops/dashboard`)로 본다. 자세한 응답은
 [docs/API.md](docs/API.md)의 「관리자 품질 검토」 절.
 

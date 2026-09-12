@@ -5,5 +5,7 @@ export type AppEnv = {
     requestId: string;
     userId?: string;
     installationId?: string;
+    /** 관리자 경로에서 토큰으로 식별한 검토자 이름. 감사 로그에 그대로 남는다. */
+    reviewer?: string;
   };
 };
