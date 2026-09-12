@@ -665,7 +665,35 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 
 ### Job 상세
 
-`GET /v1/admin/review/jobs/{jobId}`는 5분짜리 원본 서명 URL, 인물·스켈레톤·후보·선택·피드백을 반환한다.
+`GET /v1/admin/review/jobs/{jobId}`는 한 건을 끝까지 보여 준다 — 5분짜리 원본 서명 URL, 인물·스켈레톤, 후보, 확정 선택, refine 산출물, 사용자 피드백, 추론 메타.
+
+```json
+{
+  "jobId": "job_...", "status": "completed", "createdAt": "2026-09-04T...",
+  "inputUrl": "https://...", "inputUrlExpiresInSeconds": 300,
+  "inferenceMetadata": { "solver": "v3.2.5", "poseLibraryVersion": "v2.5" },
+  "people": [{ "person_index": 0, "confidence": "high", "candidate_count": 3 }],
+  "candidates": [{ "person_index": 0, "candidate_id": "...", "pose_id": "...", "rank": 1,
+                   "view": "front", "distance": 0.13, "rerank_score": 0.89, "match_level": "exact" }],
+  "selections": [{ "person_index": 0, "candidate_id": "...", "rank": 2 }],
+  "refined": [{ "personIndex": 0, "candidateId": "...", "poseId": "...", "refined": true,
+                "reason": "P3a 관통 복구", "limbs": ["left_forearm"],
+                "bvhUrl": "https://...", "thumbnailUrl": "https://..." }],
+  "feedback": "손 위치가 어색해요"
+}
+```
+
+`refined`는 `refined_artifacts`를 그대로 싣되 `object_key`·`thumbnail_key`를 서명해 URL로 바꾼 것이다. **`refined: false`인 행도 뺴지 않는다** — 왜 조정하지 않았는지(`reason`)가 조정 결과만큼 중요하다. 그 경우 두 URL은 `null`이다.
+
+### 관리자용 후보 썸네일
+
+`GET /v1/admin/review/pose-candidates/{poseId}/thumbnail?view=front`
+
+사용자 경로(`/v1/pose-candidates/...`)는 설치 토큰을 요구해 검토자가 열 수 없다. 프록시 본체는 같고 인증만 관리자 토큰이다. 포즈 라이브러리는 사용자 데이터가 아니라 공용 자산이라 서명 URL을 만들지 않는다.
+
+`view`가 없으면 `400 INVALID_INPUT`. `ETag`와 `If-None-Match`를 그대로 통과시킨다.
+
+⚠ `<img src>`로는 부를 수 없다. 관리자 토큰이 헤더로 가야 하므로 `fetch` → `blob` → `URL.createObjectURL`로 실어야 한다(대시보드가 그렇게 한다).
 
 ---
 
