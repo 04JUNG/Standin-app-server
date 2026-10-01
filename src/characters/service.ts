@@ -1,3 +1,4 @@
+import { framingAvailable } from "../converter/framing.js";
 // /v1/models 의 본체. converter의 "지금 만들 수 있는 것"과 BFF의 "어떻게 보여줄 것인가"를
 // 합쳐 클라이언트 계약(Standin-client docs/08 §8-1)으로 만든다.
 import { config } from "../config.js";
@@ -162,7 +163,7 @@ export async function currentCapabilities(
     fbxExport: converterEnabled(),
     characterSelection: await characterSelectionEnabled(overrides),
     outputScopeSelection: true,
-    outputScopeCropping: false,
+    outputScopeCropping: await framingAvailable(),
   };
 }
 

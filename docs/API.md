@@ -332,7 +332,7 @@ fire-and-forget이라 생길 수 있고, 서버가 주기적으로 정리해 무
   잘못된 본문/번호 400, 다른 설치·없는 작업/인물 404, 미완료 409.
 - Job의 `result_json`에 영속화. 후보 선택/refine과 독립적이며 GET result로 복원.
   행 잠금 트랜잭션으로 다른 인물의 동시 수정을 보존한다. 새 분석 Job은 자동부터 시작.
-- `capabilities.outputScopeSelection: true`, **`outputScopeCropping: false`**.
+- `capabilities.outputScopeSelection: true`; `outputScopeCropping`은 converter 지원 상태에 따라 결정한다.
   현재 설정 저장 단계이며 검색, 미리보기, BVH/FBX 바이트는 바뀌지 않는다.
   export 쿼리에 범위를 붙이지 않는다. 실제 crop은 별도 converter 계약/버전 작업이다.
 - 흉상/두상 조기 종료 응답에도 인물 메타데이터는 남는다. 후보 없음/검색 미지원은 그대로다.
@@ -811,5 +811,25 @@ JWT access(짧게) + refresh(회전). 비밀번호는 argon2 해시. `/v1/auth/*
 - 혼합 구도의 두상 인물은 후보 없이 `candidateShortfallReason=HEAD_SEARCH_UNSUPPORTED`.
   같은 컷의 검색 가능한 인물에는 영향이 없다.
 - 출력 범위 수동 선택은 검색을 재실행하지 않는다. 관측 관절과 출력 설정은 별개다.
-  미리보기/내보내기는 여전히 전신이며 `outputScopeCropping=false`.
+  부분 FBX 지원은 아래 `outputScopeCropping` 계약을 따른다.
 - 구 응답의 누락 필드는 기존 폴백 처리. 실제 부분 검색은 새 분석부터 적용된다.
+
+
+### 부분 FBX 출력과 검토 미리보기 (2026-10-02)
+
+`outputScopeCropping`은 converter `/healthz`의 건강 상태, 고정 solver 버전,
+`framing_version=skin-regions-v1`, full/half/bust/head 지원을 확인한 경우에만 true다.
+false/누락이면 기존 전신 출력과 설정 저장 안내를 유지한다.
+
+`GET /v1/pose-candidates/:poseId/framed?jobId=…&personIndex=…&candidateId=…&outputScope=half&format=preview`
+는 실제 최종 FBX를 재import해 만든 정면 PNG를 반환한다. 같은 URL에서 `format=fbx`는 그 FBX다.
+optional `characterId`는 두 요청에 동일하게 적용한다. 설치 인증, 소유 Job, 확정 후보,
+poseId를 매번 검사하며 outputScope는 서버 저장 resolved 값과 일치해야 한다.
+다르면 `409 OUTPUT_SCOPE_CHANGED`; 변환 실패 시 전신 파일로 대체하지 않는다.
+응답은 `private, no-store`, `X-Standin-Output-Scope`, FBX의 `X-Standin-Artifact-SHA256`를 포함한다.
+
+기존 `/export` 요청과 BVH는 전신 동작을 유지한다. half는 상체+팔+손, bust는
+가슴+어깨+목+머리(팔 제외), head는 머리 메시만 남기고 뼈대 계층은 전신으로 보존한다.
+후보 카드의 기존 썸네일과 달리 **저장 전 확인 화면**에서 선택 범위를 렌더링한다.
+이 기능은 얼굴만 있는 러프의 머리 방향 검색을 추가하지 않는다.
+자세한 알고리즘·제한·검증은 `Standin-server/docs/BODY_SCOPE.md`의 3단계를 따른다.
