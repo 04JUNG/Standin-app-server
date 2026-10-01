@@ -318,6 +318,25 @@ fire-and-forget이라 생길 수 있고, 서버가 주기적으로 정리해 무
 }
 ```
 
+### 인물별 출력 범위 설정 (1단계)
+
+`candidatesByPerson[].outputScope`:
+`{ selection: "auto", detected: "half", detectionSource: "vlm_person", resolved: "half", resolutionSource: "auto" }`.
+
+- 범위: `full`(전신), `half`(반신), `bust`(흉상), `head`(두상). 선택값에는 `auto`도 허용.
+- `detected: null`은 판별 불가/구 응답. `auto`는 이 경우 전신으로 폴백하며 `resolutionSource: "fallback"`.
+- 자동 판별과 사용자 선택은 독립적이다. 수동 선택 후 `auto`로 되돌리면 원래 판별을 다시 사용.
+- `detectionSource`: `vlm_person | legacy_shot | unknown`; `resolutionSource`: `auto | user | fallback`.
+- `PUT /v1/analysis/jobs/{jobId}/people/{personIndex}/output-scope`, body: `{ "selection": "half" }`.
+  응답: `{ personIndex, outputScope }`. 설치 소유권 검사, 완료된 Job/실제 인물만 허용.
+  잘못된 본문/번호 400, 다른 설치·없는 작업/인물 404, 미완료 409.
+- Job의 `result_json`에 영속화. 후보 선택/refine과 독립적이며 GET result로 복원.
+  행 잠금 트랜잭션으로 다른 인물의 동시 수정을 보존한다. 새 분석 Job은 자동부터 시작.
+- `capabilities.outputScopeSelection: true`, **`outputScopeCropping: false`**.
+  현재 설정 저장 단계이며 검색, 미리보기, BVH/FBX 바이트는 바뀌지 않는다.
+  export 쿼리에 범위를 붙이지 않는다. 실제 crop은 별도 converter 계약/버전 작업이다.
+- 흉상/두상 조기 종료 응답에도 인물 메타데이터는 남는다. 후보 없음/검색 미지원은 그대로다.
+
 ### `matchLevel`
 
 `person.confidence`가 **1급 기준**이다. `confidence != high`면 그 인물의 모든 후보가 `matchLevel=low`가 되고,

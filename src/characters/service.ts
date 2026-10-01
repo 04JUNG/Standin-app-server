@@ -154,11 +154,15 @@ export async function currentCapabilities(
   refine: boolean;
   fbxExport: boolean;
   characterSelection: boolean;
+  outputScopeSelection: boolean;
+  outputScopeCropping: boolean;
 }> {
   return {
     refine: config.refineFeatureEnabled,
     fbxExport: converterEnabled(),
     characterSelection: await characterSelectionEnabled(overrides),
+    outputScopeSelection: true,
+    outputScopeCropping: false,
   };
 }
 

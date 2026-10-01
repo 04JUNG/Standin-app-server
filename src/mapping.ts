@@ -1,6 +1,7 @@
 // 계약 번역 = BFF가 소유하는 책임.
 //  - 추론의 원시 distance → 클라 UI 라벨(matchLevel)
 //  - 추론의 {detail} → 클라 오류봉투 {error:{code,...}}
+import { isBodyScope, resolveOutputScope } from "./output-scope/model.js";
 import { config } from "./config.js";
 import { converterEnabled } from "./converter/client.js";
 import type { CutResult, UpstreamPerson } from "./inference.js";
@@ -93,6 +94,11 @@ function mapPerson(p: UpstreamPerson): AnalysisPerson {
   const candidateCount = p.candidates.length;
   return {
     personIndex: p.index,
+    outputScope: resolveOutputScope({
+      detected: isBodyScope(p.output_scope?.detected) ? p.output_scope.detected : null,
+      detectionSource: p.output_scope?.source === "vlm_person" || p.output_scope?.source === "legacy_shot"
+        ? p.output_scope.source : "unknown",
+    }),
     box: p.box,
     tags: p.tags,
     skeleton: p.skeleton
@@ -137,6 +143,8 @@ export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
       refine: config.refineFeatureEnabled,
       fbxExport: converterEnabled(),
       characterSelection: false,
+      outputScopeSelection: true,
+      outputScopeCropping: false,
     },
     // 인물 순서는 추론이 최종 box.x1 기준 왼쪽→오른쪽으로 고정해 보낸다.
     // BFF는 다른 기준으로 다시 정렬하지 않는다(요구서 §3-1).
