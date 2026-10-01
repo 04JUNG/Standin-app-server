@@ -801,3 +801,15 @@ JWT access(짧게) + refresh(회전). 비밀번호는 argon2 해시. `/v1/auth/*
 - **GET /v1/users/me** 🔒 — 현재 유저(`{ id, email, displayName, provider, emailVerified }`). 세션 복원용.
 
 > 저장: 유저·refresh jti·oauth 교환코드·Job은 **PostgreSQL**(BFF 전용·추론 poses.db와 분리)에 영속한다. 접속 정보는 `DATABASE_URL`.
+
+
+### 관측 상체 검색 (2026-10-02)
+
+- `coverageClass=upper_only`: 골반 기준을 쓸 수 없어, 관측된 어깨·팔만으로 검색한 후보.
+  `confidence=low`, `fallbackMode=soft`, `refineAllowed=false`, `refinableLimbs=[]`.
+  거리의 단위가 달라 전신 일치도 임계값으로 승격하지 않는다.
+- 혼합 구도의 두상 인물은 후보 없이 `candidateShortfallReason=HEAD_SEARCH_UNSUPPORTED`.
+  같은 컷의 검색 가능한 인물에는 영향이 없다.
+- 출력 범위 수동 선택은 검색을 재실행하지 않는다. 관측 관절과 출력 설정은 별개다.
+  미리보기/내보내기는 여전히 전신이며 `outputScopeCropping=false`.
+- 구 응답의 누락 필드는 기존 폴백 처리. 실제 부분 검색은 새 분석부터 적용된다.

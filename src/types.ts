@@ -19,7 +19,7 @@ export type FallbackMode = "none" | "soft" | "hard";
 export type PersonConfidence = "high" | "low";
 export type SkeletonState = "valid" | "partial" | "suspect" | "missing" | "invalid";
 export type SkeletonSource = "full_image" | "crop_retry" | "none";
-export type CoverageClass = "full" | "reduced" | "sparse" | "insufficient";
+export type CoverageClass = "full" | "reduced" | "sparse" | "upper_only" | "insufficient";
 
 export interface PoseCandidate {
   id: string; // unique exposed candidate id (pose + view)

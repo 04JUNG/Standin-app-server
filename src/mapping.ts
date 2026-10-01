@@ -59,6 +59,7 @@ const COVERAGE_CLASSES = new Set<CoverageClass>([
   "full",
   "reduced",
   "sparse",
+  "upper_only",
   "insufficient",
 ]);
 
@@ -151,11 +152,13 @@ export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
     candidatesByPerson: (cut.people ?? []).map((p) => {
       const person = mapPerson(p);
       person.candidateShortfallReason =
-        person.candidateCount >= 5
-          ? null
-          : cut.route === "core"
-            ? "UPSTREAM_FEWER_THAN_REQUESTED"
-            : "ANALYSIS_ROUTE_SKIPPED";
+        person.candidateCount === 0 && p.quality_reasons?.includes("head_search_unsupported")
+          ? "HEAD_SEARCH_UNSUPPORTED"
+          : person.candidateCount >= 5
+            ? null
+            : cut.route === "core"
+              ? "UPSTREAM_FEWER_THAN_REQUESTED"
+              : "ANALYSIS_ROUTE_SKIPPED";
       person.candidates = p.candidates.map((c, i): PoseCandidate => ({
         id: `${c.pose_id}::${c.view}`,
         poseId: c.pose_id,
