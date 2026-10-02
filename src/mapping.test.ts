@@ -175,3 +175,18 @@ test("raw scores and quality trace never reach the public result", () => {
   assert.equal(serialized.includes("quality_trace"), false);
   assert.equal(serialized.includes("secret"), false);
 });
+
+test("observed upper-body candidates stay soft while a head in the same cut is unsupported", () => {
+  const result = mapCutResult("partial", cut([
+    { coverage_class: "upper_only", confidence: "low", refine_allowed: false,
+      refinable_limbs: [], candidates: [candidate(0.001)] },
+    { confidence: "low", candidates: [], quality_reasons: ["head_search_unsupported"] },
+  ]));
+  const [upper, head] = result.candidatesByPerson;
+  assert.equal(upper?.coverageClass, "upper_only");
+  assert.equal(upper?.fallbackMode, "soft");
+  assert.equal(upper?.candidates[0]?.matchLevel, "low");
+  assert.equal(upper?.refineAllowed, false);
+  assert.equal(head?.fallbackMode, "hard");
+  assert.equal(head?.candidateShortfallReason, "HEAD_SEARCH_UNSUPPORTED");
+});

@@ -2,6 +2,8 @@
 // ⚠ 클라 `endpoints.ts`의 타입과 단일 소스로 공유하는 것이 목표(드리프트 방지).
 //   나중에 공용 패키지(packages/contract)로 승격 검토.
 
+import type { OutputScope } from "./output-scope/model.js";
+
 export type MatchLevel = "high" | "medium" | "low";
 
 export type AnalysisJobStatus = "queued" | "running" | "completed" | "failed";
@@ -17,7 +19,7 @@ export type FallbackMode = "none" | "soft" | "hard";
 export type PersonConfidence = "high" | "low";
 export type SkeletonState = "valid" | "partial" | "suspect" | "missing" | "invalid";
 export type SkeletonSource = "full_image" | "crop_retry" | "none";
-export type CoverageClass = "full" | "reduced" | "sparse" | "insufficient";
+export type CoverageClass = "full" | "reduced" | "sparse" | "upper_only" | "insufficient";
 
 export interface PoseCandidate {
   id: string; // unique exposed candidate id (pose + view)
@@ -67,6 +69,8 @@ export interface AnalysisResult {
      * 다른 FBX가 저장된다. 기본 체형 말고 고를 것이 없어도 false다.
      */
     characterSelection: boolean;
+    outputScopeSelection?: boolean;
+    outputScopeCropping?: boolean;
   };
 }
 
@@ -74,6 +78,7 @@ export interface AnalysisResult {
 export type ExportFormat = "bvh" | "fbx";
 
 export interface AnalysisPerson {
+  outputScope?: OutputScope;
   personIndex: number;
   box: number[] | null;
   tags: Record<string, string>;
