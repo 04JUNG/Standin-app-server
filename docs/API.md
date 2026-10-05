@@ -768,6 +768,23 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 - 원본 테이블 위의 뷰라서 작업 삭제·동의 철회·365일 정리 때 함께 사라진다.
 - 관절이 없는 인물은 담지 않는다.
 
+### 라이브러리 공백과 VLM 프롬프트 지표
+
+`GET /v1/admin/product?days=7`(1~90) 응답에 두 섹션이 있다. 대시보드 제품 지표 ⑥·⑦이다.
+
+- `library.weeks[]`: 주(월요일 시작, UTC) × 라이브러리 버전 × coverage별 집계.
+  - 인원: `people`, `eligible`
+  - 공백 구간: `weakGap`, `strongGap`, `extractionSuspect`
+  - 비율(%): `gapRate`, `strongGapRate`, `selectionRate`, `irrelevantRate`
+  - `top1Median`
+- 비율의 분모는 `eligible`이다.
+  - 적격 조건: VLM 인물 슬롯, 전체 이미지 추출, valid/partial, full/reduced, 전신 검색, 얽힘 아님, 관절 오류 피드백 없음.
+  - 이 조건은 Standin-server `pose_gaps/eligibility.py`의 운영 조건과 같다.
+- 경계 `library.thresholds`는 `{ weak: 0.25, strong: 0.35, extractionCap: 0.6 }`(pose_gaps와 같음)이다. 0.6을 넘는 거리는 공백이 아니라 추출 실패 의심으로 따로 센다.
+- `vlm.prompts[]`: 프롬프트 버전별 `routes`, `countConfidenceHighRate`, `personTagFillRate`, `personTagSources`. 버전을 저장하기 전의 분석은 `unrecorded`다.
+- 개발 단말(쿼터 면제 설치)은 뺀다.
+- 원본이 365일 뒤 지워져도 버전 사이 비교가 남도록 `daily_library_aggregates`에 ID 없는 일별 집계를 둔다. Top-1 거리는 0.05 구간 히스토그램으로 둔다.
+
 `GET /v1/admin/ops` 응답의 `inferenceLibrary`(`{ version, source, contentSha256 }` 또는 `null`)는 추론 `/healthz`가 알려 준, 지금 떠 있는 포즈 라이브러리다. 대시보드에서는 추론 상태 옆에 뜬다.
 
 ---

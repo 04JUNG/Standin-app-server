@@ -877,6 +877,47 @@ function retryBlock(retry) {
     "건 (" + pct(retry.rerunRate) + ").</p>";
 }
 
+/** ⑥ 라이브러리 버전별 공백. 버전이 바뀐 주에 공백률이 내려가야 포즈를 더한 효과가 있다. */
+function libraryBlock(library) {
+  if (!library) return "";
+  const head = "<h3>⑥ 라이브러리 공백 — 버전별, 주 단위</h3>";
+  if (!library.weeks.length) return head + '<p class="empty">아직 집계할 분석이 없다.</p>';
+  const t = library.thresholds;
+  return head +
+    '<div class="scroll"><table><thead><tr><th>주</th><th>라이브러리</th><th>coverage</th>' +
+    '<th class="num">적격</th><th class="num">공백률</th><th class="num">강한 공백</th>' +
+    '<th class="num">추출 의심</th><th class="num">Top-1 중앙값</th><th class="num">선택률</th>' +
+    '<th class="num">엉뚱함</th></tr></thead><tbody>' +
+    library.weeks.map((row) =>
+      "<tr><td>" + esc(row.week) + "</td><td>" + esc(row.libraryVersion) + "</td><td>" +
+      esc(row.coverageClass) + '</td><td class="num">' + row.eligible + "/" + row.people + "</td>" +
+      '<td class="num">' + pct(row.gapRate) + '</td><td class="num">' + pct(row.strongGapRate) + "</td>" +
+      '<td class="num">' + row.extractionSuspect + '</td><td class="num">' +
+      (row.top1Median === null ? "—" : row.top1Median.toFixed(3)) + "</td>" +
+      '<td class="num">' + pct(row.selectionRate) + '</td><td class="num">' + pct(row.irrelevantRate) + "</td></tr>"
+    ).join("") + "</tbody></table></div>" +
+    '<p class="sub">공백률 = Top-1 거리 ' + t.weak + " 초과 " + t.extractionCap + " 이하인 적격 인물(강한 공백은 " +
+    t.strong + " 초과). " + t.extractionCap + " 초과는 라이브러리보다 관절 추출을 먼저 의심해 따로 센다. " +
+    "적격 = VLM 인물 슬롯 · 전체 이미지 추출 · valid/partial · full/reduced · 전신 검색 · 얽힘 아님 · 관절 오류 피드백 없음.</p>";
+}
+
+/** ⑦ VLM 프롬프트 버전별. 프롬프트를 바꾼 뒤 route·인원수가 흔들리지 않는지 본다. */
+function vlmBlock(vlm) {
+  if (!vlm || !vlm.prompts.length) return "";
+  return "<h3>⑦ VLM 프롬프트 — 버전별</h3>" +
+    '<div class="scroll"><table><thead><tr><th>프롬프트</th><th class="num">Job</th>' +
+    '<th class="num">core / bust / skip</th><th class="num">인원수 일치</th><th class="num">인물</th>' +
+    '<th class="num">인물 태그</th><th class="num">인물별 / 1인 컷</th></tr></thead><tbody>' +
+    vlm.prompts.map((row) =>
+      "<tr><td>" + esc(row.promptVersion) + '</td><td class="num">' + row.jobs + "</td>" +
+      '<td class="num">' + row.routes.core + " / " + row.routes.bust + " / " + row.routes.skip + "</td>" +
+      '<td class="num">' + pct(row.countConfidenceHighRate) + '</td><td class="num">' + row.people + "</td>" +
+      '<td class="num">' + pct(row.personTagFillRate) + '</td><td class="num">' +
+      row.personTagSources.vlmPerson + " / " + row.personTagSources.legacyCut + "</td></tr>"
+    ).join("") + "</tbody></table></div>" +
+    '<p class="sub">unrecorded는 프롬프트 버전을 저장하기 전의 분석이다. 1인 컷은 인물별로 묻지 않은 프롬프트에서 컷 값을 그 인물의 값으로 쓴 경우다.</p>';
+}
+
 function productRender(data) {
   const drop = data.dropoff;
   $("productOut").innerHTML =
@@ -895,6 +936,8 @@ function productRender(data) {
     (drop.feedback.length
       ? " 선택하지 않은 Job의 피드백: " + drop.feedback.map((f) => esc(f.reason) + "(" + f.count + ")").join(", ")
       : " 선택하지 않은 Job에 달린 피드백은 없다.") + "</p>" +
+    libraryBlock(data.library) +
+    vlmBlock(data.vlm) +
     '<details style="margin-top:10px"><summary class="sub">클라이언트 이벤트 대조 — 서버 기록과 어긋나면 계측 유실이다</summary>' +
     '<div class="scroll" style="margin-top:8px"><table><thead><tr><th>이벤트</th><th class="num">건수</th><th class="num">설치</th></tr></thead><tbody>' +
     data.clientStages.map((stage) =>

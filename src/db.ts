@@ -5,6 +5,7 @@
 // 파일 DB를 두면 배포할 때마다 가입한 사용자가 통째로 없어진다.
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import { config } from "./config.js";
+import { GAP_THRESHOLDS } from "./admin/library.js";
 import { deleteExpiredRows } from "./retention.js";
 
 export const pool = new Pool({
@@ -467,6 +468,64 @@ export const SCHEMA = `
 
   CREATE INDEX IF NOT EXISTS export_events_job_person ON export_events (job_id, person_index);
   CREATE INDEX IF NOT EXISTS jobs_created_at ON jobs (created_at);
+
+  /* 라이브러리 버전별 공백 측정(러프 데이터 선순환 P8). /v1/admin/product의 library 섹션과
+     아래 daily_library_aggregates가 함께 읽는다. 인물 1명이 한 행이다.
+     적격 판정은 Standin-server pose_gaps/eligibility.py의 운영 조건과 같다. 관절 수 같은 정량
+     조건은 SQL로 옮기지 않았다. search_scope가 없는 행은 body-scope 이전 분석이라 전신 검색이었다. */
+  CREATE OR REPLACE VIEW library_observations_v1 AS
+  SELECT
+    left(j.created_at, 10) AS day,
+    j.created_at,
+    j.installation_id,
+    COALESCE(top1.pose_library_version, j.inference_metadata_json::jsonb ->> 'poseLibraryVersion',
+             'unknown') AS pose_library_version,
+    COALESCE(ap.coverage_class, 'insufficient') AS coverage_class,
+    top1.distance AS top1_distance,
+    (ap.slot_origin = 'vlm'
+      AND ap.skeleton_source = 'full_image'
+      AND ap.skeleton_state IN ('valid', 'partial')
+      AND ap.coverage_class IN ('full', 'reduced')
+      AND COALESCE(ap.refine_context_json::jsonb -> 'qualityTrace' ->> 'search_scope',
+                   'full_body') = 'full_body'
+      AND COALESCE(ap.tags_json::jsonb ->> 'relationship', '') NOT IN ('hugging', 'fighting')
+      AND COALESCE(jf.reason, '') NOT IN ('skeleton_wrong', 'person_missing')
+      AND top1.distance IS NOT NULL) AS eligible,
+    (cs.job_id IS NOT NULL) AS selected,
+    COALESCE(jf.reason = 'candidates_irrelevant', false) AS irrelevant_feedback
+  FROM analysis_people ap
+  JOIN jobs j ON j.id = ap.job_id
+  LEFT JOIN LATERAL (
+    SELECT ac.distance, ac.pose_library_version
+    FROM analysis_candidates ac
+    WHERE ac.job_id = ap.job_id AND ac.person_index = ap.person_index
+    ORDER BY ac.rank
+    LIMIT 1
+  ) top1 ON true
+  LEFT JOIN confirmed_selections cs
+    ON cs.job_id = ap.job_id AND cs.person_index = ap.person_index
+  LEFT JOIN job_feedback jf ON jf.job_id = ap.job_id
+  WHERE j.status = 'completed' AND j.installation_id IS NOT NULL;
+
+  /* 라이브러리 공백의 일별 집계. ID가 없는 장기 보관용이다 — 원본 행이 365일 뒤 지워져도
+     버전 사이 비교가 남는다. daily_analytics_aggregates처럼 기동마다 원본이 남아 있는 지난
+     날짜를 다시 계산한다. top1_histogram_json은 적격 인물의 Top-1 거리를 0.05 폭 구간
+     ("0"~"20", 20은 1.0 이상)으로 센 것이다. 중앙값은 더할 수 없어서 구간 수를 둔다. */
+  CREATE TABLE IF NOT EXISTS daily_library_aggregates (
+    day                  TEXT NOT NULL,
+    pose_library_version TEXT NOT NULL,
+    coverage_class       TEXT NOT NULL,
+    people               INTEGER NOT NULL,
+    eligible             INTEGER NOT NULL,
+    weak_gap             INTEGER NOT NULL,
+    strong_gap           INTEGER NOT NULL,
+    extraction_suspect   INTEGER NOT NULL,
+    selected             INTEGER NOT NULL,
+    irrelevant_feedback  INTEGER NOT NULL,
+    top1_histogram_json  TEXT NOT NULL,
+    refreshed_at         TEXT NOT NULL,
+    PRIMARY KEY (day, pose_library_version, coverage_class)
+  );
 `;
 
 // 이 앱 전용 advisory lock 키. 다른 서비스와 겹치지 않게 고정값 하나를 쓴다.
@@ -555,6 +614,57 @@ async function refreshAggregatesAndRetention(client: PoolClient): Promise<void> 
       latency_p95_seconds = EXCLUDED.latency_p95_seconds,
       refreshed_at = EXCLUDED.refreshed_at
   `);
+
+  // 라이브러리 공백 일별 집계. 원본을 지우기 전에 남긴다. 개발 단말(쿼터 면제 설치)은 뺀다.
+  await client.query(
+    `INSERT INTO daily_library_aggregates (
+       day, pose_library_version, coverage_class, people, eligible, weak_gap, strong_gap,
+       extraction_suspect, selected, irrelevant_feedback, top1_histogram_json, refreshed_at
+     )
+     WITH obs AS (
+       SELECT day, pose_library_version, coverage_class, eligible, selected, irrelevant_feedback,
+              top1_distance, LEAST(floor(top1_distance / 0.05)::int, 20) AS bucket
+       FROM library_observations_v1
+       WHERE day < current_date::text AND NOT (installation_id = ANY($1::text[]))
+     ),
+     hist AS (
+       SELECT day, pose_library_version, coverage_class, jsonb_object_agg(bucket::text, n) AS histogram
+       FROM (
+         SELECT day, pose_library_version, coverage_class, bucket, count(*)::int AS n
+         FROM obs WHERE eligible GROUP BY 1, 2, 3, 4
+       ) counted
+       GROUP BY 1, 2, 3
+     )
+     SELECT o.day, o.pose_library_version, o.coverage_class,
+       count(*)::int,
+       count(*) FILTER (WHERE o.eligible)::int,
+       count(*) FILTER (WHERE o.eligible AND o.top1_distance > $2 AND o.top1_distance <= $3)::int,
+       count(*) FILTER (WHERE o.eligible AND o.top1_distance > $3 AND o.top1_distance <= $4)::int,
+       count(*) FILTER (WHERE o.eligible AND o.top1_distance > $4)::int,
+       count(*) FILTER (WHERE o.eligible AND o.selected)::int,
+       count(*) FILTER (WHERE o.eligible AND o.irrelevant_feedback)::int,
+       COALESCE(h.histogram, '{}'::jsonb)::text,
+       now()::text
+     FROM obs o
+     LEFT JOIN hist h USING (day, pose_library_version, coverage_class)
+     GROUP BY o.day, o.pose_library_version, o.coverage_class, h.histogram
+     ON CONFLICT (day, pose_library_version, coverage_class) DO UPDATE SET
+       people = EXCLUDED.people,
+       eligible = EXCLUDED.eligible,
+       weak_gap = EXCLUDED.weak_gap,
+       strong_gap = EXCLUDED.strong_gap,
+       extraction_suspect = EXCLUDED.extraction_suspect,
+       selected = EXCLUDED.selected,
+       irrelevant_feedback = EXCLUDED.irrelevant_feedback,
+       top1_histogram_json = EXCLUDED.top1_histogram_json,
+       refreshed_at = EXCLUDED.refreshed_at`,
+    [
+      [...config.quotaExemptInstallations],
+      GAP_THRESHOLDS.weak,
+      GAP_THRESHOLDS.strong,
+      GAP_THRESHOLDS.extractionCap,
+    ],
+  );
 
   // S3 객체 자체는 버킷 lifecycle(90일)과 동의 철회 삭제 스윕이 지운다. 여기서는 대장만 정리한다.
   await deleteExpiredRows(client);
