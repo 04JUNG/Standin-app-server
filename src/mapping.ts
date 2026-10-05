@@ -135,6 +135,9 @@ export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
       poseModelVersion: cut.inference_metadata.pose_model_version,
       poseLibraryVersion: cut.inference_metadata.pose_library_version,
       featureVersion: cut.inference_metadata.feature_version,
+      // 어느 프롬프트가 답했는지. 인물별 태그가 있는 Job과 없는 Job을 나중에 가르려면
+      // 이 값이 있어야 한다(P3 export의 versions.vlm_prompt).
+      vlmPromptVersion: cut.inference_metadata.vlm_prompt_version ?? null,
     },
     notes: cut.notes ?? [],
     // ⚠ 이 값은 **분석 시점**의 배포 상태다. 결과는 그대로 저장돼 나중에 다시 조회되므로
@@ -200,6 +203,75 @@ export interface RefineContext {
   slotOrigin: string | null;
   /** 하체 관측 판정. 추론이 false면 모든 다리 조정을 막는다. */
   lowerBodyObserved: boolean;
+}
+
+/**
+ * 인물별 VLM 태그(P2). 기록 전용이다 — 매칭·라우팅·refine의 입력이 아니다
+ * (Standin-server CLAUDE.md 불변식 1).
+ *
+ * 공개 `/v1` 응답에는 넣지 않는다. 클라이언트가 쓸 일이 없고, 한 번 내보내면 어휘를
+ * 되돌려 받는 구조가 생긴다.
+ */
+export interface PersonTagRecord {
+  personIndex: number;
+  action: string | null;
+  view: string | null;
+  /** `vlm_person` | `legacy_cut` | `unknown`. 추론이 정하는 값이라 여기서 좁히지 않는다. */
+  source: string;
+}
+
+export interface CutSummary {
+  route: string;
+  countConfidence: string;
+  detectorCount: number;
+  vlmCount: number;
+  /** VLM이 실제로 말한 컷 태그. 추론이 기본값으로 채운 값과 구분된다. */
+  vlmTags: {
+    shot: string | null;
+    action: string | null;
+    view: string | null;
+    relationship: string | null;
+  } | null;
+}
+
+/**
+ * 문자열만 받는다. 어휘는 추론 서버(`src/schema.py`)가 단일 소스이므로 여기서 값을
+ * 해석하거나 좁히지 않는다 — 두 곳이 어휘를 알면 추론이 값을 늘릴 때 조용히 어긋난다.
+ */
+function stringOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+export function extractPersonTags(cut: CutResult): PersonTagRecord[] {
+  return (cut.people ?? []).flatMap((p) => {
+    const tags = p.person_tags;
+    if (!tags) return [];
+    const action = stringOrNull(tags.action);
+    const view = stringOrNull(tags.view);
+    const source = stringOrNull(tags.source) ?? "unknown";
+    // 셋 다 비면 적을 것이 없다. 빈 행을 넣으면 "물어봤는데 모른다"와 "묻지 않았다"가
+    // 같아 보인다.
+    if (action === null && view === null && source === "unknown") return [];
+    return [{ personIndex: p.index, action, view, source }];
+  });
+}
+
+export function extractCutSummary(cut: CutResult): CutSummary {
+  const raw = cut.vlm_tags;
+  return {
+    route: cut.route,
+    countConfidence: cut.count_confidence,
+    detectorCount: cut.detector_count,
+    vlmCount: cut.vlm_count,
+    vlmTags: raw
+      ? {
+          shot: stringOrNull(raw.shot),
+          action: stringOrNull(raw.action),
+          view: stringOrNull(raw.view),
+          relationship: stringOrNull(raw.relationship),
+        }
+      : null,
+  };
 }
 
 export function extractRefineContexts(cut: CutResult): RefineContext[] {

@@ -16,7 +16,7 @@ import {
 } from "../limits/policy.js";
 import { refund, tryConsume } from "../limits/store.js";
 import { log } from "../log.js";
-import type { RefineContext } from "../mapping.js";
+import type { CutSummary, PersonTagRecord, RefineContext } from "../mapping.js";
 import { deleteJobs } from "../retention.js";
 import type { AnalysisResult } from "../types.js";
 
@@ -491,14 +491,24 @@ export async function persistAnalysisRecords(
   jobId: string,
   result: AnalysisResult,
   refineContexts: RefineContext[] = [],
+  personTags: PersonTagRecord[] = [],
+  cutSummary: CutSummary | null = null,
 ): Promise<void> {
   const contextByPerson = new Map(refineContexts.map((ctx) => [ctx.personIndex, ctx]));
+  const tagsByPerson = new Map(personTags.map((tags) => [tags.personIndex, tags]));
   await transaction(async (client) => {
     // 분석 중에 동의 철회로 작업이 지워졌으면 결과를 쓰지 않는다. FK가 없어 그대로 INSERT하면
     // 존재하지 않는 job_id의 관절 행이 남고, 어떤 삭제 경로도 그 행을 다시 찾지 못한다.
     // 삭제 쪽(retention.ts::deleteJobs)도 같은 행을 먼저 잠그므로 둘은 차례로만 지나간다.
     const job = await client.query("SELECT 1 FROM jobs WHERE id = $1 FOR UPDATE", [jobId]);
     if (job.rowCount === 0) return;
+    // 컷 요약은 그 확인 뒤에 쓴다. 지워진 작업에 되살리는 UPDATE를 보내지 않는다.
+    if (cutSummary) {
+      await client.query("UPDATE jobs SET cut_summary_json = $2 WHERE id = $1", [
+        jobId,
+        JSON.stringify(cutSummary),
+      ]);
+    }
     await client.query("DELETE FROM analysis_candidates WHERE job_id = $1", [jobId]);
     await client.query("DELETE FROM analysis_people WHERE job_id = $1", [jobId]);
     for (const person of result.candidatesByPerson) {
@@ -509,8 +519,9 @@ export async function persistAnalysisRecords(
            candidate_count, candidate_shortfall_reason,
            skeleton_state, skeleton_source, coverage_class, fallback_mode,
            slot_origin, lower_body_observed,
-           refine_allowed, refinable_limbs_json, refine_context_json, raw_scores_json)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+           refine_allowed, refinable_limbs_json, refine_context_json, raw_scores_json,
+           person_tags_json)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
         [
           jobId,
           person.personIndex,
@@ -539,6 +550,11 @@ export async function persistAnalysisRecords(
               })
             : null,
           ctx?.rawScores ? JSON.stringify(ctx.rawScores) : null,
+          // 인물별 태그가 없는 Job(구 프롬프트·구 추론)은 NULL로 남는다. 컷 값을 베껴
+          // 넣으면 "인물별로 물어본 적 없음"을 나중에 알 수 없다.
+          tagsByPerson.has(person.personIndex)
+            ? JSON.stringify(tagsByPerson.get(person.personIndex))
+            : null,
         ],
       );
       for (const candidate of person.candidates) {

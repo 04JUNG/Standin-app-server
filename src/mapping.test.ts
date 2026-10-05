@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mapCutResult } from "./mapping.js";
+import { extractCutSummary, extractPersonTags, mapCutResult } from "./mapping.js";
 import type { CutResult, UpstreamPerson } from "./inference.js";
 
 const METADATA = {
@@ -189,4 +189,106 @@ test("observed upper-body candidates stay soft while a head in the same cut is u
   assert.equal(upper?.refineAllowed, false);
   assert.equal(head?.fallbackMode, "hard");
   assert.equal(head?.candidateShortfallReason, "HEAD_SEARCH_UNSUPPORTED");
+});
+
+// ── P2 인물별 VLM 태그 ────────────────────────────────────────────────
+
+test("인물별 태그는 사람마다 따로 기록된다", () => {
+  const tags = extractPersonTags(
+    cut([
+      { person_tags: { action: "sitting", view: "side", source: "vlm_person" } },
+      { person_tags: { action: "standing", view: "front", source: "vlm_person" } },
+    ]),
+  );
+  assert.deepEqual(tags, [
+    { personIndex: 0, action: "sitting", view: "side", source: "vlm_person" },
+    { personIndex: 1, action: "standing", view: "front", source: "vlm_person" },
+  ]);
+});
+
+test("태그가 없는 인물은 행을 만들지 않는다", () => {
+  // 구 프롬프트(p1-scope)와 구 추론 응답이 여기 걸린다. 컷 값을 베껴 넣으면
+  // "인물별로 물어본 적 없음"을 나중에 구분할 수 없다.
+  assert.deepEqual(extractPersonTags(cut([{}, {}])), []);
+  assert.deepEqual(extractPersonTags(cut([{ person_tags: {} }])), []);
+  assert.deepEqual(
+    extractPersonTags(cut([{ person_tags: { action: null, view: null, source: "unknown" } }])),
+    [],
+  );
+});
+
+test("한 인물만 태그가 있어도 그 인물만 남는다", () => {
+  const tags = extractPersonTags(
+    cut([{}, { person_tags: { action: "lying", view: null, source: "vlm_person" } }]),
+  );
+  assert.deepEqual(tags, [{ personIndex: 1, action: "lying", view: null, source: "vlm_person" }]);
+});
+
+test("문자열이 아닌 값은 버리고 어휘를 다시 해석하지 않는다", () => {
+  const tags = extractPersonTags(
+    cut([{ person_tags: { action: 3, view: "", source: "vlm_person" } }]),
+  );
+  assert.deepEqual(tags, [{ personIndex: 0, action: null, view: null, source: "vlm_person" }]);
+  // 모르는 어휘라도 추론이 보낸 문자열은 그대로 둔다. 어휘의 단일 소스는 추론이다.
+  const unknown = extractPersonTags(
+    cut([{ person_tags: { action: "crouching", view: "top_down", source: "vlm_person" } }]),
+  );
+  assert.equal(unknown[0]?.action, "crouching");
+  assert.equal(unknown[0]?.view, "top_down");
+});
+
+test("컷 요약은 라우팅 근거와 VLM이 말한 태그를 함께 담는다", () => {
+  const base = cut([{}, {}], "bust");
+  const summary = extractCutSummary({
+    ...base,
+    vlm_count: 3,
+    vlm_tags: { shot: "bust", action: "talking", view: "front", relationship: "talking" },
+  });
+  assert.deepEqual(summary, {
+    route: "bust",
+    countConfidence: "high",
+    detectorCount: 2,
+    vlmCount: 3,
+    vlmTags: { shot: "bust", action: "talking", view: "front", relationship: "talking" },
+  });
+});
+
+test("구 추론 응답은 vlmTags가 null이고 나머지는 그대로다", () => {
+  const summary = extractCutSummary(cut([{}]));
+  assert.equal(summary.vlmTags, null);
+  assert.equal(summary.route, "core");
+  assert.equal(summary.detectorCount, 1);
+});
+
+test("VLM이 말하지 않은 컷 태그는 기본값으로 채우지 않는다", () => {
+  // people[].tags는 추론이 other·front로 좁힌 값이다. 그 둘을 구분하려고 둔 필드다.
+  const base = cut([{}]);
+  const summary = extractCutSummary({ ...base, vlm_tags: { shot: "full_half" } });
+  assert.deepEqual(summary.vlmTags, {
+    shot: "full_half",
+    action: null,
+    view: null,
+    relationship: null,
+  });
+});
+
+test("프롬프트 버전은 메타에 실리고, 없으면 null이다", () => {
+  const withVersion = mapCutResult("job-1", {
+    ...cut([{}]),
+    inference_metadata: { ...METADATA, vlm_prompt_version: "p2-person-tags" },
+  });
+  assert.equal(withVersion.inferenceMetadata.vlmPromptVersion, "p2-person-tags");
+  assert.equal(mapCutResult("job-1", cut([{}])).inferenceMetadata.vlmPromptVersion, null);
+});
+
+test("인물별 태그는 공개 응답에 나가지 않는다", () => {
+  // 매칭·라우팅의 입력이 아니고, 내보내면 클라가 되돌려 보내는 구조가 생긴다.
+  const result = mapCutResult(
+    "job-1",
+    cut([{ person_tags: { action: "sitting", view: "side", source: "vlm_person" } }]),
+  );
+  const serialized = JSON.stringify(result);
+  assert.ok(!serialized.includes("person_tags"));
+  assert.ok(!serialized.includes("personTags"));
+  assert.ok(!serialized.includes("sitting"));
 });

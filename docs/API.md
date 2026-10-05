@@ -281,7 +281,8 @@ fire-and-forget이라 생길 수 있고, 서버가 주기적으로 정리해 무
     "poseBackend": "rtmlib",
     "poseModelVersion": "runtime-default",
     "poseLibraryVersion": "v1",
-    "featureVersion": 1
+    "featureVersion": 1,
+    "vlmPromptVersion": "p2-person-tags"
   },
   "candidatesByPerson": [
     {
@@ -707,6 +708,17 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 ```
 
 `refined`는 `refined_artifacts`를 그대로 싣되 `object_key`·`thumbnail_key`를 서명해 URL로 바꾼 것이다. **`refined: false`인 행도 뺴지 않는다** — 왜 조정하지 않았는지(`reason`)가 조정 결과만큼 중요하다. 그 경우 두 URL은 `null`이다.
+
+### 인물별 VLM 태그는 응답에 없다 (P2)
+
+추론 서버가 `p2-person-tags` 프롬프트로 답하면 인물마다 다른 `action`·`view`가 온다. BFF는 이것을 **저장만 하고 `/v1` 응답에는 넣지 않는다.**
+
+- `analysis_people.person_tags_json` — `{ personIndex, action, view, source }`. 값이 하나도 없으면 행을 만들지 않고 `NULL`로 둔다. 컷 값을 베껴 넣으면 "인물별로 물어본 적 없음"을 나중에 구분할 수 없다.
+- `jobs.cut_summary_json` — `{ route, countConfidence, detectorCount, vlmCount, vlmTags }`. `vlmTags`는 VLM이 **실제로 말한** 컷 태그다. `candidatesByPerson[].tags`는 추론이 `other`·`front`로 좁힌 뒤의 값이라 둘이 다르다.
+- `inferenceMetadata.vlmPromptVersion`은 공개 응답에 **있다**. 어느 프롬프트가 답했는지 모르면 인물별 태그가 있는 Job과 없는 Job을 가를 수 없다. 구 추론 응답은 `null`이다.
+
+이 값들은 매칭·라우팅·refine의 입력이 아니다(Standin-server `CLAUDE.md` 불변식 1). 두 컬럼 모두 기존 작업 삭제·동의 철회 경로가 지우는 행에 들어 있다.
+
 
 ### 관리자용 후보 썸네일
 

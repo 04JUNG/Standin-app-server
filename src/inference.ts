@@ -57,6 +57,13 @@ export interface UpstreamPerson {
   raw_scores?: number[] | null;
   quality_reasons?: string[];
   quality_trace?: Record<string, unknown>;
+  /**
+   * 인물별 VLM 태그(P2). 컷 단위 `tags`와 달리 이 값은 인물마다 다르다.
+   *
+   * 프롬프트가 인물별로 묻지 않은 버전(`p1-scope`)이거나 구 추론 응답이면 없다 →
+   * 기록하지 않는다. 비어 있다고 컷 값을 베껴 넣지 않는다(그러면 P2 이전과 구분이 사라진다).
+   */
+  person_tags?: { action?: unknown; view?: unknown; source?: unknown };
 }
 
 // 추론 /analyze 응답(CutResult) — 필요한 필드만.
@@ -76,7 +83,19 @@ export interface CutResult {
     pose_model_version: string;
     pose_library_version: string;
     feature_version: number;
+    /** 어느 VLM 프롬프트가 답했는지(`p1-scope` | `p2-person-tags`). 구 추론 응답에는 없다. */
+    vlm_prompt_version?: string | null;
   };
+  /**
+   * VLM이 컷에 대해 **실제로 말한** 태그. `people[].tags`와 달리 잘못된 값을 기본값으로
+   * 채우지 않는다 — 추론이 `other`·`front`로 좁힌 값과 VLM이 그렇게 답한 값을 구분한다.
+   */
+  vlm_tags?: {
+    shot?: unknown;
+    action?: unknown;
+    view?: unknown;
+    relationship?: unknown;
+  } | null;
 }
 
 /** 추론 호출이 상한 시간을 넘겼다. 5xx와 구분해 Job 실패 사유로 남긴다. */

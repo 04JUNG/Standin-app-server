@@ -118,6 +118,10 @@ export const SCHEMA = `
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS started_at TEXT;
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS completed_at TEXT;
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS inference_metadata_json TEXT;
+  -- P2 컷 요약(route·인원수·VLM이 실제로 말한 태그). 이 Job이 왜 그렇게 라우팅됐는지를
+  -- 나중에 되짚는 값이라 result_json과 달리 작고 질의하기 좋게 둔다.
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS cut_summary_json TEXT;
+
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS lease_owner TEXT;
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS lease_expires_at TEXT;
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0;
@@ -161,6 +165,10 @@ export const SCHEMA = `
   -- refine v2.5 policy lineage. 추론의 structural_refine_allowed가 slot_origin='vlm'과
   -- skeleton_source='full_image'를 함께 요구하므로, 보내지 않으면 모든 refine이 조용히
   -- skeleton_policy로 떨어진다. 공개 응답에는 나가지 않는 서버측 전용 값이다(BFF-03).
+  -- P2 인물별 VLM 태그. 기록 전용이라 공개 응답에는 나가지 않는다. 컷 단위 tags_json과
+  -- 달리 인물마다 값이 다르고, 프롬프트가 인물별로 묻지 않은 Job은 NULL로 남는다.
+  ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS person_tags_json TEXT;
+
   ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS slot_origin TEXT;
   ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS lower_body_observed BOOLEAN NOT NULL DEFAULT FALSE;
 

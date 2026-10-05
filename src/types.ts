@@ -46,6 +46,8 @@ export interface AnalysisResult {
     poseModelVersion: string;
     poseLibraryVersion: string;
     featureVersion: number;
+    /** 어느 VLM 프롬프트가 답했는지. 구 추론 응답은 null이다. */
+    vlmPromptVersion: string | null;
   };
   candidatesByPerson: AnalysisPerson[];
   notes: string[];

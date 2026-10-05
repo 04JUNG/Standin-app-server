@@ -3,7 +3,7 @@
 //    Phase 3: 큐(BullMQ/Redis 등)로 교체 — 이 함수 시그니처는 유지.
 import { analyze, analysisFailureCode, shouldRefundQuota } from "../inference.js";
 import { errorFields, log } from "../log.js";
-import { extractRefineContexts, mapCutResult } from "../mapping.js";
+import { extractCutSummary, extractPersonTags, extractRefineContexts, mapCutResult } from "../mapping.js";
 import { notify } from "../notify.js";
 import { amendContext } from "../requestContext.js";
 import type { AnalysisResult } from "../types.js";
@@ -52,7 +52,13 @@ export async function runAnalysisJob(
   try {
     const cut = await analyze(file, hint);
     const result = mapCutResult(jobId, cut);
-    await persistAnalysisRecords(jobId, result, extractRefineContexts(cut));
+    await persistAnalysisRecords(
+      jobId,
+      result,
+      extractRefineContexts(cut),
+      extractPersonTags(cut),
+      extractCutSummary(cut),
+    );
     await updateJob(jobId, { status: "completed", result });
     logQualityMetrics(jobId, result);
   } catch (error) {
