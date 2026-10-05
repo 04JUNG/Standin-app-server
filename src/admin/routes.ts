@@ -10,6 +10,7 @@ import { currentUsage } from "../limits/store.js";
 import { errorEnvelope } from "../mapping.js";
 import { getInstallationSummary, listInstallations } from "../installations/store.js";
 import { parseRosterQuery, toRosterPage } from "./installationList.js";
+import { toReviewPeople, type AnalysisPersonRow } from "./reviewDetail.js";
 import { DEFAULT_REVIEWER, matchReviewer, parseReviewers } from "./reviewers.js";
 import { parseWindowDays, toCohorts, toDropoff, toFunnel } from "./product.js";
 import { toColumnHealth, toDistanceBuckets, toStageGaps } from "./instrumentation.js";
@@ -357,21 +358,30 @@ adminRoutes.get("/review/installations/:id/jobs", async (c) => {
 
 adminRoutes.get("/review/jobs/:id", async (c) => {
   const jobId = c.req.param("id");
+  // result_json은 건당 수십~수백 KB라 목록 쿼리에는 넣지 않는다(jobs/store.ts). 여기는
+  // Job 하나라 읽어도 되고, 인물별 출력 범위가 이 안에만 있다.
   const job = await queryOne<{
     id: string;
     status: string;
     created_at: string;
     input_s3_key: string | null;
+    input_width: number | null;
+    input_height: number | null;
     inference_metadata_json: string | null;
+    result_json: string | null;
   }>(
-    `SELECT id, status, created_at, input_s3_key, inference_metadata_json
+    `SELECT id, status, created_at, input_s3_key, input_width, input_height,
+            inference_metadata_json, result_json
      FROM jobs WHERE id = $1 AND installation_id IS NOT NULL`,
     [jobId],
   );
   if (!job) return c.json(errorEnvelope("NOT_FOUND", "unknown jobId", c.get("requestId")), 404);
 
-  const [people, candidates, selections, feedback, refinedRows] = await Promise.all([
-    query("SELECT * FROM analysis_people WHERE job_id = $1 ORDER BY person_index", [jobId]),
+  const [peopleRows, candidates, selections, feedback, refinedRows] = await Promise.all([
+    query<AnalysisPersonRow>(
+      "SELECT * FROM analysis_people WHERE job_id = $1 ORDER BY person_index",
+      [jobId],
+    ),
     query(
       "SELECT * FROM analysis_candidates WHERE job_id = $1 ORDER BY person_index, rank",
       [jobId],
@@ -424,10 +434,15 @@ adminRoutes.get("/review/jobs/:id", async (c) => {
     createdAt: job.created_at,
     inputUrl: job.input_s3_key ? await signedInputUrl(job.input_s3_key) : null,
     inputUrlExpiresInSeconds: job.input_s3_key ? 300 : null,
+    // 관절은 원본 픽셀 좌표다. 화면이 겹쳐 그리려면 그 좌표계의 크기를 알아야 한다.
+    image:
+      job.input_width && job.input_height
+        ? { width: job.input_width, height: job.input_height }
+        : null,
     inferenceMetadata: job.inference_metadata_json
       ? JSON.parse(job.inference_metadata_json)
       : null,
-    people,
+    people: toReviewPeople(peopleRows, job.result_json),
     candidates,
     selections,
     refined,
