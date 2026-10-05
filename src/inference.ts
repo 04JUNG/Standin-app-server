@@ -11,6 +11,7 @@ import { currentContext } from "./requestContext.js";
  * 실패시키는 대신 `mapping.ts`가 low/refine-off 쪽으로 안전하게 해석한다.
  */
 export interface UpstreamPerson {
+  output_scope?: { detected?: unknown; source?: unknown };
   index: number;
   box: number[] | null;
   tags: Record<string, string>;

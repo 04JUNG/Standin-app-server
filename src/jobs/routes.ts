@@ -1,5 +1,7 @@
 // /v1/analysis/jobs — 분석 Job 생성·폴링·결과.
 // 동기 추론을 "제출→폴링" 비동기 계약으로 감싼다(클라 08_API_CONTRACT.md 형태).
+import { createOutputScopeRoutes } from "../output-scope/routes.js";
+import { resolveOutputScope } from "../output-scope/model.js";
 import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
 import { errorEnvelope } from "../mapping.js";
@@ -35,6 +37,7 @@ const RESULT_INPUT_URL_TTL_SECONDS = 900;
 
 // POST /:jobId/people/:personIndex/refine. 같은 prefix라 여기 붙이고 파일만 나눈다.
 jobsRoutes.route("/", refineRoutes);
+jobsRoutes.route("/", createOutputScopeRoutes());
 
 // POST /v1/analysis/jobs — 이미지 업로드 → jobId 즉시 반환(추론은 백그라운드)
 jobsRoutes.post("/", async (c) => {
@@ -208,6 +211,9 @@ jobsRoutes.get("/:id/result", async (c) => {
   // 없어진 기능을 쓰려 든다. 조회 시점 값으로 덮어쓴다.
   return c.json({
     ...job.result,
+    candidatesByPerson: job.result.candidatesByPerson.map((person) => ({
+      ...person, outputScope: resolveOutputScope(person.outputScope),
+    })),
     capabilities: await currentCapabilities(),
     inputUrl,
     inputUrlExpiresInSeconds: inputUrl ? RESULT_INPUT_URL_TTL_SECONDS : null,

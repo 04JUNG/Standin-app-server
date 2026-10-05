@@ -1,3 +1,4 @@
+import { createFramingRoutes } from "../output-scope/framingRoutes.js";
 // /v1/pose-candidates — 선택 후보의 최종 포즈 파일(BVH 또는 V3.2 FBX)을 내려준다.
 import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
@@ -18,6 +19,7 @@ import {
 } from "../converter/client.js";
 
 export const poseRoutes = new Hono<AppEnv>();
+poseRoutes.route("/", createFramingRoutes());
 
 function bytesResponse(bytes: Uint8Array, fileName: string): Response {
   return new Response(bytes, {
