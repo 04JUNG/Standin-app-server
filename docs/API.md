@@ -694,8 +694,17 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 {
   "jobId": "job_...", "status": "completed", "createdAt": "2026-09-04T...",
   "inputUrl": "https://...", "inputUrlExpiresInSeconds": 300,
+  "image": { "width": 900, "height": 1200 },
   "inferenceMetadata": { "solver": "v3.2.5", "poseLibraryVersion": "v2.5" },
-  "people": [{ "person_index": 0, "confidence": "high", "candidate_count": 3 }],
+  "people": [{ "personIndex": 0, "confidence": "high", "candidateCount": 3,
+               "box": [120, 80, 360, 720], "tags": { "action": "standing", "view": "front" },
+               "skeleton": { "schemaVersion": "coco17-v1", "keypoints": [[450, 180]], "scores": [0.91] },
+               "jointScores": { "values": [0.91], "source": "effective" },
+               "skeletonState": "valid", "skeletonSource": "full_image", "coverageClass": "full",
+               "fallbackMode": "none", "slotOrigin": "vlm", "lowerBodyObserved": true,
+               "refineAllowed": true, "refinableLimbs": ["left_arm"],
+               "outputScope": { "selection": "auto", "detected": "full", "detectionSource": "vlm_person",
+                                "resolved": "full", "resolutionSource": "auto" } }],
   "candidates": [{ "person_index": 0, "candidate_id": "...", "pose_id": "...", "rank": 1,
                    "view": "front", "distance": 0.13, "rerank_score": 0.89, "match_level": "exact" }],
   "selections": [{ "person_index": 0, "candidate_id": "...", "rank": 2 }],
@@ -705,6 +714,13 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
   "feedback": "손 위치가 어색해요"
 }
 ```
+
+`people`은 `analysis_people`을 파싱해 내보낸다(2026-10-06부터 camelCase다. 그 전에는 row를 그대로 실어 `skeleton_json`이 문자열이었다). 화면이 쓰지 않는 서버측 전용 컬럼 `refine_context_json`·`raw_scores_json`은 응답에 넣지 않는다 — 전자에는 같은 관절 좌표가 또 들어 있다.
+
+- `skeleton.keypoints`는 **원본 러프의 픽셀 좌표**다. 겹쳐 그리려면 `image`(= `jobs.input_width/height`)가 필요하다. 옛 Job은 두 컬럼이 비어 있어 `image`가 `null`이다.
+- `skeleton.scores`를 그대로 쓰면 안 된다. 추론이 refine을 막은 인물은 그 배열을 0으로 덮어쓴다(Standin-server `pipeline.py::_apply_refine_policy`). `jointScores`가 그 경우 마스킹 전 `raw_scores`로 갈아 끼우고 `source`로 어느 쪽인지 알려 준다(`effective` | `raw` | `none`).
+- `tags`는 **컷 단위** VLM 태그다(shot·action·view·relationship). 같은 컷의 모든 인물이 같은 값을 받는다. 인물마다 갈리는 VLM 신호는 `outputScope`와 `lowerBodyObserved`뿐이다.
+- `outputScope`는 `analysis_people`에 컬럼이 없어 `jobs.result_json`에서 꺼내고, 저장된 파생 필드를 믿지 않고 다시 계산한다.
 
 `refined`는 `refined_artifacts`를 그대로 싣되 `object_key`·`thumbnail_key`를 서명해 URL로 바꾼 것이다. **`refined: false`인 행도 뺴지 않는다** — 왜 조정하지 않았는지(`reason`)가 조정 결과만큼 중요하다. 그 경우 두 URL은 `null`이다.
 

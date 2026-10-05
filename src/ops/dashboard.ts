@@ -7,6 +7,22 @@
 // 토큰은 페이지에 심지 않는다. 주소창의 ?token= 은 로드 직후 history.replaceState로
 // 지우고 sessionStorage에만 남긴다 — 브라우저 히스토리·리퍼러에 토큰이 남지 않게 한다.
 
+import {
+  COCO17_EDGES,
+  COCO17_KEYPOINT_NAMES,
+  JOINT_SCORE_FAINT,
+  PERSON_COLORS,
+} from "./skeleton.js";
+
+// 뼈대 상수는 TypeScript 모듈 하나에만 둔다. 화면용 사본을 따로 적으면 관절 순서가
+// 조용히 어긋나므로, 여기서 JSON으로 심어 브라우저와 테스트가 같은 값을 쓰게 한다.
+const SKELETON_CONSTANTS = String.raw`
+const EDGES = ${JSON.stringify(COCO17_EDGES)};
+const JOINT_NAMES = ${JSON.stringify(COCO17_KEYPOINT_NAMES)};
+const JOINT_FAINT = ${JSON.stringify(JOINT_SCORE_FAINT)};
+const PERSON_COLORS = ${JSON.stringify(PERSON_COLORS)};
+`;
+
 export const DASHBOARD_HTML = String.raw`<!doctype html>
 <html lang="ko">
 <head>
@@ -70,6 +86,26 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
   .cohort.hot { border-color:var(--warn); }
   .cohort .big { font-size:22px; }
   .gap { color:var(--bad); font-weight:600; }
+  .shotWrap { position:relative; max-width:320px; }
+  .shotWrap .shot { max-width:none; width:100%; }
+  .shotWrap .ovl { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+  .shotWrap.solo .ovl { position:static; background:var(--panel); border:1px solid var(--line); border-radius:8px; }
+  .ovl .bone { stroke-linecap:round; fill:none; }
+  .ovl .joint { stroke:#0b0e14; stroke-width:.6; }
+  .ovl .faint { opacity:.35; }
+  .ovl .box { fill:none; stroke-dasharray:6 4; opacity:.7; }
+  .ovl.noBones .bone, .ovl.noJoints .joint, .ovl.noBoxes .box { display:none; }
+  .ovl g.person.off { display:none; }
+  .legend { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin:8px 0 0; }
+  .legend .chip { border:1px solid var(--line); border-radius:999px; padding:2px 10px; font-size:12px; cursor:pointer; background:transparent; color:var(--text); font-weight:500; }
+  .legend .chip.off { opacity:.4; text-decoration:line-through; }
+  .legend .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:5px; }
+  .toggles { display:flex; gap:12px; flex-wrap:wrap; margin-top:6px; }
+  .toggles label { font-size:12px; color:var(--muted); display:inline-flex; gap:4px; align-items:center; cursor:pointer; }
+  .toggles input { min-width:0; }
+  .tagline { display:flex; gap:6px; flex-wrap:wrap; margin:4px 0 8px; }
+  .tag { border:1px solid var(--line); border-radius:6px; padding:2px 8px; font-size:12px; color:var(--muted); }
+  .tag b { color:var(--text); font-weight:600; }
 </style>
 </head>
 <body>
@@ -151,7 +187,7 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
   </main>
 </div>
 
-<script>
+<script>${SKELETON_CONSTANTS}
 const KEY = "standin.adminToken";
 const $ = (id) => document.getElementById(id);
 
@@ -354,22 +390,190 @@ function refineCard(row) {
     "</div>";
 }
 
+function scoreOf(person, index) {
+  const values = (person.jointScores && person.jointScores.values) || [];
+  return index < values.length ? values[index] : null;
+}
+
+/**
+ * 관절 좌표는 원본 러프의 픽셀이다. 원본 크기를 모르는 옛 Job(입력 크기 컬럼이 비어
+ * 있다)은 좌표가 닿는 범위로 캔버스를 잡는다 — 비율이 조금 어긋나도 "뼈대를 못 본다"
+ * 보다는 낫다.
+ */
+function overlayBox(detail) {
+  if (detail.image && detail.image.width > 0 && detail.image.height > 0) {
+    return { width: detail.image.width, height: detail.image.height, exact: true };
+  }
+  let maxX = 0, maxY = 0;
+  (detail.people || []).forEach((person) => {
+    ((person.skeleton && person.skeleton.keypoints) || []).forEach((point) => {
+      maxX = Math.max(maxX, point[0]); maxY = Math.max(maxY, point[1]);
+    });
+    if (person.box) { maxX = Math.max(maxX, person.box[2]); maxY = Math.max(maxY, person.box[3]); }
+  });
+  if (maxX <= 0 || maxY <= 0) return null;
+  return { width: Math.ceil(maxX * 1.04), height: Math.ceil(maxY * 1.04), exact: false };
+}
+
+function personColor(index) { return PERSON_COLORS[index % PERSON_COLORS.length]; }
+
+function overlaySvg(detail) {
+  const box = overlayBox(detail);
+  if (!box) return { svg: "", box: null };
+  const unit = Math.max(box.width, box.height);
+  const bone = Math.max(unit / 260, 1);
+  const dot = Math.max(unit / 190, 1.4);
+  const groups = (detail.people || []).map((person, order) => {
+    const color = personColor(order);
+    const keypoints = (person.skeleton && person.skeleton.keypoints) || [];
+    const parts = [];
+    if (person.box) {
+      parts.push('<rect class="box" x="' + person.box[0] + '" y="' + person.box[1] +
+        '" width="' + (person.box[2] - person.box[0]) + '" height="' + (person.box[3] - person.box[1]) +
+        '" stroke="' + color + '" stroke-width="' + bone + '"></rect>');
+    }
+    EDGES.forEach((edge) => {
+      const a = keypoints[edge.a], b = keypoints[edge.b];
+      if (!a || !b) return;
+      const scoreA = scoreOf(person, edge.a), scoreB = scoreOf(person, edge.b);
+      const weak = Math.min(scoreA === null ? 1 : scoreA, scoreB === null ? 1 : scoreB) < JOINT_FAINT;
+      parts.push('<line class="bone' + (weak ? " faint" : "") + '" x1="' + a[0] + '" y1="' + a[1] +
+        '" x2="' + b[0] + '" y2="' + b[1] + '" stroke="' + color + '" stroke-width="' + bone + '"></line>');
+    });
+    keypoints.forEach((point, index) => {
+      const score = scoreOf(person, index);
+      const name = JOINT_NAMES[index] || ("관절 " + index);
+      parts.push('<circle class="joint' + (score !== null && score < JOINT_FAINT ? " faint" : "") +
+        '" cx="' + point[0] + '" cy="' + point[1] + '" r="' + dot + '" fill="' + color + '">' +
+        "<title>인물 " + person.personIndex + " · " + esc(name) +
+        (score === null ? "" : " · " + score.toFixed(2)) + "</title></circle>");
+    });
+    return parts.length
+      ? '<g class="person" data-person="' + person.personIndex + '">' + parts.join("") + "</g>"
+      : "";
+  }).join("");
+  if (!groups) return { svg: "", box: null };
+  return {
+    svg: '<svg class="ovl" id="detailOvl" viewBox="0 0 ' + box.width + " " + box.height +
+      '" preserveAspectRatio="none">' + groups + "</svg>",
+    box: box,
+  };
+}
+
+function overlayLegend(detail) {
+  const chips = (detail.people || []).filter((person) => person.skeleton || person.box)
+    .map((person, order) =>
+      '<button class="chip" data-person="' + person.personIndex + '">' +
+      '<span class="dot" style="background:' + personColor(order) + '"></span>인물 ' + person.personIndex +
+      "</button>").join("");
+  if (!chips) return "";
+  return '<div class="legend">' + chips + "</div>" +
+    '<div class="toggles">' +
+    '<label><input type="checkbox" id="ovlBones" checked>뼈</label>' +
+    '<label><input type="checkbox" id="ovlJoints" checked>관절</label>' +
+    '<label><input type="checkbox" id="ovlBoxes" checked>박스</label>' +
+    "</div>";
+}
+
+function bindOverlay() {
+  const svg = $("detailOvl");
+  if (!svg) return;
+  const toggle = (id, cls) => {
+    const input = $(id);
+    if (input) input.addEventListener("change", () => svg.classList.toggle(cls, !input.checked));
+  };
+  toggle("ovlBones", "noBones");
+  toggle("ovlJoints", "noJoints");
+  toggle("ovlBoxes", "noBoxes");
+  document.querySelectorAll(".legend .chip").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      const group = svg.querySelector('g.person[data-person="' + chip.dataset.person + '"]');
+      if (!group) return;
+      const off = !group.classList.contains("off");
+      group.classList.toggle("off", off);
+      chip.classList.toggle("off", off);
+    });
+  });
+}
+
+function scoreNote(person) {
+  const source = person.jointScores && person.jointScores.source;
+  if (source === "raw") return "점수는 마스킹 전 원본이다(refine이 막힌 인물은 저장된 점수가 0이다)";
+  if (source === "none") return "점수가 없어 모든 관절을 같은 농도로 그린다";
+  return "";
+}
+
+function personBadges(person) {
+  const state = person.skeletonState;
+  const stateKind = state === "valid" ? "ok" : state === "missing" || state === "invalid" ? "bad" : "warn";
+  const coverage = person.coverageClass;
+  const coverageKind = coverage === "full" ? "ok" : coverage === "insufficient" ? "bad" : "warn";
+  const scope = person.outputScope;
+  return [
+    person.confidence ? pill("신뢰도 " + esc(person.confidence), person.confidence === "high" ? "ok" : "warn") : "",
+    state ? pill("추출 " + esc(state), stateKind) : "",
+    coverage ? pill("범위 " + esc(coverage), coverageKind) : "",
+    person.skeletonSource
+      ? pill(
+          "출처 " + esc(person.skeletonSource),
+          person.skeletonSource === "full_image" ? "ok" : person.skeletonSource === "none" ? "bad" : "warn",
+        )
+      : "",
+    person.fallbackMode && person.fallbackMode !== "none"
+      ? pill("폴백 " + esc(person.fallbackMode), "warn")
+      : "",
+    person.slotOrigin ? pill("슬롯 " + esc(person.slotOrigin), person.slotOrigin === "vlm" ? "ok" : "warn") : "",
+    pill(person.refineAllowed ? "refine 허용" : "refine 불가", person.refineAllowed ? "ok" : "warn"),
+    pill(person.lowerBodyObserved ? "하체 관측" : "하체 미관측", person.lowerBodyObserved ? "ok" : "warn"),
+    scope ? pill("출력범위 " + esc(scope.resolved) + " · " + esc(scope.detectionSource), scope.detected ? "ok" : "warn") : "",
+  ].filter(Boolean).join(" ");
+}
+
+function tagLine(tags) {
+  const keys = Object.keys(tags || {});
+  if (!keys.length) return "";
+  return '<div class="tagline">' +
+    keys.map((key) => '<span class="tag">' + esc(key) + " <b>" + esc(tags[key]) + "</b></span>").join("") +
+    "</div>";
+}
+
+function metadataPills(meta) {
+  if (!meta) return "";
+  const items = [
+    ["VLM", [meta.vlmProvider, meta.vlmModel].filter(Boolean).join(" ")],
+    ["추출", [meta.poseBackend, meta.poseModelVersion].filter(Boolean).join(" ")],
+    ["라이브러리", meta.poseLibraryVersion],
+    ["배포", meta.deploymentVersion],
+    ["피처", meta.featureVersion],
+  ].filter((item) => item[1] !== null && item[1] !== undefined && item[1] !== "");
+  return '<div class="tagline">' +
+    items.map((item) => '<span class="tag">' + esc(item[0]) + " <b>" + esc(item[1]) + "</b></span>").join("") +
+    "</div>";
+}
+
 function detailRender(detail) {
   releaseDetailBlobs();
   const byPerson = groupBy(detail.candidates, "person_index");
   const refinedByPerson = groupBy(detail.refined, "personIndex");
   const chosen = new Map((detail.selections || []).map((s) => [s.person_index, s.candidate_id]));
+  const overlay = overlaySvg(detail);
 
   const people = (detail.people || []).map((person) => {
-    const index = person.person_index;
+    const index = person.personIndex;
     const candidates = byPerson.get(index) || [];
     const refined = refinedByPerson.get(index) || [];
     const selectedId = chosen.get(index);
+    const note = scoreNote(person);
     return "<h3>인물 " + index + " · 후보 " + candidates.length + "개" +
-      (person.confidence ? " · 신뢰도 " + esc(person.confidence) : "") +
       (selectedId ? " · " + pill("선택 있음", "ok") : " · " + pill("선택 없음", "warn")) +
-      (person.candidate_shortfall_reason ? ' <span class="sub">' + esc(person.candidate_shortfall_reason) + "</span>" : "") +
+      (person.candidateShortfallReason ? ' <span class="sub">' + esc(person.candidateShortfallReason) + "</span>" : "") +
       "</h3>" +
+      '<div class="tagline">' + personBadges(person) + "</div>" +
+      tagLine(person.tags) +
+      (person.skeleton
+        ? '<p class="sub">뼈대 ' + esc(person.skeleton.schemaVersion) + " · 관절 " +
+          person.skeleton.keypoints.length + "개" + (note ? " · " + esc(note) : "") + "</p>"
+        : '<p class="sub">뼈대 없음</p>') +
       (candidates.length
         ? '<div class="cands">' + candidates.map((row) => candidateCard(row, selectedId)).join("") + "</div>"
         : '<p class="empty">후보가 없습니다.</p>') +
@@ -378,25 +582,34 @@ function detailRender(detail) {
         : "");
   }).join("");
 
+  const shot = detail.inputUrl
+    ? '<div class="shotWrap"><img class="shot" src="' + esc(detail.inputUrl) + '" alt="">' + overlay.svg + "</div>" +
+      '<p class="sub">서명 URL은 ' + (detail.inputUrlExpiresInSeconds || 300) + "초 뒤 만료된다.</p>"
+    : overlay.svg
+      ? '<div class="shotWrap solo">' + overlay.svg + "</div>" +
+        '<p class="sub">원본은 지워졌고(90일 lifecycle) 뼈대만 남아 있다' +
+        (overlay.box && !overlay.box.exact ? " · 캔버스는 좌표 범위로 추정했다" : "") + ".</p>"
+      : '<p class="empty">원본도 뼈대도 남아 있지 않습니다.</p>';
+
   $("detailOut").innerHTML =
     '<div class="detail">' +
     '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
     '<span class="mono">' + esc(detail.jobId) + "</span>" + jobStatus({ status: detail.status, personCount: (detail.people || []).length }) +
     '<span class="sub">' + when(detail.createdAt) + "</span>" +
     '<button class="ghost" id="detailClose" style="margin-left:auto">닫기</button></div>' +
-    '<div class="side" style="margin-top:12px"><div><h3>원본 러프</h3>' +
-    (detail.inputUrl
-      ? '<img class="shot" src="' + esc(detail.inputUrl) + '" alt=""><p class="sub">서명 URL은 ' + (detail.inputUrlExpiresInSeconds || 300) + "초 뒤 만료된다.</p>"
-      : '<p class="empty">원본이 남아 있지 않습니다(90일 lifecycle).</p>') +
+    '<div class="side" style="margin-top:12px"><div><h3>원본 러프와 뼈대</h3>' + shot + overlayLegend(detail) +
     "</div><div>" +
     (detail.feedback ? "<h3>사용자 피드백</h3><p>" + esc(detail.feedback) + "</p>" : "") +
+    "<h3>추론 메타</h3>" + metadataPills(detail.inferenceMetadata) +
     (detail.inferenceMetadata
-      ? '<h3>추론 메타</h3><details><summary class="sub">펼치기</summary><pre class="mono" style="white-space:pre-wrap">' +
+      ? '<details><summary class="sub">원본 JSON</summary><pre class="mono" style="white-space:pre-wrap">' +
         esc(JSON.stringify(detail.inferenceMetadata, null, 2)) + "</pre></details>"
-      : "") +
+      : '<p class="empty">메타가 없습니다.</p>') +
+    '<p class="sub">VLM 태그(shot·action·view·relationship)는 <b>컷 단위</b>라 같은 컷의 모든 인물이 같은 값을 받는다. 인물마다 갈리는 값은 출력범위와 하체 관측뿐이다.</p>' +
     "</div></div>" + people + "</div>";
 
   $("detailOut").querySelectorAll(".cand img[data-pose]").forEach(fillCandidateThumb);
+  bindOverlay();
   $("detailClose").addEventListener("click", () => {
     releaseDetailBlobs();
     $("detailOut").innerHTML = "";
