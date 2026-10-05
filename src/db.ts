@@ -164,6 +164,18 @@ export const SCHEMA = `
   ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS slot_origin TEXT;
   ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS lower_body_observed BOOLEAN NOT NULL DEFAULT FALSE;
 
+  -- 라이브러리 공백 분석(러프 데이터 선순환)용 인물 신호. 공개 응답에는 나가지 않는다.
+  -- person_tags_json은 추론 person_tags({action, view, source}), output_scope_json은 출력 구도
+  -- ({detected, source}), 아래 넷은 검색 신호다. 이 칸들이 생기기 전 행은 NULL이다.
+  ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS person_tags_json TEXT;
+  ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS output_scope_json TEXT;
+  ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS rank_distance DOUBLE PRECISION;
+  ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS distance_metric TEXT;
+  ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS search_stability TEXT;
+  ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS confidence_threshold DOUBLE PRECISION;
+  -- 컷 단위 요약(route, 개수 신뢰도, 검출기·VLM 인원수, VLM이 실제로 말한 컷 태그).
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS cut_summary_json TEXT;
+
   CREATE TABLE IF NOT EXISTS analysis_candidates (
     job_id               TEXT NOT NULL,
     person_index         INTEGER NOT NULL,
@@ -398,6 +410,63 @@ export const SCHEMA = `
     ON ac.job_id = ap.job_id AND ac.person_index = ap.person_index
   LEFT JOIN job_feedback jf ON jf.job_id = j.id
   WHERE j.installation_id IS NOT NULL;
+
+  /* 라이브러리 공백 분석용 관측. GET /v1/admin/gaps/observations(admin/gapExport.ts)가 읽는다.
+     원본 테이블 위의 뷰라서 작업 삭제·동의 철회·365일 보관 만료와 함께 행이 사라진다.
+     완료된 작업과, 철회·삭제 요청이 없는 설치만 담는다. 열을 바꿀 때는 _v2를 새로 만든다 —
+     CREATE OR REPLACE VIEW는 기존 열의 이름·순서를 바꾸지 못한다. */
+  CREATE OR REPLACE VIEW gap_observations_v1 AS
+  SELECT
+    ap.job_id,
+    ap.person_index,
+    j.installation_id,
+    j.created_at,
+    j.inference_metadata_json,
+    j.cut_summary_json,
+    ap.tags_json,
+    ap.skeleton_json,
+    ap.raw_scores_json,
+    ap.refine_context_json,
+    ap.person_tags_json,
+    ap.output_scope_json,
+    ap.coverage_class,
+    ap.skeleton_state,
+    ap.skeleton_source,
+    ap.slot_origin,
+    ap.lower_body_observed,
+    ap.confidence,
+    ap.fallback_mode,
+    ap.rank_distance,
+    ap.distance_metric,
+    ap.search_stability,
+    ap.confidence_threshold,
+    (SELECT jsonb_agg(jsonb_build_object(
+        'pose_id', ac.pose_id, 'view', ac.view, 'rank', ac.rank, 'distance', ac.distance,
+        'match_level', ac.match_level, 'pose_library_version', ac.pose_library_version)
+        ORDER BY ac.rank)
+       FROM analysis_candidates ac
+      WHERE ac.job_id = ap.job_id AND ac.person_index = ap.person_index AND ac.rank <= 5
+    ) AS candidates,
+    cs.rank AS selected_rank,
+    EXISTS (SELECT 1 FROM export_events ee
+             WHERE ee.job_id = ap.job_id AND ee.person_index = ap.person_index
+               AND ee.status = 'completed') AS exported,
+    (SELECT ra.refined FROM refined_artifacts ra
+      WHERE ra.job_id = ap.job_id AND ra.person_index = ap.person_index
+        AND ra.candidate_id = cs.candidate_id) AS selected_refined,
+    jf.reason AS job_feedback
+  FROM analysis_people ap
+  JOIN jobs j ON j.id = ap.job_id
+  JOIN installations i ON i.id = j.installation_id
+  LEFT JOIN confirmed_selections cs
+    ON cs.job_id = ap.job_id AND cs.person_index = ap.person_index
+  LEFT JOIN job_feedback jf ON jf.job_id = ap.job_id
+  WHERE j.status = 'completed'
+    AND i.revoked_at IS NULL
+    AND i.deletion_requested_at IS NULL;
+
+  CREATE INDEX IF NOT EXISTS export_events_job_person ON export_events (job_id, person_index);
+  CREATE INDEX IF NOT EXISTS jobs_created_at ON jobs (created_at);
 `;
 
 // 이 앱 전용 advisory lock 키. 다른 서비스와 겹치지 않게 고정값 하나를 쓴다.

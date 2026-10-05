@@ -16,7 +16,7 @@ import {
 } from "../limits/policy.js";
 import { refund, tryConsume } from "../limits/store.js";
 import { log } from "../log.js";
-import type { RefineContext } from "../mapping.js";
+import type { CutSummary, PersonSignals, RefineContext } from "../mapping.js";
 import { deleteJobs } from "../retention.js";
 import type { AnalysisResult } from "../types.js";
 
@@ -491,8 +491,11 @@ export async function persistAnalysisRecords(
   jobId: string,
   result: AnalysisResult,
   refineContexts: RefineContext[] = [],
+  signals: PersonSignals[] = [],
+  cutSummary: CutSummary | null = null,
 ): Promise<void> {
   const contextByPerson = new Map(refineContexts.map((ctx) => [ctx.personIndex, ctx]));
+  const signalsByPerson = new Map(signals.map((signal) => [signal.personIndex, signal]));
   await transaction(async (client) => {
     // 분석 중에 동의 철회로 작업이 지워졌으면 결과를 쓰지 않는다. FK가 없어 그대로 INSERT하면
     // 존재하지 않는 job_id의 관절 행이 남고, 어떤 삭제 경로도 그 행을 다시 찾지 못한다.
@@ -503,14 +506,18 @@ export async function persistAnalysisRecords(
     await client.query("DELETE FROM analysis_people WHERE job_id = $1", [jobId]);
     for (const person of result.candidatesByPerson) {
       const ctx = contextByPerson.get(person.personIndex);
+      const signal = signalsByPerson.get(person.personIndex);
       await client.query(
         `INSERT INTO analysis_people
           (job_id, person_index, bbox_json, tags_json, skeleton_json, confidence,
            candidate_count, candidate_shortfall_reason,
            skeleton_state, skeleton_source, coverage_class, fallback_mode,
            slot_origin, lower_body_observed,
-           refine_allowed, refinable_limbs_json, refine_context_json, raw_scores_json)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+           refine_allowed, refinable_limbs_json, refine_context_json, raw_scores_json,
+           person_tags_json, output_scope_json, rank_distance, distance_metric,
+           search_stability, confidence_threshold)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
+                 $19,$20,$21,$22,$23,$24)`,
         [
           jobId,
           person.personIndex,
@@ -539,6 +546,13 @@ export async function persistAnalysisRecords(
               })
             : null,
           ctx?.rawScores ? JSON.stringify(ctx.rawScores) : null,
+          // 공백 분석용 신호(mapping.ts::extractPersonSignals). 공개 응답에는 없다.
+          signal ? JSON.stringify(signal.personTags) : null,
+          signal ? JSON.stringify(signal.outputScope) : null,
+          signal?.rankDistance ?? null,
+          signal?.distanceMetric ?? null,
+          signal?.searchStability ?? null,
+          signal?.confidenceThreshold ?? null,
         ],
       );
       for (const candidate of person.candidates) {
@@ -566,13 +580,14 @@ export async function persistAnalysisRecords(
     await client.query(
       `UPDATE jobs
        SET inference_metadata_json = $2, input_width = COALESCE(input_width, $3),
-           input_height = COALESCE(input_height, $4)
+           input_height = COALESCE(input_height, $4), cut_summary_json = $5
        WHERE id = $1`,
       [
         jobId,
         JSON.stringify(result.inferenceMetadata),
         result.image.width,
         result.image.height,
+        cutSummary ? JSON.stringify(cutSummary) : null,
       ],
     );
   });

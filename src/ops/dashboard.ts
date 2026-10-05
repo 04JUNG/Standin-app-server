@@ -239,7 +239,8 @@ function table(rows, head) {
 function render(data) {
   const bff = data.bff.hour, inference = data.inference.hour;
   const errorRate = bff.requests ? (bff.errors5xx / bff.requests) * 100 : 0;
-  $("inference").innerHTML = data.inferenceHealthy ? pill("추론 정상", "ok") : pill("추론 응답 없음", "bad");
+  $("inference").innerHTML = (data.inferenceHealthy ? pill("추론 정상", "ok") : pill("추론 응답 없음", "bad"))
+    + (data.inferenceLibrary ? " " + pill("라이브러리 " + esc(data.inferenceLibrary.version), "ok") : "");
   $("analysis").innerHTML = data.analysisEnabled ? pill("분석 켜짐", "ok") : pill("분석 중단됨", "warn");
   $("tasks").textContent = "태스크 BFF " + (data.tasks.bff || 0) + " · 추론 " + (data.tasks.inference || 0);
   $("updated").textContent = new Date(data.now).toLocaleTimeString("ko-KR");

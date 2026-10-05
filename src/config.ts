@@ -125,6 +125,14 @@ export const config = {
    * 설정 화면에 그대로 표시되므로 그 값을 넣는다. 인증(기기 토큰)을 통과한 뒤에만 적용된다.
    */
   quotaExemptInstallations: parseExemptList(env("QUOTA_EXEMPT_INSTALLATIONS")),
+  /**
+   * 라이브러리 공백 분석용 비식별 export(`GET /v1/admin/gaps/observations`).
+   * 키는 커서 암호화와 export별 가명 salt 유도에 쓴다. 비어 있으면 그 엔드포인트만 503이다.
+   * 인프라 시크릿 `standin/<env>/gap-export`의 `hmacKey`·`reviewers`가 주입된다.
+   */
+  gapExportHmacKey: env("GAP_EXPORT_HMAC_KEY"),
+  /** export를 받을 검토자 이름(콤마 구분, BETA_REVIEW_ADMIN_TOKEN JSON의 키). 비면 아무도 못 받는다. */
+  gapExportReviewers: parseExemptList(env("GAP_EXPORT_REVIEWERS")),
   // 설치별 동시 분석. 중복 클릭·폭주 방지가 목적이라 1이면 충분하다.
   quotaInstallationConcurrent: Number(process.env.QUOTA_INSTALLATION_CONCURRENT ?? 1),
   /**

@@ -35,7 +35,22 @@ import {
 } from "./productStore.js";
 import { isInstallationId, parseHistoryQuery, toHistoryPage } from "../jobs/history.js";
 import { listJobHistory } from "../jobs/store.js";
-import { getPoseThumbnail, health } from "../inference.js";
+import { getPoseThumbnail, inferenceStatus } from "../inference.js";
+import { notify } from "../notify.js";
+import {
+  GAP_EXPORT_PAGE_SIZE,
+  GAP_EXPORT_SCHEMA_VERSION,
+  RETENTION_HINT,
+  decodeCursor,
+  encodeCursor,
+  exportSalt,
+  parseExportDays,
+  privacyProblems,
+  startExport,
+  toObservation,
+  windowStart,
+} from "./gapExport.js";
+import { listGapObservations } from "./gapExportStore.js";
 import { DASHBOARD_HTML } from "../ops/dashboard.js";
 import {
   activeTasks,
@@ -124,7 +139,7 @@ adminRoutes.get("/ops", async (c) => {
   const [
     bffMinutes, bffHours, bffTotals,
     inferenceTotals, errors, routes, tasks,
-    flag, quotaUsed, inferenceHealthy, jobs,
+    flag, quotaUsed, inference, jobs,
   ] = await Promise.all([
     minuteSeries(hourAgo, "bff"),
     hourSeries(dayAgo, "bff"),
@@ -135,7 +150,7 @@ adminRoutes.get("/ops", async (c) => {
     activeTasks(hourAgo),
     getAnalysisFlag(),
     currentUsage("global_day", "all", day),
-    health(),
+    inferenceStatus(),
     query<{ status: string; count: string }>(
       `SELECT status, count(*)::text AS count FROM jobs
        WHERE created_at >= $1 GROUP BY status ORDER BY count(*) DESC`,
@@ -148,7 +163,9 @@ adminRoutes.get("/ops", async (c) => {
     // 화면에 누구로 보고 있는지 띄운다. 토큰을 나눠 쓰던 습관이 남아 있으면
     // "내 이름으로 열람 기록이 남는다"는 사실이 눈에 보여야 한다.
     reviewer: c.get("reviewer") ?? DEFAULT_REVIEWER,
-    inferenceHealthy,
+    inferenceHealthy: inference.healthy,
+    // 추론이 떠 있는 포즈 라이브러리(manifest 버전). 옛 추론 서버면 null.
+    inferenceLibrary: inference.library,
     analysisEnabled: flag.enabled,
     analysisReason: flag.reason,
     tasks,
@@ -477,4 +494,108 @@ adminRoutes.get("/review/pose-candidates/:id/thumbnail", async (c) => {
   if (etag) headers["ETag"] = etag;
   if (upstream.status === 304) return new Response(null, { status: 304, headers });
   return new Response(upstream.body, { status: upstream.status, headers });
+});
+
+/**
+ * GET /v1/admin/gaps/observations?days=90&cursor=… — 라이브러리 공백 분석용 비식별 관측.
+ *
+ * 받는 쪽은 Standin-server `pose_gaps pull`이다(계약: 그 저장소 docs/POSE_GAP_LOOP.md).
+ * 관리자 토큰에 더해 `GAP_EXPORT_REVIEWERS`에 든 검토자만 받는다. 한 번에 모든 사용자의
+ * 관측을 가져가는 경로라서, 한 건씩 여는 검토 화면보다 좁게 연다.
+ * 페이지마다 감사 기록을 남기고, 첫 페이지에서는 운영 채널에 알린다.
+ */
+adminRoutes.get("/gaps/observations", async (c) => {
+  const requestId = c.get("requestId");
+  const key = config.gapExportHmacKey;
+  if (!key) {
+    return c.json(
+      errorEnvelope("GAP_EXPORT_DISABLED", "공백 관측 export가 설정되지 않았습니다.", requestId),
+      503,
+    );
+  }
+  const reviewer = c.get("reviewer") ?? DEFAULT_REVIEWER;
+  if (!config.gapExportReviewers.has(reviewer)) {
+    return c.json(
+      errorEnvelope("FORBIDDEN", "공백 관측 export 권한이 없습니다.", requestId),
+      403,
+    );
+  }
+
+  const now = Date.now();
+  const cursor = c.req.query("cursor");
+  let state;
+  if (cursor) {
+    state = decodeCursor(key, cursor, now);
+    if (!state) {
+      return c.json(
+        errorEnvelope("INVALID_CURSOR", "커서가 잘못됐거나 만료됐습니다. 처음부터 다시 받으세요.", requestId),
+        400,
+      );
+    }
+  } else {
+    const days = parseExportDays(c.req.query("days"));
+    if (days === null) {
+      return c.json(
+        errorEnvelope("INVALID_INPUT", "days는 1~365 정수여야 합니다.", requestId),
+        400,
+      );
+    }
+    state = startExport(now, days);
+  }
+
+  const rows = await listGapObservations({
+    since: windowStart(state),
+    until: state.generatedAt,
+    after: state.after,
+    // 개발자 단말(쿼터 면제 설치)의 시험 분석은 사용자 공백이 아니다.
+    excludeInstallations: [...config.quotaExemptInstallations],
+    limit: GAP_EXPORT_PAGE_SIZE,
+  });
+  const salt = exportSalt(key, state.exportId);
+  const items = rows
+    .map((row) => toObservation(row, salt))
+    .filter((item): item is Record<string, unknown> => item !== null);
+  const last = rows.at(-1);
+  const nextCursor =
+    rows.length === GAP_EXPORT_PAGE_SIZE && last
+      ? encodeCursor(key, {
+          ...state,
+          after: { createdAt: last.created_at, jobId: last.job_id, personIndex: last.person_index },
+        })
+      : null;
+  const page = {
+    schemaVersion: GAP_EXPORT_SCHEMA_VERSION,
+    exportId: state.exportId,
+    window: { days: state.days },
+    generatedAt: state.generatedAt,
+    retention: RETENTION_HINT,
+    items,
+    nextCursor,
+  };
+
+  // 받는 쪽도 같은 검사를 하지만, 걸리면 이미 내보낸 뒤다. 나가기 전에 막는다.
+  const problems = privacyProblems(items);
+  if (problems.length > 0) {
+    notify({
+      severity: "P2",
+      code: "GAP_EXPORT_PRIVACY",
+      message: "공백 관측 export에 원본 ID 모양 값이 섞여 페이지를 막았습니다.",
+      context: { problems: problems.slice(0, 5) },
+    });
+    return c.json(
+      errorEnvelope("GAP_EXPORT_PRIVACY", "export 항목이 비식별 검사를 통과하지 못했습니다.", requestId),
+      500,
+    );
+  }
+
+  await audit(c, cursor ? "gap_export_page" : "gap_export_start");
+  if (!cursor) {
+    notify({
+      severity: "P3",
+      code: "GAP_EXPORT_STARTED",
+      message: "공백 관측 export를 시작했습니다.",
+      context: { reviewer, days: state.days },
+    });
+  }
+  return c.json(page);
 });
