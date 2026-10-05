@@ -5,6 +5,7 @@
 // 파일 DB를 두면 배포할 때마다 가입한 사용자가 통째로 없어진다.
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import { config } from "./config.js";
+import { deleteExpiredRows } from "./retention.js";
 
 export const pool = new Pool({
   // undefined면 pg가 표준 PG* 환경변수를 읽는다(config.usePgEnvVars 주석 참고).
@@ -53,7 +54,7 @@ export async function transaction<T>(fn: (client: PoolClient) => Promise<T>): Pr
   }
 }
 
-const SCHEMA = `
+export const SCHEMA = `
   CREATE TABLE IF NOT EXISTS installations (
     id                    TEXT PRIMARY KEY,
     token_hash            TEXT NOT NULL,
@@ -486,23 +487,8 @@ async function refreshAggregatesAndRetention(client: PoolClient): Promise<void> 
       refreshed_at = EXCLUDED.refreshed_at
   `);
 
-  const oldJobs = `SELECT id FROM jobs WHERE installation_id IS NOT NULL
-    AND created_at::timestamptz < now() - interval '365 days'`;
-  await client.query(`DELETE FROM export_events WHERE job_id IN (${oldJobs})`);
-  await client.query(`DELETE FROM job_feedback WHERE job_id IN (${oldJobs})`);
-  await client.query(`DELETE FROM confirmed_selections WHERE job_id IN (${oldJobs})`);
-  await client.query("DELETE FROM analytics_events WHERE occurred_at::timestamptz < now() - interval '365 days'");
-  await client.query(`DELETE FROM admin_access_audit WHERE job_id IN (${oldJobs})`);
-  // job_id가 빈 감사 행(kill switch 토글, 설치 단위 열람)은 위 삭제에 딸려 가지 않아
-  // 그대로 쌓인다. 대상이 없는 행은 시간으로 자른다.
-  await client.query(
-    "DELETE FROM admin_access_audit WHERE job_id IS NULL AND occurred_at::timestamptz < now() - interval '365 days'",
-  );
   // S3 객체 자체는 버킷 lifecycle(90일)과 동의 철회 삭제 스윕이 지운다. 여기서는 대장만 정리한다.
-  await client.query(`DELETE FROM refined_artifacts WHERE job_id IN (${oldJobs})`);
-  await client.query(`DELETE FROM analysis_candidates WHERE job_id IN (${oldJobs})`);
-  await client.query(`DELETE FROM analysis_people WHERE job_id IN (${oldJobs})`);
-  await client.query(`DELETE FROM jobs WHERE id IN (${oldJobs})`);
+  await deleteExpiredRows(client);
 }
 
 export async function runDataMaintenance(): Promise<void> {

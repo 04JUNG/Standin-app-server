@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import type { PoolClient } from "pg";
 import { execute, query, queryOne, transaction } from "../db.js";
+import { deleteInstallationData } from "../retention.js";
 import type { RosterQuery, RosterRow } from "../admin/installationList.js";
 
 export interface InstallationMetadata {
@@ -69,38 +69,6 @@ export async function authenticateInstallation(
     new Date().toISOString(),
   ]);
   return { id: row.id, consentVersion: row.consent_version };
-}
-
-async function deleteRows(client: PoolClient, installationId: string): Promise<void> {
-  await client.query(
-    "DELETE FROM export_events WHERE installation_id = $1",
-    [installationId],
-  );
-  await client.query(
-    "DELETE FROM job_feedback WHERE installation_id = $1",
-    [installationId],
-  );
-  await client.query(
-    "DELETE FROM confirmed_selections WHERE installation_id = $1",
-    [installationId],
-  );
-  await client.query(
-    "DELETE FROM analytics_events WHERE installation_id = $1",
-    [installationId],
-  );
-  await client.query(
-    "DELETE FROM admin_access_audit WHERE job_id IN (SELECT id FROM jobs WHERE installation_id = $1)",
-    [installationId],
-  );
-  await client.query(
-    "DELETE FROM analysis_candidates WHERE job_id IN (SELECT id FROM jobs WHERE installation_id = $1)",
-    [installationId],
-  );
-  await client.query(
-    "DELETE FROM analysis_people WHERE job_id IN (SELECT id FROM jobs WHERE installation_id = $1)",
-    [installationId],
-  );
-  await client.query("DELETE FROM jobs WHERE installation_id = $1", [installationId]);
 }
 
 /**
@@ -195,7 +163,7 @@ export async function getInstallationSummary(
 
 export async function revokeAndDeleteInstallationData(installationId: string): Promise<void> {
   await transaction(async (client) => {
-    await deleteRows(client, installationId);
+    await deleteInstallationData(client, installationId);
     // Removing the installation row invalidates the token and erases the final link.
     await client.query("DELETE FROM installations WHERE id = $1", [installationId]);
   });
