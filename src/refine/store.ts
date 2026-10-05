@@ -1,5 +1,5 @@
 // refine 관련 저장소 접근. 공개 AnalysisResult와 내부 refine context를 분리해 둔다(BFF-04).
-import { execute, queryOne } from "../db.js";
+import { queryOne, transaction } from "../db.js";
 
 /** `/analyze` 때 서버측에 보관해 둔 refine 입력과 안전정책. */
 export interface StoredRefineContext {
@@ -169,26 +169,33 @@ export async function findRefinedArtifact(
  *   남기면 export가 조정본을 찾다가 매번 베이스로 떨어지면서 지표만 틀어진다(BFF-06).
  */
 export async function saveRefinedArtifact(artifact: RefinedArtifact): Promise<void> {
-  await execute(
-    `INSERT INTO refined_artifacts
-      (job_id, person_index, candidate_id, pose_id, refined, reason, object_key,
-       thumbnail_key, limbs_json, created_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-     ON CONFLICT (job_id, person_index, candidate_id) DO UPDATE SET
-       pose_id = EXCLUDED.pose_id, refined = EXCLUDED.refined, reason = EXCLUDED.reason,
-       object_key = EXCLUDED.object_key, thumbnail_key = EXCLUDED.thumbnail_key,
-       limbs_json = EXCLUDED.limbs_json`,
-    [
-      artifact.jobId,
-      artifact.personIndex,
-      artifact.candidateId,
-      artifact.poseId,
-      artifact.refined,
-      artifact.reason,
-      artifact.objectKey,
-      artifact.thumbnailKey,
-      JSON.stringify(artifact.limbs),
-      new Date().toISOString(),
-    ],
-  );
+  await transaction(async (client) => {
+    // 조정하는 동안 작업 삭제나 동의 철회로 작업이 지워졌으면 대장을 남기지 않는다. 남기면 설치·작업
+    // ID가 든 object_key가 어떤 삭제 경로에도 걸리지 않는다. 이미 올린 S3 객체는 버킷 lifecycle(90일)이
+    // 지운다. 삭제 쪽(retention.ts::deleteJobs)이 같은 행을 FOR UPDATE로 먼저 잠근다.
+    const job = await client.query("SELECT 1 FROM jobs WHERE id = $1 FOR SHARE", [artifact.jobId]);
+    if (job.rowCount === 0) return;
+    await client.query(
+      `INSERT INTO refined_artifacts
+        (job_id, person_index, candidate_id, pose_id, refined, reason, object_key,
+         thumbnail_key, limbs_json, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       ON CONFLICT (job_id, person_index, candidate_id) DO UPDATE SET
+         pose_id = EXCLUDED.pose_id, refined = EXCLUDED.refined, reason = EXCLUDED.reason,
+         object_key = EXCLUDED.object_key, thumbnail_key = EXCLUDED.thumbnail_key,
+         limbs_json = EXCLUDED.limbs_json`,
+      [
+        artifact.jobId,
+        artifact.personIndex,
+        artifact.candidateId,
+        artifact.poseId,
+        artifact.refined,
+        artifact.reason,
+        artifact.objectKey,
+        artifact.thumbnailKey,
+        JSON.stringify(artifact.limbs),
+        new Date().toISOString(),
+      ],
+    );
+  });
 }

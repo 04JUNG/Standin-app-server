@@ -24,7 +24,7 @@ X-Device-Token: ...
 
 발급은 공개 엔드포인트라 **IP 단위 속도 제한**이 걸린다(기본 1시간 5회). 초과하면 `429 RATE_LIMITED`가 나가므로, 클라는 발급을 재시도 루프로 돌리지 말고 받은 자격증명을 안전 저장소에 보관해 재사용한다.
 
-`DELETE /v1/installations/current/data`는 전용 S3 prefix, 작업·파생 데이터·이벤트·선택·피드백과 설치 레코드를 삭제한다. 응답은 `{ "deleted": true, "backupExpiryDays": 7 }`이다.
+`DELETE /v1/installations/current/data`는 전용 S3 prefix, 작업·파생 데이터(조정본 대장 포함)·이벤트·선택·피드백, 이 설치를 연 관리자 열람 기록, 주간 쿼터 카운터와 설치 레코드를 삭제한다. 진행 중인 작업도 지운다. 워커가 결과를 쓰는 중이면 그 쓰기가 끝난 뒤 지우고, 이미 지운 작업에는 결과를 쓰지 않는다. 지우는 테이블 목록은 `src/retention.ts` 하나이며 작업 삭제·365일 보관 만료도 같은 목록을 쓴다. 응답은 `{ "deleted": true, "backupExpiryDays": 7 }`이다.
 
 ---
 
@@ -197,14 +197,14 @@ Retry-After: 41230
 ## DELETE /v1/analysis/jobs/{jobId} 🔒
 
 기록에서 작업 하나를 지운다. Job 행과 파생 데이터(인물·후보·확정 선택·피드백·내보내기
-기록·분석 이벤트·조정본 대장), 그리고 S3의 입력 원본과 조정본을 모두 지운다.
+기록·분석 이벤트·조정본 대장·관리자 열람 기록), 그리고 S3의 입력 원본과 조정본을 모두 지운다.
 
 ```json
 { "deleted": true }
 ```
 
-- 진행 중(`queued`/`running`)이면 `409 JOB_IN_PROGRESS`. 삭제를 허용하면 워커가 남긴
-  인물·후보 행이 회수 불가능한 고아가 되고, 설치별 동시 분석 한도가 무의미해진다.
+- 진행 중(`queued`/`running`)이면 `409 JOB_IN_PROGRESS`. 삭제로 슬롯이 바로 비면 설치별 동시
+  분석 한도가 무의미해진다.
 - 남의 Job이거나 없는 Job이면 `404 NOT_FOUND`.
 - DB를 먼저 커밋하고 S3 삭제는 best-effort다. S3가 실패해도 응답은 성공이며, 남는 것은
   lifecycle 90일이 어차피 지우는 고아 객체뿐이다.

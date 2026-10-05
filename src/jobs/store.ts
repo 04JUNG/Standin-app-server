@@ -17,6 +17,7 @@ import {
 import { refund, tryConsume } from "../limits/store.js";
 import { log } from "../log.js";
 import type { RefineContext } from "../mapping.js";
+import { deleteJobs } from "../retention.js";
 import type { AnalysisResult } from "../types.js";
 
 export type JobStatus = "queued" | "running" | "completed" | "failed";
@@ -338,17 +339,14 @@ export type DeleteJobOutcome =
 /**
  * 작업 기록에서 Job 하나를 지운다. S3 객체는 호출부가 이어서 지운다.
  *
- * **진행 중(queued/running)이면 거절한다.** 두 가지가 실제로 깨지기 때문이다.
- *
- * 1. persistAnalysisRecords는 analysis_people·analysis_candidates를 FK 없이 INSERT한다.
- *    지운 뒤 워커가 완료하면 존재하지 않는 job_id의 행이 남고, 보존 정리 쿼리는
- *    `job_id IN (SELECT id FROM jobs ...)` 형태라 그 행은 영구히 회수되지 않는다.
- * 2. createJobWithLimits의 동시 분석 카운트가 status IN ('queued','running') 행 수다.
- *    삭제로 슬롯이 즉시 비면 워커가 도는 중에 새 분석이 시작돼 한도가 무의미해진다.
+ * **진행 중(queued/running)이면 거절한다.** createJobWithLimits의 동시 분석 카운트가
+ * status IN ('queued','running') 행 수라서, 삭제로 슬롯이 즉시 비면 워커가 도는 중에 새 분석이
+ * 시작돼 한도가 무의미해진다. 워커가 지워진 작업에 결과를 쓰는 일은 persistAnalysisRecords가
+ * 작업 행을 잠그고 확인해서 막는다. 동의 철회는 진행 중인 작업도 지우기 때문에 그 확인이 따로 있다.
  *
  * 유실된 Job은 failStaleJobs()가 failed로 닫으므로 사용자가 영구히 막히지는 않는다.
  *
- * 삭제 순서는 installations/store.ts의 deleteRows 규약을 그대로 따른다.
+ * 지울 테이블 목록은 retention.ts가 정한다. 동의 철회·보관 만료와 같은 목록이다.
  */
 export async function deleteOwnedJob(
   id: string,
@@ -366,17 +364,7 @@ export async function deleteOwnedJob(
       return { ok: false, reason: "in_progress" };
     }
 
-    await client.query("DELETE FROM export_events WHERE job_id = $1", [id]);
-    await client.query("DELETE FROM job_feedback WHERE job_id = $1", [id]);
-    await client.query("DELETE FROM confirmed_selections WHERE job_id = $1", [id]);
-    await client.query("DELETE FROM analytics_events WHERE job_id = $1", [id]);
-    await client.query("DELETE FROM admin_access_audit WHERE job_id = $1", [id]);
-    await client.query("DELETE FROM refined_artifacts WHERE job_id = $1", [id]);
-    await client.query("DELETE FROM analysis_candidates WHERE job_id = $1", [id]);
-    await client.query("DELETE FROM analysis_people WHERE job_id = $1", [id]);
-    // job_outbox는 jobs(id) ON DELETE CASCADE로 함께 지워진다.
-    await client.query("DELETE FROM jobs WHERE id = $1", [id]);
-
+    await deleteJobs(client, { ids: "$1", params: [id] });
     return { ok: true, inputS3Key: job.input_s3_key };
   });
 }
@@ -506,6 +494,11 @@ export async function persistAnalysisRecords(
 ): Promise<void> {
   const contextByPerson = new Map(refineContexts.map((ctx) => [ctx.personIndex, ctx]));
   await transaction(async (client) => {
+    // 분석 중에 동의 철회로 작업이 지워졌으면 결과를 쓰지 않는다. FK가 없어 그대로 INSERT하면
+    // 존재하지 않는 job_id의 관절 행이 남고, 어떤 삭제 경로도 그 행을 다시 찾지 못한다.
+    // 삭제 쪽(retention.ts::deleteJobs)도 같은 행을 먼저 잠그므로 둘은 차례로만 지나간다.
+    const job = await client.query("SELECT 1 FROM jobs WHERE id = $1 FOR UPDATE", [jobId]);
+    if (job.rowCount === 0) return;
     await client.query("DELETE FROM analysis_candidates WHERE job_id = $1", [jobId]);
     await client.query("DELETE FROM analysis_people WHERE job_id = $1", [jobId]);
     for (const person of result.candidatesByPerson) {
