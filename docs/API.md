@@ -280,8 +280,10 @@ fire-and-forget이라 생길 수 있고, 서버가 주기적으로 정리해 무
     "vlmModel": "gemini-2.5-flash",
     "poseBackend": "rtmlib",
     "poseModelVersion": "runtime-default",
-    "poseLibraryVersion": "v1",
-    "featureVersion": 1
+    "poseLibraryVersion": "lib-20261002-91b57d0f",
+    "featureVersion": 1,
+    "vlmPromptVersion": "p1-scope",
+    "poseLibrarySha256": "91b57d0f…"
   },
   "candidatesByPerson": [
     {
@@ -317,6 +319,8 @@ fire-and-forget이라 생길 수 있고, 서버가 주기적으로 정리해 무
   "capabilities": { "refine": false, "fbxExport": false }
 }
 ```
+
+`inferenceMetadata.vlmPromptVersion`(답한 VLM 프롬프트)과 `poseLibrarySha256`(포즈 라이브러리 번들의 내용 해시)은 추론이 함께 보낼 때만 있다. 그 전에 저장된 결과에는 이 필드가 없다.
 
 ### 인물별 출력 범위 설정 (1단계)
 
@@ -717,6 +721,38 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 `view`가 없으면 `400 INVALID_INPUT`. `ETag`와 `If-None-Match`를 그대로 통과시킨다.
 
 ⚠ `<img src>`로는 부를 수 없다. 관리자 토큰이 헤더로 가야 하므로 `fetch` → `blob` → `URL.createObjectURL`로 실어야 한다(대시보드가 그렇게 한다).
+
+### 라이브러리 공백 관측 export
+
+`GET /v1/admin/gaps/observations?days=90&cursor=…`
+
+러프 데이터 선순환에서 쓰는 비식별 관측이다. 맞는 포즈가 없던 인물을 모아 라이브러리에 더할 포즈를 정한다. 받는 쪽은 Standin-server `python -m pose_gaps pull`이고, 항목 형식(schema 1)은 그 저장소의 `docs/POSE_GAP_LOOP.md`가 정본이다.
+
+- 관리자 토큰에 더해 **`GAP_EXPORT_REVIEWERS`에 든 검토자만** 받는다. 아니면 `403 FORBIDDEN`이다. 한 번에 모든 사용자의 관측을 가져가는 경로라서 한 건씩 여는 검토 화면보다 좁게 연다.
+- `GAP_EXPORT_HMAC_KEY`가 비어 있으면 `503 GAP_EXPORT_DISABLED`이다. 두 값은 인프라 시크릿 `standin/<env>/gap-export`에서 온다.
+- `days`는 1~365, 기본 90이다. 첫 페이지가 범위를 그 시각에 고정하고, 다음 페이지는 `nextCursor`로만 받는다.
+- 커서는 암호화돼 있고 한 시간 지나면 `400 INVALID_CURSOR`가 된다.
+- 감사 기록: 페이지마다 `admin_access_audit`에 `gap_export_start` 또는 `gap_export_page`가 남는다. 첫 페이지에서는 운영 채널에 알린다.
+
+```json
+{ "schemaVersion": 1, "exportId": "…", "window": { "days": 90 }, "generatedAt": "…",
+  "retention": { "localTtlDays": 14, "maxSnapshotAgeDays": 7 },
+  "items": [ { "obs": "o_…", "inst": "i_…", "observed_on": "2026-10-05", "expires_on": "2027-10-05",
+               "versions": { … }, "cut": { … }, "person": { … }, "candidates": [ … ], "behavior": { … } } ],
+  "nextCursor": "v1.…" }
+```
+
+**항목에 넣지 않는 것**: 작업·설치 ID, 입력 해시, S3 key, bbox, 이미지 크기.
+- 날짜는 일 단위, 관절은 0.1px로 반올림한다.
+- `obs`·`inst`는 export마다 새 salt로 만든 HMAC이다. 같은 export 안에서만 같은 값이고 export끼리는 이을 수 없다.
+- 응답 직전에 원본 ID 모양 값을 검사한다. 하나라도 걸리면 그 페이지는 `500 GAP_EXPORT_PRIVACY`로 막고 알린다.
+
+**대상 행**
+- 뷰 `gap_observations_v1`에서 읽는다. 완료된 작업 중 철회·삭제 요청이 없는 설치의 행만 담고, 쿼터 면제 설치(개발 단말)는 뺀다.
+- 원본 테이블 위의 뷰라서 작업 삭제·동의 철회·365일 정리 때 함께 사라진다.
+- 관절이 없는 인물은 담지 않는다.
+
+`GET /v1/admin/ops` 응답의 `inferenceLibrary`(`{ version, source, contentSha256 }` 또는 `null`)는 추론 `/healthz`가 알려 준, 지금 떠 있는 포즈 라이브러리다. 대시보드에서는 추론 상태 옆에 뜬다.
 
 ---
 

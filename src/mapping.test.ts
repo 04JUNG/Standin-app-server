@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mapCutResult } from "./mapping.js";
+import { extractCutSummary, extractPersonSignals, mapCutResult } from "./mapping.js";
 import type { CutResult, UpstreamPerson } from "./inference.js";
 
 const METADATA = {
@@ -189,4 +189,63 @@ test("observed upper-body candidates stay soft while a head in the same cut is u
   assert.equal(upper?.refineAllowed, false);
   assert.equal(head?.fallbackMode, "hard");
   assert.equal(head?.candidateShortfallReason, "HEAD_SEARCH_UNSUPPORTED");
+});
+
+test("person signals keep the inference vocabulary as strings and drop junk", () => {
+  const [signals] = extractPersonSignals(
+    cut([
+      {
+        person_tags: { action: "sitting", view: 7, source: "vlm_person" },
+        output_scope: { detected: "half", source: "vlm_person" },
+        rank_distance: 0.41,
+        distance_metric: "pos",
+        search_stability: "stable",
+        confidence_threshold: Number.NaN,
+      },
+    ]),
+  );
+  assert.deepEqual(signals, {
+    personIndex: 0,
+    personTags: { action: "sitting", view: null, source: "vlm_person" },
+    outputScope: { detected: "half", source: "vlm_person" },
+    rankDistance: 0.41,
+    distanceMetric: "pos",
+    searchStability: "stable",
+    confidenceThreshold: null,
+  });
+});
+
+test("an older inference response yields empty signals, not guesses", () => {
+  const [signals] = extractPersonSignals(cut([{}]));
+  assert.deepEqual(signals.personTags, { action: null, view: null, source: null });
+  assert.equal(signals.rankDistance, null);
+});
+
+test("the cut summary records what the VLM actually said", () => {
+  const summary = extractCutSummary({
+    ...cut([{}, {}]),
+    vlm_tags: { shot: "full_half", action: null, view: "side", relationship: "talking" },
+  });
+  assert.deepEqual(summary, {
+    route: "core",
+    countConfidence: "high",
+    detectorCount: 2,
+    vlmCount: 2,
+    vlmTags: { shot: "full_half", action: null, view: "side", relationship: "talking" },
+  });
+  assert.equal(extractCutSummary(cut([{}])).vlmTags, null);
+});
+
+test("prompt and library hash versions pass through when inference sends them", () => {
+  const result = mapCutResult("job-1", {
+    ...cut([{}]),
+    inference_metadata: {
+      ...METADATA,
+      vlm_prompt_version: "p2-person-tags",
+      pose_library_sha256: "ab".repeat(32),
+    },
+  });
+  assert.equal(result.inferenceMetadata.vlmPromptVersion, "p2-person-tags");
+  assert.equal(result.inferenceMetadata.poseLibrarySha256, "ab".repeat(32));
+  assert.equal(mapCutResult("job-1", cut([{}])).inferenceMetadata.vlmPromptVersion, null);
 });

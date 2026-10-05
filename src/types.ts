@@ -46,6 +46,9 @@ export interface AnalysisResult {
     poseModelVersion: string;
     poseLibraryVersion: string;
     featureVersion: number;
+    /** 아래 둘은 추론이 함께 보낼 때만 있다. 그 전에 저장된 결과에는 없다. */
+    vlmPromptVersion?: string | null;
+    poseLibrarySha256?: string | null;
   };
   candidatesByPerson: AnalysisPerson[];
   notes: string[];

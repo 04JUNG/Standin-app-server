@@ -12,6 +12,8 @@ import { currentContext } from "./requestContext.js";
  */
 export interface UpstreamPerson {
   output_scope?: { detected?: unknown; source?: unknown };
+  /** 인물별 action·view(추론 `person_tags`). 공백 분석용이며 공개 응답에는 넣지 않는다. */
+  person_tags?: { action?: unknown; view?: unknown; source?: unknown };
   index: number;
   box: number[] | null;
   tags: Record<string, string>;
@@ -72,11 +74,17 @@ export interface CutResult {
     deployment_version: string;
     vlm_provider: string;
     vlm_model: string;
+    /** 답한 VLM 프롬프트. 이 필드가 생기기 전 추론 응답에는 없다. */
+    vlm_prompt_version?: string | null;
     pose_backend: string;
     pose_model_version: string;
     pose_library_version: string;
+    /** 번들 manifest의 내용 해시. manifest 없는 옛 번들이면 null. */
+    pose_library_sha256?: string | null;
     feature_version: number;
   };
+  /** VLM이 컷에 대해 실제로 말한 태그. 어휘 밖 값은 null이다(people[].tags와 다름). */
+  vlm_tags?: Record<string, unknown> | null;
 }
 
 /** 추론 호출이 상한 시간을 넘겼다. 5xx와 구분해 Job 실패 사유로 남긴다. */
@@ -325,6 +333,45 @@ export async function getPoseThumbnail(
 }
 
 // GET /healthz → 추론 서버 가용 여부
+/** 추론 `/healthz`의 `pose_library`. 이 필드가 없는 추론 서버면 null. */
+export interface InferenceLibrary {
+  version: string;
+  source: string | null;
+  contentSha256: string | null;
+}
+
+/**
+ * 추론 상태와 떠 있는 포즈 라이브러리. 운영 대시보드가 쓴다.
+ * health()와 같은 상한을 쓴다 — 추론이 멈춰도 대시보드 요청까지 멈추면 안 된다.
+ */
+export async function inferenceStatus(): Promise<{
+  healthy: boolean;
+  library: InferenceLibrary | null;
+}> {
+  try {
+    const res = await fetch(`${config.inferenceBaseUrl}/healthz`, {
+      headers: authHeaders(),
+      signal: AbortSignal.timeout(config.healthTimeoutMs),
+    });
+    const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+    const library = body?.pose_library as Record<string, unknown> | null | undefined;
+    return {
+      healthy: res.ok,
+      library:
+        library && typeof library.version === "string"
+          ? {
+              version: library.version,
+              source: typeof library.source === "string" ? library.source : null,
+              contentSha256:
+                typeof library.content_sha256 === "string" ? library.content_sha256 : null,
+            }
+          : null,
+    };
+  } catch {
+    return { healthy: false, library: null };
+  }
+}
+
 export async function health(): Promise<boolean> {
   try {
     // ⚠ 상한이 없으면 추론이 멈출 때 /healthz도 같이 멈춘다. ALB는 그걸 BFF 장애로

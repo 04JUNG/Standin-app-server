@@ -135,6 +135,8 @@ export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
       poseModelVersion: cut.inference_metadata.pose_model_version,
       poseLibraryVersion: cut.inference_metadata.pose_library_version,
       featureVersion: cut.inference_metadata.feature_version,
+      vlmPromptVersion: shortText(cut.inference_metadata.vlm_prompt_version),
+      poseLibrarySha256: shortText(cut.inference_metadata.pose_library_sha256),
     },
     notes: cut.notes ?? [],
     // ⚠ 이 값은 **분석 시점**의 배포 상태다. 결과는 그대로 저장돼 나중에 다시 조회되므로
@@ -217,6 +219,85 @@ export function extractRefineContexts(cut: CutResult): RefineContext[] {
     // 신규 필드가 없는 구 추론 응답은 하체 미관측으로 본다. 허용은 명시적일 때만.
     lowerBodyObserved: p.lower_body_observed === true,
   }));
+}
+
+/**
+ * 라이브러리 공백 분석용 인물 신호(Standin-server `docs/POSE_GAP_LOOP.md`).
+ *
+ * 공개 `AnalysisPerson`에는 넣지 않고 `analysis_people`에만 저장한다. 어휘의 단일 소스는
+ * 추론의 schema.py라서 여기서는 문자열·유한한 숫자인지만 보고 값을 다시 해석하지 않는다.
+ */
+export interface PersonSignals {
+  personIndex: number;
+  personTags: { action: string | null; view: string | null; source: string | null };
+  outputScope: { detected: string | null; source: string | null };
+  rankDistance: number | null;
+  distanceMetric: string | null;
+  searchStability: string | null;
+  confidenceThreshold: number | null;
+}
+
+/** 컷 단위 요약. route·개수 신뢰도·인원수와 VLM이 실제로 말한 컷 태그. */
+export interface CutSummary {
+  route: string | null;
+  countConfidence: string | null;
+  detectorCount: number | null;
+  vlmCount: number | null;
+  vlmTags: {
+    shot: string | null;
+    action: string | null;
+    view: string | null;
+    relationship: string | null;
+  } | null;
+}
+
+/** 어휘 값·버전 문자열만 받는다. 길이 상한은 이상한 응답이 DB를 채우지 않게 하는 방어다. */
+function shortText(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 && value.length <= 80 ? value : null;
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+export function extractPersonSignals(cut: CutResult): PersonSignals[] {
+  return (cut.people ?? []).map((p) => ({
+    personIndex: p.index,
+    personTags: {
+      action: shortText(p.person_tags?.action),
+      view: shortText(p.person_tags?.view),
+      source: shortText(p.person_tags?.source),
+    },
+    outputScope: {
+      detected: shortText(p.output_scope?.detected),
+      source: shortText(p.output_scope?.source),
+    },
+    rankDistance: finiteNumber(p.rank_distance),
+    distanceMetric: shortText(p.distance_metric),
+    searchStability: shortText(p.search_stability),
+    confidenceThreshold: finiteNumber(p.confidence_threshold),
+  }));
+}
+
+export function extractCutSummary(cut: CutResult): CutSummary {
+  const tags =
+    cut.vlm_tags && typeof cut.vlm_tags === "object" && !Array.isArray(cut.vlm_tags)
+      ? cut.vlm_tags
+      : null;
+  return {
+    route: shortText(cut.route),
+    countConfidence: shortText(cut.count_confidence),
+    detectorCount: finiteNumber(cut.detector_count),
+    vlmCount: finiteNumber(cut.vlm_count),
+    vlmTags: tags
+      ? {
+          shot: shortText(tags.shot),
+          action: shortText(tags.action),
+          view: shortText(tags.view),
+          relationship: shortText(tags.relationship),
+        }
+      : null,
+  };
 }
 
 export function errorEnvelope(
