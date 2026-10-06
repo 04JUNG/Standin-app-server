@@ -15,6 +15,8 @@ import { DEFAULT_REVIEWER, matchReviewer, parseReviewers } from "./reviewers.js"
 import { parseWindowDays, toCohorts, toDropoff, toFunnel } from "./product.js";
 import { toColumnHealth, toDistanceBuckets, toStageGaps } from "./instrumentation.js";
 import { toFirstRunFunnel, toRetry } from "./adoption.js";
+import { GAP_THRESHOLDS, toLibraryWeeks, toVlmPrompts } from "./library.js";
+import { libraryWeekly, vlmPrompts } from "./libraryStore.js";
 import {
   clientStageCounts,
   cohortCounts,
@@ -258,6 +260,7 @@ adminRoutes.get("/product", async (c) => {
     firstSelectionAttempt(days),
     rerunRatio(days),
   ]);
+  const [libraryWeeks, prompts] = await Promise.all([libraryWeekly(days), vlmPrompts(days)]);
 
   const clientByName: Record<string, number> = {};
   for (const stage of clientStages) clientByName[stage.event_name] = stage.events;
@@ -300,6 +303,13 @@ adminRoutes.get("/product", async (c) => {
     },
     /** ② 몇 번째에 건지나. */
     retry: toRetry(curve, firstSelection, reruns.reruns, reruns.jobs),
+    /**
+     * ⑥ 라이브러리 버전별 공백. 포즈를 더한 뒤 맞는 포즈가 없던 인물이 실제로 줄었는지 본다.
+     * 경계는 Standin-server pose_gaps와 같다(GAP_THRESHOLDS).
+     */
+    library: { thresholds: GAP_THRESHOLDS, weeks: toLibraryWeeks(libraryWeeks) },
+    /** ⑦ VLM 프롬프트 버전별 route·인원수 일치·인물 태그 채움. 프롬프트를 바꾼 뒤 이상을 본다. */
+    vlm: { prompts: toVlmPrompts(prompts) },
   });
 });
 
