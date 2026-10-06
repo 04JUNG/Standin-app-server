@@ -10,7 +10,7 @@ import { currentUsage } from "../limits/store.js";
 import { errorEnvelope } from "../mapping.js";
 import { getInstallationSummary, listInstallations } from "../installations/store.js";
 import { parseRosterQuery, toRosterPage } from "./installationList.js";
-import { toReviewPeople, type AnalysisPersonRow } from "./reviewDetail.js";
+import { parseCutSummary, toReviewPeople, type AnalysisPersonRow } from "./reviewDetail.js";
 import { DEFAULT_REVIEWER, matchReviewer, parseReviewers } from "./reviewers.js";
 import { parseWindowDays, toCohorts, toDropoff, toFunnel } from "./product.js";
 import { toColumnHealth, toDistanceBuckets, toStageGaps } from "./instrumentation.js";
@@ -396,9 +396,10 @@ adminRoutes.get("/review/jobs/:id", async (c) => {
     input_height: number | null;
     inference_metadata_json: string | null;
     result_json: string | null;
+    cut_summary_json: string | null;
   }>(
     `SELECT id, status, created_at, input_s3_key, input_width, input_height,
-            inference_metadata_json, result_json
+            inference_metadata_json, result_json, cut_summary_json
      FROM jobs WHERE id = $1 AND installation_id IS NOT NULL`,
     [jobId],
   );
@@ -469,6 +470,7 @@ adminRoutes.get("/review/jobs/:id", async (c) => {
     inferenceMetadata: job.inference_metadata_json
       ? JSON.parse(job.inference_metadata_json)
       : null,
+    cutSummary: parseCutSummary(job.cut_summary_json),
     people: toReviewPeople(peopleRows, job.result_json),
     candidates,
     selections,

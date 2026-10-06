@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   outputScopesFromResult,
+  parseCutSummary,
+  parsePersonTags,
+  scopeFromColumn,
   parseBox,
   parseScores,
   parseSkeleton,
@@ -33,6 +36,12 @@ function row(overrides: Partial<AnalysisPersonRow> = {}): AnalysisPersonRow {
     refine_allowed: true,
     refinable_limbs_json: '["left_arm","right_arm"]',
     raw_scores_json: JSON.stringify(SCORES),
+    person_tags_json: null,
+    output_scope_json: null,
+    rank_distance: null,
+    distance_metric: null,
+    search_stability: null,
+    confidence_threshold: null,
     ...overrides,
   };
 }
@@ -164,4 +173,115 @@ test("사람 순서마다 제 출력 범위가 붙는다", () => {
   const people = toReviewPeople([row(), row({ person_index: 1 })], resultJson);
   assert.equal(people[0].outputScope, null);
   assert.equal(people[1].outputScope?.resolved, "head");
+});
+
+// ── P2 인물별 태그와 컷 요약 ──────────────────────────────────────────
+
+test("인물별 태그를 꺼낸다", () => {
+  assert.deepEqual(
+    parsePersonTags('{"action":"sitting","view":"side","source":"vlm_person"}'),
+    { action: "sitting", view: "side", source: "vlm_person" },
+  );
+});
+
+test("태그가 전부 비면 null이다", () => {
+  // "묻지 않았다"와 "물었는데 모른다"를 구분해야 해서 빈 껍데기를 만들지 않는다.
+  assert.equal(parsePersonTags('{"action":null,"view":null,"source":null}'), null);
+  assert.equal(parsePersonTags("{}"), null);
+  assert.equal(parsePersonTags(null), null);
+  assert.equal(parsePersonTags("깨진 JSON"), null);
+});
+
+test("모른다고 답한 인물은 source만 남는다", () => {
+  assert.deepEqual(parsePersonTags('{"action":null,"view":null,"source":"unknown"}'), {
+    action: null,
+    view: null,
+    source: "unknown",
+  });
+});
+
+test("row에서 인물별 태그와 검색 신호가 함께 나온다", () => {
+  const person = toReviewPerson(
+    row({
+      person_tags_json: '{"action":"walking","view":"back","source":"vlm_person"}',
+      rank_distance: 0.182,
+      distance_metric: "pos",
+      search_stability: "stable",
+      confidence_threshold: 0.45,
+    }),
+  );
+  assert.equal(person.personTags?.action, "walking");
+  assert.deepEqual(person.searchSignals, {
+    rankDistance: 0.182,
+    distanceMetric: "pos",
+    searchStability: "stable",
+    confidenceThreshold: 0.45,
+  });
+});
+
+test("태그 칸이 없던 옛 행은 personTags가 null이다", () => {
+  const person = toReviewPerson(row());
+  assert.equal(person.personTags, null);
+  assert.deepEqual(person.searchSignals, {
+    rankDistance: null,
+    distanceMetric: null,
+    searchStability: null,
+    confidenceThreshold: null,
+  });
+});
+
+test("출력 범위는 result_json이 우선이고 없을 때만 컬럼으로 메운다", () => {
+  // 사용자가 고른 구도를 추론 판정으로 덮지 않는다.
+  const resultJson = JSON.stringify({
+    candidatesByPerson: [
+      { personIndex: 0, outputScope: { selection: "bust", detected: "full", detectionSource: "vlm_person" } },
+    ],
+  });
+  const people = toReviewPeople(
+    [row({ output_scope_json: '{"detected":"full","source":"vlm_person"}' })],
+    resultJson,
+  );
+  assert.equal(people[0].outputScope?.resolved, "bust");
+  assert.equal(people[0].outputScope?.resolutionSource, "user");
+
+  const fallback = toReviewPeople(
+    [row({ output_scope_json: '{"detected":"half","source":"vlm_person"}' })],
+    null,
+  );
+  assert.equal(fallback[0].outputScope?.resolved, "half");
+  assert.equal(fallback[0].outputScope?.detectionSource, "vlm_person");
+});
+
+test("빈 출력 범위 컬럼은 범위를 만들어 내지 않는다", () => {
+  assert.equal(scopeFromColumn(null), null);
+  assert.equal(scopeFromColumn("{}"), null);
+  assert.equal(scopeFromColumn('{"detected":null,"source":"unknown"}')?.resolved, "full");
+});
+
+test("컷 요약을 꺼낸다", () => {
+  const summary = parseCutSummary(
+    JSON.stringify({
+      route: "core",
+      countConfidence: "high",
+      detectorCount: 2,
+      vlmCount: 2,
+      vlmTags: { shot: "full_half", action: "standing", view: null },
+    }),
+  );
+  assert.equal(summary?.route, "core");
+  assert.equal(summary?.detectorCount, 2);
+  // 값이 없는 키는 보여 줄 것이 없으니 뺀다.
+  assert.deepEqual(summary?.vlmTags, { shot: "full_half", action: "standing" });
+});
+
+test("VLM이 아무 태그도 말하지 않았으면 vlmTags가 null이다", () => {
+  const summary = parseCutSummary(JSON.stringify({ route: "skip", vlmTags: {} }));
+  assert.equal(summary?.vlmTags, null);
+  assert.equal(summary?.route, "skip");
+  assert.equal(summary?.detectorCount, null);
+});
+
+test("컷 요약이 없거나 깨져도 상세는 열린다", () => {
+  assert.equal(parseCutSummary(null), null);
+  assert.equal(parseCutSummary("["), null);
 });

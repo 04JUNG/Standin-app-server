@@ -530,12 +530,74 @@ function personBadges(person) {
   ].filter(Boolean).join(" ");
 }
 
-function tagLine(tags) {
+function tagLine(tags, prefix) {
   const keys = Object.keys(tags || {});
   if (!keys.length) return "";
-  return '<div class="tagline">' +
+  return '<div class="tagline">' + (prefix ? '<span class="sub">' + esc(prefix) + "</span>" : "") +
     keys.map((key) => '<span class="tag">' + esc(key) + " <b>" + esc(tags[key]) + "</b></span>").join("") +
     "</div>";
+}
+
+/**
+ * 인물별 VLM 태그. 없으면 그 사실을 적는다 — 빈칸으로 두면 "태그가 없는 인물"과
+ * "인물별로 물어본 적 없는 Job"이 같아 보인다.
+ */
+function personTagLine(person) {
+  const tags = person.personTags;
+  if (!tags) {
+    return '<div class="tagline"><span class="sub">인물별 태그 없음 — 이 Job은 컷 단위로만 물었다</span></div>';
+  }
+  const shown = {};
+  if (tags.action) shown.action = tags.action;
+  if (tags.view) shown.view = tags.view;
+  const source = tags.source || "unknown";
+  const known = Object.keys(shown).length > 0;
+  return '<div class="tagline"><span class="sub">인물별</span>' +
+    (known
+      ? Object.keys(shown).map((key) =>
+          '<span class="tag">' + esc(key) + " <b>" + esc(shown[key]) + "</b></span>").join("")
+      : '<span class="tag sub">VLM이 모른다고 답했다</span>') +
+    pill(esc(source), source === "vlm_person" ? "ok" : "warn") +
+    "</div>";
+}
+
+function searchSignalLine(signals) {
+  if (!signals) return "";
+  const items = [
+    ["Top-1 거리", signals.rankDistance === null || signals.rankDistance === undefined
+      ? null : Number(signals.rankDistance).toFixed(3)],
+    ["기준", signals.confidenceThreshold === null || signals.confidenceThreshold === undefined
+      ? null : Number(signals.confidenceThreshold).toFixed(3)],
+    ["지표", signals.distanceMetric],
+    ["안정성", signals.searchStability],
+  ].filter((item) => item[1] !== null && item[1] !== undefined && item[1] !== "");
+  if (!items.length) return "";
+  return '<div class="tagline"><span class="sub">검색</span>' +
+    items.map((item) => '<span class="tag">' + esc(item[0]) + " <b>" + esc(item[1]) + "</b></span>").join("") +
+    "</div>";
+}
+
+/** 컷 요약. 왜 이 컷이 그 route로 갔고 VLM이 몇 명을 봤는지. */
+function cutSummaryBlock(summary) {
+  if (!summary) return "";
+  const counts = [summary.detectorCount, summary.vlmCount]
+    .every((value) => value === null || value === undefined)
+    ? null
+    : (summary.detectorCount ?? "?") + " / " + (summary.vlmCount ?? "?");
+  const items = [
+    ["route", summary.route],
+    ["개수 신뢰도", summary.countConfidence],
+    ["검출기/VLM 인원", counts],
+  ].filter((item) => item[1] !== null && item[1] !== undefined && item[1] !== "");
+  return "<h3>컷 요약</h3>" +
+    (items.length
+      ? '<div class="tagline">' +
+        items.map((item) => '<span class="tag">' + esc(item[0]) + " <b>" + esc(item[1]) + "</b></span>").join("") +
+        "</div>"
+      : "") +
+    (summary.vlmTags
+      ? tagLine(summary.vlmTags, "VLM이 말한 컷 태그")
+      : '<p class="sub">VLM이 말한 컷 태그가 기록되지 않았다(구 추론 응답).</p>');
 }
 
 function metadataPills(meta) {
@@ -570,7 +632,9 @@ function detailRender(detail) {
       (person.candidateShortfallReason ? ' <span class="sub">' + esc(person.candidateShortfallReason) + "</span>" : "") +
       "</h3>" +
       '<div class="tagline">' + personBadges(person) + "</div>" +
-      tagLine(person.tags) +
+      personTagLine(person) +
+      tagLine(person.tags, "컷 단위") +
+      searchSignalLine(person.searchSignals) +
       (person.skeleton
         ? '<p class="sub">뼈대 ' + esc(person.skeleton.schemaVersion) + " · 관절 " +
           person.skeleton.keypoints.length + "개" + (note ? " · " + esc(note) : "") + "</p>"
@@ -606,7 +670,10 @@ function detailRender(detail) {
       ? '<details><summary class="sub">원본 JSON</summary><pre class="mono" style="white-space:pre-wrap">' +
         esc(JSON.stringify(detail.inferenceMetadata, null, 2)) + "</pre></details>"
       : '<p class="empty">메타가 없습니다.</p>') +
-    '<p class="sub">VLM 태그(shot·action·view·relationship)는 <b>컷 단위</b>라 같은 컷의 모든 인물이 같은 값을 받는다. 인물마다 갈리는 값은 출력범위와 하체 관측뿐이다.</p>' +
+    cutSummaryBlock(detail.cutSummary) +
+    ((detail.people || []).some((person) => person.personTags)
+      ? '<p class="sub">인물별 <b>action·view</b>는 사람마다 따로 판단한 값이다. 아래 "컷 단위" 줄은 컷 하나에서 뽑아 전원에게 복사한 값이라 둘이 다를 수 있다.</p>'
+      : '<p class="sub">이 Job은 VLM에 <b>컷 단위</b>로만 물었다. 같은 컷의 모든 인물이 같은 action·view를 받는다. 인물별 태그는 프롬프트를 p2-person-tags로 바꾼 뒤부터 쌓인다.</p>') +
     "</div></div>" + people + "</div>";
 
   $("detailOut").querySelectorAll(".cand img[data-pose]").forEach(fillCandidateThumb);
