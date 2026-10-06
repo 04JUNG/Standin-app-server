@@ -28,6 +28,12 @@ export interface AnalysisPersonRow {
   refine_allowed: boolean | null;
   refinable_limbs_json: string | null;
   raw_scores_json: string | null;
+  person_tags_json: string | null;
+  output_scope_json: string | null;
+  rank_distance: number | null;
+  distance_metric: string | null;
+  search_stability: string | null;
+  confidence_threshold: number | null;
 }
 
 export interface ReviewSkeleton {
@@ -51,6 +57,27 @@ export interface JointScores {
   source: "effective" | "raw" | "none";
 }
 
+/**
+ * 인물별 VLM 태그(P2). 컷 단위 `tags`와 달리 사람마다 값이 다르다.
+ *
+ * `source`로 어디서 온 값인지 가른다 — `vlm_person`은 프롬프트가 인물별로 물어 받은
+ * 값이고, `legacy_cut`은 1인 컷의 컷 값을 그 사람 것으로 본 값이다. 행 자체가 없으면
+ * 인물별로 물어본 적이 없는 Job이다(프롬프트 `p1-scope` 또는 구 추론).
+ */
+export interface ReviewPersonTags {
+  action: string | null;
+  view: string | null;
+  source: string | null;
+}
+
+/** 이 인물이 왜 그 후보를 받았는지 설명하는 검색 신호. */
+export interface ReviewSearchSignals {
+  rankDistance: number | null;
+  distanceMetric: string | null;
+  searchStability: string | null;
+  confidenceThreshold: number | null;
+}
+
 export interface ReviewPerson {
   personIndex: number;
   box: number[] | null;
@@ -69,6 +96,8 @@ export interface ReviewPerson {
   refineAllowed: boolean;
   refinableLimbs: string[];
   outputScope: OutputScope | null;
+  personTags: ReviewPersonTags | null;
+  searchSignals: ReviewSearchSignals;
 }
 
 function parseJson(raw: string | null | undefined): unknown {
@@ -159,6 +188,39 @@ export function pickJointScores(
   return { values: [], source: "none" };
 }
 
+/**
+ * 인물별 태그를 꺼낸다. 값이 하나도 없으면 `null` — "묻지 않았다"와 "물었는데 모른다"를
+ * 구분해야 하므로 빈 껍데기를 만들지 않는다.
+ */
+export function parsePersonTags(raw: string | null | undefined): ReviewPersonTags | null {
+  const value = parseJson(raw);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const tags = {
+    action: typeof record.action === "string" ? record.action : null,
+    view: typeof record.view === "string" ? record.view : null,
+    source: typeof record.source === "string" ? record.source : null,
+  };
+  return tags.action === null && tags.view === null && tags.source === null ? null : tags;
+}
+
+/**
+ * 출력 범위는 두 곳에 있다. `jobs.result_json`에는 사용자가 고른 값까지 반영된 형태가,
+ * `analysis_people.output_scope_json`에는 추론이 판정한 원본이 있다. 앞의 것을 먼저 쓰고,
+ * 없을 때만 뒤의 것으로 메운다 — 사용자가 바꾼 구도를 추론 판정으로 덮지 않기 위해서다.
+ */
+export function scopeFromColumn(raw: string | null | undefined): OutputScope | null {
+  const value = parseJson(raw);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (record.detected === undefined && record.source === undefined) return null;
+  return resolveOutputScope({
+    selection: "auto",
+    detected: record.detected as OutputScope["detected"],
+    detectionSource: record.source as OutputScope["detectionSource"],
+  });
+}
+
 function parseLimbs(raw: string | null | undefined): string[] {
   const value = parseJson(raw);
   if (!Array.isArray(value)) return [];
@@ -209,7 +271,51 @@ export function toReviewPerson(row: AnalysisPersonRow, scope?: OutputScope | nul
     lowerBodyObserved: row.lower_body_observed === true,
     refineAllowed: row.refine_allowed === true,
     refinableLimbs: parseLimbs(row.refinable_limbs_json),
-    outputScope: scope ?? null,
+    outputScope: scope ?? scopeFromColumn(row.output_scope_json),
+    personTags: parsePersonTags(row.person_tags_json),
+    searchSignals: {
+      rankDistance: isFiniteNumber(row.rank_distance) ? row.rank_distance : null,
+      distanceMetric: row.distance_metric,
+      searchStability: row.search_stability,
+      confidenceThreshold: isFiniteNumber(row.confidence_threshold)
+        ? row.confidence_threshold
+        : null,
+    },
+  };
+}
+
+/**
+ * 컷 요약(`jobs.cut_summary_json`). `vlmTags`는 VLM이 **실제로 말한** 값이라, 추론이
+ * `other`·`front`로 좁힌 `people[].tags`와 다를 수 있다. 그 차이가 프롬프트가 얼마나
+ * 답을 채우는지 보여 준다.
+ */
+export interface ReviewCutSummary {
+  route: string | null;
+  countConfidence: string | null;
+  detectorCount: number | null;
+  vlmCount: number | null;
+  vlmTags: Record<string, string> | null;
+}
+
+export function parseCutSummary(raw: string | null | undefined): ReviewCutSummary | null {
+  const value = parseJson(raw);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const rawTags = record.vlmTags;
+  let vlmTags: Record<string, string> | null = null;
+  if (rawTags && typeof rawTags === "object" && !Array.isArray(rawTags)) {
+    const kept: Record<string, string> = {};
+    for (const [key, item] of Object.entries(rawTags as Record<string, unknown>)) {
+      if (typeof item === "string" && item.length > 0) kept[key] = item;
+    }
+    vlmTags = Object.keys(kept).length > 0 ? kept : null;
+  }
+  return {
+    route: typeof record.route === "string" ? record.route : null,
+    countConfidence: typeof record.countConfidence === "string" ? record.countConfidence : null,
+    detectorCount: isFiniteNumber(record.detectorCount) ? record.detectorCount : null,
+    vlmCount: isFiniteNumber(record.vlmCount) ? record.vlmCount : null,
+    vlmTags,
   };
 }
 

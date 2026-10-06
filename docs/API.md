@@ -699,6 +699,8 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
   "jobId": "job_...", "status": "completed", "createdAt": "2026-09-04T...",
   "inputUrl": "https://...", "inputUrlExpiresInSeconds": 300,
   "image": { "width": 900, "height": 1200 },
+  "cutSummary": { "route": "core", "countConfidence": "high", "detectorCount": 2, "vlmCount": 2,
+                  "vlmTags": { "shot": "full_half", "action": "standing" } },
   "inferenceMetadata": { "solver": "v3.2.5", "poseLibraryVersion": "v2.5" },
   "people": [{ "personIndex": 0, "confidence": "high", "candidateCount": 3,
                "box": [120, 80, 360, 720], "tags": { "action": "standing", "view": "front" },
@@ -707,6 +709,9 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
                "skeletonState": "valid", "skeletonSource": "full_image", "coverageClass": "full",
                "fallbackMode": "none", "slotOrigin": "vlm", "lowerBodyObserved": true,
                "refineAllowed": true, "refinableLimbs": ["left_arm"],
+               "personTags": { "action": "reaching", "view": "three_quarter", "source": "vlm_person" },
+               "searchSignals": { "rankDistance": 0.182, "distanceMetric": "pos",
+                                  "searchStability": "stable", "confidenceThreshold": 0.45 },
                "outputScope": { "selection": "auto", "detected": "full", "detectionSource": "vlm_person",
                                 "resolved": "full", "resolutionSource": "auto" } }],
   "candidates": [{ "person_index": 0, "candidate_id": "...", "pose_id": "...", "rank": 1,
@@ -723,8 +728,10 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 
 - `skeleton.keypoints`는 **원본 러프의 픽셀 좌표**다. 겹쳐 그리려면 `image`(= `jobs.input_width/height`)가 필요하다. 옛 Job은 두 컬럼이 비어 있어 `image`가 `null`이다.
 - `skeleton.scores`를 그대로 쓰면 안 된다. 추론이 refine을 막은 인물은 그 배열을 0으로 덮어쓴다(Standin-server `pipeline.py::_apply_refine_policy`). `jointScores`가 그 경우 마스킹 전 `raw_scores`로 갈아 끼우고 `source`로 어느 쪽인지 알려 준다(`effective` | `raw` | `none`).
-- `tags`는 **컷 단위** VLM 태그다(shot·action·view·relationship). 같은 컷의 모든 인물이 같은 값을 받는다. 인물마다 갈리는 VLM 신호는 `outputScope`와 `lowerBodyObserved`뿐이다.
-- `outputScope`는 `analysis_people`에 컬럼이 없어 `jobs.result_json`에서 꺼내고, 저장된 파생 필드를 믿지 않고 다시 계산한다.
+- `tags`는 **컷 단위** VLM 태그다(shot·action·view·relationship). 같은 컷의 모든 인물이 같은 값을 받는다.
+- `personTags`는 **인물별** 태그다(P2). `null`이면 그 Job은 인물별로 물어본 적이 없다(프롬프트 `p1-scope` 또는 구 추론). `source`가 `unknown`이면 물었는데 VLM이 모른다고 답한 것이다 — 이 둘은 다른 상태라 화면도 다르게 적는다.
+- `cutSummary.vlmTags`는 VLM이 **실제로 말한** 컷 태그라 `tags`와 다를 수 있다. `tags`는 추론이 `other`·`front`로 좁힌 뒤의 값이다.
+- `outputScope`는 `jobs.result_json`을 먼저 쓰고(사용자가 고른 구도가 거기 있다), 없을 때만 `analysis_people.output_scope_json`으로 메운다. 어느 쪽이든 저장된 파생 필드를 믿지 않고 다시 계산한다.
 
 `refined`는 `refined_artifacts`를 그대로 싣되 `object_key`·`thumbnail_key`를 서명해 URL로 바꾼 것이다. **`refined: false`인 행도 뺴지 않는다** — 왜 조정하지 않았는지(`reason`)가 조정 결과만큼 중요하다. 그 경우 두 URL은 `null`이다.
 
