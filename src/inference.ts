@@ -1,5 +1,6 @@
 // 도원 추론 서버 호출을 한 곳에 격리한다(계약이 바뀌어도 여기만 수정).
 // 계약 원본: Standin-server/docs/API_CONTRACT.md
+import type { CandidateCamera } from "./types.js";
 import { config } from "./config.js";
 import { currentContext } from "./requestContext.js";
 
@@ -31,6 +32,7 @@ export interface UpstreamPerson {
     rerank_score: number | null;
     bvh_url: string;
     thumbnail_url: string | null;
+    camera?: CandidateCamera | null;
   }>;
   // ── PR #10 스켈레톤 품질 신호 ────────────────────────────────
   skeleton_state?: string;
@@ -210,6 +212,7 @@ export async function analyze(file: Blob, hint = ""): Promise<CutResult> {
  *   전부 `/analyze` 때 DB에 넣어 둔 값이며 클라이언트가 되돌려 보내는 값이 아니다(BFF-04).
  */
 export interface RefineUpstreamRequest {
+  camera?: CandidateCamera;
   pose_id: string;
   view: string;
   keypoints: number[][];

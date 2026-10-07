@@ -1,3 +1,7 @@
+import { createAlignedRoutes } from "../candidate-camera/routes.js";
+import { getOwnedJob } from "../jobs/store.js";
+import { cameraArtifact } from "../candidate-camera/artifacts.js";
+import { EXPECTED_SOLVER_VERSION } from "../converter/client.js";
 import { createFramingRoutes } from "../output-scope/framingRoutes.js";
 // /v1/pose-candidates — 선택 후보의 최종 포즈 파일(BVH 또는 V3.2 FBX)을 내려준다.
 import { Hono } from "hono";
@@ -20,6 +24,7 @@ import {
 
 export const poseRoutes = new Hono<AppEnv>();
 poseRoutes.route("/", createFramingRoutes());
+poseRoutes.route("/", createAlignedRoutes());
 
 function bytesResponse(bytes: Uint8Array, fileName: string): Response {
   return new Response(bytes, {
@@ -232,9 +237,16 @@ poseRoutes.get("/:id/export", async (c) => {
 
   // ── FBX: 확정한 바이트 하나만 converter로 보낸다 ──────────────────────────
   const finalBvhSha256 = sha256Hex(finalBvh);
+  const job = await getOwnedJob(jobId, installationId);
+  const candidate = job?.result?.candidatesByPerson.find(p => p.personIndex === personIndex)?.candidates.find(p => p.id === candidateId && p.poseId === poseId);
+  if (!candidate) return c.json(errorEnvelope("INVALID_EXPORT", "선택된 후보가 아닙니다.", c.get("requestId")), 409);
+  if (variant === "base" && candidate.camera && finalBvhSha256 !== candidate.camera.source_bvh_sha256)
+    return c.json(errorEnvelope("POSE_UNAVAILABLE", "포즈가 변경되었습니다. 다시 분석해 주세요.", c.get("requestId")), 409);
   let conversion;
   try {
-    conversion = await convertBvhToFbx({
+    conversion = candidate.camera
+      ? { ...await cameraArtifact([installationId, jobId, personIndex, candidateId], { bvhBytes: finalBvh, characterId, scope: "full", cameraRotation: candidate.camera.rotation }), solverVersion: EXPECTED_SOLVER_VERSION }
+      : await convertBvhToFbx({
       bvhBytes: finalBvh,
       fileName: converterUploadName(poseId),
       // MVP에서 mirror는 converter가 한 번만 적용하고, 우리는 아직 사용자에게 노출하지

@@ -213,6 +213,7 @@ export async function runRefine(
     upstream = await deps.refineUpstream({
       pose_id: candidate.poseId,
       view: candidate.view,
+      ...(candidate.camera ? { camera: candidate.camera } : {}),
       keypoints: context.keypoints,
       scores: context.scores,
       search_distance: candidate.distance,

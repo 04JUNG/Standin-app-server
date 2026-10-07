@@ -909,3 +909,22 @@ poseId를 매번 검사하며 outputScope는 서버 저장 resolved 값과 일�
 후보 카드의 기존 썸네일과 달리 **저장 전 확인 화면**에서 선택 범위를 렌더링한다.
 이 기능은 얼굴만 있는 러프의 머리 방향 검색을 추가하지 않는다.
 자세한 알고리즘·제한·검증은 `Standin-server/docs/BODY_SCOPE.md`의 3단계를 따른다.
+
+
+## 후보별 표시 카메라 (candidate-camera-v1)
+
+새 후보의 선택적 `camera`는 추론이 정한 Y-up 회전행렬과 원본 BVH SHA를 담는다.
+`view`/`id`는 기존 검색 식별자다. `tags`의 view만 실제 표시 방향으로 바뀐다.
+카메라가 있는 후보의 `thumbnailUrl`은 소유권을 확인하는
+`/v1/pose-candidates/:id/aligned?jobId=...&personIndex=...&candidateId=...`다.
+이 경로는 후보를 선택하기 전에도 같은 Job의 소유자에게만 제공한다. 선택적
+`characterId`는 기존 모델 카탈로그로 검증한다. 회전값은 요청에서 받지 않는다.
+
+BFF는 저장된 카메라를 refine과 `/convert-framed`로 전달한다. 원본이 변경되거나
+격리되면 409다. Converter가 회전을 누락하면 integrity 오류이며 구 썸네일로
+바꿔 성공시키지 않는다. 카메라·모델·소유자·작업이 다른 요청은 캐시가 분리된다.
+캐시는 128 MiB/10분, 후보 렌더 대기는 16개, HTTP 대기는 최대 300초다. 후보 목록은 새 클라이언트에서 미리보기와 독립적으로 열린다.
+
+FBX와 전신/반신/흉상/두상 미리보기에 같은 회전이 적용된다. BVH는 원래 방향을 유지한다.
+구 작업은 camera가 없어 기존 경로를 사용하므로, 개선 적용 후에는 새로 분석해야 한다.
+배포 순서: Converter → BFF → Inference. 느린 렌더로 화면 전체가 대기하지 않도록 progressive-preview 클라이언트도 함께 배포한다.

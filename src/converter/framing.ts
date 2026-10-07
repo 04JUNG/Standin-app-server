@@ -22,6 +22,7 @@ export interface FramedInput {
   bvhBytes: Uint8Array;
   characterId: string;
   scope: BodyScope;
+  cameraRotation?: number[][];
 }
 function dependencies(overrides: Partial<ConverterDeps>): ConverterDeps {
   return {
@@ -73,13 +74,14 @@ export async function convertFramed(
   body.set("character_id", input.characterId);
   body.set("output_scope", input.scope);
   body.set("preview_view", "front");
+  if (input.cameraRotation) body.set("camera_rotation", JSON.stringify(input.cameraRotation));
   body.set("expected_bvh_sha256", digest);
   let response: Response;
   try {
     response = await deps.fetch(`${deps.baseUrl}/convert-framed`, {
       method: "POST",
       body,
-      signal: AbortSignal.timeout(deps.timeoutMs),
+      signal: AbortSignal.timeout(Math.max(deps.timeoutMs, input.cameraRotation ? 300_000 : 0)),
     });
   } catch (error) {
     const timeout =
@@ -119,6 +121,7 @@ export async function convertFramed(
     const fbx = decode("fbx_base64"),
       preview = decode("preview_base64");
     if (
+      (input.cameraRotation !== undefined && JSON.stringify(value.camera_rotation) !== JSON.stringify(input.cameraRotation)) ||
       value.solver_version !== EXPECTED_SOLVER_VERSION ||
       value.framing_version !== FRAMING_VERSION ||
       value.output_scope !== input.scope ||
@@ -199,6 +202,7 @@ export class FramedArtifactCache {
   constructor(
     private readonly maxBytes = 128 * 1024 * 1024,
     private readonly ttlMs = 600_000,
+    private readonly maxPending = 4,
   ) {}
   async get(
     key: string,
@@ -210,7 +214,7 @@ export class FramedArtifactCache {
     if (hit) return hit.result;
     const running = this.pending.get(key);
     if (running) return running;
-    if (this.pending.size >= 4)
+    if (this.pending.size >= this.maxPending)
       throw new ConverterError("CONVERTER_UNAVAILABLE", "framing queue full");
     const promise = create()
       .then((result) => {

@@ -1,4 +1,5 @@
 // refine 관련 저장소 접근. 공개 AnalysisResult와 내부 refine context를 분리해 둔다(BFF-04).
+import type { AnalysisResult, CandidateCamera } from "../types.js";
 import { queryOne, transaction } from "../db.js";
 
 /** `/analyze` 때 서버측에 보관해 둔 refine 입력과 안전정책. */
@@ -93,13 +94,17 @@ export async function loadCandidate(
   jobId: string,
   personIndex: number,
   candidateId: string,
-): Promise<{ poseId: string; view: string; distance: number | null } | null> {
+): Promise<{ poseId: string; view: string; distance: number | null; camera?: CandidateCamera } | null> {
   const row = await queryOne<{ pose_id: string; view: string; distance: number | null }>(
     `SELECT pose_id, view, distance FROM analysis_candidates
      WHERE job_id = $1 AND person_index = $2 AND candidate_id = $3`,
     [jobId, personIndex, candidateId],
   );
-  return row ? { poseId: row.pose_id, view: row.view, distance: row.distance } : null;
+  if (!row) return null;
+  const job = await queryOne<{ result_json: string | null }>("SELECT result_json FROM jobs WHERE id = $1", [jobId]);
+  const result = job?.result_json ? JSON.parse(job.result_json) as AnalysisResult : null;
+  const camera = result?.candidatesByPerson.find(p => p.personIndex === personIndex)?.candidates.find(c => c.id === candidateId)?.camera;
+  return { poseId: row.pose_id, view: row.view, distance: row.distance, ...(camera ? { camera } : {}) };
 }
 
 export interface RefinedArtifact {
