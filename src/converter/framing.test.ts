@@ -110,3 +110,19 @@ test("cache coalesces paired requests, isolates keys and evicts over budget", as
   await cache.get("owner-a", make);
   assert.equal(calls, 3);
 });
+
+test("camera is forwarded and an older converter cannot silently drop it", async () => {
+  const cameraRotation = [[0,0,-1],[0,1,0],[1,0,0]];
+  const value = { ...payload(), camera_rotation: cameraRotation };
+  let forwarded: FormData | undefined;
+  const result = await convertFramed({...input, cameraRotation}, {
+    baseUrl: "https://converter.invalid",
+    fetch: (async (_url, req) => {
+      forwarded = req!.body as FormData;
+      return new Response(JSON.stringify(value));
+    }) as typeof fetch,
+  });
+  assert.equal(forwarded!.get("camera_rotation"), JSON.stringify(cameraRotation));
+  assert.deepEqual(result.preview, preview);
+  await assert.rejects(convertFramed({...input, cameraRotation}, deps(payload())), {code:"CONVERTER_INTEGRITY"});
+});

@@ -21,7 +21,22 @@ export type SkeletonState = "valid" | "partial" | "suspect" | "missing" | "inval
 export type SkeletonSource = "full_image" | "crop_retry" | "none";
 export type CoverageClass = "full" | "reduced" | "sparse" | "upper_only" | "insufficient";
 
+/** Server-owned camera; consumers must not derive it from the legacy search view. */
+export interface CandidateCamera {
+  version: "candidate-camera-v1";
+  rotation: number[][];
+  source_bvh_sha256: string;
+  reference: "pelvis-torso-yaw";
+  canonical_yaw: number;
+  display_view: string;
+  status: "fitted" | "canonical_fallback";
+  fit_error: number;
+  facing_source: "person_observation" | "geometry_only";
+  depth_ambiguous: boolean;
+}
+
 export interface PoseCandidate {
+  camera?: CandidateCamera;
   id: string; // unique exposed candidate id (pose + view)
   poseId: string;
   rank: number;

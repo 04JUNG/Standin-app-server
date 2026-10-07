@@ -166,10 +166,13 @@ export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
         poseId: c.pose_id,
         rank: i + 1,
         view: c.view,
-        tags: Object.values(c.tags ?? {}),
+        tags: Object.values(c.camera ? { ...c.tags, view: c.camera.display_view } : (c.tags ?? {})),
+        ...(c.camera ? { camera: c.camera } : {}),
         matchLevel: matchLevelForPerson(person.confidence, c.distance),
         bvhAvailable: true,
-        thumbnailUrl: c.thumbnail_url
+        thumbnailUrl: c.camera
+          ? `/v1/pose-candidates/${encodeURIComponent(c.pose_id)}/aligned?jobId=${encodeURIComponent(jobId)}&personIndex=${p.index}&candidateId=${encodeURIComponent(`${c.pose_id}::${c.view}`)}`
+          : c.thumbnail_url
           ? `/v1/pose-candidates/${encodeURIComponent(c.pose_id)}/thumbnail?view=${encodeURIComponent(c.view)}`
           : undefined,
         distance: c.distance,

@@ -249,3 +249,19 @@ test("prompt and library hash versions pass through when inference sends them", 
   assert.equal(result.inferenceMetadata.poseLibrarySha256, "ab".repeat(32));
   assert.equal(mapCutResult("job-1", cut([{}])).inferenceMetadata.vlmPromptVersion, null);
 });
+
+test("display camera preserves search identity and builds an owned preview URL", () => {
+  const camera = {
+    version: "candidate-camera-v1" as const, rotation:[[1,0,0],[0,1,0],[0,0,1]],
+    source_bvh_sha256: "a".repeat(64), reference: "pelvis-torso-yaw" as const,
+    canonical_yaw: 180, display_view: "front", status: "fitted" as const,
+    fit_error: 0.1, facing_source: "person_observation" as const, depth_ambiguous:false,
+  };
+  const input = {...candidate(.2), view:"back", tags:{view:"back"}, camera};
+  const result = mapCutResult("owned-job",cut([{candidates:[input]}])).candidatesByPerson[0]!.candidates[0]!;
+  assert.equal(result.id,"pose-1::back");
+  assert.equal(result.view,"back");
+  assert.deepEqual(result.tags,["front"]);
+  assert.deepEqual(result.camera,camera);
+  assert.match(result.thumbnailUrl!,/aligned\?jobId=owned-job&personIndex=0&candidateId=pose-1%3A%3Aback/);
+});

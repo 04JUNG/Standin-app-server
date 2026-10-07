@@ -1,4 +1,5 @@
 /** Authenticated output framing, isolated from the legacy whole-body export. */
+import { cameraArtifact } from "../candidate-camera/artifacts.js";
 import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
 import { getOwnedJob } from "../jobs/store.js";
@@ -133,6 +134,8 @@ export function createFramingRoutes(deps = defaults) {
           );
         bvhBytes = new Uint8Array(await response.arrayBuffer());
       }
+      if (artifact.variant === "base" && candidate.camera && sha256Hex(bvhBytes) !== candidate.camera.source_bvh_sha256)
+        return fail(409, "POSE_UNAVAILABLE", "포즈가 변경되었습니다. 다시 분석해 주세요.");
       const key = JSON.stringify([
         installationId,
         jobId,
@@ -142,10 +145,12 @@ export function createFramingRoutes(deps = defaults) {
         characterId,
         scope,
         FRAMING_VERSION,
+        candidate.camera?.rotation,
       ]);
-      const result = await cache.get(key, () =>
-        deps.convertFramed({ bvhBytes, characterId, scope }),
-      );
+      const result = candidate.camera
+        ? await cameraArtifact([installationId, jobId, personIndex, candidateId],
+            { bvhBytes, characterId, scope, cameraRotation: candidate.camera.rotation }, deps.convertFramed)
+        : await cache.get(key, () => deps.convertFramed({ bvhBytes, characterId, scope }));
       // A preference or confirmation may change while Blender is working.
       const current = await deps.getOwnedJob(jobId, installationId);
       const currentPerson = current?.result?.candidatesByPerson.find(
