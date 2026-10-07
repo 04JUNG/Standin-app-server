@@ -928,3 +928,14 @@ BFF는 저장된 카메라를 refine과 `/convert-framed`로 전달한다. 원�
 FBX와 전신/반신/흉상/두상 미리보기에 같은 회전이 적용된다. BVH는 원래 방향을 유지한다.
 구 작업은 camera가 없어 기존 경로를 사용하므로, 개선 적용 후에는 새로 분석해야 한다.
 배포 순서: Converter → BFF → Inference. 느린 렌더로 화면 전체가 대기하지 않도록 progressive-preview 클라이언트도 함께 배포한다.
+
+## Precomputed candidate previews
+
+Camera candidates in GET job result additionally expose `previewModelUrl`.
+GET `/v1/pose-candidates/:id/preview-model` takes the same jobId/personIndex/candidateId/
+optional characterId as `/aligned`. It rechecks job ownership, current source
+BVH digest, quarantine and character availability even for cached assets.
+It returns a bounded static `model/gltf-binary` with no public cache URL.
+Missing/stale assets return 503 immediately; this route never starts Blender.
+Clients fall back to `/aligned` when unavailable or WebGL fails. Existing clients,
+BVH downloads and final FBX/refined/cropped export contracts are unchanged.

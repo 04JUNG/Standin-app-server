@@ -6,7 +6,12 @@ import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
 import { errorEnvelope } from "../mapping.js";
 import { confirmSelections, saveFeedback } from "../analytics/store.js";
-import { deleteJobObjects, inspectInputImage, signedInputUrl, storeInput } from "../inputStorage.js";
+import {
+  deleteJobObjects,
+  inspectInputImage,
+  signedInputUrl,
+  storeInput,
+} from "../inputStorage.js";
 import { exceedsPixelBudget } from "../imageHeader.js";
 import { config } from "../config.js";
 import { parseHistoryQuery, toHistoryPage } from "./history.js";
@@ -45,7 +50,11 @@ jobsRoutes.post("/", async (c) => {
   // 20MB body를 읽기 전에 본다.
   if (!(await isAnalysisEnabled())) {
     return c.json(
-      errorEnvelope("SERVICE_PAUSED", "지금은 분석을 이용할 수 없습니다.", c.get("requestId")),
+      errorEnvelope(
+        "SERVICE_PAUSED",
+        "지금은 분석을 이용할 수 없습니다.",
+        c.get("requestId"),
+      ),
       503,
     );
   }
@@ -53,7 +62,11 @@ jobsRoutes.post("/", async (c) => {
   const file = body["file"];
   if (!(file instanceof File)) {
     return c.json(
-      errorEnvelope("INVALID_INPUT", "file(멀티파트 이미지)이 필요합니다.", c.get("requestId")),
+      errorEnvelope(
+        "INVALID_INPUT",
+        "file(멀티파트 이미지)이 필요합니다.",
+        c.get("requestId"),
+      ),
       400,
     );
   }
@@ -65,7 +78,11 @@ jobsRoutes.post("/", async (c) => {
     // bodyLimit이 Content-Length로 먼저 끊지만(index.ts), 헤더가 없거나 거짓인
     // 요청이 여기까지 올 수 있어 파싱 뒤에도 한 번 더 본다.
     return c.json(
-      errorEnvelope("INVALID_INPUT", "PNG, JPG, WEBP 이미지만 20MB까지 허용됩니다.", c.get("requestId")),
+      errorEnvelope(
+        "INVALID_INPUT",
+        "PNG, JPG, WEBP 이미지만 20MB까지 허용됩니다.",
+        c.get("requestId"),
+      ),
       400,
     );
   }
@@ -88,21 +105,31 @@ jobsRoutes.post("/", async (c) => {
   // 20MB 안에서도 수십억 픽셀을 선언할 수 있고, 그걸 펼치는 건 추론 서버다.
   if (actualSize && exceedsPixelBudget(actualSize, config.maxImagePixels)) {
     return c.json(
-      errorEnvelope("INVALID_INPUT", "이미지 해상도가 너무 큽니다.", c.get("requestId")),
+      errorEnvelope(
+        "INVALID_INPUT",
+        "이미지 해상도가 너무 큽니다.",
+        c.get("requestId"),
+      ),
       400,
     );
   }
   const source = body["source"];
   if (source !== "capture" && source !== "file" && source !== "clipboard") {
     return c.json(
-      errorEnvelope("INVALID_INPUT", "source가 필요합니다.", c.get("requestId")),
+      errorEnvelope(
+        "INVALID_INPUT",
+        "source가 필요합니다.",
+        c.get("requestId"),
+      ),
       400,
     );
   }
   const optionalDimension = (value: unknown): number | null => {
     if (typeof value !== "string" || value === "") return null;
     const parsed = Number(value);
-    return Number.isInteger(parsed) && parsed > 0 && parsed <= 100_000 ? parsed : null;
+    return Number.isInteger(parsed) && parsed > 0 && parsed <= 100_000
+      ? parsed
+      : null;
   };
   // 헤더에서 읽은 값이 있으면 그걸 쓴다. 클라 값은 검증되지 않았고, jobs 테이블의
   // COALESCE 때문에 한번 들어가면 실제 값이 덮어쓰지 못한다.
@@ -132,11 +159,18 @@ jobsRoutes.post("/", async (c) => {
       config.jobExecutionMode === "sqs",
     );
   } catch {
-    await updateJob(job.id, { status: "failed", errorCode: "INPUT_STORAGE_FAILED" });
+    await updateJob(job.id, {
+      status: "failed",
+      errorCode: "INPUT_STORAGE_FAILED",
+    });
     // 우리 쪽 저장 장애다. 사용자의 오늘 쿼터를 깎은 채로 두지 않는다.
     await refundAnalysisQuota(installationId).catch(() => {});
     return c.json(
-      errorEnvelope("STORAGE_UNAVAILABLE", "입력 이미지를 안전하게 보관하지 못했습니다.", c.get("requestId")),
+      errorEnvelope(
+        "STORAGE_UNAVAILABLE",
+        "입력 이미지를 안전하게 보관하지 못했습니다.",
+        c.get("requestId"),
+      ),
       503,
     );
   }
@@ -151,13 +185,17 @@ jobsRoutes.post("/", async (c) => {
       notify({
         severity: "P2",
         code: "QUEUE_DISPATCH_FAILED",
-        message: "새 분석 작업을 SQS에 즉시 발행하지 못했습니다. Outbox에서 재시도합니다.",
+        message:
+          "새 분석 작업을 SQS에 즉시 발행하지 못했습니다. Outbox에서 재시도합니다.",
       });
     });
   } else {
     void runAnalysisJob(job.id, file); // migration rollback path
   }
-  return c.json({ jobId: job.id, status: job.status, createdAt: job.createdAt }, 202);
+  return c.json(
+    { jobId: job.id, status: job.status, createdAt: job.createdAt },
+    202,
+  );
 });
 
 // GET /v1/analysis/jobs — 작업 기록 목록(커서 페이지네이션).
@@ -169,7 +207,10 @@ jobsRoutes.get("/", async (c) => {
     status: c.req.query("status"),
   });
   if (!parsed.ok) {
-    return c.json(errorEnvelope("INVALID_INPUT", parsed.message, c.get("requestId")), 400);
+    return c.json(
+      errorEnvelope("INVALID_INPUT", parsed.message, c.get("requestId")),
+      400,
+    );
   }
   const rows = await listJobHistory(c.get("installationId")!, parsed.query);
   return c.json(toHistoryPage(rows, parsed.query.limit));
@@ -179,7 +220,10 @@ jobsRoutes.get("/", async (c) => {
 jobsRoutes.get("/:id", async (c) => {
   const job = await getOwnedJob(c.req.param("id"), c.get("installationId")!);
   if (!job) {
-    return c.json(errorEnvelope("NOT_FOUND", "unknown jobId", c.get("requestId")), 404);
+    return c.json(
+      errorEnvelope("NOT_FOUND", "unknown jobId", c.get("requestId")),
+      404,
+    );
   }
   return c.json({
     jobId: job.id,
@@ -194,10 +238,20 @@ jobsRoutes.get("/:id", async (c) => {
 jobsRoutes.get("/:id/result", async (c) => {
   const job = await getOwnedJob(c.req.param("id"), c.get("installationId")!);
   if (!job) {
-    return c.json(errorEnvelope("NOT_FOUND", "unknown jobId", c.get("requestId")), 404);
+    return c.json(
+      errorEnvelope("NOT_FOUND", "unknown jobId", c.get("requestId")),
+      404,
+    );
   }
   if (job.status !== "completed" || !job.result) {
-    return c.json(errorEnvelope("NOT_READY", `job status: ${job.status}`, c.get("requestId")), 409);
+    return c.json(
+      errorEnvelope(
+        "NOT_READY",
+        `job status: ${job.status}`,
+        c.get("requestId"),
+      ),
+      409,
+    );
   }
   // 입력 원본을 여기에 얹는다. 결과는 Job당 사실상 한 번만 조회되고 presign은 네트워크
   // 없는 서명이라 비용이 없다 — 이것 하나 때문에 엔드포인트를 늘리지 않는다.
@@ -212,7 +266,19 @@ jobsRoutes.get("/:id/result", async (c) => {
   return c.json({
     ...job.result,
     candidatesByPerson: job.result.candidatesByPerson.map((person) => ({
-      ...person, outputScope: resolveOutputScope(person.outputScope),
+      ...person,
+      outputScope: resolveOutputScope(person.outputScope),
+      candidates: person.candidates.map((candidate) => ({
+        ...candidate,
+        ...(candidate.camera && candidate.thumbnailUrl
+          ? {
+              previewModelUrl: candidate.thumbnailUrl.replace(
+                "/aligned?",
+                "/preview-model?",
+              ),
+            }
+          : {}),
+      })),
     })),
     capabilities: await currentCapabilities(),
     inputUrl,
@@ -225,7 +291,10 @@ jobsRoutes.get("/:id/result", async (c) => {
 jobsRoutes.get("/:id/selections", async (c) => {
   const job = await getOwnedJob(c.req.param("id"), c.get("installationId")!);
   if (!job) {
-    return c.json(errorEnvelope("NOT_FOUND", "unknown jobId", c.get("requestId")), 404);
+    return c.json(
+      errorEnvelope("NOT_FOUND", "unknown jobId", c.get("requestId")),
+      404,
+    );
   }
   return c.json({ selections: await listConfirmedSelections(job.id) });
 });
@@ -246,7 +315,10 @@ jobsRoutes.delete("/:id", async (c) => {
         409,
       );
     }
-    return c.json(errorEnvelope("NOT_FOUND", "unknown jobId", c.get("requestId")), 404);
+    return c.json(
+      errorEnvelope("NOT_FOUND", "unknown jobId", c.get("requestId")),
+      404,
+    );
   }
 
   // DB를 먼저 지우고 S3는 best-effort로 뒤따른다. 순서를 뒤집으면 커밋이 실패했을 때
@@ -256,7 +328,11 @@ jobsRoutes.delete("/:id", async (c) => {
   try {
     await deleteJobObjects(installationId, jobId);
   } catch (error) {
-    log.error({ type: "job_object_delete_failed", jobId, ...errorFields(error) });
+    log.error({
+      type: "job_object_delete_failed",
+      jobId,
+      ...errorFields(error),
+    });
     notify({
       severity: "P3",
       code: "JOB_OBJECT_DELETE_FAILED",
@@ -267,15 +343,35 @@ jobsRoutes.delete("/:id", async (c) => {
 });
 
 jobsRoutes.put("/:id/selections", async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { selections?: unknown[] } | null;
-  if (!body?.selections || !Array.isArray(body.selections) || body.selections.length === 0) {
-    return c.json(errorEnvelope("INVALID_INPUT", "selections 배열이 필요합니다.", c.get("requestId")), 400);
+  const body = (await c.req.json().catch(() => null)) as {
+    selections?: unknown[];
+  } | null;
+  if (
+    !body?.selections ||
+    !Array.isArray(body.selections) ||
+    body.selections.length === 0
+  ) {
+    return c.json(
+      errorEnvelope(
+        "INVALID_INPUT",
+        "selections 배열이 필요합니다.",
+        c.get("requestId"),
+      ),
+      400,
+    );
   }
   const selections: Array<{ personIndex: number; candidateId: string }> = [];
   const seen = new Set<number>();
   for (const raw of body.selections) {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-      return c.json(errorEnvelope("INVALID_INPUT", "선택 형식이 잘못되었습니다.", c.get("requestId")), 400);
+      return c.json(
+        errorEnvelope(
+          "INVALID_INPUT",
+          "선택 형식이 잘못되었습니다.",
+          c.get("requestId"),
+        ),
+        400,
+      );
     }
     const item = raw as Record<string, unknown>;
     if (
@@ -285,14 +381,35 @@ jobsRoutes.put("/:id/selections", async (c) => {
       item.candidateId.length === 0 ||
       seen.has(item.personIndex as number)
     ) {
-      return c.json(errorEnvelope("INVALID_INPUT", "선택 값이 잘못되었습니다.", c.get("requestId")), 400);
+      return c.json(
+        errorEnvelope(
+          "INVALID_INPUT",
+          "선택 값이 잘못되었습니다.",
+          c.get("requestId"),
+        ),
+        400,
+      );
     }
     seen.add(item.personIndex as number);
-    selections.push({ personIndex: item.personIndex as number, candidateId: item.candidateId });
+    selections.push({
+      personIndex: item.personIndex as number,
+      candidateId: item.candidateId,
+    });
   }
-  const saved = await confirmSelections(c.get("installationId")!, c.req.param("id"), selections);
+  const saved = await confirmSelections(
+    c.get("installationId")!,
+    c.req.param("id"),
+    selections,
+  );
   if (!saved) {
-    return c.json(errorEnvelope("INVALID_SELECTION", "노출되지 않은 후보입니다.", c.get("requestId")), 409);
+    return c.json(
+      errorEnvelope(
+        "INVALID_SELECTION",
+        "노출되지 않은 후보입니다.",
+        c.get("requestId"),
+      ),
+      409,
+    );
   }
   return c.json({ confirmed: true });
 });
@@ -307,12 +424,30 @@ const FEEDBACK_REASONS = new Set([
 ]);
 
 jobsRoutes.post("/:id/feedback", async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { reason?: unknown } | null;
+  const body = (await c.req.json().catch(() => null)) as {
+    reason?: unknown;
+  } | null;
   if (typeof body?.reason !== "string" || !FEEDBACK_REASONS.has(body.reason)) {
-    return c.json(errorEnvelope("INVALID_INPUT", "허용되지 않은 피드백입니다.", c.get("requestId")), 400);
+    return c.json(
+      errorEnvelope(
+        "INVALID_INPUT",
+        "허용되지 않은 피드백입니다.",
+        c.get("requestId"),
+      ),
+      400,
+    );
   }
-  if (!(await saveFeedback(c.get("installationId")!, c.req.param("id"), body.reason))) {
-    return c.json(errorEnvelope("NOT_FOUND", "unknown jobId", c.get("requestId")), 404);
+  if (
+    !(await saveFeedback(
+      c.get("installationId")!,
+      c.req.param("id"),
+      body.reason,
+    ))
+  ) {
+    return c.json(
+      errorEnvelope("NOT_FOUND", "unknown jobId", c.get("requestId")),
+      404,
+    );
   }
   return c.json({ saved: true });
 });
@@ -320,7 +455,11 @@ jobsRoutes.post("/:id/feedback", async (c) => {
 // POST /v1/analysis/jobs/:id/rerun — TODO(Phase 2): excludeCandidateIds 반영 재검색
 jobsRoutes.post("/:id/rerun", (c) => {
   return c.json(
-    errorEnvelope("NOT_IMPLEMENTED", "rerun은 Phase 2에서 구현", c.get("requestId")),
+    errorEnvelope(
+      "NOT_IMPLEMENTED",
+      "rerun은 Phase 2에서 구현",
+      c.get("requestId"),
+    ),
     501,
   );
 });
