@@ -740,6 +740,14 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 
 ### Job 상세
 
+### 최근 Job (설치 무관)
+
+`GET /v1/admin/review/jobs?limit=20&cursor=&status=completed`
+
+설치 id를 모르는 상태에서 "방금 들어온 분석"부터 본다. 정렬·커서·`status`는 설치별 목록과 같은 규칙이고(`(created_at, id)` 내림차순), 항목에 `installationId`가 한 칸 더 붙어 거기서 그 설치의 전체 기록으로 넘어갈 수 있다.
+
+**서명 URL은 없다.** 목록 한 번이 사진 여러 장을 한꺼번에 여는 열쇠가 되지 않게 하는 방침은 설치별 목록과 같다. 원본은 상세에서 한 건씩 연다. 열람은 `review_recent_jobs`로 기록된다.
+
 `GET /v1/admin/review/jobs/{jobId}`는 한 건을 끝까지 보여 준다 — 5분짜리 원본 서명 URL, 인물·스켈레톤, 후보, 확정 선택, refine 산출물, 사용자 피드백, 추론 메타.
 
 ```json
@@ -836,6 +844,13 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 - `personTags`는 **인물별** 태그다(P2). `null`이면 그 Job은 인물별로 물어본 적이 없다(프롬프트 `p1-scope` 또는 구 추론). `source`가 `unknown`이면 물었는데 VLM이 모른다고 답한 것이다 — 이 둘은 다른 상태라 화면도 다르게 적는다.
 - `cutSummary.vlmTags`는 VLM이 **실제로 말한** 컷 태그라 `tags`와 다를 수 있다. `tags`는 추론이 `other`·`front`로 좁힌 뒤의 값이다.
 - `outputScope`는 `jobs.result_json`을 먼저 쓰고(사용자가 고른 구도가 거기 있다), 없을 때만 `analysis_people.output_scope_json`으로 메운다. 어느 쪽이든 저장된 파생 필드를 믿지 않고 다시 계산한다.
+
+`GET /v1/admin/product`의 응답에는 `accuracy`와 `usage`가 함께 온다.
+
+- `accuracy`: `selectionRate`(완료 Job 중 고른 비율), `top1Rate`(고른 것 중 1순위), `meanReciprocalRank`, `exportRate`, 사유별 `feedback[]`와 `feedbackRate`, 날짜별 `trend`
+- `usage`: `jobsStarted/Completed/Failed`, `failureRate`, `jobsPerDay`, `jobsPerActiveInstallation`, 날짜별 `trend`
+- 둘 다 원본이 `daily_analytics_aggregates`라 **오늘은 들어 있지 않다**(하루가 끝나야 집계한다). `days`가 0이면 아직 마감된 날이 없다는 뜻이고, 비율이 `null`이면 분모가 0이라 "아직 모른다"는 뜻이다 — 0%와 구분한다.
+- `meanReciprocalRank`는 날짜별 평균을 다시 평균 내지 않는다. 그날의 선택 수로 가중해 합산한다.
 
 `refined`는 `refined_artifacts`를 그대로 싣되 `object_key`·`thumbnail_key`를 서명해 URL로 바꾼 것이다. **`refined: false`인 행도 뺴지 않는다** — 왜 조정하지 않았는지(`reason`)가 조정 결과만큼 중요하다. 그 경우 두 URL은 `null`이다.
 

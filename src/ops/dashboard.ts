@@ -159,6 +159,21 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
       <div id="productOut"></div>
     </div>
     <div class="card">
+      <h2>최근 Job — 설치 상관없이 들어온 순서대로</h2>
+      <div class="lookup">
+        <select id="recentStatus">
+          <option value="">전체</option>
+          <option value="completed">completed</option>
+          <option value="failed">failed</option>
+          <option value="running">running</option>
+          <option value="queued">queued</option>
+        </select>
+        <button id="recentGo">불러오기</button>
+        <span id="recentMsg" class="sub"></span>
+      </div>
+      <div id="recentOut"></div>
+    </div>
+    <div class="card">
       <h2>설치 조회 — 이 설치가 무엇을 돌렸나</h2>
       <div class="lookup">
         <input id="lookupId" placeholder="inst_00000000-0000-4000-8000-000000000000" autocomplete="off" spellcheck="false">
@@ -701,6 +716,83 @@ async function openDetail(jobId, button) {
   }
 }
 
+let recent = { items: [], nextCursor: null, status: "" };
+
+async function recentFetch(cursor) {
+  const query = new URLSearchParams({ limit: "20" });
+  if (recent.status) query.set("status", recent.status);
+  if (cursor) query.set("cursor", cursor);
+  const res = await fetch("/v1/admin/review/jobs?" + query.toString(), {
+    headers: { "X-Beta-Admin-Token": token },
+  });
+  if (!res.ok) throw new Error("조회 실패 " + res.status);
+  return res.json();
+}
+
+function recentRender() {
+  if (!recent.items.length) {
+    $("recentOut").innerHTML = '<p class="empty">아직 없습니다.</p>';
+    return;
+  }
+  const rows = recent.items.map((item) =>
+    "<tr><td>" + jobStatus(item) + "</td>" +
+    '<td class="mono">' + esc(item.jobId) + "</td>" +
+    '<td class="sub">' + when(item.createdAt) + "</td>" +
+    '<td class="num">' + took(item) + "</td>" +
+    "<td>" + (item.installationId
+      ? '<button class="ghost mono" data-inst="' + esc(item.installationId) + '" title="' +
+        esc(item.installationId) + '">' + esc(String(item.installationId).slice(0, 13)) + "…</button>"
+      : '<span class="sub">—</span>') + "</td>" +
+    '<td class="num">' + (item.personCount === null || item.personCount === undefined ? "—" : item.personCount) + "</td>" +
+    '<td class="num">' + (item.selectionCount === null || item.selectionCount === undefined ? "—" : item.selectionCount) + "</td>" +
+    "<td>" + (item.errorCode ? pill(esc(item.errorCode), "bad") : "") + "</td>" +
+    '<td><button class="ghost" data-job="' + esc(item.jobId) + '">상세</button></td></tr>').join("");
+  $("recentOut").innerHTML =
+    '<div class="scroll"><table><thead><tr><th>상태</th><th>Job</th><th>들어온 때</th>' +
+    '<th class="num">걸린 시간</th><th>설치</th><th class="num">인물</th><th class="num">선택</th>' +
+    "<th>오류</th><th></th></tr></thead><tbody>" + rows + "</tbody></table></div>" +
+    (recent.nextCursor ? '<p><button class="ghost" id="recentMore">더 보기</button></p>' : "");
+  $("recentOut").querySelectorAll("button[data-job]").forEach((button) => {
+    button.addEventListener("click", () => openDetail(button.dataset.job, button));
+  });
+  // 설치 버튼은 그 설치의 전체 기록으로 넘어가는 지름길이다.
+  $("recentOut").querySelectorAll("button[data-inst]").forEach((button) => {
+    button.addEventListener("click", () => {
+      $("lookupId").value = button.dataset.inst;
+      lookupGo(null);
+    });
+  });
+  const more = $("recentMore");
+  if (more) {
+    more.addEventListener("click", async () => {
+      more.disabled = true;
+      try {
+        const page = await recentFetch(recent.nextCursor);
+        recent.items = recent.items.concat(page.items);
+        recent.nextCursor = page.nextCursor;
+        recentRender();
+      } catch (error) {
+        $("recentMsg").innerHTML = '<span class="err">' + esc(error.message) + "</span>";
+        more.disabled = false;
+      }
+    });
+  }
+}
+
+async function recentGo() {
+  $("recentMsg").textContent = "불러오는 중";
+  try {
+    recent.status = $("recentStatus").value;
+    const page = await recentFetch(null);
+    recent.items = page.items;
+    recent.nextCursor = page.nextCursor;
+    $("recentMsg").textContent = "";
+    recentRender();
+  } catch (error) {
+    $("recentMsg").innerHTML = '<span class="err">' + esc(error.message) + "</span>";
+  }
+}
+
 function lookupRender() {
   const install = lookup.installation;
   const head = install
@@ -985,9 +1077,81 @@ function vlmBlock(vlm) {
     '<p class="sub">unrecorded는 프롬프트 버전을 저장하기 전의 분석이다. 1인 컷은 인물별로 묻지 않은 프롬프트에서 컷 값을 그 인물의 값으로 쓴 경우다.</p>';
 }
 
+function metricCards(items) {
+  return '<div class="row">' + items.map((item) =>
+    '<div class="cohort"><h2>' + esc(item.label) + "</h2>" +
+    '<div class="big">' + esc(String(item.value)) + "</div>" +
+    '<div class="sub">' + esc(item.hint) + "</div></div>").join("") + "</div>";
+}
+
+/** 날짜별 막대 하나짜리 간단한 추이. ops 차트는 요청·5xx 전용이라 따로 둔다. */
+function trendBars(points) {
+  if (!points.length) return '<p class="empty">데이터가 아직 없습니다.</p>';
+  const width = 1000, height = 120, gap = 2;
+  const barWidth = Math.max(1, width / points.length - gap);
+  const peak = Math.max(1, ...points.map((point) => point.value || 0));
+  const bars = points.map((point, index) => {
+    const value = point.value || 0;
+    const barHeight = Math.round((value / peak) * (height - 20));
+    return '<rect x="' + index * (barWidth + gap) + '" y="' + (height - barHeight) +
+      '" width="' + barWidth + '" height="' + barHeight +
+      '" fill="var(--accent)" opacity=".75"><title>' + esc(point.title) + "</title></rect>";
+  }).join("");
+  return '<svg viewBox="0 0 ' + width + " " + height + '" preserveAspectRatio="none">' + bars + "</svg>";
+}
+
+function accuracyBlock(accuracy) {
+  if (!accuracy || !accuracy.days) {
+    return "<h3>정확도</h3><p class=\"empty\">아직 마감된 날이 없습니다. 집계는 하루가 끝난 뒤에 들어옵니다.</p>";
+  }
+  const feedback = accuracy.feedback.length
+    ? '<div class="scroll"><table><thead><tr><th>피드백 사유</th><th class="num">건수</th>' +
+      '<th class="num">비중</th></tr></thead><tbody>' +
+      accuracy.feedback.map((row) =>
+        "<tr><td>" + esc(row.reason) + '</td><td class="num">' + row.count +
+        '</td><td class="num' + (row.reason === "candidates_irrelevant" ? " gap" : "") + '">' +
+        pct(row.share) + "</td></tr>").join("") + "</tbody></table></div>"
+    : '<p class="empty">피드백이 없습니다.</p>';
+  return "<h3>정확도 — 어제까지 " + accuracy.days + "일</h3>" +
+    metricCards([
+      { label: "선택률", value: pct(accuracy.selectionRate),
+        hint: "완료 " + accuracy.jobsCompleted + "건 중 고른 Job" },
+      { label: "Top-1 비율", value: pct(accuracy.top1Rate),
+        hint: "고른 것 중 첫 번째였던 비율" },
+      { label: "평균 역순위", value: accuracy.meanReciprocalRank === null ? "—" : accuracy.meanReciprocalRank,
+        hint: "1에 가까울수록 위에서 고른다" },
+      { label: "내보내기 전환", value: pct(accuracy.exportRate),
+        hint: "고른 뒤 실제로 받아 간 비율" },
+    ]) +
+    '<p class="sub">피드백을 남긴 Job은 ' + pct(accuracy.feedbackRate) +
+    "다. 아래 비중은 그 안에서의 비율이라 표본이 작으면 크게 흔들린다.</p>" + feedback +
+    "<h3>선택률 추이</h3>" +
+    trendBars(accuracy.trend.map((point) => ({
+      value: point.selectionRate === null ? 0 : point.selectionRate,
+      title: point.day + " · " + pct(point.selectionRate) + " · 완료 " + point.jobsCompleted + "건",
+    })));
+}
+
+function usageBlock(usage) {
+  if (!usage || !usage.days) return "";
+  return "<h3>사용률</h3>" +
+    metricCards([
+      { label: "하루 평균 분석", value: usage.jobsPerDay === null ? "—" : usage.jobsPerDay,
+        hint: "총 " + usage.jobsStarted + "건 / " + usage.days + "일" },
+      { label: "설치당 분석", value: usage.jobsPerActiveInstallation === null ? "—" : usage.jobsPerActiveInstallation,
+        hint: "활성 설치 " + usage.activeInstallations + "곳 기준" },
+      { label: "실패율", value: pct(usage.failureRate),
+        hint: "시작 " + usage.jobsStarted + "건 중 실패 " + usage.jobsFailed + "건" },
+    ]) +
+    trendBars(usage.trend.map((point) => ({
+      value: point.jobsStarted,
+      title: point.day + " · 시작 " + point.jobsStarted + "건 · 실패 " + point.jobsFailed + "건",
+    })));
+}
+
 function productRender(data) {
   const drop = data.dropoff;
-  $("productOut").innerHTML =
+  $("productOut").innerHTML = accuracyBlock(data.accuracy) + usageBlock(data.usage) +
     instrumentationBlock(data.instrumentation) +
     '<h3>① 퍼널 — 어디서 새는가</h3>' + funnelTable(data.funnel) +
     '<p class="sub">실패한 Job ' + data.jobsFailed + "건. 설치 수는 사람, 건수는 부하다 — 한 사람이 열 번 돌린 것과 열 사람이 한 번씩 돌린 것을 같게 보지 않으려고 함께 센다.</p>" +
@@ -1039,6 +1203,8 @@ async function productGo() {
 }
 
 $("productGo").addEventListener("click", productGo);
+$("recentGo").addEventListener("click", recentGo);
+$("recentStatus").addEventListener("change", () => { if (recent.items.length) recentGo(); });
 $("productDays").addEventListener("change", () => { if ($("productOut").innerHTML) productGo(); });
 
 // ── 설치 명부 ────────────────────────────────────────────────
