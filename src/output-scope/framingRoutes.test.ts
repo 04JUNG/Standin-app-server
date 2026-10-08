@@ -15,6 +15,7 @@ function setup() {
     changeDuringConversion: false,
     calls: 0,
     reads: 0,
+    revision: "a".repeat(64),
   };
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
@@ -56,12 +57,16 @@ function setup() {
       },
       checkCharacter: async () => "ok" as const,
       converterEnabled: () => true,
-      convertFramed: async () => {
+      modelPreviewIdentity: async () => ({
+        modelRevision: state.revision,
+        characterSha256: "b".repeat(64),
+      }),
+      convertFramed: async (input) => {
         state.calls++;
         if (state.changeDuringConversion) state.scope = "head";
         return {
           fbx: Buffer.from("fbx"),
-          preview: Buffer.from("png"),
+          preview: Buffer.from(input.previewFormat === "model" ? "glb" : "png"),
           conversionId: "id",
           artifactSha256: "sha",
           sourceBvhSha256: "sha",
@@ -94,6 +99,27 @@ test("owned confirmed scope returns private preview; same pair can export FBX", 
     "fbx",
   );
   assert.equal(state.calls, 1);
+});
+
+test("model review and download share one conversion but exporter revisions invalidate it", async () => {
+  const { state, request } = setup();
+  const query = { jobId: "model-pair", format: "model" };
+  const model = await request(query);
+  assert.equal(model.headers.get("Content-Type"), "model/gltf-binary");
+  assert.equal(await model.text(), "glb");
+  const exported = await request({
+    ...query,
+    format: "fbx",
+    previewType: "model",
+  });
+  assert.equal(await exported.text(), "fbx");
+  assert.equal(state.calls, 1);
+  state.revision = "c".repeat(64);
+  await request(query);
+  assert.equal(state.calls, 2);
+  state.owner = false;
+  assert.equal((await request(query)).status, 409);
+  assert.equal(state.calls, 2);
 });
 for (const kind of ["owner", "confirmation", "stale", "pose", "quarantine"]) {
   test(`reject ${kind} before converting`, async () => {

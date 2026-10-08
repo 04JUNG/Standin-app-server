@@ -5,7 +5,11 @@ import type { AppEnv } from "../env.js";
 import { errorEnvelope } from "../mapping.js";
 import { getOwnedJob } from "../jobs/store.js";
 import { validateExportCandidate } from "../analytics/store.js";
-import { isRefineFailure, resolveRefinedThumbnail, runRefine } from "./service.js";
+import {
+  isRefineFailure,
+  resolveRefinedThumbnail,
+  runRefine,
+} from "./service.js";
 
 export const refineRoutes = new Hono<AppEnv>();
 
@@ -16,13 +20,34 @@ refineRoutes.post("/:jobId/people/:personIndex/refine", async (c) => {
   const requestId = c.get("requestId");
 
   if (!Number.isInteger(personIndex) || personIndex < 0) {
-    return c.json(errorEnvelope("INVALID_INPUT", "personIndex가 올바르지 않습니다.", requestId), 400);
+    return c.json(
+      errorEnvelope(
+        "INVALID_INPUT",
+        "personIndex가 올바르지 않습니다.",
+        requestId,
+      ),
+      400,
+    );
   }
 
-  const body = (await c.req.json().catch(() => null)) as { candidateId?: unknown } | null;
+  const body = (await c.req.json().catch(() => null)) as {
+    candidateId?: unknown;
+    deferPreview?: unknown;
+  } | null;
+  if (
+    body?.deferPreview !== undefined &&
+    typeof body.deferPreview !== "boolean"
+  )
+    return c.json(
+      errorEnvelope("INVALID_INPUT", "deferPreview must be boolean", requestId),
+      400,
+    );
   const candidateId = body?.candidateId;
   if (typeof candidateId !== "string" || candidateId.length === 0) {
-    return c.json(errorEnvelope("INVALID_INPUT", "candidateId가 필요합니다.", requestId), 400);
+    return c.json(
+      errorEnvelope("INVALID_INPUT", "candidateId가 필요합니다.", requestId),
+      400,
+    );
   }
 
   // 1) 이 installation이 job에 접근할 수 있는가.
@@ -30,17 +55,38 @@ refineRoutes.post("/:jobId/people/:personIndex/refine", async (c) => {
     return c.json(errorEnvelope("NOT_FOUND", "unknown jobId", requestId), 404);
   }
   // 2) 그 인물에게 실제로 노출된 Top-5 후보인가.
-  if (!(await validateExportCandidate(installationId, jobId, personIndex, candidateId))) {
+  if (
+    !(await validateExportCandidate(
+      installationId,
+      jobId,
+      personIndex,
+      candidateId,
+    ))
+  ) {
     return c.json(
-      errorEnvelope("INVALID_SELECTION", "작업에서 노출된 후보가 아닙니다.", requestId),
+      errorEnvelope(
+        "INVALID_SELECTION",
+        "작업에서 노출된 후보가 아닙니다.",
+        requestId,
+      ),
       409,
     );
   }
 
-  const outcome = await runRefine({ installationId, jobId, personIndex, candidateId });
+  const outcome = await runRefine({
+    installationId,
+    jobId,
+    personIndex,
+    candidateId,
+    deferPreview: body?.deferPreview === true,
+  });
   if (isRefineFailure(outcome)) {
     return c.json(
-      errorEnvelope("INVALID_SELECTION", "작업에서 노출된 후보가 아닙니다.", requestId),
+      errorEnvelope(
+        "INVALID_SELECTION",
+        "작업에서 노출된 후보가 아닙니다.",
+        requestId,
+      ),
       409,
     );
   }
@@ -49,7 +95,11 @@ refineRoutes.post("/:jobId/people/:personIndex/refine", async (c) => {
   // 없으면 베이스를 준다 — 클라이언트는 어느 쪽인지 몰라도 같은 URL만 내려받으면 된다.
   const exportUrl =
     `/v1/pose-candidates/${encodeURIComponent(outcome.poseId)}/export?` +
-    new URLSearchParams({ jobId, personIndex: String(personIndex), candidateId });
+    new URLSearchParams({
+      jobId,
+      personIndex: String(personIndex),
+      candidateId,
+    });
 
   // 미리보기는 별도 GET이다. 응답에 base64를 그대로 실으면 다인 컷에서 refine 응답이
   // 인물 수만큼 커지는데, 이 값은 화면에 한 번 그려지고 마는 그림이다.
@@ -79,11 +129,21 @@ refineRoutes.get("/:jobId/people/:personIndex/refine/thumbnail", async (c) => {
   const requestId = c.get("requestId");
 
   if (!Number.isInteger(personIndex) || personIndex < 0) {
-    return c.json(errorEnvelope("INVALID_INPUT", "personIndex가 올바르지 않습니다.", requestId), 400);
+    return c.json(
+      errorEnvelope(
+        "INVALID_INPUT",
+        "personIndex가 올바르지 않습니다.",
+        requestId,
+      ),
+      400,
+    );
   }
   const candidateId = c.req.query("candidateId");
   if (!candidateId) {
-    return c.json(errorEnvelope("INVALID_INPUT", "candidateId가 필요합니다.", requestId), 400);
+    return c.json(
+      errorEnvelope("INVALID_INPUT", "candidateId가 필요합니다.", requestId),
+      400,
+    );
   }
 
   // POST와 같은 두 단계 검사. 미리보기는 사용자 입력에서 파생된 private artifact이므로
@@ -91,9 +151,20 @@ refineRoutes.get("/:jobId/people/:personIndex/refine/thumbnail", async (c) => {
   if (!(await getOwnedJob(jobId, installationId))) {
     return c.json(errorEnvelope("NOT_FOUND", "unknown jobId", requestId), 404);
   }
-  if (!(await validateExportCandidate(installationId, jobId, personIndex, candidateId))) {
+  if (
+    !(await validateExportCandidate(
+      installationId,
+      jobId,
+      personIndex,
+      candidateId,
+    ))
+  ) {
     return c.json(
-      errorEnvelope("INVALID_SELECTION", "작업에서 노출된 후보가 아닙니다.", requestId),
+      errorEnvelope(
+        "INVALID_SELECTION",
+        "작업에서 노출된 후보가 아닙니다.",
+        requestId,
+      ),
       409,
     );
   }
@@ -102,7 +173,10 @@ refineRoutes.get("/:jobId/people/:personIndex/refine/thumbnail", async (c) => {
   // 그림이 없는 것은 오류가 아니지만, 응답으로는 "없음"이어야 한다 — 빈 200을 주면
   // 클라이언트가 깨진 이미지를 그린다.
   if (!bytes) {
-    return c.json(errorEnvelope("NOT_FOUND", "미리보기가 없습니다.", requestId), 404);
+    return c.json(
+      errorEnvelope("NOT_FOUND", "미리보기가 없습니다.", requestId),
+      404,
+    );
   }
 
   return new Response(bytes, {

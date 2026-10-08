@@ -18,6 +18,7 @@ import {
   convertFramed,
   FramedArtifactCache,
   FRAMING_VERSION,
+  modelPreviewIdentity,
 } from "../converter/framing.js";
 import { isBodyScope, resolveOutputScope } from "./model.js";
 
@@ -31,8 +32,10 @@ const defaults = {
   convertFramed,
   converterEnabled,
   recordExport,
+  modelPreviewIdentity,
 };
-export function createFramingRoutes(deps = defaults) {
+export function createFramingRoutes(overrides: Partial<typeof defaults> = {}) {
+  const deps = { ...defaults, ...overrides };
   const routes = new Hono<AppEnv>();
   routes.get("/:id/framed", async (c) => {
     const fail = (
@@ -55,7 +58,7 @@ export function createFramingRoutes(deps = defaults) {
       !Number.isInteger(personIndex) ||
       personIndex < 0 ||
       !isBodyScope(scope) ||
-      (format !== "preview" && format !== "fbx")
+      (format !== "preview" && format !== "fbx" && format !== "model")
     )
       return fail(
         400,
@@ -134,8 +137,16 @@ export function createFramingRoutes(deps = defaults) {
           );
         bvhBytes = new Uint8Array(await response.arrayBuffer());
       }
-      if (artifact.variant === "base" && candidate.camera && sha256Hex(bvhBytes) !== candidate.camera.source_bvh_sha256)
-        return fail(409, "POSE_UNAVAILABLE", "포즈가 변경되었습니다. 다시 분석해 주세요.");
+      if (
+        artifact.variant === "base" &&
+        candidate.camera &&
+        sha256Hex(bvhBytes) !== candidate.camera.source_bvh_sha256
+      )
+        return fail(
+          409,
+          "POSE_UNAVAILABLE",
+          "포즈가 변경되었습니다. 다시 분석해 주세요.",
+        );
       const key = JSON.stringify([
         installationId,
         jobId,
@@ -147,10 +158,45 @@ export function createFramingRoutes(deps = defaults) {
         FRAMING_VERSION,
         candidate.camera?.rotation,
       ]);
-      const result = candidate.camera
-        ? await cameraArtifact([installationId, jobId, personIndex, candidateId],
-            { bvhBytes, characterId, scope, cameraRotation: candidate.camera.rotation }, deps.convertFramed)
-        : await cache.get(key, () => deps.convertFramed({ bvhBytes, characterId, scope }));
+      const useModel =
+        format === "model" ||
+        (format === "fbx" && c.req.query("previewType") === "model");
+      const identity = useModel
+        ? await deps.modelPreviewIdentity(characterId)
+        : null;
+      if (useModel && !identity)
+        return fail(
+          503,
+          "PREVIEW_UNAVAILABLE",
+          "미리보기를 지금 준비할 수 없습니다. 다시 시도해 주세요.",
+        );
+      const result = useModel
+        ? await cameraArtifact(
+            [installationId, jobId, personIndex, candidateId],
+            {
+              bvhBytes,
+              characterId,
+              scope,
+              cameraRotation: candidate.camera?.rotation,
+              previewFormat: "model",
+              ...identity!,
+            },
+            deps.convertFramed,
+          )
+        : candidate.camera
+          ? await cameraArtifact(
+              [installationId, jobId, personIndex, candidateId],
+              {
+                bvhBytes,
+                characterId,
+                scope,
+                cameraRotation: candidate.camera.rotation,
+              },
+              deps.convertFramed,
+            )
+          : await cache.get(key, () =>
+              deps.convertFramed({ bvhBytes, characterId, scope }),
+            );
       // A preference or confirmation may change while Blender is working.
       const current = await deps.getOwnedJob(jobId, installationId);
       const currentPerson = current?.result?.candidatesByPerson.find(
@@ -174,11 +220,15 @@ export function createFramingRoutes(deps = defaults) {
         );
       }
       await exportEvent("completed");
-      const bytes = format === "preview" ? result.preview : result.fbx;
+      const bytes = format === "fbx" ? result.fbx : result.preview;
       return new Response(bytes, {
         headers: {
           "Content-Type":
-            format === "preview" ? "image/png" : "application/octet-stream",
+            format === "model"
+              ? "model/gltf-binary"
+              : format === "preview"
+                ? "image/png"
+                : "application/octet-stream",
           "Content-Length": String(bytes.byteLength),
           "Cache-Control": "private, no-store",
           "X-Standin-Output-Scope": scope,
