@@ -1,5 +1,13 @@
 # API 계약 — BFF가 클라(Tauri)에 노출하는 `/v1`
 
+## 빠른 후보 카드 (2026-10-08)
+
+카메라가 지정된 후보에는 기존 `thumbnailUrl`(정확한 각도의 느린 렌더)과 함께
+`quickThumbnailUrl`(이미 준비된 라이브러리 JPEG)을 제공합니다. 후보 카드에서는 빠른
+이미지를 먼저 사용하고, 저장 전 확인 화면은 최종 모델/FBX 계약을 그대로 사용합니다.
+JPEG는 검색 시점의 근사 시점이며 선택한 체형이나 정밀 카메라를 보장하지 않습니다.
+응답에 이미지가 없는 구 번들은 `quickThumbnailUrl`을 생략합니다.
+
 ## 모델 미리보기와 FBX 재사용 (2026-10-08)
 
 - `capabilities.modelPreview`는 정상 Converter의 모델 exporter revision 및 체형 SHA를
