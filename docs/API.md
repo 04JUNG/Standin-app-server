@@ -953,3 +953,14 @@ BVH downloads and final FBX/refined/cropped export contracts are unchanged.
 - capabilities.bodyPreviews는 false다. 이 단계는 이미지 렌더와 Export 체형 연결 완료를 의미하지 않는다.
 
 요청/응답·오류·승인 manifest·호환 정책의 정본: [체형 선택 저장 설계](BODY_SELECTION_DESIGN.md).
+
+
+## 체형 Top-K 미리보기 자산 (2026-10-08, 1~2단계)
+
+[체형 미리보기 계약](BODY_PREVIEW_DESIGN.md)을 따른다. 기존 설치 인증을 사용한다.
+
+- GET `/v1/analysis/jobs/:jobId/people/:personIndex/body-previews`: 저장된 체형/selectionRevision과 원래 후보·camera에 연결된 manifest.
+- GET 같은 prefix `/:renderKey/:candidateId/glb` 또는 `/png`: 기대 체형 hash·렌더 revision 검증, 완료 직전 최신 선택 재검사. URL query는 허용하지 않는다.
+- `/result`의 person에 `bodyPreviewManifestUrl` 추가. `capabilities.bodyPreviewAssets`는 API 지원이고 `bodyPreviews=false`는 앱/Export 전체 미연결 상태를 유지한다.
+- `renderable`/`renderingExecuted=false`는 목록만 결정됐다는 뜻이다. 개별 바이트 요청 성공 전 렌더 성공으로 표시하면 안 된다.
+- GLB miss는 같은 manifest의 PNG로 폴백 가능. stale/권한/체형 변경 오류를 기본 남성 이미지로 대체하지 않는다.

@@ -2,6 +2,8 @@
 
 구현일: 2026-10-08. 기준 develop: `adf45ab`.
 
+후속 1~2단계: [체형 자산·Top-K 미리보기 계약](BODY_PREVIEW_DESIGN.md)에 versioned GLB/PNG API를 추가했다. 아래 저장 정책은 유지한다. 앱 UI·최종 Export 연결은 아직 후속이다.
+
 ## 범위와 활성화
 
 이번 구현은 개인 기본 설정, 인물별 체형 선택 저장, `/analyze.body_matching` 추천 결과 전달이다. 추론·포즈 검색·refine 계산·후보 순위는 바꾸지 않는다. Top-5 렌더·차렷 카드·클라이언트 UI·저장 체형을 Export에 적용하는 연결은 후속 단계다.

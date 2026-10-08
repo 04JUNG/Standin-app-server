@@ -1,5 +1,6 @@
 // /v1/analysis/jobs — 분석 Job 생성·폴링·결과.
 // 동기 추론을 "제출→폴링" 비동기 계약으로 감싼다(클라 08_API_CONTRACT.md 형태).
+import { createBodyPreviewRoutes, bodyPreviewManifestUrl } from "../body-selection/previews.js";
 import { createBodySelectionRoutes } from "../body-selection/routes.js";
 import { attachBodySelections } from "../body-selection/store.js";
 import { createOutputScopeRoutes } from "../output-scope/routes.js";
@@ -44,6 +45,7 @@ const RESULT_INPUT_URL_TTL_SECONDS = 900;
 
 // POST /:jobId/people/:personIndex/refine. 같은 prefix라 여기 붙이고 파일만 나눈다.
 jobsRoutes.route("/", createBodySelectionRoutes());
+jobsRoutes.route("/", createBodyPreviewRoutes());
 jobsRoutes.route("/", refineRoutes);
 jobsRoutes.route("/", createOutputScopeRoutes());
 
@@ -271,6 +273,7 @@ jobsRoutes.get("/:id/result", async (c) => {
     ...result,
     candidatesByPerson: result.candidatesByPerson.map((person) => ({
       ...person,
+      ...(person.bodySelection ? { bodyPreviewManifestUrl: bodyPreviewManifestUrl(result.jobId, person.personIndex) } : {}),
       outputScope: resolveOutputScope(person.outputScope),
       candidates: person.candidates.map((candidate) => ({
         ...candidate,

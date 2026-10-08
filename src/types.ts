@@ -79,6 +79,8 @@ export interface AnalysisResult {
     bodySelection?: boolean;
     bodyRecommendation?: boolean;
     bodyPreviews?: boolean;
+    /** Read-only versioned Top-K assets. Does not enable the end-to-end body UX. */
+    bodyPreviewAssets?: boolean;
     refine: boolean;
     /**
      * FBX 저장을 노출해도 되는가. converter는 추론 서버와 별개로 배포되므로 refine과 함께
@@ -103,6 +105,7 @@ export type ExportFormat = "bvh" | "fbx";
 export interface AnalysisPerson {
   bodyRecommendation?: BodyRecommendation;
   bodySelection?: BodySelection;
+  bodyPreviewManifestUrl?: string;
   outputScope?: OutputScope;
   personIndex: number;
   box: number[] | null;

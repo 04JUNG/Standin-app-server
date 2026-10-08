@@ -164,6 +164,7 @@ export async function currentCapabilities(
   bodySelection: boolean;
   bodyRecommendation: boolean;
   bodyPreviews: boolean;
+  bodyPreviewAssets: boolean;
   refine: boolean;
   fbxExport: boolean;
   characterSelection: boolean;
@@ -174,6 +175,7 @@ export async function currentCapabilities(
     bodySelection: config.bodySelectionEnabled,
     bodyRecommendation: config.bodySelectionEnabled,
     bodyPreviews: false,
+    bodyPreviewAssets: config.bodySelectionEnabled && converterEnabled(),
     refine: config.refineFeatureEnabled,
     fbxExport: converterEnabled(),
     characterSelection: await characterSelectionEnabled(overrides),

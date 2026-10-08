@@ -17,12 +17,16 @@ export interface FramedArtifact {
   conversionId: string;
   artifactSha256: string;
   sourceBvhSha256: string;
+  characterSha256?: string;
+  previewRevision?: string;
 }
 export interface FramedInput {
   bvhBytes: Uint8Array;
   characterId: string;
   scope: BodyScope;
   cameraRotation?: number[][];
+  expectedCharacterSha256?: string;
+  expectedPreviewRevision?: string;
 }
 function dependencies(overrides: Partial<ConverterDeps>): ConverterDeps {
   return {
@@ -64,6 +68,9 @@ export async function convertFramed(
   const deps = dependencies(overrides);
   if (!deps.baseUrl)
     throw new ConverterError("CONVERTER_DISABLED", "converter disabled");
+  for (const value of [input.expectedCharacterSha256, input.expectedPreviewRevision])
+    if (value !== undefined && !/^[a-f0-9]{64}$/.test(value))
+      throw new ConverterError("CONVERTER_INTEGRITY", "invalid expected asset lineage");
   const digest = sha256Hex(input.bvhBytes);
   const body = new FormData();
   body.set(
@@ -76,6 +83,8 @@ export async function convertFramed(
   body.set("preview_view", "front");
   if (input.cameraRotation) body.set("camera_rotation", JSON.stringify(input.cameraRotation));
   body.set("expected_bvh_sha256", digest);
+  if (input.expectedCharacterSha256) body.set("expected_character_sha256", input.expectedCharacterSha256);
+  if (input.expectedPreviewRevision) body.set("expected_preview_revision", input.expectedPreviewRevision);
   let response: Response;
   try {
     response = await deps.fetch(`${deps.baseUrl}/convert-framed`, {
@@ -122,6 +131,8 @@ export async function convertFramed(
       preview = decode("preview_base64");
     if (
       (input.cameraRotation !== undefined && JSON.stringify(value.camera_rotation) !== JSON.stringify(input.cameraRotation)) ||
+      (input.expectedCharacterSha256 !== undefined && value.character_sha256 !== input.expectedCharacterSha256) ||
+      (input.expectedPreviewRevision !== undefined && value.preview_revision !== input.expectedPreviewRevision) ||
       value.solver_version !== EXPECTED_SOLVER_VERSION ||
       value.framing_version !== FRAMING_VERSION ||
       value.output_scope !== input.scope ||
@@ -148,6 +159,8 @@ export async function convertFramed(
       conversionId: value.conversion_id,
       artifactSha256: sha256Hex(fbx),
       sourceBvhSha256: digest,
+      characterSha256: value.character_sha256,
+      ...(typeof value.preview_revision === "string" ? { previewRevision: value.preview_revision } : {}),
     };
   } catch {
     throw new ConverterError(

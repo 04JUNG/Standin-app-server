@@ -123,7 +123,16 @@ app.use(
       "X-Beta-Admin-Token",
     ],
     // 429 응답의 Retry-After를 웹뷰가 읽으려면 노출 목록에 있어야 한다(사용량 제한 안내).
-    exposeHeaders: ["Retry-After"],
+    exposeHeaders: [
+      "Retry-After",
+      "X-Standin-Body-Render-Key",
+      "X-Standin-Body-Revision",
+      "X-Standin-Character-SHA256",
+      "X-Standin-Source-BVH-SHA256",
+      "X-Standin-Preview-Revision",
+      "X-Standin-Model-Revision",
+      "X-Standin-Artifact-SHA256",
+    ],
     credentials: true,
     maxAge: 600,
   }),
