@@ -37,6 +37,22 @@ export function parseCatalog(value: unknown): BodyCatalog {
       bodies.has(a.bodyId)
     )
       throw new Error("invalid body asset");
+    if (
+      a.neutralPreview &&
+      (!a.neutralPreview.path.startsWith("/") ||
+        !/^[a-f0-9]{64}$/.test(a.neutralPreview.sha256) ||
+        a.neutralPreview.characterSha256 !== a.assetSha256 ||
+        a.neutralPreview.pose !== "attention" ||
+        a.neutralPreview.framing !== "body-comparison.v1")
+    )
+      throw new Error("invalid neutral preview");
+    if (
+      a.displayName !== undefined &&
+      (typeof a.displayName !== "string" ||
+        !a.displayName ||
+        a.displayName.length > 200)
+    )
+      throw new Error("invalid display name");
     characters.add(a.characterId);
     bodies.add(a.bodyId);
   }

@@ -54,23 +54,28 @@ X-Device-Token: ...
 HTTP/1.1 429 Too Many Requests
 Retry-After: 41230
 ```
+
 ```json
 {
   "error": {
     "code": "WEEKLY_QUOTA_EXCEEDED",
     "message": "이번 주에 사용할 수 있는 분석 횟수를 모두 사용했습니다.",
-    "details": { "retryAfterSeconds": 213000, "limit": 100, "retryAt": "2026-08-24T00:00:00.000+09:00" },
+    "details": {
+      "retryAfterSeconds": 213000,
+      "limit": 100,
+      "retryAt": "2026-08-24T00:00:00.000+09:00"
+    },
     "requestId": "req_..."
   }
 }
 ```
 
-| code | 의미 | `details` |
-|---|---|---|
-| `WEEKLY_QUOTA_EXCEEDED` | 설치별 **주간** 분석 한도 초과 | `retryAfterSeconds`, `limit`, `retryAt` |
-| `GLOBAL_QUOTA_EXCEEDED` | 서비스 전체 일일 분석 한도 초과 | `retryAfterSeconds`, `retryAt` |
-| `RATE_LIMITED` | 짧은 시간에 요청이 몰림(IP 단위) | `retryAfterSeconds`, `limit`, `windowSeconds` |
-| `CONCURRENCY_LIMIT` | 같은 설치에 진행 중인 분석이 있음 | `retryAfterSeconds`, `limit` |
+| code                    | 의미                              | `details`                                     |
+| ----------------------- | --------------------------------- | --------------------------------------------- |
+| `WEEKLY_QUOTA_EXCEEDED` | 설치별 **주간** 분석 한도 초과    | `retryAfterSeconds`, `limit`, `retryAt`       |
+| `GLOBAL_QUOTA_EXCEEDED` | 서비스 전체 일일 분석 한도 초과   | `retryAfterSeconds`, `retryAt`                |
+| `RATE_LIMITED`          | 짧은 시간에 요청이 몰림(IP 단위)  | `retryAfterSeconds`, `limit`, `windowSeconds` |
+| `CONCURRENCY_LIMIT`     | 같은 설치에 진행 중인 분석이 있음 | `retryAfterSeconds`, `limit`                  |
 
 설치별 한도는 **주 단위**이고 **KST 월요일 자정**에 리셋된다. 하루 단위로 끊으면 "작업하는 날에
 몰아서 여러 컷"이라는 실제 사용 방식을 막는다 — 같은 총량이라도 창이 넓으면 그 리듬을 막지 않는다.
@@ -120,11 +125,11 @@ Retry-After: 41230
 
 요청: `multipart/form-data`
 
-| 필드 | 필수 | 설명 |
-|---|:---:|---|
-| `file` | ✅ | PNG/JPEG/WEBP 러프 콘티 이미지, 최대 20MB. MIME·파일 시그니처·헤더의 실제 픽셀 크기를 검증한다. |
-| `source` | ✅ | `capture \| file \| clipboard` |
-| `width`, `height` | — | 원본 픽셀 크기(참고값). 서버가 헤더에서 실제 크기를 읽으면 **그 값이 우선한다** |
+| 필드              | 필수 | 설명                                                                                            |
+| ----------------- | :--: | ----------------------------------------------------------------------------------------------- |
+| `file`            |  ✅  | PNG/JPEG/WEBP 러프 콘티 이미지, 최대 20MB. MIME·파일 시그니처·헤더의 실제 픽셀 크기를 검증한다. |
+| `source`          |  ✅  | `capture \| file \| clipboard`                                                                  |
+| `width`, `height` |  —   | 원본 픽셀 크기(참고값). 서버가 헤더에서 실제 크기를 읽으면 **그 값이 우선한다**                 |
 
 응답 `202`:
 
@@ -150,11 +155,11 @@ Retry-After: 41230
 
 작업 기록 목록. 최신순(`createdAt DESC`), 커서 페이지네이션.
 
-| 쿼리 | 기본 | 설명 |
-|---|---|---|
-| `limit` | 20 | 1~50 정수. 범위 밖은 클램프하지 않고 `400 INVALID_INPUT`. |
-| `cursor` | — | 이전 응답의 `nextCursor`. 손상된 값은 `400 INVALID_INPUT`. |
-| `status` | — | `queued \| running \| completed \| failed` 중 하나로 거른다. |
+| 쿼리     | 기본 | 설명                                                         |
+| -------- | ---- | ------------------------------------------------------------ |
+| `limit`  | 20   | 1~50 정수. 범위 밖은 클램프하지 않고 `400 INVALID_INPUT`.    |
+| `cursor` | —    | 이전 응답의 `nextCursor`. 손상된 값은 `400 INVALID_INPUT`.   |
+| `status` | —    | `queued \| running \| completed \| failed` 중 하나로 거른다. |
 
 ```json
 {
@@ -175,7 +180,7 @@ Retry-After: 41230
       "inputHeight": 1080
     }
   ],
-  "nextCursor": "eyJ..." 
+  "nextCursor": "eyJ..."
 }
 ```
 
@@ -223,7 +228,12 @@ Retry-After: 41230
 ```json
 {
   "selections": [
-    { "personIndex": 0, "candidateId": "pose-1::front", "rank": 1, "confirmedAt": "..." }
+    {
+      "personIndex": 0,
+      "candidateId": "pose-1::front",
+      "rank": 1,
+      "confirmedAt": "..."
+    }
   ]
 }
 ```
@@ -289,8 +299,17 @@ fire-and-forget이라 생길 수 있고, 서버가 주기적으로 정리해 무
     {
       "personIndex": 0,
       "box": [120, 80, 360, 720],
-      "tags": { "shot": "full_half", "action": "standing", "view": "front", "relationship": "solo" },
-      "skeleton": { "schemaVersion": "coco17-v1", "keypoints": [[1, 2]], "scores": [0.9] },
+      "tags": {
+        "shot": "full_half",
+        "action": "standing",
+        "view": "front",
+        "relationship": "solo"
+      },
+      "skeleton": {
+        "schemaVersion": "coco17-v1",
+        "keypoints": [[1, 2]],
+        "scores": [0.9]
+      },
       "confidence": "high",
       "skeletonState": "valid",
       "skeletonSource": "full_image",
@@ -352,15 +371,15 @@ fire-and-forget이라 생길 수 있고, 서버가 주기적으로 정리해 무
 
 ### 인물 품질 필드
 
-| 필드 | 값 | 의미 |
-|---|---|---|
-| `confidence` | `high` \| `low` | 최종 인물 단위 신뢰도 |
-| `skeletonState` | `valid` \| `partial` \| `suspect` \| `missing` \| `invalid` | 구조 품질과 fallback 사유 |
-| `skeletonSource` | `full_image` \| `crop_retry` \| `none` | crop 재추론으로 복구했는지 |
-| `coverageClass` | `full` \| `reduced` \| `sparse` \| `insufficient` | 거리 임계값이 적용된 관측 범위 |
-| `fallbackMode` | `none` \| `soft` \| `hard` | 아래 표 참고 |
-| `refineAllowed` | boolean | 이 인물에 refine을 호출해도 되는가 |
-| `refinableLimbs` | string[] | refine이 움직여도 되는 사지 |
+| 필드             | 값                                                          | 의미                               |
+| ---------------- | ----------------------------------------------------------- | ---------------------------------- |
+| `confidence`     | `high` \| `low`                                             | 최종 인물 단위 신뢰도              |
+| `skeletonState`  | `valid` \| `partial` \| `suspect` \| `missing` \| `invalid` | 구조 품질과 fallback 사유          |
+| `skeletonSource` | `full_image` \| `crop_retry` \| `none`                      | crop 재추론으로 복구했는지         |
+| `coverageClass`  | `full` \| `reduced` \| `sparse` \| `insufficient`           | 거리 임계값이 적용된 관측 범위     |
+| `fallbackMode`   | `none` \| `soft` \| `hard`                                  | 아래 표 참고                       |
+| `refineAllowed`  | boolean                                                     | 이 인물에 refine을 호출해도 되는가 |
+| `refinableLimbs` | string[]                                                    | refine이 움직여도 되는 사지        |
 
 `fallbackMode`는 `candidates.length == 0 → hard`, `길이 > 0 && confidence=low → soft`, 그 외 `none`이다.
 **`soft`와 `hard`는 다른 상태다.** soft는 참고용 Top-5를 보여주되 refine을 금지하고, hard는 그 인물에 자동
@@ -434,15 +453,15 @@ BFF가 보관해 둔 값을 서버측에서 읽는다 — 클라이언트가 값
 **`refined: false`는 오류가 아니다.** 안전 게이트가 조정을 버리고 베이스를 유지한 정상 결과이며, HTTP는 200이다.
 `reasonCode`는 추론의 사유(`entangled_set`, `no_gain`, `collision_gate` …)이거나 BFF가 붙인 스킵 사유다.
 
-| `reasonCode` | 의미 |
-|---|---|
-| `feature_disabled` | BFF의 refine flag가 off. 추론을 호출하지 않았다 |
-| `skeleton_policy` | 저신뢰 인물이라 refine 금지. 추론을 호출하지 않았다 |
-| `storage_unavailable` | 조정본을 보관할 저장소가 없다 |
-| `context_unavailable` | 보관된 refine 입력이 없거나 17×2가 아니다 |
-| `upstream_unavailable` | 추론 timeout·5xx. 베이스로 전환 |
-| `artifact_store_failed` | 조정은 됐지만 보관에 실패. **refined=true로 기록하지 않는다** |
-| `upstream_missing_bvh` | `refined=true`인데 `bvh` 본문이 없거나 `null`. 계약 위반이라 베이스로 전환 |
+| `reasonCode`            | 의미                                                                       |
+| ----------------------- | -------------------------------------------------------------------------- |
+| `feature_disabled`      | BFF의 refine flag가 off. 추론을 호출하지 않았다                            |
+| `skeleton_policy`       | 저신뢰 인물이라 refine 금지. 추론을 호출하지 않았다                        |
+| `storage_unavailable`   | 조정본을 보관할 저장소가 없다                                              |
+| `context_unavailable`   | 보관된 refine 입력이 없거나 17×2가 아니다                                  |
+| `upstream_unavailable`  | 추론 timeout·5xx. 베이스로 전환                                            |
+| `artifact_store_failed` | 조정은 됐지만 보관에 실패. **refined=true로 기록하지 않는다**              |
+| `upstream_missing_bvh`  | `refined=true`인데 `bvh` 본문이 없거나 `null`. 계약 위반이라 베이스로 전환 |
 
 추론이 돌려주는 사유에는 v2.5에서 `timeout`, `safety_gate`, `unchanged_geometry`, `low_observability`,
 `no_solvable_joints`, `final_collision_gate`, `final_extension_gate`가 추가됐다. 전부 `refined=false` +
@@ -579,12 +598,12 @@ resolve 해 본 것만 돌려주므로 그것이 `availability`의 유일한 근
 
 `format=fbx`일 때만 읽는다. 생략하면 배포 기본값(`CONVERTER_CHARACTER_ID`)으로 변환한다.
 
-| 상황 | 응답 |
-|---|---|
-| 목록에 있고 지금 만들 수 있음 | 그 체형으로 변환 |
-| 우리가 모르는 값 | `400 INVALID_CHARACTER` |
+| 상황                                        | 응답                        |
+| ------------------------------------------- | --------------------------- |
+| 목록에 있고 지금 만들 수 있음               | 그 체형으로 변환            |
+| 우리가 모르는 값                            | `400 INVALID_CHARACTER`     |
 | 아는 체형인데 지금 못 만듦(artifact 미배포) | `409 CHARACTER_UNAVAILABLE` |
-| `format=bvh`에 함께 옴 | **무시한다**(400 아님) |
+| `format=bvh`에 함께 옴                      | **무시한다**(400 아님)      |
 
 BVH에서 무시하는 이유: BVH는 동작만 담아 체형이 들어갈 자리가 없는데, 클라이언트와 BFF는 따로
 배포되므로 400으로 막으면 구버전 클라이언트의 저장이 통째로 깨진다.
@@ -613,14 +632,14 @@ X-Standin-Solver-Version    == chain-transport-v3.2.5
 mirror는 **converter가 한 번만** 적용한다. BFF가 BVH rotation을 직접 미러링하지 않고, CSP 단계도 같은
 반전을 다시 하지 않는다. 현재는 사용자에게 노출하지 않아 항상 `false`다.
 
-| 상태 | 코드 | 재시도 |
-|---|---|---|
-| `409` | `FBX_UNAVAILABLE` | converter가 꺼진 배포. BVH로 저장 |
-| `409` | `CONVERTER_REJECTED` | ✗ 같은 입력은 계속 거부된다 |
-| `409` | `CONVERTER_INTEGRITY` | ✗ lineage 불일치. 운영 확인 필요 |
-| `503` | `CONVERTER_UNAVAILABLE` | ○ |
-| `504` | `CONVERTER_TIMEOUT` | ○ |
-| `502` | `CONVERTER_FAILED` | ○ |
+| 상태  | 코드                    | 재시도                            |
+| ----- | ----------------------- | --------------------------------- |
+| `409` | `FBX_UNAVAILABLE`       | converter가 꺼진 배포. BVH로 저장 |
+| `409` | `CONVERTER_REJECTED`    | ✗ 같은 입력은 계속 거부된다       |
+| `409` | `CONVERTER_INTEGRITY`   | ✗ lineage 불일치. 운영 확인 필요  |
+| `503` | `CONVERTER_UNAVAILABLE` | ○                                 |
+| `504` | `CONVERTER_TIMEOUT`     | ○                                 |
+| `502` | `CONVERTER_FAILED`      | ○                                 |
 
 FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.** 사용자가 고른 포맷과 저장된 파일이 달라지면
 클립스튜디오에서 열리지 않는 이유를 알 방법이 없다.
@@ -644,10 +663,21 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 ```json
 {
   "items": [
-    { "installationId": "inst_...", "createdAt": "2026-09-01T...", "lastSeenAt": "2026-09-11T...",
-      "appVersion": "0.1.1-beta.7", "osName": "windows", "osVersion": "11", "locale": "ko",
-      "consentVersion": "2026-08-02", "revokedAt": null, "deletionRequestedAt": null,
-      "jobCount": 12, "failedCount": 1, "lastJobAt": "2026-09-04T00:29:24.879Z" }
+    {
+      "installationId": "inst_...",
+      "createdAt": "2026-09-01T...",
+      "lastSeenAt": "2026-09-11T...",
+      "appVersion": "0.1.1-beta.7",
+      "osName": "windows",
+      "osVersion": "11",
+      "locale": "ko",
+      "consentVersion": "2026-08-02",
+      "revokedAt": null,
+      "deletionRequestedAt": null,
+      "jobCount": 12,
+      "failedCount": 1,
+      "lastJobAt": "2026-09-04T00:29:24.879Z"
+    }
   ],
   "nextCursor": "eyJ..."
 }
@@ -666,15 +696,33 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 ```json
 {
   "installation": {
-    "installationId": "inst_...", "createdAt": "2026-08-01T...", "lastSeenAt": "2026-09-11T...",
-    "appVersion": "0.4.2", "osName": "windows", "osVersion": "11", "locale": "ko-KR",
-    "consentVersion": "2026-08-02", "revokedAt": null, "deletionRequestedAt": null
+    "installationId": "inst_...",
+    "createdAt": "2026-08-01T...",
+    "lastSeenAt": "2026-09-11T...",
+    "appVersion": "0.4.2",
+    "osName": "windows",
+    "osVersion": "11",
+    "locale": "ko-KR",
+    "consentVersion": "2026-08-02",
+    "revokedAt": null,
+    "deletionRequestedAt": null
   },
   "items": [
-    { "jobId": "job_...", "status": "failed", "createdAt": "2026-09-11T...", "completedAt": null,
-      "errorCode": "INFERENCE_TIMEOUT", "source": "capture", "personCount": 0, "selectionCount": 0,
-      "hasSelection": false, "thumbnailUrl": null, "inputAvailable": true,
-      "inputWidth": 1920, "inputHeight": 1080 }
+    {
+      "jobId": "job_...",
+      "status": "failed",
+      "createdAt": "2026-09-11T...",
+      "completedAt": null,
+      "errorCode": "INFERENCE_TIMEOUT",
+      "source": "capture",
+      "personCount": 0,
+      "selectionCount": 0,
+      "hasSelection": false,
+      "thumbnailUrl": null,
+      "inputAvailable": true,
+      "inputWidth": 1920,
+      "inputHeight": 1080
+    }
   ],
   "nextCursor": "eyJ..."
 }
@@ -685,10 +733,10 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 - `thumbnailUrl`은 **설치 토큰이 필요한 경로**다. 관리자 토큰으로는 열리지 않는다.
 - 원본 러프는 목록에 없다. `inputAvailable: true`인 Job을 아래 상세로 열면 서명 URL이 나온다. 목록에 20건치 서명 URL을 달면 한 번의 조회가 그 설치의 사진 전부를 꺼내는 열쇠가 된다.
 
-| 상태 | 언제 |
-|---|---|
+| 상태                | 언제                                                                |
+| ------------------- | ------------------------------------------------------------------- |
 | `400 INVALID_INPUT` | installationId 형식이 아니거나 `limit`·`cursor`·`status`가 잘못됐다 |
-| `404 NOT_FOUND` | 없는 설치. 기록이 0건인 설치는 `items: []`로 구분된다 |
+| `404 NOT_FOUND`     | 없는 설치. 기록이 0건인 설치는 `items: []`로 구분된다               |
 
 ### Job 상세
 
@@ -696,30 +744,86 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 
 ```json
 {
-  "jobId": "job_...", "status": "completed", "createdAt": "2026-09-04T...",
-  "inputUrl": "https://...", "inputUrlExpiresInSeconds": 300,
+  "jobId": "job_...",
+  "status": "completed",
+  "createdAt": "2026-09-04T...",
+  "inputUrl": "https://...",
+  "inputUrlExpiresInSeconds": 300,
   "image": { "width": 900, "height": 1200 },
-  "cutSummary": { "route": "core", "countConfidence": "high", "detectorCount": 2, "vlmCount": 2,
-                  "vlmTags": { "shot": "full_half", "action": "standing" } },
+  "cutSummary": {
+    "route": "core",
+    "countConfidence": "high",
+    "detectorCount": 2,
+    "vlmCount": 2,
+    "vlmTags": { "shot": "full_half", "action": "standing" }
+  },
   "inferenceMetadata": { "solver": "v3.2.5", "poseLibraryVersion": "v2.5" },
-  "people": [{ "personIndex": 0, "confidence": "high", "candidateCount": 3,
-               "box": [120, 80, 360, 720], "tags": { "action": "standing", "view": "front" },
-               "skeleton": { "schemaVersion": "coco17-v1", "keypoints": [[450, 180]], "scores": [0.91] },
-               "jointScores": { "values": [0.91], "source": "effective" },
-               "skeletonState": "valid", "skeletonSource": "full_image", "coverageClass": "full",
-               "fallbackMode": "none", "slotOrigin": "vlm", "lowerBodyObserved": true,
-               "refineAllowed": true, "refinableLimbs": ["left_arm"],
-               "personTags": { "action": "reaching", "view": "three_quarter", "source": "vlm_person" },
-               "searchSignals": { "rankDistance": 0.182, "distanceMetric": "pos",
-                                  "searchStability": "stable", "confidenceThreshold": 0.45 },
-               "outputScope": { "selection": "auto", "detected": "full", "detectionSource": "vlm_person",
-                                "resolved": "full", "resolutionSource": "auto" } }],
-  "candidates": [{ "person_index": 0, "candidate_id": "...", "pose_id": "...", "rank": 1,
-                   "view": "front", "distance": 0.13, "rerank_score": 0.89, "match_level": "exact" }],
+  "people": [
+    {
+      "personIndex": 0,
+      "confidence": "high",
+      "candidateCount": 3,
+      "box": [120, 80, 360, 720],
+      "tags": { "action": "standing", "view": "front" },
+      "skeleton": {
+        "schemaVersion": "coco17-v1",
+        "keypoints": [[450, 180]],
+        "scores": [0.91]
+      },
+      "jointScores": { "values": [0.91], "source": "effective" },
+      "skeletonState": "valid",
+      "skeletonSource": "full_image",
+      "coverageClass": "full",
+      "fallbackMode": "none",
+      "slotOrigin": "vlm",
+      "lowerBodyObserved": true,
+      "refineAllowed": true,
+      "refinableLimbs": ["left_arm"],
+      "personTags": {
+        "action": "reaching",
+        "view": "three_quarter",
+        "source": "vlm_person"
+      },
+      "searchSignals": {
+        "rankDistance": 0.182,
+        "distanceMetric": "pos",
+        "searchStability": "stable",
+        "confidenceThreshold": 0.45
+      },
+      "outputScope": {
+        "selection": "auto",
+        "detected": "full",
+        "detectionSource": "vlm_person",
+        "resolved": "full",
+        "resolutionSource": "auto"
+      }
+    }
+  ],
+  "candidates": [
+    {
+      "person_index": 0,
+      "candidate_id": "...",
+      "pose_id": "...",
+      "rank": 1,
+      "view": "front",
+      "distance": 0.13,
+      "rerank_score": 0.89,
+      "match_level": "exact"
+    }
+  ],
   "selections": [{ "person_index": 0, "candidate_id": "...", "rank": 2 }],
-  "refined": [{ "personIndex": 0, "candidateId": "...", "poseId": "...", "refined": true,
-                "reason": "P3a 관통 복구", "limbs": ["left_forearm"],
-                "bvhUrl": "https://...", "thumbnailUrl": "https://..." }],
+  "refined": [
+    {
+      "personIndex": 0,
+      "candidateId": "...",
+      "poseId": "...",
+      "refined": true,
+      "reason": "P3a 관통 복구",
+      "limbs": ["left_forearm"],
+      "bvhUrl": "https://...",
+      "thumbnailUrl": "https://..."
+    }
+  ],
   "feedback": "손 위치가 어색해요"
 }
 ```
@@ -766,11 +870,13 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 ```
 
 **항목에 넣지 않는 것**: 작업·설치 ID, 입력 해시, S3 key, bbox, 이미지 크기.
+
 - 날짜는 일 단위, 관절은 0.1px로 반올림한다.
 - `obs`·`inst`는 export마다 새 salt로 만든 HMAC이다. 같은 export 안에서만 같은 값이고 export끼리는 이을 수 없다.
 - 응답 직전에 원본 ID 모양 값을 검사한다. 하나라도 걸리면 그 페이지는 `500 GAP_EXPORT_PRIVACY`로 막고 알린다.
 
 **대상 행**
+
 - 뷰 `gap_observations_v1`에서 읽는다. 완료된 작업 중 철회·삭제 요청이 없는 설치의 행만 담고, 쿼터 면제 설치(개발 단말)는 뺀다.
 - 원본 테이블 위의 뷰라서 작업 삭제·동의 철회·365일 정리 때 함께 사라진다.
 - 관절이 없는 인물은 담지 않는다.
@@ -816,9 +922,14 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 ```json
 { "enabled": false, "reason": "Gemini 비용 급증" }
 ```
+
 ```json
-{ "analysisEnabled": false, "reason": "Gemini 비용 급증",
-  "updatedAt": "2026-08-11T...", "propagationSeconds": 5 }
+{
+  "analysisEnabled": false,
+  "reason": "Gemini 비용 급증",
+  "updatedAt": "2026-08-11T...",
+  "propagationSeconds": 5
+}
 ```
 
 값은 DB(`service_flags`)에 있어 **재배포 없이** 모든 태스크에 반영된다. 각 태스크는 5초 캐시를
@@ -839,16 +950,23 @@ JWT access(짧게) + refresh(회전). 비밀번호는 argon2 해시. `/v1/auth/*
 
 ```json
 {
-  "user": { "id": "user_...", "email": "a@b.com", "displayName": "작가",
-            "provider": "local", "emailVerified": true },
+  "user": {
+    "id": "user_...",
+    "email": "a@b.com",
+    "displayName": "작가",
+    "provider": "local",
+    "emailVerified": true
+  },
   "accessToken": "eyJ...",
   "accessTokenExpiresAt": "2026-07-16T14:18:54.000Z",
   "refreshToken": "eyJ..."
 }
 ```
+
 (refresh 응답은 `user` 없이 토큰 3필드만)
 
 ### local 이메일 인증 흐름
+
 `register → (인증 메일) → verify-email 클릭 → login`. 인증 전에는 login이 `403`.
 
 - **POST /v1/auth/register** — `{ email, password(8자+), displayName? }`
@@ -859,6 +977,7 @@ JWT access(짧게) + refresh(회전). 비밀번호는 argon2 해시. `/v1/auth/*
 - **POST /v1/auth/login** — `{ email, password }` → `200` 토큰. 불일치 `401 INVALID_CREDENTIALS`, 미인증 `403 EMAIL_NOT_VERIFIED`.
 
 ### 소셜 로그인 (google · kakao · naver)
+
 브라우저 리디렉트 기반 authorization code flow. BFF가 code 교환·프로필 조회·유저 upsert·토큰 발급을 담당.
 
 - **GET /v1/auth/oauth/:provider/start** — provider 인가 페이지로 `302`. 미설정 provider면 `400 PROVIDER_UNAVAILABLE`.
@@ -872,12 +991,12 @@ JWT access(짧게) + refresh(회전). 비밀번호는 argon2 해시. `/v1/auth/*
   - ⚠ 토큰을 딥링크 URL(`standin://…?accessToken=`)에 실으면 OS 로그·최근 실행 기록에 장기 자격증명이 남는다(클라 `docs/06 §6` 금지). 그래서 코드만 넘긴다.
 
 ### 세션
+
 - **POST /v1/auth/refresh** — `{ refreshToken }` → `200` 새 토큰 쌍. **회전**(재사용 `401` — ADR-002 single-flight).
 - **POST /v1/auth/logout** — `{ refreshToken }` → `{ "ok": true }`.
 - **GET /v1/users/me** 🔒 — 현재 유저(`{ id, email, displayName, provider, emailVerified }`). 세션 복원용.
 
 > 저장: 유저·refresh jti·oauth 교환코드·Job은 **PostgreSQL**(BFF 전용·추론 poses.db와 분리)에 영속한다. 접속 정보는 `DATABASE_URL`.
-
 
 ### 관측 상체 검색 (2026-10-02)
 
@@ -889,7 +1008,6 @@ JWT access(짧게) + refresh(회전). 비밀번호는 argon2 해시. `/v1/auth/*
 - 출력 범위 수동 선택은 검색을 재실행하지 않는다. 관측 관절과 출력 설정은 별개다.
   부분 FBX 지원은 아래 `outputScopeCropping` 계약을 따른다.
 - 구 응답의 누락 필드는 기존 폴백 처리. 실제 부분 검색은 새 분석부터 적용된다.
-
 
 ### 부분 FBX 출력과 검토 미리보기 (2026-10-02)
 
@@ -909,7 +1027,6 @@ poseId를 매번 검사하며 outputScope는 서버 저장 resolved 값과 일�
 후보 카드의 기존 썸네일과 달리 **저장 전 확인 화면**에서 선택 범위를 렌더링한다.
 이 기능은 얼굴만 있는 러프의 머리 방향 검색을 추가하지 않는다.
 자세한 알고리즘·제한·검증은 `Standin-server/docs/BODY_SCOPE.md`의 3단계를 따른다.
-
 
 ## 후보별 표시 카메라 (candidate-camera-v1)
 
@@ -940,7 +1057,6 @@ Missing/stale assets return 503 immediately; this route never starts Blender.
 Clients fall back to `/aligned` when unavailable or WebGL fails. Existing clients,
 BVH downloads and final FBX/refined/cropped export contracts are unchanged.
 
-
 ## 체형 기본 설정·인물별 선택 저장 (body-selection.v1)
 
 `BODY_SELECTION_ENABLED=true`인 새 작업에서 선택적 body 추천·선택 저장 계약을 제공한다. 기본은 off다.
@@ -954,7 +1070,6 @@ BVH downloads and final FBX/refined/cropped export contracts are unchanged.
 
 요청/응답·오류·승인 manifest·호환 정책의 정본: [체형 선택 저장 설계](BODY_SELECTION_DESIGN.md).
 
-
 ## 체형 Top-K 미리보기 자산 (2026-10-08, 1~2단계)
 
 [체형 미리보기 계약](BODY_PREVIEW_DESIGN.md)을 따른다. 기존 설치 인증을 사용한다.
@@ -964,3 +1079,7 @@ BVH downloads and final FBX/refined/cropped export contracts are unchanged.
 - `/result`의 person에 `bodyPreviewManifestUrl` 추가. `capabilities.bodyPreviewAssets`는 API 지원이고 `bodyPreviews=false`는 앱/Export 전체 미연결 상태를 유지한다.
 - `renderable`/`renderingExecuted=false`는 목록만 결정됐다는 뜻이다. 개별 바이트 요청 성공 전 렌더 성공으로 표시하면 안 된다.
 - GLB miss는 같은 manifest의 PNG로 폴백 가능. stale/권한/체형 변경 오류를 기본 남성 이미지로 대체하지 않는다.
+
+## 체형 선택 UI 계약
+
+[최종 확인·Export 및 차렷 카드 계약](BODY_SELECTION_UI_CONTRACT.md)을 추가한다. 기존 경로와 호환되는 opt-in 확장이다.

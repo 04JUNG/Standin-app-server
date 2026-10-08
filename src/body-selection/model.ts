@@ -8,6 +8,14 @@ export interface BodyRef {
   characterId: string;
 }
 export interface BodyAsset extends BodyRef {
+  displayName?: string;
+  neutralPreview?: {
+    path: string;
+    sha256: string;
+    characterSha256: string;
+    pose: "attention";
+    framing: "body-comparison.v1";
+  };
   supportedPoseIds: string[];
 }
 export interface BodyCatalog {

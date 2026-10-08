@@ -84,7 +84,10 @@ function toModel(
   defaultCharacterId: string,
   selectedBody: BodyRef | null = null,
 ): ModelCharacter {
-  const presentation = presentationFor(characterId, upstream?.displayName ?? "");
+  const presentation = presentationFor(
+    characterId,
+    upstream?.displayName ?? "",
+  );
   return {
     characterId,
     ...(config.bodySelectionEnabled ? { bodyRef: selectedBody } : {}),
@@ -122,12 +125,19 @@ export async function listCharacters(
   const bodies = config.bodySelectionEnabled ? loadBodyCatalog().assets : [];
   const characters = [...ids]
     .map((id) => {
-      const a = bodies.find(asset => asset.characterId === id);
-      return toModel(id, byId.has(id), byId.get(id), deps.defaultCharacterId, a ? bodyRef(a) : null);
+      const a = bodies.find((asset) => asset.characterId === id);
+      return toModel(
+        id,
+        byId.has(id),
+        byId.get(id),
+        deps.defaultCharacterId,
+        a ? bodyRef(a) : null,
+      );
     })
     .sort((a, b) => {
       const order =
-        presentationFor(a.characterId, "").order - presentationFor(b.characterId, "").order;
+        presentationFor(a.characterId, "").order -
+        presentationFor(b.characterId, "").order;
       return order !== 0 ? order : a.characterId.localeCompare(b.characterId);
     });
 
@@ -174,7 +184,8 @@ export async function currentCapabilities(
   return {
     bodySelection: config.bodySelectionEnabled,
     bodyRecommendation: config.bodySelectionEnabled,
-    bodyPreviews: false,
+    bodyPreviews:
+      config.bodyUxEnabled && config.bodySelectionEnabled && converterEnabled(),
     bodyPreviewAssets: config.bodySelectionEnabled && converterEnabled(),
     refine: config.refineFeatureEnabled,
     fbxExport: converterEnabled(),

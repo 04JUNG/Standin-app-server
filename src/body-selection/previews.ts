@@ -44,7 +44,7 @@ const defaults = {
 };
 export type BodyPreviewDeps = typeof defaults;
 
-function validCamera(
+export function validCamera(
   camera: CandidateCamera | undefined,
 ): camera is CandidateCamera {
   if (

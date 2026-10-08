@@ -1,3 +1,4 @@
+import { neutralMetadata } from "./neutral.js";
 import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
 import { pool, transaction } from "../db.js";
@@ -336,6 +337,8 @@ export async function bodyOptions(
       return {
         characterId: a.characterId,
         bodyRef: bodyRef(a),
+        ...(a.displayName ? { displayName: a.displayName } : {}),
+        ...(a.neutralPreview ? { neutralPreview: neutralMetadata(a) } : {}),
         selectable: reasons.length === 0,
         reasonCodes: reasons,
       };

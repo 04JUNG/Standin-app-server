@@ -42,9 +42,13 @@ app.use("*", async (c, next) => {
   const requestId = `req_${randomUUID()}`;
   const startedAt = Date.now();
   c.set("requestId", requestId);
-  const pathJobId = c.req.path.match(/^\/v1\/analysis\/jobs\/(job_[0-9a-f-]+)/i)?.[1];
+  const pathJobId = c.req.path.match(
+    /^\/v1\/analysis\/jobs\/(job_[0-9a-f-]+)/i,
+  )?.[1];
   const queryJobId = c.req.query("jobId");
-  const jobId = pathJobId ?? (/^job_[0-9a-f-]+$/i.test(queryJobId ?? "") ? queryJobId : undefined);
+  const jobId =
+    pathJobId ??
+    (/^job_[0-9a-f-]+$/i.test(queryJobId ?? "") ? queryJobId : undefined);
 
   await runWithContext({ requestId, jobId }, async () => {
     // 라우트 **패턴**을 쓴다. 실제 경로를 넣으면 jobId마다 다른 값이 되어
@@ -62,7 +66,12 @@ app.use("*", async (c, next) => {
         ...(code ? { errorCode: code } : {}),
       });
       // 로그와 같은 자리에서 지표도 센다. 두 곳에서 세면 반드시 어긋난다(계획 3단계).
-      recordRequest({ status, durationMs, route: c.req.routePath, errorCode: code });
+      recordRequest({
+        status,
+        durationMs,
+        route: c.req.routePath,
+        errorCode: code,
+      });
     };
 
     try {
@@ -101,7 +110,11 @@ app.onError((error, c) => {
     context: { 예외: error instanceof Error ? error.name : "NonError" },
   });
   return c.json(
-    errorEnvelope("INTERNAL_ERROR", "일시적인 오류가 발생했습니다.", c.get("requestId")),
+    errorEnvelope(
+      "INTERNAL_ERROR",
+      "일시적인 오류가 발생했습니다.",
+      c.get("requestId"),
+    ),
     500,
   );
 });
@@ -125,6 +138,7 @@ app.use(
     // 429 응답의 Retry-After를 웹뷰가 읽으려면 노출 목록에 있어야 한다(사용량 제한 안내).
     exposeHeaders: [
       "Retry-After",
+      "X-Standin-Review-Key",
       "X-Standin-Body-Render-Key",
       "X-Standin-Body-Revision",
       "X-Standin-Character-SHA256",
@@ -152,7 +166,11 @@ app.route("/v1/auth", authRoutes);
 app.on(
   "POST",
   "/v1/installations",
-  rateLimitByIp("ip_register", config.rateIpRegister, config.rateIpRegisterWindow),
+  rateLimitByIp(
+    "ip_register",
+    config.rateIpRegister,
+    config.rateIpRegisterWindow,
+  ),
 );
 app.route("/v1/installations", installationRoutes);
 
@@ -182,6 +200,7 @@ app.on(
 // 모델 목록도 설치 인증 뒤에 둔다. 분석·저장과 같은 계약이라 클라이언트가 같은
 // 헤더로 부른다(auth: false = Bearer 없음, X-Installation-Id/X-Device-Token).
 app.use("/v1/models", requireInstallation);
+app.use("/v1/models/*", requireInstallation);
 app.use("/v1/pose-candidates/*", requireInstallation);
 app.use("/v1/events/*", requireInstallation);
 
@@ -195,13 +214,18 @@ app.route("/v1/admin", adminRoutes);
 // DB가 준비된 뒤에 요청을 받는다. 실패하면 기동하지 않는다 —
 // 스키마 없이 떠 있으면 모든 요청이 500이 되고 컨테이너는 healthy로 보인다.
 await initDb().catch(async (err) => {
-  log.error({ type: "startup", errorCode: "DB_INIT_FAILED", ...errorFields(err) });
+  log.error({
+    type: "startup",
+    errorCode: "DB_INIT_FAILED",
+    ...errorFields(err),
+  });
   // 곧 프로세스가 죽는다. 배치 창을 기다릴 수 없으므로 동기로 한 번 보낸다 —
   // 이 알림을 놓치면 "태스크가 계속 재시작한다"는 사실을 아무도 모른다.
   await notifyNow({
     severity: "P1",
     code: "DB_INIT_FAILED",
-    message: "BFF가 DB 초기화에 실패해 기동하지 못했습니다. 태스크가 반복 재시작합니다.",
+    message:
+      "BFF가 DB 초기화에 실패해 기동하지 못했습니다. 태스크가 반복 재시작합니다.",
     context: { 원인: err instanceof Error ? err.name : "NonError" },
   });
   process.exit(1);
@@ -223,7 +247,10 @@ notify({
   severity: "P3",
   code: "STARTUP",
   message: `BFF 기동 — port ${config.port}`,
-  context: { version: config.deploymentVersion, env: process.env.NODE_ENV ?? "development" },
+  context: {
+    version: config.deploymentVersion,
+    env: process.env.NODE_ENV ?? "development",
+  },
 });
 
 // 추론 서버는 ALB에 붙어 있지 않아 밖에서 아무도 보지 않는다. BFF가 대신 지켜본다.
@@ -231,11 +258,18 @@ const stopInferenceWatch = startInferenceWatch();
 // 요청 지표를 1분 롤업으로 저장하고 추론 서버 지표도 함께 긁어 온다(계획 3단계).
 const stopOpsFlush = startOpsFlush();
 
-const maintenanceTimer = setInterval(() => {
-  void runDataMaintenance().catch((error) =>
-    log.error({ type: "data_maintenance", errorCode: "MAINTENANCE_FAILED", ...errorFields(error) }),
-  );
-}, 24 * 60 * 60 * 1000);
+const maintenanceTimer = setInterval(
+  () => {
+    void runDataMaintenance().catch((error) =>
+      log.error({
+        type: "data_maintenance",
+        errorCode: "MAINTENANCE_FAILED",
+        ...errorFields(error),
+      }),
+    );
+  },
+  24 * 60 * 60 * 1000,
+);
 maintenanceTimer.unref();
 
 // 유실된 Job 정리. 24시간 주기 유지보수로는 너무 느리다 — 동시 분석 한도가 1이라
@@ -253,7 +287,11 @@ const sweepStaleJobs = () =>
       });
     })
     .catch((error) =>
-      log.error({ type: "stale_jobs_swept", errorCode: "SWEEP_FAILED", ...errorFields(error) }),
+      log.error({
+        type: "stale_jobs_swept",
+        errorCode: "SWEEP_FAILED",
+        ...errorFields(error),
+      }),
     );
 void sweepStaleJobs();
 const staleJobTimer = setInterval(() => void sweepStaleJobs(), 60 * 1000);
@@ -286,8 +324,8 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
     stopOpsFlush();
     server.close(() => {
       // 버퍼에 남은 알림과 지표를 먼저 밀어낸다. 종료 신호 뒤에는 주기를 기다릴 수 없다.
-      void Promise.allSettled([flushAlerts(), flushOpsNow()]).finally(() =>
-        void closeDb().finally(() => process.exit(0)),
+      void Promise.allSettled([flushAlerts(), flushOpsNow()]).finally(
+        () => void closeDb().finally(() => process.exit(0)),
       );
     });
   });

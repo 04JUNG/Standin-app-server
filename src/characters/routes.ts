@@ -1,3 +1,7 @@
+import { loadBodyCatalog } from "../body-selection/catalog.js";
+import { readNeutral } from "../body-selection/neutral.js";
+import { sha256Hex } from "../converter/client.js";
+import { config } from "../config.js";
 // GET /v1/models — 저장할 체형 목록(Standin-client docs/08 §8-1, ADR-013).
 import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
@@ -46,5 +50,30 @@ characterRoutes.get("/", async (c) => {
       );
     }
     throw error;
+  }
+});
+
+characterRoutes.get("/:characterId/body-preview/:sha", async (c) => {
+  const asset = config.bodySelectionEnabled
+    ? loadBodyCatalog().assets.find(
+        (a) => a.characterId === c.req.param("characterId"),
+      )
+    : undefined;
+  if (
+    !asset?.neutralPreview ||
+    asset.neutralPreview.sha256 !== c.req.param("sha")
+  )
+    return c.notFound();
+  try {
+    const bytes = await readNeutral(asset);
+    if (sha256Hex(bytes) !== asset.neutralPreview.sha256) return c.notFound();
+    return new Response(new Uint8Array(bytes), {
+      headers: {
+        "Content-Type": "image/png",
+        "Cache-Control": "private, no-store",
+      },
+    });
+  } catch {
+    return c.notFound();
   }
 });

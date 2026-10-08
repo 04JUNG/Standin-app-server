@@ -23,19 +23,19 @@
 
 응답 `BodyPreviewManifest`:
 
-| 필드 | 내용 |
-|---|---|
-| schemaVersion | `body-previews.v1` |
-| jobId / personIndex | 서버 Job·인물 ID |
-| selectionRevision / resolvedBody | 실제 저장된 선택 버전과 BodyRef 전체 |
-| renderKey | 해당 인물의 후보 묶음·체형·렌더 버전을 식별하는 SHA256 |
-| outputScope | `full`. Top-K 비교용이며 최종 Export 범위와 별개 |
-| status | `renderable`. 각 GLB/PNG 다운로드 성공을 뜻하지 않음 |
-| renderingExecuted | false. 목록 조회만으로 Blender 실행이나 bake를 시작하지 않음 |
-| runtime | previewRevision, modelVersion, modelRevision, solverVersion, framingVersion |
-| candidates[] | 원래 순서·실제 개수를 유지한 candidateId/poseId/rank/view/camera/sourceBvhSha256 |
-| candidates[].thumbnailUrl | PNG 폴백 경로 |
-| candidates[].previewModel | url, rotation, sourceSha, characterId, characterSha256, modelRevision, previewRevision |
+| 필드                             | 내용                                                                                   |
+| -------------------------------- | -------------------------------------------------------------------------------------- |
+| schemaVersion                    | `body-previews.v1`                                                                     |
+| jobId / personIndex              | 서버 Job·인물 ID                                                                       |
+| selectionRevision / resolvedBody | 실제 저장된 선택 버전과 BodyRef 전체                                                   |
+| renderKey                        | 해당 인물의 후보 묶음·체형·렌더 버전을 식별하는 SHA256                                 |
+| outputScope                      | `full`. Top-K 비교용이며 최종 Export 범위와 별개                                       |
+| status                           | `renderable`. 각 GLB/PNG 다운로드 성공을 뜻하지 않음                                   |
+| renderingExecuted                | false. 목록 조회만으로 Blender 실행이나 bake를 시작하지 않음                           |
+| runtime                          | previewRevision, modelVersion, modelRevision, solverVersion, framingVersion            |
+| candidates[]                     | 원래 순서·실제 개수를 유지한 candidateId/poseId/rank/view/camera/sourceBvhSha256       |
+| candidates[].thumbnailUrl        | PNG 폴백 경로                                                                          |
+| candidates[].previewModel        | url, rotation, sourceSha, characterId, characterSha256, modelRevision, previewRevision |
 
 `renderKey`에는 owner/job/person/selectionRevision/BodyRef/full scope/runtime/후보 전체를 넣는다. 체형 hash, camera, 원본 BVH hash 또는 렌더 코드가 바뀌면 다른 key다. 다른 인물의 선택 변경은 현재 인물의 key를 바꾸지 않는다. 이 key는 인증 토큰이 아니며 매 요청 소유권을 다시 검사한다.
 
@@ -65,20 +65,20 @@ PNG cache는 기존 process-local 제한 캐시를 재사용한다. owner·rende
 
 ### 오류와 클라이언트 처리
 
-| HTTP/code | 다음 행동 |
-|---|---|
-| 400 INVALID_INPUT | 잘못된 인물 index/format/key/query. 클라이언트 계약 수정 |
-| 404 NOT_FOUND | 없는/다른 설치 소유 Job·인물·후보 |
-| 409 BODY_PREVIEW_STALE | 현재 body-selection과 manifest만 재조회. 분석 재실행 금지 |
-| 409 BODY_SELECTION_REQUIRED / BODY_UNAVAILABLE | 현재 체형 선택 또는 가용 여부 확인 |
-| 409 BODY_SELECTION_UNSUPPORTED | 설정 snapshot 없는 구 작업. 신규 UX 비활성 |
-| 409 BODY_NOT_APPLICABLE | 후보 없는 인물 |
-| 409 BODY_PREVIEW_UNSUPPORTED | 원본 hash·유효 camera·BVH가 없는 후보. 기존 이미지를 새 체형으로 표시하지 않음 |
-| 409 POSE_UNAVAILABLE | BVH 격리·삭제·hash 변경 |
-| 409 CONVERTER_INTEGRITY / CONVERTER_REJECTED | 기대 자산/런타임 계약 불일치. 선택을 바꾸거나 새 manifest 확인 |
-| 503 PREVIEW_NOT_READY | 사전 GLB 없음. 같은 manifest의 PNG를 요청 가능 |
-| 503 BODY_PREVIEW_UNAVAILABLE / CONVERTER_UNAVAILABLE | 구/중단된 converter 또는 통신 실패. 재시도 가능 |
-| 503 BODY_SELECTION_DISABLED | feature off |
+| HTTP/code                                            | 다음 행동                                                                      |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------ |
+| 400 INVALID_INPUT                                    | 잘못된 인물 index/format/key/query. 클라이언트 계약 수정                       |
+| 404 NOT_FOUND                                        | 없는/다른 설치 소유 Job·인물·후보                                              |
+| 409 BODY_PREVIEW_STALE                               | 현재 body-selection과 manifest만 재조회. 분석 재실행 금지                      |
+| 409 BODY_SELECTION_REQUIRED / BODY_UNAVAILABLE       | 현재 체형 선택 또는 가용 여부 확인                                             |
+| 409 BODY_SELECTION_UNSUPPORTED                       | 설정 snapshot 없는 구 작업. 신규 UX 비활성                                     |
+| 409 BODY_NOT_APPLICABLE                              | 후보 없는 인물                                                                 |
+| 409 BODY_PREVIEW_UNSUPPORTED                         | 원본 hash·유효 camera·BVH가 없는 후보. 기존 이미지를 새 체형으로 표시하지 않음 |
+| 409 POSE_UNAVAILABLE                                 | BVH 격리·삭제·hash 변경                                                        |
+| 409 CONVERTER_INTEGRITY / CONVERTER_REJECTED         | 기대 자산/런타임 계약 불일치. 선택을 바꾸거나 새 manifest 확인                 |
+| 503 PREVIEW_NOT_READY                                | 사전 GLB 없음. 같은 manifest의 PNG를 요청 가능                                 |
+| 503 BODY_PREVIEW_UNAVAILABLE / CONVERTER_UNAVAILABLE | 구/중단된 converter 또는 통신 실패. 재시도 가능                                |
+| 503 BODY_SELECTION_DISABLED                          | feature off                                                                    |
 
 GLB/WebGL 실패 시 같은 manifest의 PNG로 폴백한다. Abort나 BODY_PREVIEW_STALE은 오래된 PNG 생성으로 이어지면 안 된다. 카탈로그 기본 체형으로 임의 대체하지 않는다. 후속 앱은 최신 renderKey의 모든 후보가 준비됐을 때 이미지 묶음을 전환하고 진행 버튼을 활성화한다.
 
@@ -110,3 +110,7 @@ Standin-server `codex/body-preview-contract`의 `converter_api/body_preview.py` 
 - 테스트용 9종 참조로 양 경로의 체형 전달 검증. 이는 실제 9종 FBX 렌더 검수와 다르다.
 - 단위 검증: camera/원본hash/선택revision/runtime 변경, 정적 GLB 내부 identity 위조, 캐시 조회 시 권한·격리 검사, 후보 부족/구 camera, PNG 기대 hash 불일치.
 - 컨버터: 실제 FastAPI 경로 + fixture runner로 관련 계약/배포 검사 **80개 통과**. Docker COPY 파일만 구성한 디렉터리에서 runtime 계약 import 검증 포함. 실제 Docker build·Blender 실행·배포 완료 증거는 아니다.
+
+## 후속 구현 (2026-10-08)
+
+앱 UI 및 최종 확인·Export 연결은 [BODY_SELECTION_UI_CONTRACT.md](BODY_SELECTION_UI_CONTRACT.md)를 따른다. `bodyPreviews`는 이제 기본 off인 `BODY_UX_ENABLED`로 별도 제어한다. 위의 고정 false 설명을 대체한다.
