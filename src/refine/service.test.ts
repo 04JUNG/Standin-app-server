@@ -30,8 +30,27 @@ const INPUT = {
   candidateId: "pose-1::front",
 };
 
+test("deferred preview keeps the accepted BVH and requests no upstream thumbnail", async () => {
+  const context = deps();
+  const upstream = context.base.refineUpstream;
+  let request: RefineUpstreamRequest | undefined;
+  context.base.refineUpstream = async (input) => {
+    request = input;
+    return upstream(input);
+  };
+  const result = await runRefine(
+    { ...INPUT, deferPreview: true },
+    context.base,
+  );
+  assert.equal(isRefineFailure(result), false);
+  assert.equal(request?.render_thumbnail, false);
+  assert.equal(context.uploaded.length, 1);
+  assert.equal(context.thumbnails.length, 0);
+});
+
 /** 추론이 돌려주는 조정본 본문. 계약상 LF 개행이다. */
-const BASE_BVH = "HIERARCHY\nROOT Hips\nMOTION\nFrames: 1\nFrame Time: 0.033333\n0.0\n";
+const BASE_BVH =
+  "HIERARCHY\nROOT Hips\nMOTION\nFrames: 1\nFrame Time: 0.033333\n0.0\n";
 
 /** 계약대로 base64 인라인된 1×1 PNG. 시그니처가 맞아야 통과한다. */
 const PNG_BASE64 =
@@ -55,7 +74,11 @@ function deps(overrides: Partial<RefineDeps> = {}) {
   const base: RefineDeps = {
     featureEnabled: () => true,
     storageAvailable: () => true,
-    loadCandidate: async () => ({ poseId: "pose-1", view: "front", distance: 0.21 }),
+    loadCandidate: async () => ({
+      poseId: "pose-1",
+      view: "front",
+      distance: 0.21,
+    }),
     loadRefineContext: async () => ({ ...CONTEXT }),
     findRefinedArtifact: async () => null,
     saveRefinedArtifact: async (artifact) => {
@@ -89,7 +112,11 @@ function deps(overrides: Partial<RefineDeps> = {}) {
 async function run(overrides: Partial<RefineDeps> = {}) {
   const { base, saved, uploaded, thumbnails } = deps(overrides);
   const outcome = await runRefine(INPUT, base);
-  assert.equal(isRefineFailure(outcome), false, "unexpected candidate mismatch");
+  assert.equal(
+    isRefineFailure(outcome),
+    false,
+    "unexpected candidate mismatch",
+  );
   return {
     outcome: outcome as Exclude<typeof outcome, { error: string }>,
     saved,
@@ -235,7 +262,10 @@ test("the inlined bvh body is stored byte-for-byte", async () => {
   assert.equal(outcome.refined, true);
   assert.equal(saved[0]?.refined, true);
   assert.equal(new TextDecoder().decode(stored[0]), BASE_BVH);
-  assert.ok(!new TextDecoder().decode(stored[0]).includes("\r\n"), "CRLF가 섞이면 안 된다");
+  assert.ok(
+    !new TextDecoder().decode(stored[0]).includes("\r\n"),
+    "CRLF가 섞이면 안 된다",
+  );
 });
 
 // BFF-07. 같은 선택을 다시 눌러도 추론 재호출도, S3 객체 중복 생성도 없다.
@@ -250,7 +280,8 @@ test("an existing artifact short-circuits the whole flow", async () => {
       refined: true,
       reason: "ok",
       objectKey: "installations/inst-1/jobs/job-1/refined/0/pose-1__front.bvh",
-      thumbnailKey: "installations/inst-1/jobs/job-1/refined/0/pose-1__front.png",
+      thumbnailKey:
+        "installations/inst-1/jobs/job-1/refined/0/pose-1__front.png",
       limbs: ["left_arm"],
     }),
     refineUpstream: async () => {
@@ -349,7 +380,11 @@ test("a thumbnail upload failure does not change the refine result", async () =>
       throw new Error("s3 down");
     },
   });
-  assert.equal(outcome.refined, true, "그림을 못 올렸다고 조정을 버리지 않는다");
+  assert.equal(
+    outcome.refined,
+    true,
+    "그림을 못 올렸다고 조정을 버리지 않는다",
+  );
   assert.equal(outcome.thumbnailAvailable, false);
   assert.equal(saved[0]?.refined, true);
   assert.equal(saved[0]?.thumbnailKey, null);
@@ -358,7 +393,10 @@ test("a thumbnail upload failure does not change the refine result", async () =>
 // 미리보기는 "저장될 포즈가 이것"이라고 주장하는 그림이다. 계약에 어긋나면 보여주지 않는다.
 test("a thumbnail that violates the contract is dropped, not stored", async () => {
   for (const [label, thumbnail] of [
-    ["PNG가 아닌 바이트", { ...THUMBNAIL, data: Buffer.from("not a png").toString("base64") }],
+    [
+      "PNG가 아닌 바이트",
+      { ...THUMBNAIL, data: Buffer.from("not a png").toString("base64") },
+    ],
     ["다른 media_type", { ...THUMBNAIL, media_type: "image/jpeg" }],
     ["다른 encoding", { ...THUMBNAIL, encoding: "hex" }],
     ["빈 data", { ...THUMBNAIL, data: "" }],
@@ -405,7 +443,6 @@ test("a missing refine context skips instead of guessing", async () => {
   const { outcome } = await run({ loadRefineContext: async () => null });
   assert.equal(outcome.reasonCode, "context_unavailable");
 });
-
 
 // ── v2.5 policy lineage ─────────────────────────────────────────────────────
 // 추론의 structural_refine_allowed는 skeleton_state·coverage_class·slot_origin·

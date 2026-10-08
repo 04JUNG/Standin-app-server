@@ -125,6 +125,7 @@ export async function runRefine(
     jobId: string;
     personIndex: number;
     candidateId: string;
+    deferPreview?: boolean;
   },
   deps: RefineDeps = defaultDeps,
 ): Promise<RefineOutcome | RefineFailure> {
@@ -211,6 +212,7 @@ export async function runRefine(
   let upstream;
   try {
     upstream = await deps.refineUpstream({
+      ...(input.deferPreview ? { render_thumbnail: false } : {}),
       pose_id: candidate.poseId,
       view: candidate.view,
       ...(candidate.camera ? { camera: candidate.camera } : {}),

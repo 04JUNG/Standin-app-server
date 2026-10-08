@@ -1,5 +1,27 @@
 # API 계약 — BFF가 클라(Tauri)에 노출하는 `/v1`
 
+## 모델 미리보기와 FBX 재사용 (2026-10-08)
+
+- `capabilities.modelPreview`는 정상 Converter의 모델 exporter revision 및 체형 SHA를
+  확인했을 때만 true다. 구 Converter/BFF/앱은 기존 PNG 경로를 유지한다.
+- 선택 refine POST의 선택 필드 `deferPreview: true`는 추론에 `render_thumbnail:false`를
+  전달한다. 후보 소유권·관측 정책·결과 저장은 그대로이고 `thumbnailUrl`은 null일 수 있다.
+- 기존 `/v1/pose-candidates/:id/framed`의 `format=model`은 최종 범위/체형/각도가 적용된
+  정적 GLB (`model/gltf-binary`)를 반환한다. 소유권·확정 후보·현재 범위 검사를 모두 적용한다.
+- 동일 URL의 `format=fbx&previewType=model`은 모델 준비 때 만든 **동일 FBX 바이트**를
+  재사용한다. `format=preview` 및 기존 FBX 호출은 기존 PNG+FBX 경로다.
+- `format=model&useLibraryModel=true`는 서버에 저장된 결과가 원본·전신이고 후보 각도가
+  확인될 때만 사전 생성 `posed-mesh-v1`을 반환하고 FBX 준비를 시작한다. 앱은 후보의
+  회전을 한 번 적용한다. 실제 리파인 결과가 있거나 캐시/체형 해시가 맞지 않으면 최종
+  `framed-mesh-v1`으로 처리한다. 사전 생성 응답에는 최종 FBX 해시 헤더를 붙이지 않는다.
+- 모델에서 확인한 `expectedBvhSha256`, `expectedCharacterSha256`, 선택적
+  `expectedModelRevision`을 저장 요청에 싣는다. 실제 소스/체형/exporter가 바뀌면 변환 전에
+  `409 PREVIEW_CHANGED`로 거절한다. 사전 생성 모델은 최종 exporter revision을 고정하지 않는다.
+- 캐시는 소유자, job, 인물, 후보, 실제 BVH SHA, 체형, 출력 범위, 각도, 모델 exporter revision,
+  체형 SHA로 구분한다. PNG/model 캐시는 분리되고 동일 진행 요청은 합쳐진다.
+  프로세스별 128 MiB/10분/최대 16개 진행 요청이며, 캐시 적중 시에도 접근 권한을 재검사한다.
+  재시작·다른 BFF 인스턴스·퇴출 뒤에는 다시 변환할 수 있다. 공유 영구 캐시는 후속 범위다.
+
 > 이 서버가 **클라이언트에 제공하는** 계약. 스키마 소스는 `src/types.ts`.
 > 이 서버가 **호출하는** 도원 추론 계약은 `Standin-server/docs/API_CONTRACT.md`.
 > 기본 주소: `http://localhost:8080` (env `PORT`).

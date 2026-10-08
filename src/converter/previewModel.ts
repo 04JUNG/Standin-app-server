@@ -2,6 +2,39 @@
 import { config } from "../config.js";
 import { sha256Hex } from "./client.js";
 
+export function matchesLibraryModel(
+  bytes: Buffer,
+  source: string,
+  characterId: string,
+  characterSha256: string,
+) {
+  try {
+    if (
+      bytes.length < 28 ||
+      bytes.length > 8 * 1024 * 1024 ||
+      bytes.readUInt32LE(0) !== 0x46546c67 ||
+      bytes.readUInt32LE(4) !== 2 ||
+      bytes.readUInt32LE(8) !== bytes.length ||
+      bytes.readUInt32LE(16) !== 0x4e4f534a
+    )
+      return false;
+    const size = bytes.readUInt32LE(12);
+    if (size % 4 || size > 128 * 1024 || size + 28 > bytes.length) return false;
+    const meta = JSON.parse(bytes.subarray(20, 20 + size).toString("utf8"))
+      .asset?.extras;
+    return (
+      meta?.version === "posed-mesh-v1" &&
+      meta.source_bvh_sha256 === source &&
+      meta.character_id === characterId &&
+      meta.character_sha256 === characterSha256 &&
+      meta.scope === "full" &&
+      meta.coordinates === "Y-up-hips-origin"
+    );
+  } catch {
+    return false;
+  }
+}
+
 export async function getPreviewModel(
   sourceSha: string,
   characterId: string,

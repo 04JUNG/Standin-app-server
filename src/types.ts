@@ -89,6 +89,7 @@ export interface AnalysisResult {
     characterSelection: boolean;
     outputScopeSelection?: boolean;
     outputScopeCropping?: boolean;
+    modelPreview?: boolean;
   };
 }
 
