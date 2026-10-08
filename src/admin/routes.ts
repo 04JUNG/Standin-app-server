@@ -10,6 +10,8 @@ import { currentUsage } from "../limits/store.js";
 import { errorEnvelope } from "../mapping.js";
 import { getInstallationSummary, listInstallations } from "../installations/store.js";
 import { parseRosterQuery, toRosterPage } from "./installationList.js";
+import { toAccuracy, toUsage } from "./quality.js";
+import { dailyAggregates } from "./qualityStore.js";
 import { parseCutSummary, toReviewPeople, type AnalysisPersonRow } from "./reviewDetail.js";
 import { DEFAULT_REVIEWER, matchReviewer, parseReviewers } from "./reviewers.js";
 import { parseWindowDays, toCohorts, toDropoff, toFunnel } from "./product.js";
@@ -36,7 +38,7 @@ import {
   rerunRatio,
 } from "./productStore.js";
 import { isInstallationId, parseHistoryQuery, toHistoryPage } from "../jobs/history.js";
-import { listJobHistory } from "../jobs/store.js";
+import { listJobHistory, listRecentJobs } from "../jobs/store.js";
 import { getPoseThumbnail, inferenceStatus } from "../inference.js";
 import { notify } from "../notify.js";
 import {
@@ -260,7 +262,9 @@ adminRoutes.get("/product", async (c) => {
     firstSelectionAttempt(days),
     rerunRatio(days),
   ]);
-  const [libraryWeeks, prompts] = await Promise.all([libraryWeekly(days), vlmPrompts(days)]);
+  const [libraryWeeks, prompts, daily] = await Promise.all([
+    libraryWeekly(days), vlmPrompts(days), dailyAggregates(days),
+  ]);
 
   const clientByName: Record<string, number> = {};
   for (const stage of clientStages) clientByName[stage.event_name] = stage.events;
@@ -269,6 +273,9 @@ adminRoutes.get("/product", async (c) => {
   return c.json({
     windowDays: days,
     since: new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString(),
+    // 정확도·사용률은 일별 집계에서 온다. 그 표에는 **오늘이 없다**(하루가 끝나야 넣는다).
+    accuracy: toAccuracy(daily),
+    usage: toUsage(daily, funnelRow.active_installations),
     funnel: toFunnel(funnelRow),
     jobsFailed: funnelRow.jobs_failed,
     clientStages: clientStages.map((stage) => ({
@@ -381,6 +388,37 @@ adminRoutes.get("/review/installations/:id/jobs", async (c) => {
   const rows = await listJobHistory(installationId, parsed.query);
   await audit(c, "review_installation_jobs", { installationId });
   return c.json({ installation, ...toHistoryPage(rows, parsed.query.limit) });
+});
+
+/**
+ * GET /v1/admin/review/jobs — 설치를 가리지 않은 최근 Job 목록.
+ *
+ * 이게 없으면 운영자는 "방금 들어온 분석"을 보려고 설치 명부부터 열어 id를 옮겨 적어야
+ * 했다. 정렬·커서·status 필터는 설치별 목록과 같은 규칙을 쓴다.
+ *
+ * 응답에 서명 URL은 없다. 목록 한 번이 사진 여러 장을 한꺼번에 여는 열쇠가 되지 않게
+ * 하는 기존 방침 그대로이고, 원본은 상세(`/review/jobs/:id`)에서 한 건씩 연다.
+ */
+adminRoutes.get("/review/jobs", async (c) => {
+  const parsed = parseHistoryQuery({
+    limit: c.req.query("limit"),
+    cursor: c.req.query("cursor"),
+    status: c.req.query("status"),
+  });
+  if (!parsed.ok) {
+    return c.json(errorEnvelope("INVALID_INPUT", parsed.message, c.get("requestId")), 400);
+  }
+  const rows = await listRecentJobs(parsed.query);
+  const page = toHistoryPage(rows, parsed.query.limit);
+  const installationByJob = new Map(rows.map((row) => [row.id, row.installation_id]));
+  await audit(c, "review_recent_jobs", {});
+  return c.json({
+    ...page,
+    items: page.items.map((item) => ({
+      ...item,
+      installationId: installationByJob.get(item.jobId) ?? null,
+    })),
+  });
 });
 
 adminRoutes.get("/review/jobs/:id", async (c) => {

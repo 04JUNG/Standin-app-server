@@ -487,6 +487,57 @@ export async function updateJob(id: string, patch: Partial<Job>): Promise<void> 
   await execute(`UPDATE jobs SET ${sets.join(", ")} WHERE id = $1`, params);
 }
 
+/**
+ * 설치를 가리지 않은 최근 Job 목록. 운영자가 설치 id를 먼저 알아내야 하는 단계를 없앤다.
+ *
+ * `listJobHistory`와 같은 컬럼을 돌려주되 설치 필터가 없고 `installation_id`가 한 칸 더
+ * 붙는다 — 어느 설치의 작업인지 보이지 않으면 거기서 더 들어갈 수가 없다.
+ *
+ * 정렬·커서는 설치별 목록과 같은 `(created_at, id)`다. 인덱스는 `jobs_created_at`을 쓴다.
+ * `installation_id IS NOT NULL`은 설치에 속하지 않는 행(옛 사용자 경로)을 빼기 위한 것이고,
+ * 상세 조회(`/review/jobs/:id`)가 거는 조건과 같다.
+ *
+ * ⚠ 서명 URL은 여기서 만들지 않는다. 목록 한 번이 그 많은 사진을 한꺼번에 여는 열쇠가
+ *   되면 안 된다(설치별 목록과 같은 이유).
+ */
+export async function listRecentJobs(
+  params: HistoryQuery,
+): Promise<Array<JobHistoryRow & { installation_id: string }>> {
+  return query<JobHistoryRow & { installation_id: string }>(
+    `SELECT j.id, j.installation_id, j.status, j.created_at, j.completed_at, j.error_code,
+            j.source, j.input_width, j.input_height, (j.input_s3_key IS NOT NULL) AS has_input,
+            p.person_count, s.selection_count, t.thumb_pose_id, t.thumb_view
+       FROM jobs j
+       LEFT JOIN LATERAL (
+         SELECT count(*)::int AS person_count FROM analysis_people ap WHERE ap.job_id = j.id
+       ) p ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT count(*)::int AS selection_count FROM confirmed_selections cs WHERE cs.job_id = j.id
+       ) s ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT ac.pose_id AS thumb_pose_id, ac.view AS thumb_view
+           FROM analysis_candidates ac
+           LEFT JOIN confirmed_selections cs
+             ON cs.job_id = ac.job_id AND cs.person_index = ac.person_index
+            AND cs.candidate_id = ac.candidate_id
+          WHERE ac.job_id = j.id
+          ORDER BY (cs.candidate_id IS NULL), ac.person_index, ac.rank
+          LIMIT 1
+       ) t ON TRUE
+      WHERE j.installation_id IS NOT NULL
+        AND ($1::text IS NULL OR j.status = $1)
+        AND ($2::text IS NULL OR (j.created_at, j.id) < ($2, $3))
+      ORDER BY j.created_at DESC, j.id DESC
+      LIMIT $4`,
+    [
+      params.status,
+      params.cursor?.createdAt ?? null,
+      params.cursor?.id ?? null,
+      params.limit + 1,
+    ],
+  );
+}
+
 export async function persistAnalysisRecords(
   jobId: string,
   result: AnalysisResult,
