@@ -96,6 +96,26 @@ export const SCHEMA = `
     expires_at BIGINT NOT NULL                           -- unix seconds
   );
 
+  CREATE TABLE IF NOT EXISTS body_preferences (
+    installation_id TEXT PRIMARY KEY REFERENCES installations(id) ON DELETE CASCADE,
+    value JSONB NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS body_selections (
+    job_id TEXT NOT NULL,
+    person_index INTEGER NOT NULL CHECK (person_index >= 0),
+    value JSONB NOT NULL,
+    PRIMARY KEY (job_id,person_index)
+  );
+  CREATE TABLE IF NOT EXISTS body_mutations (
+    installation_id TEXT NOT NULL REFERENCES installations(id) ON DELETE CASCADE,
+    resource TEXT NOT NULL,
+    mutation_id TEXT NOT NULL,
+    job_id TEXT,
+    payload_hash TEXT NOT NULL,
+    response JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (installation_id,resource,mutation_id)
+  );
   CREATE TABLE IF NOT EXISTS jobs (
     id          TEXT PRIMARY KEY,
     user_id     TEXT,
@@ -107,6 +127,7 @@ export const SCHEMA = `
     rerun_of    TEXT
   );
 
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS body_policy_json JSONB;
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS installation_id TEXT;
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS source TEXT;
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS input_s3_key TEXT;

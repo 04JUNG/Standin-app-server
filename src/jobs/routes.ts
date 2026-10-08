@@ -1,5 +1,7 @@
 // /v1/analysis/jobs — 분석 Job 생성·폴링·결과.
 // 동기 추론을 "제출→폴링" 비동기 계약으로 감싼다(클라 08_API_CONTRACT.md 형태).
+import { createBodySelectionRoutes } from "../body-selection/routes.js";
+import { attachBodySelections } from "../body-selection/store.js";
 import { createOutputScopeRoutes } from "../output-scope/routes.js";
 import { resolveOutputScope } from "../output-scope/model.js";
 import { Hono } from "hono";
@@ -41,6 +43,7 @@ export const jobsRoutes = new Hono<AppEnv>();
 const RESULT_INPUT_URL_TTL_SECONDS = 900;
 
 // POST /:jobId/people/:personIndex/refine. 같은 prefix라 여기 붙이고 파일만 나눈다.
+jobsRoutes.route("/", createBodySelectionRoutes());
 jobsRoutes.route("/", refineRoutes);
 jobsRoutes.route("/", createOutputScopeRoutes());
 
@@ -263,9 +266,10 @@ jobsRoutes.get("/:id/result", async (c) => {
   // capabilities는 이 Job이 아니라 **지금 서버**의 성질이다. 저장된 값을 그대로 쓰면
   // 기록에서 다시 연 작업이 몇 주 전 배포 상태를 보고, 지금 되는 기능을 못 쓰거나
   // 없어진 기능을 쓰려 든다. 조회 시점 값으로 덮어쓴다.
+  const result = await attachBodySelections(c.get("installationId")!, job.result);
   return c.json({
-    ...job.result,
-    candidatesByPerson: job.result.candidatesByPerson.map((person) => ({
+    ...result,
+    candidatesByPerson: result.candidatesByPerson.map((person) => ({
       ...person,
       outputScope: resolveOutputScope(person.outputScope),
       candidates: person.candidates.map((candidate) => ({

@@ -6,6 +6,8 @@ function env(key: string, def = ""): string {
 }
 
 export const config = {
+  bodySelectionEnabled: env("BODY_SELECTION_ENABLED", "false") === "true",
+  bodyCatalogPath: env("BODY_CATALOG_PATH", "config/body-models.json"),
   port: Number(process.env.PORT ?? 8080),
   // BFF 공개 URL(OAuth 콜백·이메일 인증 링크 구성용)
   publicUrl: env("PUBLIC_URL", "http://localhost:8080"),

@@ -939,3 +939,17 @@ It returns a bounded static `model/gltf-binary` with no public cache URL.
 Missing/stale assets return 503 immediately; this route never starts Blender.
 Clients fall back to `/aligned` when unavailable or WebGL fails. Existing clients,
 BVH downloads and final FBX/refined/cropped export contracts are unchanged.
+
+
+## 체형 기본 설정·인물별 선택 저장 (body-selection.v1)
+
+`BODY_SELECTION_ENABLED=true`인 새 작업에서 선택적 body 추천·선택 저장 계약을 제공한다. 기본은 off다.
+
+- GET/PUT `/v1/installations/current/body-preferences`: 설치별 기본 캐릭터와 auto/fixed_default 설정.
+- GET/PUT `/v1/analysis/jobs/{jobId}/people/{personIndex}/body-selection`: inherit/manual/auto 선택 저장·조회.
+- GET 같은 인물 경로의 `/body-options`: 적용 가능한 승인 체형 목록.
+- GET result에 person별 bodyRecommendation/bodySelection 추가. 기존 포즈 후보는 유지한다.
+- 변경에는 expectedRevision과 mutationId가 필요하다. 사용자 직접 선택이 추천보다 우선한다.
+- capabilities.bodyPreviews는 false다. 이 단계는 이미지 렌더와 Export 체형 연결 완료를 의미하지 않는다.
+
+요청/응답·오류·승인 manifest·호환 정책의 정본: [체형 선택 저장 설계](BODY_SELECTION_DESIGN.md).

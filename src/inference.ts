@@ -65,6 +65,7 @@ export interface UpstreamPerson {
 
 // 추론 /analyze 응답(CutResult) — 필요한 필드만.
 export interface CutResult {
+  body_matching?: unknown;
   route: string;
   count_confidence: string;
   detector_count: number;

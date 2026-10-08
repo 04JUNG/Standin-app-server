@@ -1,7 +1,9 @@
+export type { BodyPreferences, BodyRef, BodySelection, BodyRecommendation } from "./body-selection/model.js";
 // 클라(Tauri)와의 /v1 계약 타입.
 // ⚠ 클라 `endpoints.ts`의 타입과 단일 소스로 공유하는 것이 목표(드리프트 방지).
 //   나중에 공용 패키지(packages/contract)로 승격 검토.
 
+import type { BodyRecommendation, BodySelection } from "./body-selection/model.js";
 import type { OutputScope } from "./output-scope/model.js";
 
 export type MatchLevel = "high" | "medium" | "low";
@@ -74,6 +76,9 @@ export interface AnalysisResult {
    * 추론 endpoint가 살아 있어도 BFF flag가 꺼져 있으면 여기서 false가 나간다.
    */
   capabilities: {
+    bodySelection?: boolean;
+    bodyRecommendation?: boolean;
+    bodyPreviews?: boolean;
     refine: boolean;
     /**
      * FBX 저장을 노출해도 되는가. converter는 추론 서버와 별개로 배포되므로 refine과 함께
@@ -96,6 +101,8 @@ export interface AnalysisResult {
 export type ExportFormat = "bvh" | "fbx";
 
 export interface AnalysisPerson {
+  bodyRecommendation?: BodyRecommendation;
+  bodySelection?: BodySelection;
   outputScope?: OutputScope;
   personIndex: number;
   box: number[] | null;

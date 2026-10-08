@@ -1,5 +1,6 @@
 // Job 저장소(PostgreSQL). result는 JSON 문자열로 저장.
 // 인터페이스(createJob/getJob/updateJob)는 유지하되 Promise를 돌려준다.
+import { captureBodyPolicy, initializeBodySelections } from "../body-selection/store.js";
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { config } from "../config.js";
@@ -123,6 +124,7 @@ async function insertJob(
       input?.height ?? null,
     ],
   );
+  if (config.bodySelectionEnabled && input?.installationId) await captureBodyPolicy(executor, job.id, input.installationId);
   return job;
 }
 
@@ -131,7 +133,7 @@ export async function createJob(
   rerunOf: string | null = null,
   input?: JobInput,
 ): Promise<Job> {
-  return insertJob(pool, userId, rerunOf, input);
+  return transaction(client => insertJob(client, userId, rerunOf, input));
 }
 
 /**
@@ -577,6 +579,7 @@ export async function persistAnalysisRecords(
         );
       }
     }
+    await initializeBodySelections(client, jobId, result);
     await client.query(
       `UPDATE jobs
        SET inference_metadata_json = $2, input_width = COALESCE(input_width, $3),
