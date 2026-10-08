@@ -7,6 +7,7 @@
 
 `BODY_SELECTION_ENABLED=true`, `BODY_UX_ENABLED=true`, converter 설정이 모두 있어야 전체 UX capability `bodyPreviews`를 켠다.
 BODY_UX_ENABLED 기본값은 false. 실제 자산 준비 여부를 보장하는 flag가 아니다.
+설정 GET/PUT과 후보 bodyPreviews 및 body 모드 최종 렌더는 동일한 bodyUxAvailable 조건을 사용한다. BODY_SELECTION_ENABLED만 켠 단계에서는 설정 API도 BODY_SELECTION_DISABLED(503)를 반환하고 클라이언트는 구 설정 화면을 유지한다. 저장된 설정을 삭제하지 않으며 내부 Job snapshot/선택 저장 기능은 독립적으로 준비할 수 있다.
 result의 후보가 있는 인물에 bodySelection snapshot이 없으면 구 Job으로 취급하여 bodyPreviews=false다.
 
 ## 최종 PNG/FBX
@@ -82,6 +83,10 @@ PNG magic·2MiB 상한·파일 SHA256과 승인 manifest의 일치를 검사한�
 - 캐시 적중 후 revision·asset hash·runtime·refine·scope·소유권·포즈 확정·격리 변경 거절.
 - 실제 렌더는 fixture converter이며 실제 9종 FBX 외형 QA는 포함하지 않는다.
 
-운영 flag 활성화·배포·PR은 이번 구현 범위에서 수행하지 않았다.
+기능 PR에서 검토하며 운영 flag 활성화·배포는 별도다.
 
 최종 검증: 전체 305개 통과, skip 0. typecheck/build 통과.
+
+## 디자인 단서 기반 기본 체형
+
+감지의 `auto_presentation_default`는 mock 아님, 인물 소유권 명확, provider 오류 없음, visible feminine/masculine, compatible_candidates, 관측값/진단값 일치 및 face_design/body_contour 근거를 검증한 후 승인 자산·지원 포즈 조건을 통과해야 추천으로 전달한다. reasonCodes에 `presentation_supported_shape_default`를 남긴다. 일반 auto_default는 기존처럼 추천으로 승격하지 않는다. manual/fixed_default는 우선하고 명시적 auto는 추천을 선택한다.

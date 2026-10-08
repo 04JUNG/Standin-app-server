@@ -1,3 +1,4 @@
+import { bodyUxAvailable } from "./availability.js";
 import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
 import { config } from "../config.js";
@@ -93,7 +94,7 @@ function base(enabled: () => boolean, paths: string[] = ["*"]) {
 }
 export function createBodyPreferenceRoutes(
   store = bodyStore,
-  enabled = () => config.bodySelectionEnabled,
+  enabled = bodyUxAvailable,
 ) {
   const app = base(enabled);
   app.get("/", async (c) =>

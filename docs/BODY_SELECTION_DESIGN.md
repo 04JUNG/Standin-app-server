@@ -169,3 +169,8 @@ BODY_TEST_DATABASE_URL=postgresql://... npm test
 통합 테스트는 별도 임의 schema에서 저장소 실제 SCHEMA를 실행한다. snapshot 복원, 두 연결의 동시 쓰기, 멱등성, 다른 설치 접근, 모델 교체, Job/설치 삭제를 확인한 뒤 schema를 제거한다. URL 미설정 시 해당 테스트만 skip한다.
 
 2026-10-08: 임시 로컬 PostgreSQL에서 전체 256개 테스트 통과(생략 없음). typecheck 및 build 통과. 실제 converter·승인 FBX·Gemini 운영 호출은 이번 저장 기능 검증에 포함하지 않았다.
+
+## 2026-10-08 계약 보완
+
+- 공개 기본 설정 API는 BODY_SELECTION_ENABLED + BODY_UX_ENABLED + FBX export flag/Converter URL이 모두 준비됐을 때 열린다. 후보 UX·최종 body 렌더와 같은 조건이다. 저장 기능만 준비하는 단계에서는 설정 화면은 기존 방식 유지.
+- `auto_presentation_default`는 명확한 디자인 단서를 반영한 기본 체격이다. 진단·관측 검증 후 자동 추천 전달을 허용하고 일반 `auto_default`와 구분한다. 체격 관측 정확도 성공으로 해석하지 않는다.

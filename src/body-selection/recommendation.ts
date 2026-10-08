@@ -104,11 +104,36 @@ export function mapBodyRecommendations(
       row.selection_state !== "selected" ||
       row.applied_body_id !== row.auto_body_id ||
       a.body_id !== row.auto_body_id ||
-      !["auto_default", "auto_best_effort"].includes(
-        String(row.selection_source),
-      )
+      ![
+        "auto_default",
+        "auto_best_effort",
+        "auto_presentation_default",
+      ].includes(String(row.selection_source))
     )
       continue;
+    if (row.selection_source === "auto_presentation_default") {
+      const trace = object(row.presentation_selection);
+      const observation = object(row.observations);
+      const presentation = object(observation?.presentation);
+      if (
+        !presentation ||
+        raw.is_mock !== false ||
+        observation?.ownership_ambiguous !== false ||
+        observation?.provider_error != null ||
+        trace?.mode !== "compatible_candidates" ||
+        trace.visibility !== "visible" ||
+        !["feminine", "masculine"].includes(String(trace.observed)) ||
+        presentation?.value !== trace.observed ||
+        presentation.visibility !== "visible" ||
+        typeof presentation.evidence !== "string" ||
+        !presentation.evidence.trim() ||
+        !Array.isArray(presentation.cues) ||
+        !presentation.cues.some(
+          (cue) => cue === "face_design" || cue === "body_contour",
+        )
+      )
+        continue;
+    }
     const asset = catalog.assets.find(
       (v) =>
         v.bodyId === a.body_id &&
@@ -125,7 +150,7 @@ export function mapBodyRecommendations(
       catalogVersion: raw.catalog_version,
       catalogSha256: raw.catalog_sha256,
       selectionSource: row.selection_source as
-        "auto_default" | "auto_best_effort",
+        "auto_default" | "auto_best_effort" | "auto_presentation_default",
     };
     if (row.selection_source === "auto_default")
       rec.reasonCodes = ["catalog_default_not_recommendation"];
@@ -141,7 +166,10 @@ export function mapBodyRecommendations(
         ...rec,
         status: "available",
         body: bodyRef(asset),
-        reasonCodes: [],
+        reasonCodes:
+          row.selection_source === "auto_presentation_default"
+            ? ["presentation_supported_shape_default"]
+            : [],
       };
     result.set(p.index, rec);
   }

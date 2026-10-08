@@ -1,3 +1,4 @@
+import { bodyUxAvailable } from "../body-selection/availability.js";
 import { bodyStore, BodyError } from "../body-selection/store.js";
 import { sameBody } from "../body-selection/model.js";
 import { getPreviewRuntime } from "../converter/previewRuntime.js";
@@ -39,7 +40,7 @@ const defaults = {
 const bodyDefaults = {
   selection: bodyStore.selection,
   runtime: getPreviewRuntime,
-  enabled: () => config.bodySelectionEnabled && config.bodyUxEnabled,
+  enabled: bodyUxAvailable,
 };
 export function createFramingRoutes(deps = defaults, bodyDeps = bodyDefaults) {
   const routes = new Hono<AppEnv>();

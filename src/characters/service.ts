@@ -1,3 +1,4 @@
+import { bodyUxAvailable } from "../body-selection/availability.js";
 import { loadBodyCatalog } from "../body-selection/catalog.js";
 import { bodyRef, type BodyRef } from "../body-selection/model.js";
 import { framingAvailable } from "../converter/framing.js";
@@ -184,8 +185,7 @@ export async function currentCapabilities(
   return {
     bodySelection: config.bodySelectionEnabled,
     bodyRecommendation: config.bodySelectionEnabled,
-    bodyPreviews:
-      config.bodyUxEnabled && config.bodySelectionEnabled && converterEnabled(),
+    bodyPreviews: bodyUxAvailable(),
     bodyPreviewAssets: config.bodySelectionEnabled && converterEnabled(),
     refine: config.refineFeatureEnabled,
     fbxExport: converterEnabled(),

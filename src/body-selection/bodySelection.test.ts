@@ -1,3 +1,4 @@
+import { bodyUxAvailable } from "./availability.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Hono } from "hono";
@@ -248,4 +249,191 @@ test("HTTP routes forward authenticated owner, wrap conflicts and do not gate un
     503,
   );
   assert.equal((await app.request("/preferences")).status, 200);
+});
+
+function presentationFixture(style = "feminine") {
+  const c = fixture();
+  const raw = c.body_matching as Record<string, unknown> & {
+    people: Array<Record<string, unknown>>;
+  };
+  raw.is_mock = false;
+  const row = raw.people[0];
+  row.selection_source = "auto_presentation_default";
+  row.presentation_selection = {
+    mode: "compatible_candidates",
+    visibility: "visible",
+    observed: style,
+  };
+  row.observations = {
+    ownership_ambiguous: false,
+    provider_error: null,
+    presentation: {
+      value: style,
+      visibility: "visible",
+      cues: ["face_design"],
+      evidence: "owned design cue",
+    },
+  };
+  return { c, raw, row };
+}
+test("presentation-only female/male default survives BFF fallback while explicit user choices win", () => {
+  for (const style of ["feminine", "masculine"]) {
+    const { c } = presentationFixture(style);
+    const lib = catalog(),
+      rec = mapBodyRecommendations(c, lib).get(0)!;
+    assert.equal(rec.status, "available");
+    const policy = snapshot(
+      { ...defaultPreferences(), defaultCharacterId: "character-0" },
+      lib,
+    );
+    const selected = resolveBody(0, policy, rec, lib, ["pose-a"]);
+    assert.equal(selected.resolvedBody?.characterId, "character-1");
+    assert.deepEqual(rec.reasonCodes, ["presentation_supported_shape_default"]);
+    assert.equal(
+      resolveBody(
+        0,
+        policy,
+        rec,
+        lib,
+        ["pose-a"],
+        "manual",
+        bodyRef(lib.assets[2]),
+      ).resolvedBody?.characterId,
+      "character-2",
+    );
+    policy.preferences.mode = "fixed_default";
+    assert.equal(
+      resolveBody(0, policy, rec, lib, ["pose-a"]).resolvedBody?.characterId,
+      "character-0",
+    );
+    assert.equal(
+      resolveBody(0, policy, rec, lib, ["pose-a"], "auto").resolvedBody
+        ?.characterId,
+      "character-1",
+    );
+  }
+});
+test("unowned, weak, mock, unsupported or missing presentation cannot promote a default", () => {
+  const changes = [
+    (f: ReturnType<typeof presentationFixture>) => {
+      f.raw.is_mock = true;
+    },
+    (f: ReturnType<typeof presentationFixture>) => {
+      f.row.observations = null;
+    },
+    (f: ReturnType<typeof presentationFixture>) => {
+      f.row.presentation_selection = { mode: "matching_style_unavailable" };
+    },
+    ...[
+      { ownership_ambiguous: true },
+      { provider_error: "timeout" },
+      {
+        presentation: {
+          value: "feminine",
+          visibility: "uncertain",
+          cues: ["face_design"],
+          evidence: "weak",
+        },
+      },
+      {
+        presentation: {
+          value: "feminine",
+          visibility: "visible",
+          cues: ["hair_design"],
+          evidence: "hair only",
+        },
+      },
+      {
+        presentation: {
+          value: "masculine",
+          visibility: "visible",
+          cues: ["face_design"],
+          evidence: "mismatch",
+        },
+      },
+    ].map((patch) => (f: ReturnType<typeof presentationFixture>) => {
+      f.row.observations = { ...(f.row.observations as object), ...patch };
+    }),
+  ];
+  for (const change of changes) {
+    const f = presentationFixture();
+    change(f);
+    assert.equal(
+      mapBodyRecommendations(f.c, catalog()).get(0)?.status,
+      "unavailable",
+    );
+  }
+  const f = presentationFixture(),
+    lib = catalog();
+  lib.assets[1].supportedPoseIds = [];
+  assert.equal(mapBodyRecommendations(f.c, lib).get(0)?.status, "unavailable");
+});
+test("preference reads and writes use the same UX gate for every flag combination", async () => {
+  const previous = {
+    bodySelectionEnabled: config.bodySelectionEnabled,
+    bodyUxEnabled: config.bodyUxEnabled,
+    fbxExportEnabled: config.fbxExportEnabled,
+    converterBaseUrl: config.converterBaseUrl,
+  };
+  let reads = 0,
+    writes = 0;
+  const fake = {
+    ...bodyStore,
+    preferences: async () => {
+      reads++;
+      return defaultPreferences();
+    },
+    savePreferences: async () => {
+      writes++;
+      return defaultPreferences();
+    },
+  };
+  const app = new Hono<AppEnv>();
+  app.use("*", async (c, next) => {
+    c.set("installationId", "owner");
+    await next();
+  });
+  app.route("/preferences", createBodyPreferenceRoutes(fake));
+  try {
+    for (const selection of [false, true])
+      for (const ux of [false, true])
+        for (const fbx of [false, true])
+          for (const url of ["", "http://fixture.invalid"]) {
+            Object.assign(config, {
+              bodySelectionEnabled: selection,
+              bodyUxEnabled: ux,
+              fbxExportEnabled: fbx,
+              converterBaseUrl: url,
+            });
+            const enabled = selection && ux && fbx && !!url;
+            assert.equal(bodyUxAvailable(), enabled);
+            for (const method of ["GET", "PUT"]) {
+              const response = await app.request("/preferences", {
+                method,
+                ...(method === "PUT"
+                  ? {
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        mode: "auto",
+                        defaultCharacterId: null,
+                        expectedRevision: 0,
+                        mutationId: "test-mutation",
+                      }),
+                    }
+                  : {}),
+              });
+              assert.equal(response.status, enabled ? 200 : 503);
+              if (!enabled)
+                assert.equal(
+                  ((await response.json()) as { error: { code: string } }).error
+                    .code,
+                  "BODY_SELECTION_DISABLED",
+                );
+            }
+          }
+    assert.equal(reads, 1);
+    assert.equal(writes, 1);
+  } finally {
+    Object.assign(config, previous);
+  }
 });

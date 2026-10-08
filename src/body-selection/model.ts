@@ -42,7 +42,8 @@ export interface BodyRecommendation {
   catalogVersion?: string;
   catalogSha256?: string;
   inputSha256?: string;
-  selectionSource?: "auto_best_effort" | "auto_default";
+  selectionSource?:
+    "auto_best_effort" | "auto_default" | "auto_presentation_default";
 }
 export type BodyIntent = "inherit" | "manual" | "auto";
 export interface BodySelection {
