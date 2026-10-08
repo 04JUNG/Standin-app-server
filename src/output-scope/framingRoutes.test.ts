@@ -5,17 +5,46 @@ import type { AppEnv } from "../env.js";
 import type { Job } from "../jobs/store.js";
 import { createFramingRoutes } from "./framingRoutes.js";
 import { resolveOutputScope } from "./model.js";
+import { sha256Hex } from "../converter/client.js";
+
+const sourceSha = sha256Hex(Buffer.from("HIERARCHY MOTION"));
+function libraryModel(characterSha = "b".repeat(64)) {
+  const json = JSON.stringify({
+    asset: {
+      extras: {
+        version: "posed-mesh-v1",
+        source_bvh_sha256: sourceSha,
+        character_id: "master",
+        character_sha256: characterSha,
+        scope: "full",
+        coordinates: "Y-up-hips-origin",
+      },
+    },
+  });
+  const size = Math.ceil(Buffer.byteLength(json) / 4) * 4;
+  const bytes = Buffer.alloc(size + 32);
+  [0x46546c67, 2, bytes.length, size, 0x4e4f534a].forEach((v, i) =>
+    bytes.writeUInt32LE(v, i * 4),
+  );
+  bytes.fill(32, 20, 20 + size);
+  bytes.write(json, 20);
+  return bytes;
+}
 
 function setup() {
   const state = {
     owner: true,
     confirmed: true,
-    scope: "half" as "half" | "head",
+    scope: "half" as "half" | "head" | "full",
     available: true,
     changeDuringConversion: false,
     calls: 0,
     reads: 0,
     revision: "a".repeat(64),
+    refined: false,
+    libraryReads: 0,
+    libraryCharacter: "b".repeat(64),
+    pending: undefined as Promise<void> | undefined,
   };
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
@@ -37,7 +66,23 @@ function setup() {
                   {
                     personIndex: 0,
                     outputScope: resolveOutputScope({ selection: state.scope }),
-                    candidates: [{ id: "pick", poseId: "pose" }],
+                    candidates: [
+                      {
+                        id: "pick",
+                        poseId: "pose",
+                        camera:
+                          state.scope === "full"
+                            ? {
+                                source_bvh_sha256: sourceSha,
+                                rotation: [
+                                  [1, 0, 0],
+                                  [0, 1, 0],
+                                  [0, 0, 1],
+                                ],
+                              }
+                            : undefined,
+                      },
+                    ],
                   },
                 ],
               },
@@ -45,10 +90,17 @@ function setup() {
           : undefined;
       },
       validateExportCandidate: async () => state.confirmed,
-      resolveExportArtifact: async () => ({
-        variant: "base" as const,
-        fallbackReason: null,
-      }),
+      resolveExportArtifact: async () =>
+        state.refined
+          ? {
+              variant: "refined" as const,
+              bytes: Buffer.from("REFINED"),
+              fallbackReason: null,
+            }
+          : {
+              variant: "base" as const,
+              fallbackReason: null,
+            },
       getPoseBvh: async () => {
         state.reads++;
         return new Response("HIERARCHY MOTION", {
@@ -56,6 +108,10 @@ function setup() {
         });
       },
       checkCharacter: async () => "ok" as const,
+      getPreviewModel: async () => {
+        state.libraryReads++;
+        return libraryModel(state.libraryCharacter);
+      },
       converterEnabled: () => true,
       modelPreviewIdentity: async () => ({
         modelRevision: state.revision,
@@ -63,6 +119,7 @@ function setup() {
       }),
       convertFramed: async (input) => {
         state.calls++;
+        await state.pending;
         if (state.changeDuringConversion) state.scope = "head";
         return {
           fbx: Buffer.from("fbx"),
@@ -156,4 +213,92 @@ test("paired cache still rechecks ownership on every download", async () => {
   state.owner = false;
   assert.equal((await request({ jobId, format: "fbx" })).status, 409);
   assert.equal(state.calls, 1);
+});
+
+test("server-confirmed library model returns before preparation; save joins the same work", async () => {
+  const { state, request } = setup();
+  state.scope = "full";
+  let finish!: () => void;
+  state.pending = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const query = {
+    jobId: "library-pair",
+    outputScope: "full",
+    characterId: "master",
+    format: "model",
+    useLibraryModel: "true",
+  };
+  const response = await request(query);
+  assert.equal(response.status, 200);
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), libraryModel());
+  assert.equal(response.headers.get("X-Standin-Artifact-SHA256"), null);
+  assert.equal(state.calls, 1);
+  const download = request({
+    ...query,
+    format: "fbx",
+    previewType: "model",
+    expectedBvhSha256: sourceSha,
+  });
+  finish();
+  assert.equal(await (await download).text(), "fbx");
+  assert.equal(state.calls, 1);
+});
+
+test("lost refine response cannot make the server return an unmodified library model", async () => {
+  const { state, request } = setup();
+  state.scope = "full";
+  state.refined = true;
+  const response = await request({
+    outputScope: "full",
+    format: "model",
+    useLibraryModel: "true",
+  });
+  assert.equal(await response.text(), "glb");
+  assert.equal(state.libraryReads, 0);
+});
+
+test("a library model with an old character hash falls through to final conversion", async () => {
+  const { state, request } = setup();
+  state.scope = "full";
+  state.libraryCharacter = "f".repeat(64);
+  const response = await request({
+    outputScope: "full",
+    characterId: "master",
+    format: "model",
+    useLibraryModel: "true",
+  });
+  assert.equal(await response.text(), "glb");
+  assert.equal(state.calls, 1);
+});
+
+for (const field of [
+  "expectedBvhSha256",
+  "expectedCharacterSha256",
+  "expectedModelRevision",
+]) {
+  test(`changed ${field} rejects save before conversion`, async () => {
+    const { state, request } = setup();
+    const response = await request({
+      format: "fbx",
+      previewType: "model",
+      [field]: "f".repeat(64),
+    });
+    assert.equal(response.status, 409);
+    const body = (await response.json()) as { error: { code: string } };
+    assert.equal(body.error.code, "PREVIEW_CHANGED");
+    assert.equal(state.calls, 0);
+  });
+}
+
+test("a refinement stored after review invalidates the pinned original source", async () => {
+  const { state, request } = setup();
+  state.refined = true;
+  const response = await request({
+    format: "fbx",
+    previewType: "model",
+    expectedBvhSha256: sourceSha,
+  });
+  assert.equal(response.status, 409);
+  assert.equal(state.calls, 0);
 });
