@@ -25,6 +25,8 @@ const FIXED_OUTPUT_MODE = "rigged_rest";
 const FIXED_APPLY_ROOT_TRANSLATION = false;
 
 export type ConverterErrorCode =
+  | "PREVIEW_NOT_READY"
+  | "BODY_PREVIEW_UNAVAILABLE"
   /** 이 BFF에서 FBX가 켜져 있지 않다. 사용자 오류가 아니라 배포 상태다. */
   | "CONVERTER_DISABLED"
   /** Blender·캐릭터 artifact 없음(503) 또는 네트워크 도달 실패. 재시도 가능. */

@@ -1,3 +1,4 @@
+import { createBodyPreferenceRoutes } from "../body-selection/routes.js";
 import { Hono } from "hono";
 import { config } from "../config.js";
 import type { AppEnv } from "../env.js";
@@ -7,6 +8,9 @@ import { requireInstallation } from "./middleware.js";
 import { createInstallation, revokeAndDeleteInstallationData } from "./store.js";
 
 export const installationRoutes = new Hono<AppEnv>();
+installationRoutes.use("/current/body-preferences", requireInstallation);
+installationRoutes.use("/current/body-preferences/*", requireInstallation);
+installationRoutes.route("/current/body-preferences", createBodyPreferenceRoutes());
 
 function shortString(value: unknown, max = 64): string | null {
   return typeof value === "string" && value.length > 0 && value.length <= max ? value : null;

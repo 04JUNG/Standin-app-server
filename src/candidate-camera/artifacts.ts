@@ -2,6 +2,7 @@
 import {
   convertFramed,
   FramedArtifactCache,
+  FRAMING_VERSION,
   type FramedInput,
 } from "../converter/framing.js";
 import { sha256Hex } from "../converter/client.js";
@@ -18,6 +19,9 @@ export function cameraArtifact(
     input.characterId,
     input.scope,
     input.cameraRotation,
+    input.expectedCharacterSha256,
+    input.expectedPreviewRevision,
+    FRAMING_VERSION,
     input.previewFormat,
     input.modelRevision,
     input.characterSha256,

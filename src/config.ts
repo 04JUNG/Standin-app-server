@@ -6,6 +6,9 @@ function env(key: string, def = ""): string {
 }
 
 export const config = {
+  bodyUxEnabled: env("BODY_UX_ENABLED", "false") === "true",
+  bodySelectionEnabled: env("BODY_SELECTION_ENABLED", "false") === "true",
+  bodyCatalogPath: env("BODY_CATALOG_PATH", "config/body-models.json"),
   port: Number(process.env.PORT ?? 8080),
   // BFF 공개 URL(OAuth 콜백·이메일 인증 링크 구성용)
   publicUrl: env("PUBLIC_URL", "http://localhost:8080"),
@@ -134,14 +137,18 @@ export const config = {
   /** export를 받을 검토자 이름(콤마 구분, BETA_REVIEW_ADMIN_TOKEN JSON의 키). 비면 아무도 못 받는다. */
   gapExportReviewers: parseExemptList(env("GAP_EXPORT_REVIEWERS")),
   // 설치별 동시 분석. 중복 클릭·폭주 방지가 목적이라 1이면 충분하다.
-  quotaInstallationConcurrent: Number(process.env.QUOTA_INSTALLATION_CONCURRENT ?? 1),
+  quotaInstallationConcurrent: Number(
+    process.env.QUOTA_INSTALLATION_CONCURRENT ?? 1,
+  ),
   /**
    * 이 시간이 지나도 queued/running인 Job은 유실로 본다.
    *
    * 러너가 프로세스 내 fire-and-forget이라 배포·태스크 교체 시 상태가 running인 채로 남는다.
    * 동시 분석 한도가 1이면 그 설치는 영원히 막히므로, 오래된 Job은 세지 않고 실패로 정리한다.
    */
-  analysisStaleAfterSeconds: Number(process.env.ANALYSIS_STALE_AFTER_SECONDS ?? 300),
+  analysisStaleAfterSeconds: Number(
+    process.env.ANALYSIS_STALE_AFTER_SECONDS ?? 300,
+  ),
   // IP burst. NAT·공용망 사용자를 고려해 너무 낮게 잡지 않는다.
   rateIpRegister: Number(process.env.RATE_IP_REGISTER ?? 5),
   rateIpRegisterWindow: Number(process.env.RATE_IP_REGISTER_WINDOW ?? 3600),
@@ -166,7 +173,10 @@ export const config = {
 
   // BFF 전용 DB(추론 poses.db와 분리). PostgreSQL.
   // 기본 포트가 5433인 이유는 docker-compose.yml 주석 참고(네이티브 Postgres와 충돌 회피).
-  databaseUrl: env("DATABASE_URL", "postgres://standin:standin@localhost:5433/standin"),
+  databaseUrl: env(
+    "DATABASE_URL",
+    "postgres://standin:standin@localhost:5433/standin",
+  ),
   /**
    * PGHOST가 있으면 접속 문자열 대신 표준 PG* 변수를 쓴다.
    *
@@ -182,9 +192,18 @@ export const config = {
   // 소셜 로그인 성공 후 토큰을 넘길 클라 리디렉트(데스크톱 딥링크 등). 없으면 콜백이 JSON 반환.
   oauthSuccessRedirect: env("OAUTH_SUCCESS_REDIRECT"),
   oauth: {
-    google: { clientId: env("GOOGLE_CLIENT_ID"), clientSecret: env("GOOGLE_CLIENT_SECRET") },
-    kakao: { clientId: env("KAKAO_CLIENT_ID"), clientSecret: env("KAKAO_CLIENT_SECRET") },
-    naver: { clientId: env("NAVER_CLIENT_ID"), clientSecret: env("NAVER_CLIENT_SECRET") },
+    google: {
+      clientId: env("GOOGLE_CLIENT_ID"),
+      clientSecret: env("GOOGLE_CLIENT_SECRET"),
+    },
+    kakao: {
+      clientId: env("KAKAO_CLIENT_ID"),
+      clientSecret: env("KAKAO_CLIENT_SECRET"),
+    },
+    naver: {
+      clientId: env("NAVER_CLIENT_ID"),
+      clientSecret: env("NAVER_CLIENT_SECRET"),
+    },
   },
 
   /**
@@ -211,8 +230,12 @@ export const config = {
    * 추론 서버 헬스 확인 주기와 P1 승격 임계. 일시적 흔들림으로 사람을 깨우지 않기 위해
    * 연속 실패 횟수를 센다(기본 30초 × 3회 = 약 1분 30초).
    */
-  inferenceWatchIntervalMs: Number(process.env.INFERENCE_WATCH_INTERVAL_MS ?? 30_000),
-  inferenceWatchFailureThreshold: Number(process.env.INFERENCE_WATCH_FAILURES ?? 3),
+  inferenceWatchIntervalMs: Number(
+    process.env.INFERENCE_WATCH_INTERVAL_MS ?? 30_000,
+  ),
+  inferenceWatchFailureThreshold: Number(
+    process.env.INFERENCE_WATCH_FAILURES ?? 3,
+  ),
 
   // 이메일 인증 발송(SMTP). 미설정이면 콘솔에 링크 출력(dev).
   smtp: {

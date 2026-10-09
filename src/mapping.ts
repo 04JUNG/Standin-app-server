@@ -4,6 +4,8 @@
 import { isBodyScope, resolveOutputScope } from "./output-scope/model.js";
 import { config } from "./config.js";
 import { converterEnabled } from "./converter/client.js";
+import { mapBodyRecommendations } from "./body-selection/recommendation.js";
+import { loadBodyCatalog } from "./body-selection/catalog.js";
 import type { CutResult, UpstreamPerson } from "./inference.js";
 import type {
   AnalysisPerson,
@@ -124,6 +126,7 @@ function mapPerson(p: UpstreamPerson): AnalysisPerson {
 }
 
 export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
+  const bodies = config.bodySelectionEnabled ? mapBodyRecommendations(cut, loadBodyCatalog()) : undefined;
   return {
     jobId,
     image: cut.image,
@@ -153,6 +156,7 @@ export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
     // BFF는 다른 기준으로 다시 정렬하지 않는다(요구서 §3-1).
     candidatesByPerson: (cut.people ?? []).map((p) => {
       const person = mapPerson(p);
+      if (bodies) person.bodyRecommendation = bodies.get(p.index);
       person.candidateShortfallReason =
         person.candidateCount === 0 && p.quality_reasons?.includes("head_search_unsupported")
           ? "HEAD_SEARCH_UNSUPPORTED"

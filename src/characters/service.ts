@@ -1,3 +1,6 @@
+import { bodyUxAvailable } from "../body-selection/availability.js";
+import { loadBodyCatalog } from "../body-selection/catalog.js";
+import { bodyRef, type BodyRef } from "../body-selection/model.js";
 import { framingAvailable, modelPreviewIdentity } from "../converter/framing.js";
 // /v1/models 의 본체. converter의 "지금 만들 수 있는 것"과 BFF의 "어떻게 보여줄 것인가"를
 // 합쳐 클라이언트 계약(Standin-client docs/08 §8-1)으로 만든다.
@@ -18,6 +21,7 @@ import {
 export type CharacterAvailability = "available" | "coming_soon";
 
 export interface ModelCharacter {
+  bodyRef?: BodyRef | null;
   characterId: string;
   displayName: string;
   gender: CharacterGender;
@@ -79,10 +83,15 @@ function toModel(
   available: boolean,
   upstream: ConverterCharacter | undefined,
   defaultCharacterId: string,
+  selectedBody: BodyRef | null = null,
 ): ModelCharacter {
-  const presentation = presentationFor(characterId, upstream?.displayName ?? "");
+  const presentation = presentationFor(
+    characterId,
+    upstream?.displayName ?? "",
+  );
   return {
     characterId,
+    ...(config.bodySelectionEnabled ? { bodyRef: selectedBody } : {}),
     displayName: presentation.displayName,
     gender: presentation.gender,
     availability: available ? "available" : "coming_soon",
@@ -114,11 +123,22 @@ export async function listCharacters(
   const byId = new Map(upstream.map((row) => [row.characterId, row]));
   const ids = new Set([...Object.keys(CHARACTER_PRESENTATION), ...byId.keys()]);
 
+  const bodies = config.bodySelectionEnabled ? loadBodyCatalog().assets : [];
   const characters = [...ids]
-    .map((id) => toModel(id, byId.has(id), byId.get(id), deps.defaultCharacterId))
+    .map((id) => {
+      const a = bodies.find((asset) => asset.characterId === id);
+      return toModel(
+        id,
+        byId.has(id),
+        byId.get(id),
+        deps.defaultCharacterId,
+        a ? bodyRef(a) : null,
+      );
+    })
     .sort((a, b) => {
       const order =
-        presentationFor(a.characterId, "").order - presentationFor(b.characterId, "").order;
+        presentationFor(a.characterId, "").order -
+        presentationFor(b.characterId, "").order;
       return order !== 0 ? order : a.characterId.localeCompare(b.characterId);
     });
 
@@ -152,6 +172,10 @@ export async function characterSelectionEnabled(
 export async function currentCapabilities(
   overrides: Partial<CharacterDeps> = {},
 ): Promise<{
+  bodySelection: boolean;
+  bodyRecommendation: boolean;
+  bodyPreviews: boolean;
+  bodyPreviewAssets: boolean;
   refine: boolean;
   fbxExport: boolean;
   characterSelection: boolean;
@@ -160,6 +184,10 @@ export async function currentCapabilities(
   modelPreview: boolean;
 }> {
   return {
+    bodySelection: config.bodySelectionEnabled,
+    bodyRecommendation: config.bodySelectionEnabled,
+    bodyPreviews: bodyUxAvailable(),
+    bodyPreviewAssets: config.bodySelectionEnabled && converterEnabled(),
     refine: config.refineFeatureEnabled,
     fbxExport: converterEnabled(),
     characterSelection: await characterSelectionEnabled(overrides),
