@@ -106,6 +106,34 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
   .tagline { display:flex; gap:6px; flex-wrap:wrap; margin:4px 0 8px; }
   .tag { border:1px solid var(--line); border-radius:6px; padding:2px 8px; font-size:12px; color:var(--muted); }
   .tag b { color:var(--text); font-weight:600; }
+  /* ── v2: 머리글·탭·KPI·서랍 ─────────────────────────────── */
+  header { position:sticky; top:0; z-index:20; background:var(--bg); }
+  header .spacer { margin-left:auto; }
+  header select { padding:4px 8px; }
+  nav.tabs { display:flex; gap:4px; padding:0 20px; border-bottom:1px solid var(--line); position:sticky; top:57px; z-index:19; background:var(--bg); overflow-x:auto; }
+  nav.tabs button { background:transparent; color:var(--muted); border:0; border-bottom:2px solid transparent; border-radius:0; padding:10px 14px; font-weight:600; }
+  nav.tabs button.on { color:var(--text); border-bottom-color:var(--accent); }
+  nav.tabs button:hover { color:var(--text); }
+  section.tab { display:none; gap:16px; }
+  section.tab.on { display:grid; }
+  .kpis { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
+  .kpi { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px 16px; }
+  .kpi .label { font-size:12px; color:var(--muted); font-weight:600; }
+  .kpi .value { font-size:26px; font-weight:700; font-variant-numeric:tabular-nums; margin-top:4px; }
+  .kpi .hint { font-size:11px; color:var(--muted); margin-top:2px; }
+  .kpi.warn .value { color:var(--warn); }
+  .kpi.bad .value { color:var(--bad); }
+  .grid2 { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); }
+  .card h2 .ghost { float:right; }
+  tbody tr:hover { background:color-mix(in srgb,var(--accent) 6%,transparent); }
+  #backdrop { position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:40; display:none; }
+  #backdrop.on { display:block; }
+  #drawer { position:fixed; top:0; right:0; bottom:0; width:min(920px,100vw); background:var(--bg); border-left:1px solid var(--line); z-index:41; transform:translateX(100%); transition:transform .18s ease; display:flex; flex-direction:column; }
+  #drawer.on { transform:translateX(0); }
+  .drawer-head { display:flex; gap:8px; align-items:center; padding:12px 16px; border-bottom:1px solid var(--line); }
+  .drawer-head #drawerTitle { font-weight:600; font-size:14px; }
+  .drawer-body { overflow-y:auto; padding:0 16px 24px; flex:1; }
+  .drawer-body .detail { border:0; padding:0; background:transparent; }
 </style>
 </head>
 <body>
@@ -122,42 +150,41 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
     <span id="inference"></span>
     <span id="analysis"></span>
     <span id="tasks" class="sub"></span>
-    <span style="margin-left:auto" class="sub" title="열람 기록이 이 이름으로 남는다">
+    <span class="spacer"></span>
+    <label class="sub" style="display:inline-flex;gap:6px;align-items:center">기간
+      <select id="period">
+        <option value="1">오늘</option>
+        <option value="7" selected>7일</option>
+        <option value="14">14일</option>
+        <option value="30">30일</option>
+        <option value="90">90일</option>
+      </select>
+    </label>
+    <span class="sub" title="열람 기록이 이 이름으로 남는다">
       <span id="reviewer">—</span> · 갱신 <span id="updated">—</span>
     </span>
   </header>
+  <nav class="tabs" id="tabs">
+    <button data-tab="overview" class="on">개요</button>
+    <button data-tab="jobs">작업</button>
+    <button data-tab="installs">설치</button>
+    <button data-tab="metrics">지표</button>
+    <button data-tab="ops">운영</button>
+  </nav>
   <main>
-    <div class="row" id="cards"></div>
-    <div class="card">
-      <h2>최근 1시간 · 분 단위 (막대=요청, 빨강=5xx)</h2>
-      <div id="chartHour"></div>
-    </div>
-    <div class="card">
-      <h2>최근 24시간 · 시간 단위</h2>
-      <div id="chartDay"></div>
-    </div>
-    <div class="row">
-      <div class="card"><h2>오류 코드 (1시간)</h2><div class="scroll" id="errors"></div></div>
-      <div class="card"><h2>라우트 (1시간)</h2><div class="scroll" id="routes"></div></div>
-    </div>
-    <div class="row">
-      <div class="card"><h2>분석 Job (1시간)</h2><div class="scroll" id="jobs"></div></div>
-      <div class="card"><h2>사용량</h2><div id="quota"></div></div>
-    </div>
-    <div class="card">
-      <h2>제품 지표 — 퍼널 · 코호트 · 이탈 신호</h2>
-      <div class="lookup">
-        <select id="productDays">
-          <option value="7">최근 7일</option>
-          <option value="14">최근 14일</option>
-          <option value="30">최근 30일</option>
-          <option value="90">최근 90일</option>
-        </select>
-        <button class="ghost" id="productGo">불러오기</button>
-        <span id="productMsg" class="sub"></span>
+    <section class="tab on" id="tab-overview">
+      <div id="kpis" class="kpis"><p class="empty">불러오는 중…</p></div>
+      <p class="sub" id="kpiNote"></p>
+      <div class="grid2">
+        <div class="card"><h2>선택률 · 일별 (어제까지)</h2><div id="ovSelection"></div></div>
+        <div class="card"><h2>분석 수 · 일별 (어제까지)</h2><div id="ovUsage"></div></div>
       </div>
-      <div id="productOut"></div>
-    </div>
+      <div class="card">
+        <h2>최근 Job <button class="ghost" data-goto="jobs">전체 보기 →</button></h2>
+        <div id="ovRecent"></div>
+      </div>
+    </section>
+    <section class="tab" id="tab-jobs">
     <div class="card">
       <h2>최근 Job — 설치 상관없이 들어온 순서대로</h2>
       <div class="lookup">
@@ -173,6 +200,8 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
       </div>
       <div id="recentOut"></div>
     </div>
+    </section>
+    <section class="tab" id="tab-installs">
     <div class="card">
       <h2>설치 조회 — 이 설치가 무엇을 돌렸나</h2>
       <div class="lookup">
@@ -192,15 +221,56 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
         <span id="lookupMsg" class="sub"></span>
       </div>
       <div id="rosterOut"></div>
-      <div id="lookupOut"></div>
-      <div id="detailOut"></div>
+    </div>
+    </section>
+    <section class="tab" id="tab-metrics">
+    <div class="card">
+      <h2>제품 지표 — 퍼널 · 코호트 · 이탈 신호</h2>
+      <div class="lookup">
+        <button class="ghost" id="productGo">불러오기</button>
+        <span id="productMsg" class="sub"></span>
+      </div>
+      <div id="productOut"></div>
+    </div>
+    </section>
+    <section class="tab" id="tab-ops">
+    <div class="row" id="cards"></div>
+    <div class="card">
+      <h2>최근 1시간 · 분 단위 (막대=요청, 빨강=5xx)</h2>
+      <div id="chartHour"></div>
+    </div>
+    <div class="card">
+      <h2>최근 24시간 · 시간 단위</h2>
+      <div id="chartDay"></div>
+    </div>
+    <div class="row">
+      <div class="card"><h2>오류 코드 (1시간)</h2><div class="scroll" id="errors"></div></div>
+      <div class="card"><h2>라우트 (1시간)</h2><div class="scroll" id="routes"></div></div>
+    </div>
+    <div class="row">
+      <div class="card"><h2>분석 Job (1시간)</h2><div class="scroll" id="jobs"></div></div>
+      <div class="card"><h2>사용량</h2><div id="quota"></div></div>
     </div>
     <p class="sub">
       지연시간은 히스토그램에서 읽은 값이라 버킷 상한까지만 정확하다("이 값 이하"라는 뜻).
       태스크별 p95를 평균 내면 p95가 아니게 되므로 값 대신 분포를 저장한다.
     </p>
+    </section>
   </main>
 </div>
+
+<div id="backdrop"></div>
+<aside id="drawer" aria-hidden="true">
+  <div class="drawer-head">
+    <button class="ghost" id="drawerBack" style="display:none">← 설치 기록</button>
+    <span id="drawerTitle"></span>
+    <button class="ghost" id="drawerClose" style="margin-left:auto">닫기 ✕</button>
+  </div>
+  <div class="drawer-body">
+    <div id="lookupOut"></div>
+    <div id="detailOut"></div>
+  </div>
+</aside>
 
 <script>${SKELETON_CONSTANTS}
 const KEY = "standin.adminToken";
@@ -346,6 +416,32 @@ async function lookupFetch(cursor) {
 // 매칭이 맞는지 알고, 선택과 refine을 겹쳐 봐야 사용자가 무엇을 들고 갔는지 안다.
 
 /** 후보 썸네일은 blob으로 싣는다. img 태그는 관리자 토큰 헤더를 실을 수 없다. */
+// ── 서랍 ─────────────────────────────────────────────────────
+//
+// 상세와 설치 기록은 어디서 눌러도 오른쪽 서랍에 연다. 예전에는 페이지 맨 아래 칸에
+// 그려져, 위쪽 목록에서 누르면 결과가 화면 밖에 생겼다.
+function showDrawer(mode) {
+  const detail = mode === "detail";
+  $("detailOut").style.display = detail ? "" : "none";
+  $("lookupOut").style.display = detail ? "none" : "";
+  // 설치 기록에서 들어온 상세면 돌아갈 길을 남긴다.
+  $("drawerBack").style.display = detail && $("lookupOut").innerHTML ? "" : "none";
+  $("drawerTitle").textContent = detail ? "Job 상세" : "설치 기록";
+  $("drawer").classList.add("on");
+  $("drawer").setAttribute("aria-hidden", "false");
+  $("backdrop").classList.add("on");
+  $("drawer").querySelector(".drawer-body").scrollTop = 0;
+}
+
+function closeDrawer() {
+  releaseDetailBlobs();
+  $("drawer").classList.remove("on");
+  $("drawer").setAttribute("aria-hidden", "true");
+  $("backdrop").classList.remove("on");
+  $("detailOut").innerHTML = "";
+  $("lookupOut").innerHTML = "";
+}
+
 let detailBlobUrls = [];
 
 function releaseDetailBlobs() {
@@ -693,11 +789,8 @@ function detailRender(detail) {
 
   $("detailOut").querySelectorAll(".cand img[data-pose]").forEach(fillCandidateThumb);
   bindOverlay();
-  $("detailClose").addEventListener("click", () => {
-    releaseDetailBlobs();
-    $("detailOut").innerHTML = "";
-  });
-  $("detailOut").scrollIntoView({ behavior: "smooth", block: "start" });
+  $("detailClose").addEventListener("click", closeDrawer);
+  showDrawer("detail");
 }
 
 async function openDetail(jobId, button) {
@@ -851,10 +944,13 @@ async function lookupGo(cursor) {
     lookup.nextCursor = data.nextCursor;
     lookup.items = cursor ? lookup.items.concat(data.items) : data.items;
     $("lookupMsg").textContent = lookup.items.length + "건" + (data.nextCursor ? " (더 있음)" : "");
+    $("detailOut").innerHTML = "";
     lookupRender();
+    showDrawer("install");
   } catch (error) {
     $("lookupMsg").innerHTML = '<span class="err">' + esc(error.message) + "</span>";
-    $("lookupOut").innerHTML = "";
+    $("lookupOut").innerHTML = '<p class="err">' + esc(error.message) + "</p>";
+    showDrawer("install");
   }
 }
 
@@ -1181,7 +1277,6 @@ function productRender(data) {
     button.addEventListener("click", () => {
       $("lookupId").value = button.dataset.pick;
       lookupGo(null);
-      $("lookupId").scrollIntoView({ behavior: "smooth", block: "center" });
     });
   });
 }
@@ -1189,7 +1284,7 @@ function productRender(data) {
 async function productGo() {
   $("productMsg").textContent = "불러오는 중…";
   try {
-    const res = await fetch("/v1/admin/product?days=" + encodeURIComponent($("productDays").value), {
+    const res = await fetch("/v1/admin/product?days=" + encodeURIComponent($("period").value), {
       headers: { "X-Beta-Admin-Token": token },
     });
     if (!res.ok) throw new Error(res.status === 404 ? "토큰이 거절됐습니다." : "조회 실패 " + res.status);
@@ -1205,7 +1300,7 @@ async function productGo() {
 $("productGo").addEventListener("click", productGo);
 $("recentGo").addEventListener("click", recentGo);
 $("recentStatus").addEventListener("change", () => { if (recent.items.length) recentGo(); });
-$("productDays").addEventListener("change", () => { if ($("productOut").innerHTML) productGo(); });
+
 
 // ── 설치 명부 ────────────────────────────────────────────────
 //
@@ -1275,13 +1370,140 @@ $("lookupGo").addEventListener("click", () => lookupGo(null));
 $("lookupId").addEventListener("keydown", (event) => { if (event.key === "Enter") lookupGo(null); });
 $("lookupStatus").addEventListener("change", () => { if (lookup.id) lookupGo(null); });
 
+// ── 개요 ─────────────────────────────────────────────────────
+function kpiCard(label, value, hint, kind) {
+  return '<div class="kpi' + (kind ? " " + kind : "") + '"><div class="label">' + esc(label) + "</div>" +
+    '<div class="value">' + esc(String(value)) + "</div>" +
+    (hint ? '<div class="hint">' + esc(hint) + "</div>" : "") + "</div>";
+}
+
+function overviewRender(data) {
+  const k = data.kpis;
+  const n = (value) => (value === null || value === undefined ? "—" : value);
+  $("kpis").innerHTML =
+    kpiCard("활성 설치", n(k.activeInstallations), "기간 중 접속 · 전체 " + k.totalInstallations + "곳") +
+    kpiCard("오늘 활성", n(k.activeToday), "최근 24시간 접속") +
+    kpiCard("분석", n(k.jobsStarted), "완료 " + k.jobsCompleted + "건") +
+    kpiCard("선택률", pct(k.selectionRate), "완료 중 고른 Job " + k.jobsSelected + "건") +
+    kpiCard("다운로드", n(k.downloads), "내보낸 Job " + k.jobsExported + "건 · 전환 " + pct(k.exportRate)) +
+    kpiCard("실패율", pct(k.failureRate), "실패 " + k.jobsFailed + "건",
+      k.failureRate !== null && k.failureRate >= 10 ? "bad" : k.failureRate !== null && k.failureRate >= 5 ? "warn" : "") +
+    kpiCard("피드백", n(k.feedbackCount), "관련 없음 " + pct(k.irrelevantRate),
+      k.irrelevantRate !== null && k.irrelevantRate >= 30 ? "warn" : "");
+  $("kpiNote").textContent = "최근 " + data.windowDays + "일 · " + when(data.since) +
+    " 이후. 위 숫자는 오늘까지, 아래 추이는 하루가 끝난 날(어제)까지다.";
+  const days = data.trends.days;
+  $("ovSelection").innerHTML = days
+    ? trendBars(data.trends.selection.map((point) => ({
+        value: point.selectionRate === null ? 0 : point.selectionRate,
+        title: point.day + " · " + pct(point.selectionRate) + " · 완료 " + point.jobsCompleted + "건",
+      })))
+    : '<p class="empty">아직 마감된 날이 없습니다.</p>';
+  $("ovUsage").innerHTML = days
+    ? trendBars(data.trends.usage.map((point) => ({
+        value: point.jobsStarted,
+        title: point.day + " · 시작 " + point.jobsStarted + "건 · 실패 " + point.jobsFailed + "건",
+      })))
+    : '<p class="empty">아직 마감된 날이 없습니다.</p>';
+}
+
+async function overviewGo() {
+  try {
+    const res = await fetch("/v1/admin/overview?days=" + encodeURIComponent($("period").value), {
+      headers: { "X-Beta-Admin-Token": token },
+    });
+    if (!res.ok) throw new Error("개요 조회 실패 " + res.status);
+    overviewRender(await res.json());
+  } catch (error) {
+    $("kpis").innerHTML = '<p class="err">' + esc(error.message) + "</p>";
+  }
+  // 첫 화면의 최근 Job은 작업 탭 목록과 같은 질의를 앞 8건만 쓴다.
+  try {
+    const page = await recentFetch(null);
+    const rows = page.items.slice(0, 8).map((item) =>
+      "<tr><td>" + jobStatus(item) + "</td>" +
+      '<td class="sub">' + when(item.createdAt) + "</td>" +
+      '<td class="num">' + took(item) + "</td>" +
+      '<td class="num">' + (item.personCount === null || item.personCount === undefined ? "—" : item.personCount) + "</td>" +
+      '<td class="num">' + (item.selectionCount === null || item.selectionCount === undefined ? "—" : item.selectionCount) + "</td>" +
+      "<td>" + (item.errorCode ? pill(esc(item.errorCode), "bad") : "") + "</td>" +
+      '<td><button class="ghost" data-job="' + esc(item.jobId) + '">상세</button></td></tr>').join("");
+    $("ovRecent").innerHTML = rows
+      ? '<div class="scroll"><table><thead><tr><th>상태</th><th>들어온 때</th><th class="num">걸린 시간</th>' +
+        '<th class="num">인물</th><th class="num">선택</th><th>오류</th><th></th></tr></thead><tbody>' +
+        rows + "</tbody></table></div>"
+      : '<p class="empty">아직 없습니다.</p>';
+    $("ovRecent").querySelectorAll("button[data-job]").forEach((button) => {
+      button.addEventListener("click", () => openDetail(button.dataset.job, button));
+    });
+  } catch (error) {
+    $("ovRecent").innerHTML = '<p class="err">' + esc(error.message) + "</p>";
+  }
+}
+
+// ── 탭 ───────────────────────────────────────────────────────
+//
+// 탭을 처음 열 때만 그 탭의 데이터를 가져온다. 열지 않은 탭 때문에 첫 화면이 느려지지
+// 않게 한다. 마지막으로 본 탭은 이 브라우저에만 기억한다(없어도 개요로 연다).
+const TAB_KEY = "standin.adminTab";
+const loadedTabs = new Set(["overview", "ops"]);
+
+function selectTab(name) {
+  document.querySelectorAll("#tabs button").forEach((button) => {
+    button.classList.toggle("on", button.dataset.tab === name);
+  });
+  document.querySelectorAll("section.tab").forEach((section) => {
+    section.classList.toggle("on", section.id === "tab-" + name);
+  });
+  try { localStorage.setItem(TAB_KEY, name); } catch (error) { /* 저장 못 해도 동작은 같다 */ }
+  if (loadedTabs.has(name)) return;
+  loadedTabs.add(name);
+  if (name === "jobs") recentGo();
+  if (name === "installs") rosterGo(null);
+  if (name === "metrics") productGo();
+}
+
+document.querySelectorAll("#tabs button").forEach((button) => {
+  button.addEventListener("click", () => selectTab(button.dataset.tab));
+});
+document.querySelectorAll("button[data-goto]").forEach((button) => {
+  button.addEventListener("click", () => selectTab(button.dataset.goto));
+});
+
+$("period").addEventListener("change", () => {
+  overviewGo();
+  if (loadedTabs.has("metrics")) productGo();
+});
+
+$("drawerClose").addEventListener("click", closeDrawer);
+$("backdrop").addEventListener("click", closeDrawer);
+$("drawerBack").addEventListener("click", () => {
+  releaseDetailBlobs();
+  $("detailOut").innerHTML = "";
+  showDrawer("install");
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && $("drawer").classList.contains("on")) closeDrawer();
+});
+
+let overviewLoaded = false;
+async function boot() {
+  await tick();
+  if (overviewLoaded || $("app").classList.contains("hide")) return;
+  overviewLoaded = true;
+  overviewGo();
+  let saved = null;
+  try { saved = localStorage.getItem(TAB_KEY); } catch (error) { saved = null; }
+  if (saved && saved !== "overview" && document.getElementById("tab-" + saved)) selectTab(saved);
+}
+
 $("enter").addEventListener("click", () => {
   token = $("token").value.trim();
   sessionStorage.setItem(KEY, token);
-  tick();
+  boot();
 });
 
-if (token) { sessionStorage.setItem(KEY, token); tick(); }
+if (token) { sessionStorage.setItem(KEY, token); boot(); }
 else { $("gate").classList.add("show"); }
 setInterval(() => { if (token) tick(); }, 30000);
 </script>
