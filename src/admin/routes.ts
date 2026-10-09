@@ -11,6 +11,8 @@ import { errorEnvelope } from "../mapping.js";
 import { getInstallationSummary, listInstallations } from "../installations/store.js";
 import { parseRosterQuery, toRosterPage } from "./installationList.js";
 import { toAccuracy, toUsage } from "./quality.js";
+import { toOverviewKpis } from "./overview.js";
+import { overviewExtras } from "./overviewStore.js";
 import { dailyAggregates } from "./qualityStore.js";
 import { parseCutSummary, toReviewPeople, type AnalysisPersonRow } from "./reviewDetail.js";
 import { DEFAULT_REVIEWER, matchReviewer, parseReviewers } from "./reviewers.js";
@@ -232,6 +234,41 @@ adminRoutes.put("/flags/analysis_enabled", async (c) => {
  * 새는지 보고, 코호트에서 누가 거기 멈췄는지 세고, 신호에서 그들이 무엇이 달랐는지로
  * 내려간다. 따로 부르면 세 번 왕복하면서 기간이 어긋날 수 있다.
  */
+/**
+ * GET /v1/admin/overview?days=7 — 대시보드 첫 화면의 KPI 띠와 추이.
+ *
+ * `/product`는 블록이 많아 무겁고 "불러오기"를 눌러야 뜬다. 첫 화면은 열자마자 핵심
+ * 숫자가 보여야 하므로 가벼운 질의만 따로 둔다. 퍼널 집계는 `/product`와 같은 함수를
+ * 재사용한다 — 같은 숫자를 두 군데서 다르게 세지 않는다.
+ *
+ * KPI는 원본을 바로 세서 오늘이 들어간다. 추이는 일별 집계라 어제까지다.
+ */
+adminRoutes.get("/overview", async (c) => {
+  const parsed = parseWindowDays(c.req.query("days"));
+  if (!parsed.ok) {
+    return c.json(errorEnvelope("INVALID_INPUT", parsed.message, c.get("requestId")), 400);
+  }
+  const { days } = parsed;
+  const [funnelRow, extras, daily] = await Promise.all([
+    funnelCounts(days),
+    overviewExtras(days),
+    dailyAggregates(days),
+  ]);
+  const accuracy = toAccuracy(daily);
+  const usage = toUsage(daily, funnelRow.active_installations);
+  await audit(c, "review_overview", {});
+  return c.json({
+    windowDays: days,
+    since: new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString(),
+    kpis: toOverviewKpis(funnelRow, extras),
+    trends: {
+      selection: accuracy.trend,
+      usage: usage.trend,
+      days: accuracy.days,
+    },
+  });
+});
+
 adminRoutes.get("/product", async (c) => {
   const parsed = parseWindowDays(c.req.query("days"));
   if (!parsed.ok) {
