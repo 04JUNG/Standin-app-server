@@ -30,6 +30,22 @@ const INPUT = {
   candidateId: "pose-1::front",
 };
 
+test("미리보기를 미루지 않아도 추론에 인라인 렌더를 요청하지 않는다", async () => {
+  // 렌더가 20초쯤 걸려 BFF의 refine 상한(운영 5초)을 넘긴다. 요청하면 조정 결과까지
+  // upstream_unavailable로 잃는다. 미리보기는 refine/thumbnail.ts가 나중에 그린다.
+  const context = deps();
+  const upstream = context.base.refineUpstream;
+  let request: RefineUpstreamRequest | undefined;
+  context.base.refineUpstream = async (input) => {
+    request = input;
+    return upstream(input);
+  };
+  const result = await runRefine(INPUT, context.base);
+  assert.equal(isRefineFailure(result), false);
+  assert.equal(request?.render_thumbnail, false);
+  assert.equal(context.uploaded.length, 1);
+});
+
 test("deferred preview keeps the accepted BVH and requests no upstream thumbnail", async () => {
   const context = deps();
   const upstream = context.base.refineUpstream;

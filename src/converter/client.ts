@@ -192,6 +192,63 @@ export async function fetchConverterCharacters(
  * 그 결정은 refine 소유이고(resolveExportArtifact), 여기서 다시 고르면 두 곳이 서로 다른
  * 답을 낼 수 있다.
  */
+/** PNG 시그니처. 썸네일 응답이 정말 PNG인지 본다. */
+const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+export interface ThumbnailInput {
+  bvhBytes: Uint8Array;
+  /** front | three_quarter | side | back. 후보가 보여 준 방향과 같아야 한다. */
+  view: string;
+  characterId?: string;
+  size?: number;
+}
+
+/**
+ * 임의의 BVH를 정해진 방향에서 그린 PNG. 전환기 `POST /render-thumbnail`.
+ *
+ * FBX를 만들지 않아 `/convert`·`/convert-framed`보다 가볍다. 그래도 Blender를 띄우므로
+ * 수 초~수십 초가 걸리고, 전환기는 한 번에 한 건만 처리한다 — 여러 건을 한꺼번에 부르면
+ * 사용자의 내보내기가 그 뒤에 줄을 선다.
+ */
+export async function renderThumbnail(
+  input: ThumbnailInput,
+  overrides: Partial<ConverterDeps> = {},
+): Promise<Uint8Array> {
+  const deps = { ...defaultDeps(), ...overrides };
+  if (!deps.baseUrl) {
+    throw new ConverterError("CONVERTER_DISABLED", "converter base url is not configured");
+  }
+  const form = new FormData();
+  form.set("bvh", new Blob([input.bvhBytes], { type: "application/octet-stream" }), "refined.bvh");
+  form.set("character_id", input.characterId ?? deps.defaultCharacterId);
+  form.set("view", input.view);
+  form.set("size", String(input.size ?? 256));
+  form.set("format", "png");
+
+  let res: Response;
+  try {
+    res = await deps.fetch(`${deps.baseUrl}/render-thumbnail`, {
+      method: "POST",
+      body: form,
+      signal: AbortSignal.timeout(deps.timeoutMs),
+    });
+  } catch (error) {
+    const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+    throw new ConverterError(
+      timedOut ? "CONVERTER_TIMEOUT" : "CONVERTER_UNAVAILABLE",
+      timedOut ? "converter request timed out" : "converter is unreachable",
+    );
+  }
+  if (!res.ok) {
+    throw mapUpstreamFailure(res.status, await res.text().catch(() => ""));
+  }
+  const png = new Uint8Array(await res.arrayBuffer());
+  if (png.length < PNG_MAGIC.length || PNG_MAGIC.some((byte, i) => png[i] !== byte)) {
+    throw new ConverterError("CONVERTER_INTEGRITY", "thumbnail response is not a PNG", null, res.status);
+  }
+  return png;
+}
+
 export async function convertBvhToFbx(
   input: ConvertInput,
   overrides: Partial<ConverterDeps> = {},

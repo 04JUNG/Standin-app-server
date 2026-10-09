@@ -49,6 +49,14 @@ export const config = {
    *   복구 경로가 실전에서 한 번도 관측되지 않는다.
    */
   refineTimeoutMs: Number(process.env.REFINE_TIMEOUT_MS ?? 9000),
+  /**
+   * 추론이 `/refine` 안에서 미리보기를 그리게 할지. 기본은 끈다.
+   *
+   * 미리보기 렌더가 20초쯤 걸려 위 `refineTimeoutMs`(운영 5초) 안에 끝나지 않는다. 켜 두면
+   * 미리보기만 못 받는 게 아니라 조정 결과까지 `upstream_unavailable`로 버려진다. 미리보기는
+   * 처음 볼 때 따로 그린다(`refine/thumbnail.ts`).
+   */
+  refineInlineThumbnail: process.env.REFINE_INLINE_THUMBNAIL === "1",
 
   /**
    * 내부 Converter API(V3.2 BVH→FBX). 추론 서버와 **다른 서비스**다 — 별도 ECS service,
