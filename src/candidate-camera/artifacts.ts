@@ -22,6 +22,9 @@ export function cameraArtifact(
     input.expectedCharacterSha256,
     input.expectedPreviewRevision,
     FRAMING_VERSION,
+    input.previewFormat,
+    input.modelRevision,
+    input.characterSha256,
   ]);
   return cache.get(key, () => convert(input));
 }

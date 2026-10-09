@@ -13,6 +13,10 @@ import { resolveExportArtifact } from "../refine/service.js";
 import { getPoseBvh } from "../inference.js";
 import { checkCharacter } from "../characters/service.js";
 import { config } from "../config.js";
+import {
+  getPreviewModel,
+  matchesLibraryModel,
+} from "../converter/previewModel.js";
 import { errorEnvelope } from "../mapping.js";
 import {
   ConverterError,
@@ -23,6 +27,7 @@ import {
   convertFramed,
   FramedArtifactCache,
   FRAMING_VERSION,
+  modelPreviewIdentity,
 } from "../converter/framing.js";
 import { isBodyScope, resolveOutputScope } from "./model.js";
 
@@ -36,13 +41,16 @@ const defaults = {
   convertFramed,
   converterEnabled,
   recordExport,
+  modelPreviewIdentity,
+  getPreviewModel,
 };
 const bodyDefaults = {
   selection: bodyStore.selection,
   runtime: getPreviewRuntime,
   enabled: bodyUxAvailable,
 };
-export function createFramingRoutes(deps = defaults, bodyDeps = bodyDefaults) {
+export function createFramingRoutes(overrides: Partial<typeof defaults> = {}, bodyDeps = bodyDefaults) {
+  const deps = { ...defaults, ...overrides };
   const routes = new Hono<AppEnv>();
   routes.get("/:id/framed", async (c) => {
     const fail = (
@@ -58,6 +66,15 @@ export function createFramingRoutes(deps = defaults, bodyDeps = bodyDefaults) {
     const scope = c.req.query("outputScope"),
       format = c.req.query("format");
     const poseId = c.req.param("id");
+    const expectedSource = c.req.query("expectedBvhSha256");
+    const expectedCharacter = c.req.query("expectedCharacterSha256");
+    const expectedRevision = c.req.query("expectedModelRevision");
+    if (
+      [expectedSource, expectedCharacter, expectedRevision].some(
+        (value) => value !== undefined && !/^[a-f0-9]{64}$/.test(value),
+      )
+    )
+      return fail(400, "INVALID_INPUT", "미리보기를 다시 확인해 주세요.");
     if (
       !jobId ||
       !candidateId ||
@@ -65,7 +82,7 @@ export function createFramingRoutes(deps = defaults, bodyDeps = bodyDefaults) {
       !Number.isInteger(personIndex) ||
       personIndex < 0 ||
       !isBodyScope(scope) ||
-      (format !== "preview" && format !== "fbx")
+      (format !== "preview" && format !== "fbx" && format !== "model")
     )
       return fail(
         400,
@@ -247,21 +264,89 @@ export function createFramingRoutes(deps = defaults, bodyDeps = bodyDefaults) {
               expectedPreviewRevision: runtime.previewRevision,
             }
           : {};
-      const result = candidate.camera
-        ? await cameraArtifact(
-            [installationId, jobId, personIndex, candidateId, key],
-            {
-              bvhBytes,
+      const useModel =
+        format === "model" ||
+        (format === "fbx" && c.req.query("previewType") === "model");
+      const identity = useModel
+        ? await deps.modelPreviewIdentity(characterId)
+        : null;
+      if (useModel && !identity)
+        return fail(
+          503,
+          "PREVIEW_UNAVAILABLE",
+          "미리보기를 지금 준비할 수 없습니다. 다시 시도해 주세요.",
+        );
+      const sourceSha = sha256Hex(bvhBytes);
+      if (
+        (expectedSource && expectedSource !== sourceSha) ||
+        (expectedCharacter &&
+          expectedCharacter !== identity?.characterSha256) ||
+        (expectedRevision && expectedRevision !== identity?.modelRevision)
+      ) {
+        await exportEvent("failed", "PREVIEW_CHANGED");
+        return fail(
+          409,
+          "PREVIEW_CHANGED",
+          "포즈나 모델이 바뀌었습니다. 미리보기를 다시 확인해 주세요.",
+        );
+      }
+      const prepare = () =>
+        useModel
+          ? cameraArtifact(
+              [installationId, jobId, personIndex, candidateId, ...(bodyMode ? [key] : [])],
+              {
+                bvhBytes,
+                characterId,
+                scope,
+                cameraRotation: candidate.camera?.rotation,
+                previewFormat: "model",
+                ...identity!,
+                ...expected,
+              },
+              deps.convertFramed,
+            )
+          : candidate.camera
+            ? cameraArtifact(
+                [installationId, jobId, personIndex, candidateId, ...(bodyMode ? [key] : [])],
+                {
+                  bvhBytes,
+                  characterId,
+                  scope,
+                  cameraRotation: candidate.camera.rotation,
+                  ...expected,
+                },
+                deps.convertFramed,
+              )
+            : cache.get(key, () =>
+                deps.convertFramed({ bvhBytes, characterId, scope }),
+              );
+      let libraryModel: Buffer | undefined;
+      // The stored artifact, not a client's refine flag, decides whether the
+      // library surface still describes the output. Cache misses use the pair.
+      if (
+        !bodyMode &&
+        format === "model" &&
+        c.req.query("useLibraryModel") === "true" &&
+        artifact.variant === "base" &&
+        scope === "full" &&
+        candidate.camera
+      ) {
+        try {
+          const bytes = await deps.getPreviewModel(sourceSha, characterId);
+          if (
+            matchesLibraryModel(
+              bytes,
+              sourceSha,
               characterId,
-              scope,
-              cameraRotation: candidate.camera.rotation,
-              ...expected,
-            },
-            deps.convertFramed,
+              identity!.characterSha256,
+            )
           )
-        : await cache.get(key, () =>
-            deps.convertFramed({ bvhBytes, characterId, scope }),
-          );
+            libraryModel = bytes;
+        } catch {
+          /* Fall through to the exact final model. */
+        }
+      }
+      const result = libraryModel ? undefined : await prepare();
       // A preference or confirmation may change while Blender is working.
       const current = await deps.getOwnedJob(jobId, installationId);
       const currentPerson = current?.result?.candidatesByPerson.find(
@@ -285,7 +370,7 @@ export function createFramingRoutes(deps = defaults, bodyDeps = bodyDefaults) {
         );
       }
       const reviewKey = sha256Hex(
-        new TextEncoder().encode(JSON.stringify([key, result.artifactSha256])),
+        new TextEncoder().encode(JSON.stringify([key, result?.artifactSha256])),
       );
       if (bodyMode) {
         const nowBody = await bodyDeps.selection(
@@ -322,8 +407,8 @@ export function createFramingRoutes(deps = defaults, bodyDeps = bodyDefaults) {
             "결과가 변경되었습니다. 다시 확인해 주세요.",
           );
         if (
-          result.characterSha256 !== body!.resolvedBody!.assetSha256 ||
-          result.previewRevision !== runtime!.previewRevision
+          result?.characterSha256 !== body!.resolvedBody!.assetSha256 ||
+          result?.previewRevision !== runtime!.previewRevision
         )
           return fail(
             409,
@@ -332,11 +417,17 @@ export function createFramingRoutes(deps = defaults, bodyDeps = bodyDefaults) {
           );
       }
       await exportEvent("completed");
-      const bytes = format === "preview" ? result.preview : result.fbx;
+      if (libraryModel) void prepare().catch(() => {});
+      const bytes =
+        libraryModel ?? (format === "fbx" ? result!.fbx : result!.preview);
       return new Response(bytes, {
         headers: {
           "Content-Type":
-            format === "preview" ? "image/png" : "application/octet-stream",
+            format === "model"
+              ? "model/gltf-binary"
+              : format === "preview"
+                ? "image/png"
+                : "application/octet-stream",
           "Content-Length": String(bytes.byteLength),
           "Cache-Control": "private, no-store",
           "X-Standin-Output-Scope": scope,
@@ -348,7 +439,9 @@ export function createFramingRoutes(deps = defaults, bodyDeps = bodyDefaults) {
                 "X-Standin-Source-BVH-SHA256": sha256Hex(bvhBytes),
               }
             : {}),
-          "X-Standin-Artifact-SHA256": result.artifactSha256,
+          ...(result
+            ? { "X-Standin-Artifact-SHA256": result.artifactSha256 }
+            : {}),
           ...(format === "fbx"
             ? {
                 "Content-Disposition": `attachment; filename="pose-${scope}.fbx"`,

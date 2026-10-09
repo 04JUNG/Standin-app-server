@@ -27,6 +27,9 @@ export interface FramedInput {
   cameraRotation?: number[][];
   expectedCharacterSha256?: string;
   expectedPreviewRevision?: string;
+  previewFormat?: "model";
+  modelRevision?: string;
+  characterSha256?: string;
 }
 function dependencies(overrides: Partial<ConverterDeps>): ConverterDeps {
   return {
@@ -81,7 +84,9 @@ export async function convertFramed(
   body.set("character_id", input.characterId);
   body.set("output_scope", input.scope);
   body.set("preview_view", "front");
-  if (input.cameraRotation) body.set("camera_rotation", JSON.stringify(input.cameraRotation));
+  if (input.previewFormat) body.set("preview_format", input.previewFormat);
+  if (input.cameraRotation)
+    body.set("camera_rotation", JSON.stringify(input.cameraRotation));
   body.set("expected_bvh_sha256", digest);
   if (input.expectedCharacterSha256) body.set("expected_character_sha256", input.expectedCharacterSha256);
   if (input.expectedPreviewRevision) body.set("expected_preview_revision", input.expectedPreviewRevision);
@@ -90,7 +95,9 @@ export async function convertFramed(
     response = await deps.fetch(`${deps.baseUrl}/convert-framed`, {
       method: "POST",
       body,
-      signal: AbortSignal.timeout(Math.max(deps.timeoutMs, input.cameraRotation ? 300_000 : 0)),
+      signal: AbortSignal.timeout(
+        Math.max(deps.timeoutMs, input.cameraRotation ? 300_000 : 0),
+      ),
     });
   } catch (error) {
     const timeout =
@@ -148,9 +155,11 @@ export async function convertFramed(
       !fbx
         .subarray(0, 19)
         .equals(Buffer.from("Kaydara FBX Binary" + String.fromCharCode(32))) ||
-      !preview
-        .subarray(0, 8)
-        .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+      (input.previewFormat === "model"
+        ? !validFinalModel(preview, input, digest, sha256Hex(fbx), value)
+        : !preview
+            .subarray(0, 8)
+            .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])))
     )
       throw new Error("lineage");
     return {
@@ -170,7 +179,55 @@ export async function convertFramed(
   }
 }
 
-let healthCache: { expires: number; supported: boolean } | undefined;
+function validFinalModel(
+  data: Buffer,
+  input: FramedInput,
+  source: string,
+  fbx: string,
+  value: Record<string, unknown>,
+) {
+  if (
+    data.length < 28 ||
+    data.length > 8 * 1024 * 1024 ||
+    data.readUInt32LE(0) !== 0x46546c67 ||
+    data.readUInt32LE(4) !== 2 ||
+    data.readUInt32LE(8) !== data.length ||
+    data.readUInt32LE(16) !== 0x4e4f534a
+  )
+    return false;
+  const size = data.readUInt32LE(12);
+  if (size % 4 || size > 128 * 1024 || size + 28 > data.length) return false;
+  const meta = JSON.parse(data.subarray(20, 20 + size).toString("utf8")).asset
+    ?.extras;
+  return (
+    value.preview_format === "model" &&
+    !!input.modelRevision &&
+    !!input.characterSha256 &&
+    value.preview_model_revision === input.modelRevision &&
+    value.character_sha256 === input.characterSha256 &&
+    meta?.version === "framed-mesh-v1" &&
+    meta.revision === input.modelRevision &&
+    meta.character_sha256 === input.characterSha256 &&
+    meta.character_id === input.characterId &&
+    meta.source_bvh_sha256 === source &&
+    meta.base_fbx_sha256 === fbx &&
+    meta.scope === input.scope &&
+    meta.coordinates === "Y-up-hips-origin" &&
+    JSON.stringify(meta.camera_rotation) ===
+      JSON.stringify(input.cameraRotation ?? null) &&
+    data.readUInt32LE(24 + size) === 0x004e4942 &&
+    data.readUInt32LE(20 + size) + size + 28 === data.length
+  );
+}
+
+let healthCache:
+  | {
+      expires: number;
+      supported: boolean;
+      revision?: string;
+      hashes?: Record<string, string>;
+    }
+  | undefined;
 export async function framingAvailable(
   overrides: Partial<ConverterDeps> = {},
 ): Promise<boolean> {
@@ -182,6 +239,8 @@ export async function framingAvailable(
   )
     return healthCache.supported;
   let supported = false;
+  let revision: string | undefined;
+  let hashes: Record<string, string> | undefined;
   try {
     const deps = dependencies(overrides);
     const res = await deps.fetch(`${deps.baseUrl}/healthz`, {
@@ -196,12 +255,36 @@ export async function framingAvailable(
       value.framing_version === FRAMING_VERSION &&
       Array.isArray(scopes) &&
       ["full", "half", "bust", "head"].every((scope) => scopes.includes(scope));
+    if (
+      supported &&
+      typeof value.preview_model_revision === "string" &&
+      /^[a-f0-9]{64}$/.test(value.preview_model_revision) &&
+      value.character_hashes &&
+      typeof value.character_hashes === "object" &&
+      !Array.isArray(value.character_hashes) &&
+      Object.values(value.character_hashes).every(
+        (v) => typeof v === "string" && /^[a-f0-9]{64}$/.test(v),
+      )
+    ) {
+      revision = value.preview_model_revision;
+      hashes = value.character_hashes as Record<string, string>;
+    }
   } catch {
     /* Old/offline converter: keep the feature closed. */
   }
   if (!Object.keys(overrides).length)
-    healthCache = { expires: Date.now() + 30_000, supported };
+    healthCache = { expires: Date.now() + 30_000, supported, revision, hashes };
   return supported;
+}
+
+export async function modelPreviewIdentity(
+  characterId = config.converterCharacterId,
+) {
+  if (!(await framingAvailable())) return null;
+  const characterSha256 = healthCache?.hashes?.[characterId];
+  return healthCache?.supported && healthCache.revision && characterSha256
+    ? { modelRevision: healthCache.revision, characterSha256 }
+    : null;
 }
 
 /** Bounded, process-local paired artifact cache. Authorize before every lookup. */

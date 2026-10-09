@@ -257,11 +257,12 @@ test("display camera preserves search identity and builds an owned preview URL",
     canonical_yaw: 180, display_view: "front", status: "fitted" as const,
     fit_error: 0.1, facing_source: "person_observation" as const, depth_ambiguous:false,
   };
-  const input = {...candidate(.2), view:"back", tags:{view:"back"}, camera};
+  const input = {...candidate(.2), view:"back", tags:{view:"back"}, thumbnail_url:"/pose/pose-1/thumbnail?view=back", camera};
   const result = mapCutResult("owned-job",cut([{candidates:[input]}])).candidatesByPerson[0]!.candidates[0]!;
   assert.equal(result.id,"pose-1::back");
   assert.equal(result.view,"back");
   assert.deepEqual(result.tags,["front"]);
   assert.deepEqual(result.camera,camera);
   assert.match(result.thumbnailUrl!,/aligned\?jobId=owned-job&personIndex=0&candidateId=pose-1%3A%3Aback/);
+  assert.equal(result.quickThumbnailUrl,"/v1/pose-candidates/pose-1/thumbnail?view=back");
 });

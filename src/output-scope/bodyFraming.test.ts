@@ -97,6 +97,8 @@ function setup() {
           new Response(source, { status: state.quarantine ? 409 : 200 }),
         checkCharacter: async () => "ok",
         converterEnabled: () => true,
+        modelPreviewIdentity: async () => ({characterSha256: state.hash, modelRevision: "c".repeat(64)}),
+        getPreviewModel: async () => {throw new Error("body review must use the verified artifact pair");},
         convertFramed: async (input) => {
           state.calls++;
           assert.equal(input.characterId, "chosen");
@@ -213,4 +215,17 @@ test("refined cache hit still checks base-pose quarantine", async () => {
     409,
   );
   assert.equal(state.calls, 1);
+});
+
+test("merged final-model path preserves body receipt, hash checks and paired export reuse", async () => {
+  const {state, request} = setup();
+  const preview = await request({format: "model", useLibraryModel: "true"});
+  assert.equal(preview.status, 200);
+  assert.equal(preview.headers.get("Content-Type"), "model/gltf-binary");
+  assert.equal(preview.headers.get("X-Standin-Character-SHA256"), state.hash);
+  const download = await request({format: "fbx", previewType: "model", reviewKey: preview.headers.get("X-Standin-Review-Key")!});
+  assert.equal(download.status, 200);
+  assert.equal(state.calls, 1);
+  state.revision++;
+  assert.equal((await request({format: "model"})).status, 409);
 });

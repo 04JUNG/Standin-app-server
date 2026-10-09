@@ -213,6 +213,7 @@ export async function analyze(file: Blob, hint = ""): Promise<CutResult> {
  *   전부 `/analyze` 때 DB에 넣어 둔 값이며 클라이언트가 되돌려 보내는 값이 아니다(BFF-04).
  */
 export interface RefineUpstreamRequest {
+  render_thumbnail?: boolean;
   camera?: CandidateCamera;
   pose_id: string;
   view: string;

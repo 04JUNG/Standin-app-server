@@ -179,6 +179,9 @@ export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
           : c.thumbnail_url
           ? `/v1/pose-candidates/${encodeURIComponent(c.pose_id)}/thumbnail?view=${encodeURIComponent(c.view)}`
           : undefined,
+        ...(c.camera && c.thumbnail_url
+          ? { quickThumbnailUrl: `/v1/pose-candidates/${encodeURIComponent(c.pose_id)}/thumbnail?view=${encodeURIComponent(c.view)}` }
+          : {}),
         distance: c.distance,
         rerankScore: c.rerank_score,
       }));
