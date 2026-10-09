@@ -15,6 +15,11 @@ import { toOverviewKpis } from "./overview.js";
 import { overviewExtras } from "./overviewStore.js";
 import { dailyAggregates } from "./qualityStore.js";
 import { parseCutSummary, toReviewPeople, type AnalysisPersonRow } from "./reviewDetail.js";
+import { ensureRefinedThumbnail } from "../refine/thumbnail.js";
+import { resolveExportArtifact } from "../refine/service.js";
+import { findRefinedArtifact } from "../refine/store.js";
+import { convertBvhToFbx, ConverterError } from "../converter/client.js";
+
 import { DEFAULT_REVIEWER, matchReviewer, parseReviewers } from "./reviewers.js";
 import { parseWindowDays, toCohorts, toDropoff, toFunnel } from "./product.js";
 import { toColumnHealth, toDistanceBuckets, toStageGaps } from "./instrumentation.js";
@@ -41,7 +46,7 @@ import {
 } from "./productStore.js";
 import { isInstallationId, parseHistoryQuery, toHistoryPage } from "../jobs/history.js";
 import { listJobHistory, listRecentJobs } from "../jobs/store.js";
-import { getPoseThumbnail, inferenceStatus } from "../inference.js";
+import { getPoseBvh, getPoseThumbnail, inferenceStatus } from "../inference.js";
 import { notify } from "../notify.js";
 import {
   GAP_EXPORT_PAGE_SIZE,
@@ -456,6 +461,86 @@ adminRoutes.get("/review/jobs", async (c) => {
       installationId: installationByJob.get(item.jobId) ?? null,
     })),
   });
+});
+
+/** `/review/jobs/:id/refined/:personIndex/...`의 경로 검사. 틀리면 null. */
+function refinedTarget(c: Context<AppEnv>): { jobId: string; personIndex: number; candidateId: string } | null {
+  const jobId = c.req.param("id") ?? "";
+  const personIndex = Number(c.req.param("personIndex"));
+  const candidateId = c.req.query("candidateId") ?? "";
+  if (!/^job_[0-9a-f-]{36}$/.test(jobId)) return null;
+  if (!Number.isInteger(personIndex) || personIndex < 0 || personIndex > 99) return null;
+  if (candidateId.length === 0 || candidateId.length > 200) return null;
+  return { jobId, personIndex, candidateId };
+}
+
+/**
+ * GET /v1/admin/review/jobs/:id/refined/:personIndex/thumbnail?candidateId= — 조정본 미리보기.
+ *
+ * 저장된 미리보기가 있으면 그것을, 없으면 그 자리에서 그려 저장한 뒤 돌려준다. refine이
+ * 미리보기 없이 끝나도록 바뀌었으므로(추론이 그리면 5초 상한을 넘긴다) 처음 한 번은 여기서
+ * 그려진다. 전환기가 한 번에 한 건만 처리해 처음엔 수십 초 걸릴 수 있다.
+ */
+adminRoutes.get("/review/jobs/:id/refined/:personIndex/thumbnail", async (c) => {
+  const target = refinedTarget(c);
+  if (!target) {
+    return c.json(errorEnvelope("INVALID_INPUT", "jobId·personIndex·candidateId가 올바르지 않습니다.", c.get("requestId")), 400);
+  }
+  const png = await ensureRefinedThumbnail(target.jobId, target.personIndex, target.candidateId);
+  await audit(c, "review_refined_thumbnail", { jobId: target.jobId });
+  if (!png) {
+    return c.json(errorEnvelope("NOT_FOUND", "그릴 조정본이 없습니다.", c.get("requestId")), 404);
+  }
+  return new Response(png, {
+    status: 200,
+    // 관리자 화면 전용이고 그 사이 다시 그려질 수 있다. 캐시에 남기지 않는다.
+    headers: { "Content-Type": "image/png", "Cache-Control": "private, no-store" },
+  });
+});
+
+/**
+ * GET /v1/admin/review/jobs/:id/refined/:personIndex/fbx?candidateId= — 조정본 FBX.
+ *
+ * 조정본이 있으면 그것을, 없거나 만료됐으면 라이브러리 원본 포즈를 FBX로 바꾼다. 어느 쪽이
+ * 나갔는지는 `X-Standin-Variant`로 알린다. FBX는 저장해 두지 않고 매번 전환기가 만든다.
+ */
+adminRoutes.get("/review/jobs/:id/refined/:personIndex/fbx", async (c) => {
+  const target = refinedTarget(c);
+  if (!target) {
+    return c.json(errorEnvelope("INVALID_INPUT", "jobId·personIndex·candidateId가 올바르지 않습니다.", c.get("requestId")), 400);
+  }
+  const artifact = await findRefinedArtifact(target.jobId, target.personIndex, target.candidateId);
+  if (!artifact) {
+    return c.json(errorEnvelope("NOT_FOUND", "refine 기록이 없습니다.", c.get("requestId")), 404);
+  }
+  const resolved = await resolveExportArtifact(target.jobId, target.personIndex, target.candidateId);
+  let bvh: Uint8Array;
+  if (resolved.variant === "refined") {
+    bvh = resolved.bytes;
+  } else {
+    const res = await getPoseBvh(artifact.poseId);
+    if (!res.ok) {
+      return c.json(errorEnvelope("NOT_FOUND", "원본 포즈를 찾을 수 없습니다.", c.get("requestId")), 404);
+    }
+    bvh = new Uint8Array(await res.arrayBuffer());
+  }
+  try {
+    const result = await convertBvhToFbx({ bvhBytes: bvh, fileName: "admin-export.bvh" });
+    await audit(c, "review_refined_fbx", { jobId: target.jobId });
+    const safePose = artifact.poseId.replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 60);
+    return new Response(result.fbx, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": `attachment; filename="${target.jobId}-p${target.personIndex}-${safePose}.fbx"`,
+        "Cache-Control": "private, no-store",
+        "X-Standin-Variant": resolved.variant,
+      },
+    });
+  } catch (error) {
+    const code = error instanceof ConverterError ? error.code : "CONVERTER_UNAVAILABLE";
+    return c.json(errorEnvelope(code, "FBX 변환에 실패했습니다.", c.get("requestId")), 502);
+  }
 });
 
 adminRoutes.get("/review/jobs/:id", async (c) => {

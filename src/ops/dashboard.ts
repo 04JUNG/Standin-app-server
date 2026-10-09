@@ -491,15 +491,73 @@ function candidateCard(row, selectedId) {
     "</div>";
 }
 
+// 지금 열린 상세의 Job. refine 카드의 미리보기·FBX 경로를 만들 때 쓴다.
+let currentDetailJobId = "";
+
+function refinedQuery(row) {
+  return "/v1/admin/review/jobs/" + encodeURIComponent(currentDetailJobId) + "/refined/" +
+    encodeURIComponent(row.personIndex) + "/{kind}?candidateId=" + encodeURIComponent(row.candidateId);
+}
+
 function refineCard(row) {
-  return '<div class="cand">' +
-    (row.thumbnailUrl ? '<img src="' + esc(row.thumbnailUrl) + '" alt="">' : '<div class="sub">미리보기 없음</div>') +
+  // 저장된 미리보기가 있으면 바로, 조정본인데 없으면 관리자 경로가 그 자리에서 그린다.
+  // refine은 이제 미리보기 없이 끝나므로(5초 상한) 처음 한 번은 여기서 그려진다.
+  const preview = row.thumbnailUrl
+    ? '<img src="' + esc(row.thumbnailUrl) + '" alt="">'
+    : row.refined
+      ? '<img data-refined="' + esc(refinedQuery(row).replace("{kind}", "thumbnail")) + '" alt="">' +
+        '<div class="sub refined-wait">미리보기 만드는 중…</div>'
+      : '<div class="sub">조정 안 함 — 후보 그림을 보세요</div>';
+  return '<div class="cand">' + preview +
     '<div style="margin:6px 0 4px">' + (row.refined ? pill("조정됨", "ok") : pill("조정 안 함", "warn")) + "</div>" +
     '<div class="sub mono" title="' + esc(row.poseId) + '">' + esc(String(row.poseId).slice(0, 16)) + "</div>" +
     '<div class="sub">' + esc(row.reason || "—") + "</div>" +
     (row.limbs && row.limbs.length ? '<div class="sub">' + esc(row.limbs.join(", ")) + "</div>" : "") +
-    (row.bvhUrl ? '<div class="sub" style="margin-top:4px"><a href="' + esc(row.bvhUrl) + '" target="_blank" rel="noopener">BVH</a></div>' : "") +
-    "</div>";
+    '<div class="sub" style="margin-top:4px;display:flex;gap:8px;align-items:center">' +
+      (row.bvhUrl ? '<a href="' + esc(row.bvhUrl) + '" target="_blank" rel="noopener">BVH</a>' : "") +
+      '<button class="ghost" data-fbx="' + esc(refinedQuery(row).replace("{kind}", "fbx")) + '">FBX</button>' +
+    "</div></div>";
+}
+
+/** 관리자 토큰이 헤더로 가야 해서 img src로 못 부른다. blob으로 받아 붙인다. */
+async function fillRefinedThumb(img) {
+  const wait = img.nextElementSibling;
+  try {
+    const res = await fetch(img.dataset.refined, { headers: { "X-Beta-Admin-Token": token } });
+    if (!res.ok) throw new Error(res.status === 404 ? "그릴 조정본이 없습니다" : "미리보기 실패 " + res.status);
+    const url = URL.createObjectURL(await res.blob());
+    detailBlobUrls.push(url);
+    img.src = url;
+    if (wait) wait.remove();
+  } catch (error) {
+    img.remove();
+    if (wait) { wait.textContent = error.message; wait.classList.add("err"); }
+  }
+}
+
+async function downloadFbx(button) {
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = "변환 중…";
+  try {
+    const res = await fetch(button.dataset.fbx, { headers: { "X-Beta-Admin-Token": token } });
+    if (!res.ok) throw new Error(res.status === 404 ? "원본이 없습니다" : "변환 실패 " + res.status);
+    const disposition = res.headers.get("Content-Disposition") || "";
+    const match = /filename="([^"]+)"/.exec(disposition);
+    const url = URL.createObjectURL(await res.blob());
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = match ? match[1] : "refined.fbx";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    button.textContent = res.headers.get("X-Standin-Variant") === "base" ? "FBX(원본)" : label;
+  } catch (error) {
+    button.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function scoreOf(person, index) {
@@ -727,6 +785,7 @@ function metadataPills(meta) {
 
 function detailRender(detail) {
   releaseDetailBlobs();
+  currentDetailJobId = detail.jobId;
   const byPerson = groupBy(detail.candidates, "person_index");
   const refinedByPerson = groupBy(detail.refined, "personIndex");
   const chosen = new Map((detail.selections || []).map((s) => [s.person_index, s.candidate_id]));
@@ -788,6 +847,10 @@ function detailRender(detail) {
     "</div></div>" + people + "</div>";
 
   $("detailOut").querySelectorAll(".cand img[data-pose]").forEach(fillCandidateThumb);
+  $("detailOut").querySelectorAll(".cand img[data-refined]").forEach(fillRefinedThumb);
+  $("detailOut").querySelectorAll("button[data-fbx]").forEach((button) => {
+    button.addEventListener("click", () => downloadFbx(button));
+  });
   bindOverlay();
   $("detailClose").addEventListener("click", closeDrawer);
   showDrawer("detail");
