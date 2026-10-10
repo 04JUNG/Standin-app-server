@@ -319,6 +319,22 @@ export async function getPoseBvh(poseId: string): Promise<Response> {
 }
 
 // GET /pose/{id}/thumbnail?view=... → PNG 원본 응답
+/** 포즈 라이브러리 한 페이지(관리자 모아 보기). 쿼리는 호출하는 쪽이 검증해서 넘긴다. */
+export async function listLibraryPoses(params: URLSearchParams): Promise<Response> {
+  return fetch(`${config.inferenceBaseUrl}/poses?${params.toString()}`, {
+    headers: { ...authHeaders() },
+    signal: AbortSignal.timeout(10_000),
+  });
+}
+
+/** 포즈 라이브러리의 출처별·분류별 폴더. */
+export async function libraryFolders(): Promise<Response> {
+  return fetch(`${config.inferenceBaseUrl}/poses/folders`, {
+    headers: { ...authHeaders() },
+    signal: AbortSignal.timeout(10_000),
+  });
+}
+
 export async function getPoseThumbnail(
   poseId: string,
   view: string,
