@@ -33,20 +33,23 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
 <style>
   :root {
     color-scheme: light dark;
-    --bg: #0f1115; --panel: #171a21; --line: #262b36; --text: #e6e9ef;
-    --muted: #98a2b3; --ok: #2f9e44; --warn: #f08c00; --bad: #e03131; --accent: #4dabf7;
+    --bg:#f6f5f2; --panel:#ffffff; --line:#e4e2dc; --grid:#eeece7; --text:#1d2025; --muted:#686d74;
+    --ok:#2f7d5b; --warn:#b5651d; --bad:#b23a3a; --accent:#1d2025;
+    --c-users:#c0701f; --c-jobs:#2f7d5b; --c-down:#7a5ca3; --c-fail:#b23a3a;
   }
-  @media (prefers-color-scheme: light) {
-    :root { --bg:#f6f7f9; --panel:#fff; --line:#e4e7ec; --text:#101828; --muted:#667085; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#131519; --panel:#1b1e23; --line:#2c3038; --grid:#23262c; --text:#eceef1; --muted:#a0a6af;
+            --ok:#5fb88f; --warn:#e39b55; --bad:#e07070; --accent:#eceef1;
+            --c-users:#e39b55; --c-jobs:#5fb88f; --c-down:#b195dc; --c-fail:#e07070; }
   }
   * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 ui-sans-serif,system-ui,"Segoe UI",sans-serif; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.6 "Pretendard","Apple SD Gothic Neo","Malgun Gothic",ui-sans-serif,system-ui,sans-serif; -webkit-font-smoothing:antialiased; }
   header { padding:16px 20px; border-bottom:1px solid var(--line); display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
   h1 { font-size:16px; margin:0; font-weight:600; }
   main { padding:20px; display:grid; gap:16px; max-width:1200px; margin:0 auto; }
   .row { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); }
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
-  .card h2 { font-size:12px; margin:0 0 8px; color:var(--muted); font-weight:600; letter-spacing:.03em; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px 20px; }
+  .card h2 { font-size:15px; margin:0 0 12px; color:var(--text); font-weight:700; letter-spacing:0; }
   .big { font-size:28px; font-weight:650; font-variant-numeric:tabular-nums; }
   .sub { color:var(--muted); font-size:12px; }
   .pill { display:inline-flex; align-items:center; gap:6px; padding:3px 9px; border-radius:999px; font-size:12px; font-weight:600; }
@@ -54,13 +57,13 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
   .pill.warn { background:color-mix(in srgb,var(--warn) 18%,transparent); color:var(--warn); }
   .pill.bad { background:color-mix(in srgb,var(--bad) 18%,transparent); color:var(--bad); }
   table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
-  th,td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); }
-  th { color:var(--muted); font-size:12px; font-weight:600; }
+  th,td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-size:12.5px; font-weight:600; }
   td.num, th.num { text-align:right; }
   .scroll { overflow-x:auto; }
   svg { display:block; width:100%; height:120px; }
   .empty { color:var(--muted); padding:12px 0; }
-  button { font:inherit; background:var(--accent); color:#04121f; border:0; border-radius:8px; padding:7px 14px; font-weight:600; cursor:pointer; }
+  button { font:inherit; background:var(--accent); color:var(--panel); border:0; border-radius:8px; padding:7px 14px; font-weight:600; cursor:pointer; }
   input { font:inherit; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:7px 10px; min-width:280px; }
   #gate { display:none; padding:40px 20px; max-width:460px; margin:0 auto; }
   #gate.show { display:block; }
@@ -134,6 +137,23 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
   .drawer-head #drawerTitle { font-weight:600; font-size:14px; }
   .drawer-body { overflow-y:auto; padding:0 16px 24px; flex:1; }
   .drawer-body .detail { border:0; padding:0; background:transparent; }
+  /* ── 선 차트 ─────────────────────────────────────────────── */
+  .lc { width:100%; height:auto; display:block; overflow:visible; }
+  .lc text { font-size:12px; fill:var(--muted); font-family:inherit; }
+  .lc .day { fill:var(--text); font-weight:600; }
+  .lc .val { font-size:12.5px; font-weight:700; }
+  .lc .grid { stroke:var(--grid); stroke-width:1; }
+  .lc .axis { stroke:var(--line); stroke-width:1; }
+  .lc .cursor { stroke:var(--muted); stroke-width:1; stroke-dasharray:2 3; }
+  .chart-title { display:flex; align-items:baseline; gap:8px; margin:14px 0 2px; font-size:13.5px; font-weight:700; }
+  .chart-title .swatch { display:inline-block; width:18px; height:0; border-top:2px dotted; transform:translateY(-3px); }
+  .chart-summary { font-size:13.5px; color:var(--text); margin:10px 0 0; min-height:22px; }
+  .chart-summary .sub { font-size:12.5px; }
+  .seg { display:inline-flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  .seg button { background:var(--panel); color:var(--text); border:0; border-right:1px solid var(--line); border-radius:0; padding:6px 14px; font-weight:500; }
+  .seg button:last-child { border-right:0; }
+  .seg button.on { background:color-mix(in srgb,var(--c-users) 14%,var(--panel)); font-weight:700; }
+  .controls { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
 </style>
 </head>
 <body>
@@ -175,6 +195,19 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
     <section class="tab on" id="tab-overview">
       <div id="kpis" class="kpis"><p class="empty">불러오는 중…</p></div>
       <p class="sub" id="kpiNote"></p>
+      <div class="card">
+        <h2>시간대별 활동</h2>
+        <div class="controls">
+          <div class="seg" id="actRange">
+            <button data-range="24h" class="on">24시간</button>
+            <button data-range="7d">7일</button>
+            <button data-range="30d">30일</button>
+          </div>
+          <div class="seg" id="actBucket"></div>
+          <span class="sub" id="actMsg"></span>
+        </div>
+        <div id="actOut"></div>
+      </div>
       <div class="grid2">
         <div class="card"><h2>선택률 · 일별 (어제까지)</h2><div id="ovSelection"></div></div>
         <div class="card"><h2>분석 수 · 일별 (어제까지)</h2><div id="ovUsage"></div></div>
@@ -300,18 +333,18 @@ function ms(value) { return value === null || value === undefined ? "—" : valu
 
 function chart(points, labelOf) {
   if (!points.length) return '<p class="empty">데이터가 아직 없습니다.</p>';
-  const width = 1000, height = 120, gap = 2;
-  const barWidth = Math.max(1, width / points.length - gap);
-  const peak = Math.max(1, ...points.map((p) => p.requests));
-  const bars = points.map((point, index) => {
-    const x = index * (barWidth + gap);
-    const total = Math.round((point.requests / peak) * (height - 20));
-    const bad = Math.round((point.errors5xx / peak) * (height - 20));
-    const okPart = '<rect x="' + x + '" y="' + (height - total) + '" width="' + barWidth + '" height="' + Math.max(0, total - bad) + '" fill="var(--accent)" opacity=".75"><title>' + esc(labelOf(point)) + " · " + point.requests + "건 · p95 " + ms(point.p95Ms) + "</title></rect>";
-    const badPart = bad > 0 ? '<rect x="' + x + '" y="' + (height - bad) + '" width="' + barWidth + '" height="' + bad + '" fill="var(--bad)"><title>5xx ' + point.errors5xx + "건</title></rect>" : "";
-    return okPart + badPart;
-  }).join("");
-  return '<svg viewBox="0 0 ' + width + " " + height + '" preserveAspectRatio="none">' + bars + "</svg>";
+  let lastDay = "";
+  const axis = points.map((point) => {
+    const at = kst(point.at);
+    const top = at.md !== lastDay ? at.md : "";
+    lastDay = at.md;
+    return { top, bottom: at.hm };
+  });
+  return chartGroup(axis, [
+    { label: "요청", values: points.map((point) => point.requests), unit: "건", color: "--c-jobs", dash: "2 4" },
+    { label: "5xx", values: points.map((point) => point.errors5xx), unit: "건", color: "--c-fail", dash: "6 4" },
+  ], (i) => esc(labelOf(points[i])) + " · 요청 " + points[i].requests + "건 · 5xx " + points[i].errors5xx +
+    "건 · p95 " + ms(points[i].p95Ms), '<span class="sub">점에 마우스를 올리면 그 시각의 숫자가 보입니다.</span>');
 }
 
 function table(rows, head) {
@@ -1244,19 +1277,150 @@ function metricCards(items) {
 }
 
 /** 날짜별 막대 하나짜리 간단한 추이. ops 차트는 요청·5xx 전용이라 따로 둔다. */
-function trendBars(points) {
+// ── 선 차트 ─────────────────────────────────────────────────
+//
+// 점선과 점으로 그리고, 같은 그룹의 차트는 시간축을 공유한다. 한 차트에 마우스를 올리면
+// 그룹 전체에 세로선이 서고 아래 요약줄에 그 구간의 숫자가 뜬다. 막대는 구간 사이 변화가
+// 잘 안 보이고, 시간축이 없어 "몇 시에"를 읽을 수 없었다.
+const CHART_W = 960;
+let chartSeq = 0;
+const chartGroups = {};
+const KST_PARTS = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Seoul", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+});
+
+function kst(iso) {
+  const parts = {};
+  const date = new Date(iso);
+  // 축 이름표 하나 때문에 화면 전체가 죽으면 안 된다(formatToParts는 잘못된 날짜에 던진다).
+  if (Number.isNaN(date.getTime())) return { md: "", hm: "", hour: -1 };
+  KST_PARTS.formatToParts(date).forEach((part) => { parts[part.type] = part.value; });
+  return { md: parts.month + "." + parts.day, hm: parts.hour + ":" + parts.minute, hour: Number(parts.hour) };
+}
+
+function niceMax(value) {
+  if (value <= 1) return 1;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(value)));
+  const n = value / magnitude;
+  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * magnitude;
+}
+
+function fmtNum(value) {
+  return Number.isInteger(value) ? String(value) : (Math.round(value * 10) / 10).toFixed(1);
+}
+
+/**
+ * spec: { group, index, points:[{value, top, bottom}], color, dash, unit, partialLast }
+ * top/bottom은 x축 두 줄(날짜·시각). 비우면 그 칸은 이름표를 생략한다.
+ */
+function lineChart(spec) {
+  const W = spec.width || CHART_W, H = 168, L = 8, R = 52, T = 26, B = 44;
+  const n = spec.points.length;
+  const plotW = W - L - R, plotH = H - T - B;
+  const max = niceMax(Math.max(0, ...spec.points.map((point) => point.value || 0)));
+  const x = (i) => (n <= 1 ? L + plotW / 2 : L + (i * plotW) / (n - 1));
+  const y = (v) => T + plotH * (1 - (v || 0) / max);
+  const color = "var(" + spec.color + ")";
+  const parts = [];
+  [0, max / 2, max].forEach((tick) => {
+    parts.push('<line class="grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + y(tick) + '" y2="' + y(tick) + '"/>');
+    parts.push('<text x="' + (W - R + 8) + '" y="' + (y(tick) + 4) + '">' + fmtNum(tick) + "</text>");
+  });
+  parts.push('<line class="axis" x1="' + L + '" x2="' + (W - R) + '" y1="' + (T + plotH) + '" y2="' + (T + plotH) + '"/>');
+  const step = Math.max(1, Math.ceil(n / (W >= 700 ? 10 : 5)));
+  const labeled = [];
+  spec.points.forEach((point, i) => { if (point.top) labeled.push(i); });
+  for (let i = 0; i < n; i += step) {
+    if (!labeled.some((j) => Math.abs(i - j) < step * 0.6)) labeled.push(i);
+  }
+  labeled.forEach((i) => {
+    const point = spec.points[i];
+    if (point.top) parts.push('<text class="day" text-anchor="middle" x="' + x(i) + '" y="' + (T + plotH + 18) + '">' + esc(point.top) + "</text>");
+    if (point.bottom) parts.push('<text text-anchor="middle" x="' + x(i) + '" y="' + (T + plotH + 34) + '">' + esc(point.bottom) + "</text>");
+  });
+  const path = spec.points.map((point, i) => x(i).toFixed(1) + "," + y(point.value).toFixed(1)).join(" ");
+  parts.push('<polyline points="' + path + '" style="fill:none;stroke:' + color + ';stroke-width:2;stroke-linecap:round;stroke-dasharray:' + (spec.dash || "2 5") + '"/>');
+  spec.points.forEach((point, i) => {
+    const partial = spec.partialLast && i === n - 1;
+    parts.push('<circle cx="' + x(i).toFixed(1) + '" cy="' + y(point.value).toFixed(1) + '" r="3" style="' +
+      (partial ? "fill:var(--panel);stroke:" + color + ";stroke-width:1.5" : "fill:" + color) + '"/>');
+  });
+  parts.push('<line class="cursor" x1="0" x2="0" y1="' + T + '" y2="' + (T + plotH) + '" visibility="hidden"/>');
+  parts.push('<text class="val" text-anchor="middle" y="' + (T - 9) + '" visibility="hidden" style="fill:' + color + '"></text>');
+  const half = n <= 1 ? plotW / 2 : plotW / (n - 1) / 2;
+  spec.points.forEach((point, i) => {
+    parts.push('<rect data-g="' + spec.group + '" data-i="' + i + '" data-x="' + x(i).toFixed(1) + '" x="' + (x(i) - half).toFixed(1) +
+      '" y="' + T + '" width="' + (half * 2).toFixed(1) + '" height="' + plotH + '" fill="transparent"/>');
+  });
+  return '<svg class="lc" data-g="' + spec.group + '" data-c="' + spec.index + '" viewBox="0 0 ' + W + " " + H + '">' + parts.join("") + "</svg>";
+}
+
+/**
+ * 시간축을 공유하는 차트 묶음을 만든다. charts: [{label, values, unit, color, dash}],
+ * summarize(i)는 그 구간의 요약 HTML, idle은 아무 구간도 가리키지 않을 때의 요약.
+ */
+function chartGroup(points, charts, summarize, idle, options) {
+  const group = "g" + (++chartSeq);
+  chartGroups[group] = { charts, summarize, idle, summaryId: group + "-sum" };
+  const partialLast = Boolean(options && options.partialLast);
+  return charts.map((chart, index) =>
+    '<div class="chart-title"><span class="swatch" style="border-color:var(' + chart.color + ')"></span>' + esc(chart.label) + "</div>" +
+    lineChart({ group, index, color: chart.color, dash: chart.dash, unit: chart.unit, partialLast,
+      width: options && options.width,
+      points: points.map((point, i) => ({ value: chart.values[i], top: point.top, bottom: point.bottom })) })
+  ).join("") + '<div class="chart-summary" id="' + group + '-sum">' + idle + "</div>";
+}
+
+function chartHover(group, i) {
+  const info = chartGroups[group];
+  if (!info) return;
+  document.querySelectorAll('svg.lc[data-g="' + group + '"]').forEach((svg) => {
+    const chart = info.charts[Number(svg.dataset.c)];
+    const rect = svg.querySelector('rect[data-i="' + i + '"]');
+    const cursor = svg.querySelector(".cursor");
+    const label = svg.querySelector(".val");
+    if (i === null || !rect) {
+      cursor.setAttribute("visibility", "hidden");
+      label.setAttribute("visibility", "hidden");
+      return;
+    }
+    const xPos = rect.dataset.x;
+    cursor.setAttribute("x1", xPos); cursor.setAttribute("x2", xPos);
+    cursor.setAttribute("visibility", "visible");
+    label.setAttribute("x", xPos);
+    label.textContent = fmtNum(chart.values[i] || 0) + (chart.unit || "");
+    label.setAttribute("visibility", "visible");
+  });
+  const summary = document.getElementById(info.summaryId);
+  if (summary) summary.innerHTML = i === null ? info.idle : info.summarize(i);
+}
+
+document.addEventListener("mouseover", (event) => {
+  const rect = event.target.closest && event.target.closest("rect[data-g]");
+  if (rect) chartHover(rect.dataset.g, Number(rect.dataset.i));
+});
+document.addEventListener("mouseout", (event) => {
+  const from = event.target.closest && event.target.closest("svg.lc");
+  const to = event.relatedTarget && event.relatedTarget.closest && event.relatedTarget.closest("svg.lc");
+  if (from && from !== to && (!to || to.dataset.g !== from.dataset.g)) chartHover(from.dataset.g, null);
+});
+
+/**
+ * 일별 추이 한 줄짜리. points: [{value, title}] (title은 "YYYY-MM-DD · …").
+ * 예전 막대 차트를 같은 선 차트로 바꿨다 — 호출하는 곳은 그대로 둔다.
+ */
+function trendBars(points, options) {
   if (!points.length) return '<p class="empty">데이터가 아직 없습니다.</p>';
-  const width = 1000, height = 120, gap = 2;
-  const barWidth = Math.max(1, width / points.length - gap);
-  const peak = Math.max(1, ...points.map((point) => point.value || 0));
-  const bars = points.map((point, index) => {
-    const value = point.value || 0;
-    const barHeight = Math.round((value / peak) * (height - 20));
-    return '<rect x="' + index * (barWidth + gap) + '" y="' + (height - barHeight) +
-      '" width="' + barWidth + '" height="' + barHeight +
-      '" fill="var(--accent)" opacity=".75"><title>' + esc(point.title) + "</title></rect>";
-  }).join("");
-  return '<svg viewBox="0 0 ' + width + " " + height + '" preserveAspectRatio="none">' + bars + "</svg>";
+  const opts = options || {};
+  const axis = points.map((point, i) => {
+    const day = String(point.title || "").slice(5, 10).replace("-", ".");
+    // 일 단위는 아래 줄이 이미 날짜다. 위 줄(날짜 경계)은 시간 단위 차트에서만 쓴다.
+    return { top: "", bottom: day };
+  });
+  return chartGroup(axis, [{ label: opts.label || "", values: points.map((point) => point.value || 0),
+    unit: opts.unit || "", color: opts.color || "--c-jobs", dash: opts.dash }],
+    (i) => esc(points[i].title), '<span class="sub">점에 마우스를 올리면 그날의 숫자가 보입니다.</span>',
+    { width: opts.width });
 }
 
 function accuracyBlock(accuracy) {
@@ -1288,7 +1452,7 @@ function accuracyBlock(accuracy) {
     trendBars(accuracy.trend.map((point) => ({
       value: point.selectionRate === null ? 0 : point.selectionRate,
       title: point.day + " · " + pct(point.selectionRate) + " · 완료 " + point.jobsCompleted + "건",
-    })));
+    })), { label: "선택률", unit: "%", color: "--c-jobs" });
 }
 
 function usageBlock(usage) {
@@ -1305,7 +1469,7 @@ function usageBlock(usage) {
     trendBars(usage.trend.map((point) => ({
       value: point.jobsStarted,
       title: point.day + " · 시작 " + point.jobsStarted + "건 · 실패 " + point.jobsFailed + "건",
-    })));
+    })), { label: "분석 Job", unit: "건", color: "--c-users", dash: "6 4" });
 }
 
 function productRender(data) {
@@ -1460,13 +1624,13 @@ function overviewRender(data) {
     ? trendBars(data.trends.selection.map((point) => ({
         value: point.selectionRate === null ? 0 : point.selectionRate,
         title: point.day + " · " + pct(point.selectionRate) + " · 완료 " + point.jobsCompleted + "건",
-      })))
+      })), { unit: "%", color: "--c-jobs", width: 480 })
     : '<p class="empty">아직 마감된 날이 없습니다.</p>';
   $("ovUsage").innerHTML = days
     ? trendBars(data.trends.usage.map((point) => ({
         value: point.jobsStarted,
         title: point.day + " · 시작 " + point.jobsStarted + "건 · 실패 " + point.jobsFailed + "건",
-      })))
+      })), { unit: "건", color: "--c-users", dash: "6 4", width: 480 })
     : '<p class="empty">아직 마감된 날이 없습니다.</p>';
 }
 
@@ -1503,6 +1667,78 @@ async function overviewGo() {
     $("ovRecent").innerHTML = '<p class="err">' + esc(error.message) + "</p>";
   }
 }
+
+// ── 시간대별 활동 ───────────────────────────────────────────
+const ACT_BUCKETS = { "24h": ["1h", "3h"], "7d": ["3h", "6h", "1d"], "30d": ["6h", "1d"] };
+const BUCKET_LABEL = { "1h": "1시간", "3h": "3시간", "6h": "6시간", "1d": "1일" };
+const activity = { range: "24h", bucket: "1h" };
+
+function activityControls() {
+  document.querySelectorAll("#actRange button").forEach((button) => {
+    button.classList.toggle("on", button.dataset.range === activity.range);
+  });
+  $("actBucket").innerHTML = ACT_BUCKETS[activity.range].map((bucket) =>
+    '<button data-bucket="' + bucket + '" class="' + (bucket === activity.bucket ? "on" : "") + '">' +
+    BUCKET_LABEL[bucket] + "</button>").join("");
+  $("actBucket").querySelectorAll("button").forEach((button) => {
+    button.addEventListener("click", () => { activity.bucket = button.dataset.bucket; activityGo(); });
+  });
+}
+
+function activityRender(data) {
+  const points = data.points;
+  if (!points.length) { $("actOut").innerHTML = '<p class="empty">데이터가 없습니다.</p>'; return; }
+  const daily = data.bucket === "1d";
+  let lastDay = "";
+  const axis = points.map((point) => {
+    const at = kst(point.start);
+    const top = at.md !== lastDay ? at.md : "";
+    lastDay = at.md;
+    return daily ? { top: "", bottom: at.md } : { top, bottom: at.hm };
+  });
+  const sum = (key) => points.reduce((total, point) => total + point[key], 0);
+  const idle = '<span class="sub">총 분석 ' + sum("jobsStarted") + "건(완료 " + sum("jobsCompleted") +
+    " · 실패 " + sum("jobsFailed") + ") · 다운로드 " + sum("downloads") +
+    "건. 들어온 설치는 구간마다 따로 세므로 더하지 않는다. 점에 마우스를 올리면 구간별 숫자가 보인다.</span>";
+  const summarize = (i) => {
+    const point = points[i];
+    const from = kst(point.start), to = kst(point.end);
+    const partial = i === points.length - 1;
+    return "<b>" + from.md + " " + from.hm + " → " + to.md + " " + to.hm + " KST</b>" +
+      " · 들어온 설치 <b>" + point.activeInstallations + "명</b>" +
+      " · 분석 Job <b>" + point.jobsStarted + "건</b> (완료 " + point.jobsCompleted + " · 실패 " +
+      '<span class="' + (point.jobsFailed ? "err" : "") + '">' + point.jobsFailed + "</span>)" +
+      " · 다운로드 <b>" + point.downloads + "건</b>" + (partial ? ' <span class="sub">· 진행 중인 구간</span>' : "");
+  };
+  $("actOut").innerHTML = chartGroup(axis, [
+    { label: "들어온 설치", values: points.map((point) => point.activeInstallations), unit: "명", color: "--c-users", dash: "1 5" },
+    { label: "분석 Job", values: points.map((point) => point.jobsStarted), unit: "건", color: "--c-jobs", dash: "6 4" },
+    { label: "다운로드", values: points.map((point) => point.downloads), unit: "건", color: "--c-down", dash: "3 3" },
+  ], summarize, idle, { partialLast: true });
+}
+
+async function activityGo() {
+  activityControls();
+  $("actMsg").textContent = "불러오는 중…";
+  try {
+    const query = new URLSearchParams({ range: activity.range, bucket: activity.bucket });
+    const res = await fetch("/v1/admin/timeseries?" + query.toString(), { headers: { "X-Beta-Admin-Token": token } });
+    if (!res.ok) throw new Error("조회 실패 " + res.status);
+    const data = await res.json();
+    $("actMsg").textContent = BUCKET_LABEL[data.bucket] + " 단위 · 한국 시간";
+    activityRender(data);
+  } catch (error) {
+    $("actMsg").innerHTML = '<span class="err">' + esc(error.message) + "</span>";
+  }
+}
+
+document.querySelectorAll("#actRange button").forEach((button) => {
+  button.addEventListener("click", () => {
+    activity.range = button.dataset.range;
+    activity.bucket = ACT_BUCKETS[activity.range][0];
+    activityGo();
+  });
+});
 
 // ── 탭 ───────────────────────────────────────────────────────
 //
@@ -1555,6 +1791,7 @@ async function boot() {
   if (overviewLoaded || $("app").classList.contains("hide")) return;
   overviewLoaded = true;
   overviewGo();
+  activityGo();
   let saved = null;
   try { saved = localStorage.getItem(TAB_KEY); } catch (error) { saved = null; }
   if (saved && saved !== "overview" && document.getElementById("tab-" + saved)) selectTab(saved);
