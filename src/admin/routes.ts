@@ -13,6 +13,8 @@ import { parseRosterQuery, toRosterPage } from "./installationList.js";
 import { toAccuracy, toUsage } from "./quality.js";
 import { toOverviewKpis } from "./overview.js";
 import { overviewExtras } from "./overviewStore.js";
+import { fillBuckets, parseTimeseriesQuery } from "./timeseries.js";
+import { activityTimeseries } from "./timeseriesStore.js";
 import { dailyAggregates } from "./qualityStore.js";
 import { parseCutSummary, toReviewPeople, type AnalysisPersonRow } from "./reviewDetail.js";
 import { ensureRefinedThumbnail } from "../refine/thumbnail.js";
@@ -248,6 +250,29 @@ adminRoutes.put("/flags/analysis_enabled", async (c) => {
  *
  * KPI는 원본을 바로 세서 오늘이 들어간다. 추이는 일별 집계라 어제까지다.
  */
+/**
+ * GET /v1/admin/timeseries?range=24h&bucket=1h — 시간대별 활동.
+ *
+ * 구간마다 들어온 설치 수, 분석 Job(시작·완료·실패), 다운로드 수. 빈 구간은 0으로 채워
+ * 시간축이 끊기지 않게 한다. 구간은 KST 자정에 맞춘다. 숫자뿐이라 개인 정보는 없다.
+ */
+adminRoutes.get("/timeseries", async (c) => {
+  const parsed = parseTimeseriesQuery({ range: c.req.query("range"), bucket: c.req.query("bucket") });
+  if (!parsed.ok) {
+    return c.json(errorEnvelope("INVALID_INPUT", parsed.message, c.get("requestId")), 400);
+  }
+  const now = Date.now();
+  const rows = await activityTimeseries(parsed.query, now);
+  await audit(c, "review_timeseries", {});
+  return c.json({
+    range: parsed.query.range,
+    bucket: parsed.query.bucket,
+    bucketSeconds: parsed.query.bucketSeconds,
+    timezone: "Asia/Seoul",
+    points: fillBuckets(rows, Math.floor(now / 1000), parsed.query),
+  });
+});
+
 adminRoutes.get("/overview", async (c) => {
   const parsed = parseWindowDays(c.req.query("days"));
   if (!parsed.ok) {
