@@ -46,9 +46,13 @@ import {
   firstSelectionAttempt,
   rerunRatio,
 } from "./productStore.js";
-import { isInstallationId, parseHistoryQuery, toHistoryPage } from "../jobs/history.js";
+import { encodeCursor as encodeHistoryCursor, isInstallationId, parseHistoryQuery, toHistoryPage } from "../jobs/history.js";
 import { listJobHistory, listRecentJobs } from "../jobs/store.js";
-import { getPoseBvh, getPoseThumbnail, inferenceStatus } from "../inference.js";
+import { getPoseBvh, getPoseThumbnail, inferenceStatus, libraryFolders, listLibraryPoses } from "../inference.js";
+import { buildActivity, buildStrips, kstDay, OUTCOME_LABELS, type OutcomeKey } from "./activity.js";
+import { activityJobs, visitDays, visitStrips } from "./activityStore.js";
+import { GALLERY_PAGE, parseGalleryQuery, parseGroup, STATUS_ORDER } from "./gallery.js";
+import { galleryFolders, galleryItems } from "./galleryStore.js";
 import { notify } from "../notify.js";
 import {
   GAP_EXPORT_PAGE_SIZE,
@@ -566,6 +570,122 @@ adminRoutes.get("/review/jobs/:id/refined/:personIndex/fbx", async (c) => {
     const code = error instanceof ConverterError ? error.code : "CONVERTER_UNAVAILABLE";
     return c.json(errorEnvelope(code, "FBX 변환에 실패했습니다.", c.get("requestId")), 502);
   }
+});
+
+// ── 사용자(설치)별 활동 ─────────────────────────────────────
+
+const ACTIVITY_DAYS = 14;
+const STRIP_DAYS = 7;
+
+/**
+ * GET /v1/admin/review/installations/:id/activity — 최근 14일, 날마다 왔는지·무엇을 돌렸는지.
+ *
+ * "오늘은 왔고 어제는 안 왔고, 오늘 두 개 돌렸는데 하나는 골랐다"를 한눈에 본다.
+ * 날짜는 KST. 방문은 그날 앱 이벤트나 Job이 하나라도 있었는지다.
+ */
+adminRoutes.get("/review/installations/:id/activity", async (c) => {
+  const installationId = c.req.param("id");
+  if (!isInstallationId(installationId)) {
+    return c.json(errorEnvelope("INVALID_INPUT", "installationId가 올바르지 않습니다.", c.get("requestId")), 400);
+  }
+  const today = kstDay(new Date());
+  // 하루 여유를 둔다. KST 날짜 경계와 UTC 경계가 9시간 어긋난다.
+  const since = new Date(Date.now() - (ACTIVITY_DAYS + 1) * 86_400_000).toISOString();
+  const [days, jobs] = await Promise.all([visitDays(installationId, since), activityJobs(installationId, since)]);
+  await audit(c, "review_installation_activity", { installationId });
+  return c.json({ today, ...buildActivity(days, jobs, today, ACTIVITY_DAYS) });
+});
+
+/** GET /v1/admin/review/installations-activity?ids=a,b — 설치 목록의 7일 출석 점. */
+adminRoutes.get("/review/installations-activity", async (c) => {
+  const ids = (c.req.query("ids") ?? "").split(",").map((id) => id.trim()).filter(Boolean);
+  if (ids.length === 0 || ids.length > 50 || !ids.every(isInstallationId)) {
+    return c.json(errorEnvelope("INVALID_INPUT", "ids는 설치 id 1~50개여야 합니다.", c.get("requestId")), 400);
+  }
+  const today = kstDay(new Date());
+  const since = new Date(Date.now() - (STRIP_DAYS + 1) * 86_400_000).toISOString();
+  const rows = await visitStrips(ids, since);
+  await audit(c, "review_installation_strips", {});
+  return c.json({ today, strips: buildStrips(rows, ids, today, STRIP_DAYS) });
+});
+
+// ── 모아 보기 ───────────────────────────────────────────────
+
+/** GET /v1/admin/gallery/folders?group=date|installation|status — 러프 폴더와 장수. */
+adminRoutes.get("/gallery/folders", async (c) => {
+  const group = parseGroup(c.req.query("group"));
+  if (!group) return c.json(errorEnvelope("INVALID_INPUT", "group이 올바르지 않습니다.", c.get("requestId")), 400);
+  const rows = await galleryFolders(group);
+  const folders = rows.map((row) => ({
+    key: row.key,
+    label: group === "status" ? OUTCOME_LABELS[row.key as OutcomeKey] ?? row.key : row.key,
+    count: row.count,
+    withImage: row.with_image,
+    lastAt: row.last_at,
+  }));
+  if (group === "status") {
+    folders.sort((a, b) => STATUS_ORDER.indexOf(a.key as OutcomeKey) - STATUS_ORDER.indexOf(b.key as OutcomeKey));
+  }
+  await audit(c, "review_gallery_folders", {});
+  return c.json({ group, folders });
+});
+
+/**
+ * GET /v1/admin/gallery/roughs?group=&key=&cursor= — 한 폴더의 러프 24장.
+ *
+ * 사용자 사진을 여러 장 여는 유일한 경로다. 그래서 페이지를 열 때마다 **그 페이지의 Job을
+ * 하나하나** 열람 기록에 남기고, 서명 URL은 5분짜리다. 일괄 다운로드는 없다.
+ */
+adminRoutes.get("/gallery/roughs", async (c) => {
+  const parsed = parseGalleryQuery({ group: c.req.query("group"), key: c.req.query("key"), cursor: c.req.query("cursor") });
+  if (!parsed.ok) return c.json(errorEnvelope("INVALID_INPUT", parsed.message, c.get("requestId")), 400);
+  const rows = await galleryItems(parsed.query);
+  const page = rows.slice(0, GALLERY_PAGE);
+  const items = await Promise.all(page.map(async (row) => ({
+    jobId: row.id,
+    installationId: row.installation_id,
+    status: row.status,
+    createdAt: row.created_at,
+    errorCode: row.error_code,
+    personCount: row.person_count,
+    selectionCount: row.selection_count,
+    outcome: row.outcome,
+    outcomeLabel: OUTCOME_LABELS[row.outcome as OutcomeKey] ?? row.outcome,
+    exported: row.exported,
+    refined: row.refined,
+    inputUrl: row.input_s3_key ? await signedInputUrl(row.input_s3_key) : null,
+  })));
+  for (const row of page) await audit(c, "review_gallery", { jobId: row.id, installationId: row.installation_id });
+  const last = page[page.length - 1];
+  return c.json({
+    items,
+    inputUrlExpiresInSeconds: 300,
+    nextCursor: rows.length > GALLERY_PAGE && last ? encodeHistoryCursor({ createdAt: last.created_at, id: last.id }) : null,
+  });
+});
+
+/** GET /v1/admin/gallery/pose-folders — 포즈 라이브러리 출처·분류 폴더(추론 프록시). */
+adminRoutes.get("/gallery/pose-folders", async (c) => {
+  const res = await libraryFolders().catch(() => null);
+  if (!res || !res.ok) {
+    return c.json(errorEnvelope("UPSTREAM_UNAVAILABLE", "추론 서버가 라이브러리 목록을 주지 않았습니다.", c.get("requestId")), 502);
+  }
+  return c.json(await res.json());
+});
+
+/** GET /v1/admin/gallery/poses?source=&category=&q=&cursor= — 포즈 라이브러리 한 페이지. 공용 자산이라 열람 기록은 남기지 않는다. */
+adminRoutes.get("/gallery/poses", async (c) => {
+  const params = new URLSearchParams();
+  for (const key of ["source", "category", "q", "cursor"]) {
+    const value = c.req.query(key);
+    if (value) params.set(key, value.slice(0, 120));
+  }
+  params.set("limit", "48");
+  const res = await listLibraryPoses(params).catch(() => null);
+  if (!res || !res.ok) {
+    return c.json(errorEnvelope("UPSTREAM_UNAVAILABLE", "추론 서버가 라이브러리 목록을 주지 않았습니다.", c.get("requestId")), 502);
+  }
+  return c.json(await res.json());
 });
 
 adminRoutes.get("/review/jobs/:id", async (c) => {
