@@ -34,6 +34,13 @@ function row(overrides: Partial<JobHistoryRow> = {}): JobHistoryRow {
   };
 }
 
+test("저장된 VLM 세부 실패 사유가 작업 기록에도 보존된다", () => {
+  for (const errorCode of ["ANALYSIS_RATE_LIMITED", "ANALYSIS_DAILY_QUOTA_EXHAUSTED",
+    "ANALYSIS_UPSTREAM_TIMEOUT", "ANALYSIS_UPSTREAM_ERROR"]) {
+    assert.equal(toHistoryItem(row({ status: "failed", error_code: errorCode })).errorCode, errorCode);
+  }
+});
+
 test("커서는 왕복해도 값이 보존된다", () => {
   const cursor = { createdAt: CREATED_AT, id: JOB_ID };
   assert.deepEqual(decodeCursor(encodeCursor(cursor)), cursor);
