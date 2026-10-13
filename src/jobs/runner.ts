@@ -39,6 +39,10 @@ const FAILURE_ALERTS: Record<string, string> = {
   ANALYSIS_TIMEOUT: "분석이 시간 초과로 실패했습니다. 추론 서버가 느리거나 멈춰 있습니다.",
   ANALYSIS_UNAVAILABLE:
     "상류 VLM 혼잡으로 분석이 실패했습니다. 사용자에게는 재시도 안내가 나갑니다.",
+  ANALYSIS_RATE_LIMITED: "상류 AI 요청 한도에 도달했습니다. 잠시 후 재시도 안내가 나갑니다.",
+  ANALYSIS_DAILY_QUOTA_EXHAUSTED: "상류 AI 일일 한도가 소진됐습니다. 운영 한도를 확인해 주세요. 즉시 재시도를 안내하지 않습니다.",
+  ANALYSIS_UPSTREAM_TIMEOUT: "상류 AI 응답 시간이 초과됐습니다. 사용자에게 재시도 안내가 나갑니다.",
+  ANALYSIS_UPSTREAM_ERROR: "상류 AI 서비스 오류로 분석이 실패했습니다. 사용자에게 재시도 안내가 나갑니다.",
   INFERENCE_FAILED: "분석이 추론 서버 오류로 실패했습니다.",
 };
 
