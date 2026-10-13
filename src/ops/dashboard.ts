@@ -154,6 +154,37 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
   .seg button:last-child { border-right:0; }
   .seg button.on { background:color-mix(in srgb,var(--c-users) 14%,var(--panel)); font-weight:700; }
   .controls { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  /* ── 모아 보기 ─────────────────────────────────────────────── */
+  .gal { display:grid; grid-template-columns:220px 1fr; gap:16px; margin-top:14px; align-items:start; }
+  @media (max-width:760px) { .gal { grid-template-columns:1fr; } }
+  .folders { border:1px solid var(--line); border-radius:10px; max-height:640px; overflow-y:auto; }
+  .folders button { display:flex; justify-content:space-between; gap:8px; width:100%; text-align:left; background:transparent; color:var(--text); border:0; border-bottom:1px solid var(--line); border-radius:0; padding:9px 12px; font-weight:500; }
+  .folders button:last-child { border-bottom:0; }
+  .folders button.on { background:color-mix(in srgb,var(--c-users) 12%,var(--panel)); font-weight:700; }
+  .folders .count { color:var(--muted); font-variant-numeric:tabular-nums; }
+  .tiles { display:grid; gap:12px; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); }
+  .tile { border:1px solid var(--line); border-radius:10px; overflow:hidden; background:var(--panel); cursor:pointer; text-align:left; padding:0; color:var(--text); font-weight:400; }
+  .tile:hover { border-color:var(--text); }
+  .tile .img { aspect-ratio:3/4; background:var(--bg); display:flex; align-items:center; justify-content:center; }
+  .tile img { width:100%; height:100%; object-fit:contain; }
+  .tile .cap { padding:8px 10px; font-size:12.5px; display:grid; gap:4px; }
+  .tile .bar { height:4px; }
+  .o-selected { background:var(--ok); } .o-no_selection { background:var(--warn); } .o-zero_people { background:var(--muted); }
+  .o-failed { background:var(--bad); } .o-in_progress { background:var(--line); }
+  /* ── 사용자 활동 ──────────────────────────────────────────── */
+  .days { display:grid; grid-template-columns:repeat(14,1fr); gap:4px; margin:10px 0 4px; }
+  .day { text-align:center; font-size:11.5px; color:var(--muted); padding:6px 0; border-radius:8px; }
+  .day.today { background:color-mix(in srgb,var(--c-users) 10%,var(--panel)); color:var(--text); font-weight:700; }
+  .dot { width:14px; height:14px; border-radius:50%; margin:5px auto 3px; border:2px solid var(--line); }
+  .t-selected { background:var(--ok); border-color:var(--ok); } .t-no_selection { background:var(--warn); border-color:var(--warn); }
+  .t-failed { background:var(--bad); border-color:var(--bad); } .t-visit_only { border-color:var(--muted); }
+  .strip { display:inline-flex; gap:3px; }
+  .strip i { width:9px; height:9px; border-radius:50%; border:1.5px solid var(--line); display:inline-block; }
+  .strip i.v { border-color:var(--muted); } .strip i.j { background:var(--c-jobs); border-color:var(--c-jobs); }
+  .dayhead { margin:16px 0 6px; font-weight:700; font-size:14px; }
+  /* 배지·버튼이 좁은 칸에서 "후보 선 / 택"처럼 쪼개지지 않게 한다. 칸이 모자라면 표가 가로로 흐른다. */
+  .pill, button { white-space:nowrap; }
+  #activityOut td { white-space:nowrap; }
 </style>
 </head>
 <body>
@@ -188,6 +219,7 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
     <button data-tab="overview" class="on">개요</button>
     <button data-tab="jobs">작업</button>
     <button data-tab="installs">설치</button>
+    <button data-tab="gallery">모아 보기</button>
     <button data-tab="metrics">지표</button>
     <button data-tab="ops">운영</button>
   </nav>
@@ -233,6 +265,25 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
       </div>
       <div id="recentOut"></div>
     </div>
+    </section>
+    <section class="tab" id="tab-gallery">
+      <div class="card">
+        <h2>모아 보기</h2>
+        <div class="controls">
+          <div class="seg" id="galMode">
+            <button data-mode="roughs" class="on">러프·결과</button>
+            <button data-mode="poses">포즈 라이브러리</button>
+          </div>
+          <div class="seg" id="galGroup"></div>
+          <input id="galSearch" placeholder="pose_id 검색" autocomplete="off" style="display:none;min-width:200px">
+          <span class="sub" id="galMsg"></span>
+        </div>
+        <p class="sub" id="galNote"></p>
+        <div class="gal">
+          <div class="folders" id="galFolders"></div>
+          <div><div class="tiles" id="galTiles"></div><p id="galMoreWrap"></p></div>
+        </div>
+      </div>
     </section>
     <section class="tab" id="tab-installs">
     <div class="card">
@@ -300,6 +351,7 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
     <button class="ghost" id="drawerClose" style="margin-left:auto">닫기 ✕</button>
   </div>
   <div class="drawer-body">
+    <div id="activityOut"></div>
     <div id="lookupOut"></div>
     <div id="detailOut"></div>
   </div>
@@ -457,6 +509,7 @@ function showDrawer(mode) {
   const detail = mode === "detail";
   $("detailOut").style.display = detail ? "" : "none";
   $("lookupOut").style.display = detail ? "none" : "";
+  $("activityOut").style.display = detail ? "none" : "";
   // 설치 기록에서 들어온 상세면 돌아갈 길을 남긴다.
   $("drawerBack").style.display = detail && $("lookupOut").innerHTML ? "" : "none";
   $("drawerTitle").textContent = detail ? "Job 상세" : "설치 기록";
@@ -473,6 +526,7 @@ function closeDrawer() {
   $("backdrop").classList.remove("on");
   $("detailOut").innerHTML = "";
   $("lookupOut").innerHTML = "";
+  $("activityOut").innerHTML = "";
 }
 
 let detailBlobUrls = [];
@@ -1043,6 +1097,7 @@ async function lookupGo(cursor) {
     $("detailOut").innerHTML = "";
     lookupRender();
     showDrawer("install");
+    if (!cursor) installActivityGo(id);
   } catch (error) {
     $("lookupMsg").innerHTML = '<span class="err">' + esc(error.message) + "</span>";
     $("lookupOut").innerHTML = '<p class="err">' + esc(error.message) + "</p>";
@@ -1555,6 +1610,7 @@ function rosterRender() {
     '<td class="mono" title="' + esc(item.installationId) + '">' + esc(item.installationId.slice(5, 17)) + "…</td>" +
     "<td>" + when(item.lastSeenAt) + "</td>" +
     '<td class="sub">' + esc(item.appVersion || "?") + " · " + esc(item.osName || "?") + "</td>" +
+    '<td><span class="strip" data-strip="' + esc(item.installationId) + '"></span></td>' +
     '<td class="num">' + item.jobCount + "</td>" +
     '<td class="num' + (item.failedCount ? " err" : "") + '">' + item.failedCount + "</td>" +
     "<td>" + (item.lastJobAt ? when(item.lastJobAt) : '<span class="sub">없음</span>') + "</td>" +
@@ -1563,10 +1619,11 @@ function rosterRender() {
 
   $("rosterOut").innerHTML =
     '<div class="scroll" style="margin-top:12px"><table><thead><tr><th></th><th>설치</th><th>마지막 접속</th>' +
-    '<th>앱 · OS</th><th class="num">Job</th><th class="num">실패</th><th>마지막 분석</th><th></th>' +
+    '<th>앱 · OS</th><th title="오래된 날 → 오늘. 테두리 = 방문, 채움 = 분석">최근 7일</th><th class="num">Job</th><th class="num">실패</th><th>마지막 분석</th><th></th>' +
     "</tr></thead><tbody>" + rows + "</tbody></table></div>" +
     (roster.nextCursor ? '<p style="margin:10px 0 0"><button class="ghost" id="rosterMore">설치 더 보기</button></p>' : "");
 
+  rosterStrips();
   $("rosterOut").querySelectorAll("button[data-pick]").forEach((button) => {
     button.addEventListener("click", () => {
       $("lookupId").value = button.dataset.pick;
@@ -1740,6 +1797,253 @@ document.querySelectorAll("#actRange button").forEach((button) => {
   });
 });
 
+// ── 사용자(설치)별 활동 ─────────────────────────────────────
+const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
+function dayLabel(date) {
+  const weekday = WEEKDAYS[new Date(date + "T00:00:00Z").getUTCDay()];
+  return date.slice(5).replace("-", ".") + " (" + weekday + ")";
+}
+const OUTCOME_PILL = { selected: "ok", no_selection: "warn", zero_people: "warn", failed: "bad", in_progress: "warn" };
+
+async function installActivityGo(installationId) {
+  $("activityOut").innerHTML = '<p class="sub">활동 불러오는 중…</p>';
+  try {
+    const res = await fetch("/v1/admin/review/installations/" + encodeURIComponent(installationId) + "/activity",
+      { headers: { "X-Beta-Admin-Token": token } });
+    if (!res.ok) throw new Error("활동 조회 실패 " + res.status);
+    activityRenderInstall(await res.json());
+  } catch (error) {
+    $("activityOut").innerHTML = '<p class="err">' + esc(error.message) + "</p>";
+  }
+}
+
+function activityRenderInstall(data) {
+  const last = data.lastVisit ? (data.lastVisit === data.today ? "오늘" : dayLabel(data.lastVisit)) : "없음";
+  const cells = data.days.map((day) =>
+    '<div class="day' + (day.date === data.today ? " today" : "") + '" title="' + esc(dayLabel(day.date)) +
+    (day.visited ? " · 방문" : " · 안 옴") + (day.jobs ? " · 분석 " + day.jobs + "건 · 선택 " + day.selected + "건" : "") + '">' +
+    esc(day.date === data.today ? "오늘" : day.date.slice(8)) +
+    '<div class="dot t-' + day.tone + '"></div>' + (day.jobs ? day.jobs + "건" : "&nbsp;") + "</div>").join("");
+  const byDay = {};
+  data.jobs.forEach((job) => { (byDay[job.day] = byDay[job.day] || []).push(job); });
+  const list = Object.keys(byDay).sort().reverse().map((date) =>
+    '<div class="dayhead">' + esc(date === data.today ? "오늘 · " + dayLabel(date) : dayLabel(date)) + " · " + byDay[date].length + "건</div>" +
+    '<div class="scroll"><table><tbody>' + byDay[date].map((job) =>
+      "<tr><td class=\"sub\">" + esc(kst(job.createdAt).hm) + "</td>" +
+      "<td>" + pill(esc(job.outcomeLabel), OUTCOME_PILL[job.outcome] || "warn") + "</td>" +
+      '<td class="sub">인물 ' + job.personCount + "명</td>" +
+      "<td>" + (job.exported ? pill("내보냄", "ok") : '<span class="sub">내보내기 없음</span>') + "</td>" +
+      "<td>" + (job.refined ? pill("조정됨", "ok") : "") + "</td>" +
+      "<td>" + (job.feedback ? '<span class="sub">피드백: ' + esc(job.feedback) + "</span>" : "") +
+        (job.errorCode ? ' <span class="err mono">' + esc(job.errorCode) + "</span>" : "") + "</td>" +
+      '<td><button class="ghost" data-detail="' + esc(job.jobId) + '">상세</button></td></tr>').join("") +
+    "</tbody></table></div>").join("");
+  $("activityOut").innerHTML =
+    '<div class="card" style="margin:12px 0"><h2>최근 14일 활동</h2>' +
+    '<div class="chart-summary">최근 14일 중 <b>' + data.visitedDays + "일</b> 방문 · 마지막 방문 <b>" + esc(last) +
+    "</b> · 분석 <b>" + data.jobsTotal + "건</b> 중 후보 선택 <b>" + data.jobsSelected + "건</b></div>" +
+    '<div class="days">' + cells + "</div>" +
+    '<p class="sub">점: 초록 = 후보를 고른 날 · 주황 = 돌렸지만 고르지 않음 · 빨강 = 실패만 · 테두리만 = 방문만</p>' +
+    (list || '<p class="empty">최근 14일 동안 돌린 분석이 없습니다.</p>') + "</div>";
+  $("activityOut").querySelectorAll("button[data-detail]").forEach((button) => {
+    button.addEventListener("click", () => openDetail(button.dataset.detail, button));
+  });
+}
+
+async function rosterStrips() {
+  const spans = Array.from($("rosterOut").querySelectorAll("span[data-strip]"));
+  const ids = spans.map((span) => span.dataset.strip).slice(0, 50);
+  if (!ids.length) return;
+  try {
+    const res = await fetch("/v1/admin/review/installations-activity?ids=" + encodeURIComponent(ids.join(",")),
+      { headers: { "X-Beta-Admin-Token": token } });
+    if (!res.ok) return;
+    const data = await res.json();
+    spans.forEach((span) => {
+      const cells = data.strips[span.dataset.strip] || [];
+      span.innerHTML = cells.map((cell) =>
+        '<i class="' + (cell.jobs ? "j" : cell.visited ? "v" : "") + '" title="' + esc(dayLabel(cell.date)) +
+        (cell.jobs ? " · 분석 " + cell.jobs + "건" : cell.visited ? " · 방문" : " · 안 옴") + '"></i>').join("");
+    });
+  } catch (error) { /* 출석 칸은 없어도 목록은 쓸 수 있다 */ }
+}
+
+// ── 모아 보기 ───────────────────────────────────────────────
+//
+// 사용자 사진을 여러 장 여는 화면이라 서버가 페이지마다 열람 기록을 남긴다(24장씩,
+// 서명 URL 5분). 포즈 라이브러리는 공용 자산이라 그런 제한이 없다.
+const gallery = { mode: "roughs", group: "date", folder: null, cursor: null, blobs: [] };
+const GROUPS = {
+  roughs: [["date", "날짜별"], ["installation", "설치별"], ["status", "결과별"]],
+  poses: [["sources", "출처별"], ["categories", "분류별"]],
+};
+
+function galleryReleaseBlobs() {
+  gallery.blobs.forEach((url) => URL.revokeObjectURL(url));
+  gallery.blobs = [];
+}
+
+function galleryControls() {
+  document.querySelectorAll("#galMode button").forEach((button) => {
+    button.classList.toggle("on", button.dataset.mode === gallery.mode);
+  });
+  $("galGroup").innerHTML = GROUPS[gallery.mode].map(([key, label]) =>
+    '<button data-group="' + key + '" class="' + (key === gallery.group ? "on" : "") + '">' + label + "</button>").join("");
+  $("galGroup").querySelectorAll("button").forEach((button) => {
+    button.addEventListener("click", () => { gallery.group = button.dataset.group; galleryGo(); });
+  });
+  $("galSearch").style.display = gallery.mode === "poses" ? "" : "none";
+  $("galNote").textContent = gallery.mode === "roughs"
+    ? "최근 90일 · 동의 철회·삭제 요청 설치 제외 · 24장씩 · 페이지를 열 때마다 열람 기록이 남습니다. 누르면 오른쪽에 상세가 열립니다."
+    : "검색에 쓰이는 라이브러리 그대로입니다(격리된 포즈 제외). 누르면 네 방향을 크게 봅니다.";
+}
+
+function folderLabel(folder) {
+  if (gallery.mode === "roughs" && gallery.group === "date") return dayLabel(folder.key);
+  if (gallery.mode === "roughs" && gallery.group === "installation") return folder.key.slice(5, 17) + "…";
+  return folder.label || folder.key;
+}
+
+async function galleryGo() {
+  galleryControls();
+  galleryReleaseBlobs();
+  $("galFolders").innerHTML = '<p class="sub" style="padding:10px">불러오는 중…</p>';
+  $("galTiles").innerHTML = "";
+  $("galMoreWrap").innerHTML = "";
+  try {
+    let folders;
+    if (gallery.mode === "roughs") {
+      const res = await fetch("/v1/admin/gallery/folders?group=" + gallery.group, { headers: { "X-Beta-Admin-Token": token } });
+      if (!res.ok) throw new Error("폴더 조회 실패 " + res.status);
+      folders = (await res.json()).folders;
+    } else {
+      const res = await fetch("/v1/admin/gallery/pose-folders", { headers: { "X-Beta-Admin-Token": token } });
+      if (!res.ok) throw new Error("라이브러리 폴더 조회 실패 " + res.status);
+      const data = await res.json();
+      folders = data[gallery.group];
+      $("galMsg").textContent = "포즈 " + data.total + "개";
+    }
+    if (!folders.length) { $("galFolders").innerHTML = '<p class="empty" style="padding:10px">비어 있습니다.</p>'; return; }
+    $("galFolders").innerHTML = folders.map((folder) =>
+      '<button data-key="' + esc(folder.key) + '" title="' + esc(folder.key) + '"><span>' + esc(folderLabel(folder)) +
+      '</span><span class="count">' + folder.count + "</span></button>").join("");
+    $("galFolders").querySelectorAll("button").forEach((button) => {
+      button.addEventListener("click", () => galleryOpenFolder(button.dataset.key));
+    });
+    galleryOpenFolder(folders[0].key);
+  } catch (error) {
+    $("galFolders").innerHTML = '<p class="err" style="padding:10px">' + esc(error.message) + "</p>";
+  }
+}
+
+function galleryOpenFolder(key) {
+  gallery.folder = key;
+  gallery.cursor = null;
+  galleryReleaseBlobs();
+  $("galTiles").innerHTML = "";
+  $("galFolders").querySelectorAll("button").forEach((button) => {
+    button.classList.toggle("on", button.dataset.key === key);
+  });
+  galleryLoad();
+}
+
+async function galleryLoad() {
+  $("galMoreWrap").innerHTML = '<span class="sub">불러오는 중…</span>';
+  try {
+    const params = new URLSearchParams();
+    let url;
+    if (gallery.mode === "roughs") {
+      params.set("group", gallery.group);
+      params.set("key", gallery.folder);
+      url = "/v1/admin/gallery/roughs?";
+    } else {
+      params.set(gallery.group === "sources" ? "source" : "category", gallery.folder);
+      if ($("galSearch").value.trim()) params.set("q", $("galSearch").value.trim());
+      url = "/v1/admin/gallery/poses?";
+    }
+    if (gallery.cursor) params.set("cursor", gallery.cursor);
+    const res = await fetch(url + params.toString(), { headers: { "X-Beta-Admin-Token": token } });
+    if (!res.ok) throw new Error("조회 실패 " + res.status);
+    const data = await res.json();
+    const tiles = gallery.mode === "roughs" ? data.items.map(roughTile) : data.items.map(poseTile);
+    $("galTiles").insertAdjacentHTML("beforeend", tiles.join(""));
+    gallery.cursor = data.nextCursor || data.next_cursor || null;
+    $("galMoreWrap").innerHTML = gallery.cursor ? '<button class="ghost" id="galMore">더 보기</button>' : "";
+    if ($("galMore")) $("galMore").addEventListener("click", galleryLoad);
+    bindTiles();
+  } catch (error) {
+    $("galMoreWrap").innerHTML = '<span class="err">' + esc(error.message) + "</span>";
+  }
+}
+
+function roughTile(item) {
+  return '<button class="tile" data-job="' + esc(item.jobId) + '">' +
+    '<div class="bar o-' + esc(item.outcome) + '"></div>' +
+    '<div class="img">' + (item.inputUrl ? '<img loading="lazy" src="' + esc(item.inputUrl) + '" alt="">' : '<span class="sub">원본 만료</span>') + "</div>" +
+    '<div class="cap"><div>' + pill(esc(item.outcomeLabel), OUTCOME_PILL[item.outcome] || "warn") + "</div>" +
+    '<div class="sub">' + esc(kst(item.createdAt).md + " " + kst(item.createdAt).hm) + " · 인물 " + item.personCount + "명</div>" +
+    '<div class="sub">' + (item.exported ? "내보냄" : "내보내기 없음") + (item.refined ? " · 조정됨" : "") + "</div></div></button>";
+}
+
+function poseTile(item) {
+  const view = item.views.includes("three_quarter") ? "three_quarter" : item.views[0];
+  return '<button class="tile" data-pose-open="' + esc(item.pose_id) + '" data-views="' + esc(item.views.join(",")) +
+    '" data-meta="' + esc(item.source_label + " · " + item.category + " · " + item.action + (item.review_status ? " · " + item.review_status : "")) + '">' +
+    '<div class="img"><img data-gal-pose="' + esc(item.pose_id) + '" data-view="' + esc(view) + '" alt=""></div>' +
+    '<div class="cap"><div class="mono" title="' + esc(item.pose_id) + '">' + esc(item.pose_id.slice(0, 22)) + "</div>" +
+    '<div class="sub">' + esc(item.category) + " · " + esc(item.action) + "</div></div></button>";
+}
+
+async function galleryPoseThumb(img) {
+  try {
+    const res = await fetch("/v1/admin/review/pose-candidates/" + encodeURIComponent(img.dataset.galPose) +
+      "/thumbnail?view=" + encodeURIComponent(img.dataset.view), { headers: { "X-Beta-Admin-Token": token } });
+    if (!res.ok) return;
+    const url = URL.createObjectURL(await res.blob());
+    gallery.blobs.push(url);
+    img.src = url;
+  } catch (error) { /* 썸네일 하나 없다고 목록을 막지 않는다 */ }
+}
+
+function bindTiles() {
+  $("galTiles").querySelectorAll("img[data-gal-pose]:not([src])").forEach(galleryPoseThumb);
+  $("galTiles").querySelectorAll("button[data-job]:not([data-bound])").forEach((button) => {
+    button.dataset.bound = "1";
+    button.addEventListener("click", () => openDetail(button.dataset.job, button));
+  });
+  $("galTiles").querySelectorAll("button[data-pose-open]:not([data-bound])").forEach((button) => {
+    button.dataset.bound = "1";
+    button.addEventListener("click", () => openPose(button));
+  });
+}
+
+function openPose(button) {
+  releaseDetailBlobs();
+  const poseId = button.dataset.poseOpen;
+  const views = button.dataset.views.split(",");
+  $("lookupOut").innerHTML = "";
+  $("activityOut").innerHTML = "";
+  $("detailOut").innerHTML = '<div class="detail"><h3 class="mono">' + esc(poseId) + "</h3>" +
+    '<p class="sub">' + esc(button.dataset.meta) + "</p>" +
+    '<div class="cands">' + views.map((view) =>
+      '<div class="cand"><img data-pose="' + esc(poseId) + '" data-view="' + esc(view) + '" alt="">' +
+      '<div class="sub" style="margin-top:6px">' + esc(view) + "</div></div>").join("") + "</div></div>";
+  $("detailOut").querySelectorAll(".cand img[data-pose]").forEach(fillCandidateThumb);
+  showDrawer("detail");
+  $("drawerTitle").textContent = "포즈";
+}
+
+document.querySelectorAll("#galMode button").forEach((button) => {
+  button.addEventListener("click", () => {
+    gallery.mode = button.dataset.mode;
+    gallery.group = GROUPS[gallery.mode][0][0];
+    galleryGo();
+  });
+});
+$("galSearch").addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && gallery.folder) galleryOpenFolder(gallery.folder);
+});
+
 // ── 탭 ───────────────────────────────────────────────────────
 //
 // 탭을 처음 열 때만 그 탭의 데이터를 가져온다. 열지 않은 탭 때문에 첫 화면이 느려지지
@@ -1760,6 +2064,7 @@ function selectTab(name) {
   if (name === "jobs") recentGo();
   if (name === "installs") rosterGo(null);
   if (name === "metrics") productGo();
+  if (name === "gallery") galleryGo();
 }
 
 document.querySelectorAll("#tabs button").forEach((button) => {
