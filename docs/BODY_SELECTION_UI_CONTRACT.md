@@ -58,7 +58,7 @@ bodySelectionRevision이 없는 구 클라이언트 요청은 기존 계약을 �
     "path": "/approved/assets/body-neutral.png",
     "sha256": "<PNG SHA256>",
     "characterSha256": "<동일 BodyAsset.assetSha256>",
-    "pose": "attention",
+    "pose": "t_pose",
     "framing": "body-comparison.v1"
   }
 }
@@ -90,3 +90,5 @@ PNG magic·2MiB 상한·파일 SHA256과 승인 manifest의 일치를 검사한�
 ## 디자인 단서 기반 기본 체형
 
 감지의 `auto_presentation_default`는 mock 아님, 인물 소유권 명확, provider 오류 없음, visible feminine/masculine, compatible_candidates, 관측값/진단값 일치 및 face_design/body_contour 근거를 검증한 후 승인 자산·지원 포즈 조건을 통과해야 추천으로 전달한다. reasonCodes에 `presentation_supported_shape_default`를 남긴다. 일반 auto_default는 기존처럼 추천으로 승격하지 않는다. manual/fixed_default는 우선하고 명시적 auto는 추천을 선택한다.
+
+2026-10-15 사용자 확정: 기본 사진과 체형 비교는 T 포즈다. 새 카탈로그는 `pose: "t_pose"`를 사용한다. 기존 attention 자산은 과거 릴리스 호환용으로만 허용한다.

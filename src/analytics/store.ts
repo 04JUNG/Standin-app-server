@@ -136,6 +136,13 @@ export async function confirmSelections(
         rank: row.rank,
       });
     }
+    // PUT replaces the job's confirmed set. A person the user stopped exporting must
+    // not come back as "confirmed" when the job is reopened from history.
+    await client.query(
+      `DELETE FROM confirmed_selections
+       WHERE job_id = $1 AND NOT (person_index = ANY($2::int[]))`,
+      [jobId, validated.map((s) => s.personIndex)],
+    );
     for (const selection of validated) {
       await client.query(
         `INSERT INTO confirmed_selections

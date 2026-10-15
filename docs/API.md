@@ -536,7 +536,7 @@ POST와 **같은 두 단계 소유권 검사**를 거친다 — job이 이 insta
   - 실패·이탈: `analysis_failed`, `rerun_requested`, `export_completed`, `export_failed`, `capture_failed`
   - 자동 업데이트: `update_check`, `update_installed`, `update_failed`
 - ⚠ **허용 목록에 없는 이름이 배치에 하나라도 섞이면 배치 전체를 `400 INVALID_INPUT`으로 거절한다.** 클라이언트는 4xx를 영구 거절로 보고 그 배치를 버리므로, 같이 실린 정상 이벤트까지 사라진다. **클라이언트에 새 이벤트를 넣기 전에 이 목록을 먼저 배포한다.** 목록에 항목을 더하는 것은 구버전 클라이언트에 영향이 없다.
-- `PUT /v1/analysis/jobs/{jobId}/selections`: `[{personIndex,candidateId}]`를 멱등 저장하며 해당 작업에서 노출된 후보인지 검증한다.
+- `PUT /v1/analysis/jobs/{jobId}/selections`: `[{personIndex,candidateId}]`를 멱등 저장하며 해당 작업에서 노출된 후보인지 검증한다. 요청은 그 작업의 확정 집합을 **대체**한다 — 목록에 없는 인물(사용자가 내보내기를 끈 인물)의 이전 확정은 지운다.
 - `POST /v1/analysis/jobs/{jobId}/feedback`: `good | person_missing | skeleton_wrong | candidates_irrelevant | export_problem | other`만 허용한다.
 
 ---
@@ -1114,6 +1114,22 @@ BVH downloads and final FBX/refined/cropped export contracts are unchanged.
 - capabilities.bodyPreviews는 false다. 이 단계는 이미지 렌더와 Export 체형 연결 완료를 의미하지 않는다.
 
 요청/응답·오류·승인 manifest·호환 정책의 정본: [체형 선택 저장 설계](BODY_SELECTION_DESIGN.md).
+
+### 체형 수치 조절 (body-shape.v1, 2026-10-14)
+
+`BODY_SHAPE_EDIT_ENABLED=true`이고 승인 manifest의 asset에 `shape`가 선언된 체형만 수치 조절을 연다. 기본은 off이며, 끄면 기존 응답과 같다.
+
+- manifest asset: `shape: { schemaVersion: "body-shape.v1", controls: [{ key, min, max, step, default, label? }], basic? }`. `label`(1–24자)은 화면 이름 — 체형마다 같은 key를 달리 부를 수 있다(예: 여성 `physique`="지방"). `basic`(1–12, 컨트롤 수 이하)은 앞에서부터 기본으로 보일 조절 수, 없으면 5(남성 5개 위3·아래2, 여성 7개 위4·아래3). key는 `^[a-z][a-z0-9_]{0,39}$`, `min < max`, `step > 0`, `default ∈ [min,max]`. 형식이 틀리면 카탈로그 전체를 닫는다.
+- `GET .../body-options`: 조절 가능한 체형에만 `shape`(위 spec)를 싣는다.
+- `PUT .../body-selection`: `intent: "manual"`일 때만 `shape: { controls: { key: number } }`를 받는다. 빠진 key는 default, 모르는 key·범위 밖·step에 맞지 않는 값은 `400 INVALID_SHAPE`, 조절을 선언하지 않은 체형은 `409 SHAPE_UNSUPPORTED`. 모든 값이 default면 `shape: null`로 저장한다(평범한 asset과 같은 렌더 키).
+- `body-selection` 응답: `shape: { schemaVersion, controls, shapeSha256 } | null`. `shapeSha256 = sha256(["body-shape.v1", characterId, assetSha256, sorted controls])`. 체형이 더는 조절을 선언하지 않으면 `resolutionStatus: "unavailable"`.
+- `GET/PUT /v1/installations/current/body-preferences`: `shapeDefault: { characterId, controls } | null`("내 기본값")과 읽기 전용 `shapeEditable: [{ characterId, shape }]`. PUT에서 `shapeDefault` key를 빼면 저장된 값을 유지한다(구 클라이언트 호환).
+- `BODY_SHAPE_BAKE_ENABLED=true`는 검증된 shape-bake.v1 converter와 일치하는 카탈로그를 배포한 뒤에만 켠다. 기본 off에서는 기존 409 가드를 유지한다. on에서는 `/convert-framed`에 저장된 shape 전체를 전달하고 응답 shape_sha256을 검증한다. 캐시 키에도 shapeSha256을 포함한다.
+- 수치 변경 Top-K GLB는 정적 라이브러리 자산을 재사용하지 않고 PNG로 폴백한다. 최종 검토 GLB는 실제 최종 FBX에서 만들어진다.
+- 실시간 체형 미리보기(`standin-shape-runtime.v1`, 2026-10-15): manifest asset에 `shapeRuntime: { path, sha256, bytes, format: "standin-shape-runtime.v1", rules, preset }`. `shape`가 없는 asset에 선언하면 카탈로그 전체를 닫는다. `rules`는 `^[a-z0-9][a-z0-9.-]{0,63}$`, `preset`은 `^[A-Z][A-Z0-9_]{0,31}$`, `bytes` ≤ 32 MiB.
+  - `GET .../body-options`: 수치 조절이 열린 체형에만 `shapeRuntime: { url, sha256, bytes, format, rules, preset }`(로컬 경로 없음). 같은 규칙의 프리셋은 같은 자산을 가리키고 `preset`만 다르다.
+  - `GET /v1/models/:characterId/shape-runtime/:sha256`: 승인된 바이트를 그대로 준다(`application/octet-stream`, `Cache-Control: private, max-age=86400, immutable`). 크기·`SSR1` 머리·sha256이 manifest와 다르거나 체형 편집이 꺼져 있으면 404.
+  - 클라이언트가 sha256·형식·규칙을 다시 검사하고 앱 안에서 계산해 "내 체형" 박스에만 그린다. 서버의 미리보기·FBX(converter)와는 별개다 — 이 자산이 있다고 수치 체형 렌더가 열리지는 않는다(`BODY_SHAPE_BAKE_ENABLED=false`일 때 409 가드 유지).
 
 ## 체형 Top-K 미리보기 자산 (2026-10-08, 1~2단계)
 

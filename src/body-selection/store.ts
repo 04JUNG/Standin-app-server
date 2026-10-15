@@ -1,3 +1,4 @@
+import { shapeRuntimeMetadata } from "./shapeRuntime.js";
 import { neutralMetadata } from "./neutral.js";
 import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
@@ -6,6 +7,14 @@ import type { AnalysisResult, AnalysisPerson } from "../types.js";
 import { config } from "../config.js";
 import { checkCharacter } from "../characters/service.js";
 import { loadBodyCatalog } from "./catalog.js";
+import {
+  bodyShape,
+  shapeDefault,
+  shapeEditable,
+  shapeSpec,
+  ShapeInputError,
+  type BodyShape,
+} from "./shape.js";
 import {
   bodyRef,
   defaultPreferences,
@@ -35,10 +44,33 @@ export interface Mutation {
 export interface PreferenceChange extends Mutation {
   mode: BodyPreferences["mode"];
   defaultCharacterId: string | null;
+  /** Absent keeps the saved value; null clears it. */
+  shapeDefault?: unknown;
 }
 export interface SelectionChange extends Mutation {
   intent: BodyIntent;
   characterId?: string;
+  /** Manual only: `{ controls }` for a shape-capable asset. */
+  shape?: { controls: unknown };
+}
+function shapeError(e: unknown): never {
+  if (e instanceof ShapeInputError)
+    throw new BodyError(e.code, e.code === "INVALID_SHAPE" ? 400 : 409);
+  throw e;
+}
+/** Preferences as the client sees them: stored value plus what the catalog allows. */
+export type PresentedPreferences = BodyPreferences & {
+  shapeEditable?: ReturnType<typeof shapeEditable>;
+};
+export function presentPreferences(
+  value: BodyPreferences,
+  catalog: BodyCatalog = loadBodyCatalog(),
+): PresentedPreferences {
+  return {
+    ...value,
+    shapeDefault: value.shapeDefault ?? null,
+    shapeEditable: shapeEditable(catalog),
+  };
 }
 export const bodyDeps = { catalog: loadBodyCatalog, check: checkCharacter };
 export type BodyDeps = typeof bodyDeps;
@@ -106,10 +138,13 @@ export async function writePreferences(
     [owner],
   );
   if (!lock.rows.length) throw new BodyError("NOT_FOUND", 404);
+  const keepShape = !("shapeDefault" in change);
   const previous = await replay(db, owner, "preferences", change, [
     change.mode,
     change.defaultCharacterId,
     change.expectedRevision,
+    // Old clients never send the key; their replay hash must stay unchanged.
+    ...(keepShape ? [] : [change.shapeDefault ?? null]),
   ]);
   if (previous.value) return previous.value as BodyPreferences;
   const current = await readPreferences(db, owner);
@@ -126,10 +161,21 @@ export async function writePreferences(
     if ((await deps.check(change.defaultCharacterId)) !== "ok")
       throw new BodyError("BODY_UNAVAILABLE", 409);
   }
+  let nextShape = current.shapeDefault ?? null;
+  if (!keepShape) {
+    try {
+      nextShape = shapeDefault(deps.catalog(), change.shapeDefault ?? null);
+    } catch (e) {
+      shapeError(e);
+    }
+    if (nextShape && (await deps.check(nextShape.characterId)) !== "ok")
+      throw new BodyError("BODY_UNAVAILABLE", 409);
+  }
   const value: BodyPreferences = {
     ...current,
     mode: change.mode,
     defaultCharacterId: change.defaultCharacterId,
+    shapeDefault: nextShape,
     revision: current.revision + 1,
   };
   await db.query(
@@ -228,11 +274,21 @@ function revalidate(
           reasonCodes: ["body_asset_unavailable"],
         }
       : value.recommendation;
+  // A shaped choice is only valid while its asset still accepts the same controls.
+  const shapeLost =
+    !!value.shape &&
+    !shapeSpec(
+      catalog.assets.find(
+        (a) => a.characterId === value.resolvedBody?.characterId,
+      ),
+    );
   return {
     ...value,
+    shape: value.shape ?? null,
     recommendation,
     resolutionStatus:
-      value.resolvedBody && !eligible(value.resolvedBody, catalog, poses)
+      (value.resolvedBody && !eligible(value.resolvedBody, catalog, poses)) ||
+      shapeLost
         ? "unavailable"
         : value.resolutionStatus,
   };
@@ -266,6 +322,7 @@ export async function writeSelection(
     change.intent,
     change.characterId ?? null,
     change.expectedRevision,
+    ...(change.shape ? [change.shape] : []),
   ]);
   if (previous.value) return previous.value as BodySelection;
   const catalog = deps.catalog();
@@ -289,6 +346,16 @@ export async function writeSelection(
     throw new BodyError("INVALID_CHARACTER", 400);
   if (manual && !eligible(manual, catalog, poses))
     throw new BodyError("BODY_POSE_UNSUPPORTED", 409);
+  let shape: BodyShape | null = null;
+  if (change.shape) {
+    if (change.intent !== "manual" || !manual)
+      throw new BodyError("INVALID_INPUT", 400);
+    try {
+      shape = bodyShape(manual, change.shape.controls);
+    } catch (e) {
+      shapeError(e);
+    }
+  }
   const value = resolveBody(
     index,
     policy,
@@ -298,6 +365,7 @@ export async function writeSelection(
     change.intent,
     manual ? bodyRef(manual) : null,
     current.selectionRevision + 1,
+    shape,
   );
   if (value.resolutionStatus !== "ready" || !value.resolvedBody)
     throw new BodyError(
@@ -339,6 +407,10 @@ export async function bodyOptions(
         bodyRef: bodyRef(a),
         ...(a.displayName ? { displayName: a.displayName } : {}),
         ...(a.neutralPreview ? { neutralPreview: neutralMetadata(a) } : {}),
+        ...(shapeSpec(a) ? { shape: shapeSpec(a) } : {}),
+        ...(shapeSpec(a) && a.shapeRuntime
+          ? { shapeRuntime: shapeRuntimeMetadata(a) }
+          : {}),
         selectable: reasons.length === 0,
         reasonCodes: reasons,
       };
@@ -373,9 +445,12 @@ export async function attachBodySelections(
   };
 }
 export const bodyStore = {
-  preferences: (owner: string) => readPreferences(pool, owner),
-  savePreferences: (owner: string, change: PreferenceChange) =>
-    transaction((db) => writePreferences(db, owner, change)),
+  preferences: async (owner: string) =>
+    presentPreferences(await readPreferences(pool, owner)),
+  savePreferences: async (owner: string, change: PreferenceChange) =>
+    presentPreferences(
+      await transaction((db) => writePreferences(db, owner, change)),
+    ),
   selection: (owner: string, job: string, index: number) =>
     readSelection(pool, owner, job, index),
   saveSelection: (

@@ -1,4 +1,5 @@
 /** Paired FBX + PNG from the same final artifact. No pose inference lives here. */
+import type { BodyShape } from "../body-selection/shape.js";
 import { config } from "../config.js";
 import {
   ConverterError,
@@ -21,6 +22,7 @@ export interface FramedArtifact {
   previewRevision?: string;
 }
 export interface FramedInput {
+  shape?: BodyShape | null;
   bvhBytes: Uint8Array;
   characterId: string;
   scope: BodyScope;
@@ -82,6 +84,7 @@ export async function convertFramed(
     "final.bvh",
   );
   body.set("character_id", input.characterId);
+  if (input.shape) body.set("shape", JSON.stringify(input.shape));
   body.set("output_scope", input.scope);
   body.set("preview_view", "front");
   if (input.previewFormat) body.set("preview_format", input.previewFormat);
@@ -140,6 +143,7 @@ export async function convertFramed(
       (input.cameraRotation !== undefined && JSON.stringify(value.camera_rotation) !== JSON.stringify(input.cameraRotation)) ||
       (input.expectedCharacterSha256 !== undefined && value.character_sha256 !== input.expectedCharacterSha256) ||
       (input.expectedPreviewRevision !== undefined && value.preview_revision !== input.expectedPreviewRevision) ||
+      (input.shape != null && value.shape_sha256 !== input.shape.shapeSha256) ||
       value.solver_version !== EXPECTED_SOLVER_VERSION ||
       value.framing_version !== FRAMING_VERSION ||
       value.output_scope !== input.scope ||
@@ -206,6 +210,7 @@ function validFinalModel(
     value.preview_model_revision === input.modelRevision &&
     value.character_sha256 === input.characterSha256 &&
     meta?.version === "framed-mesh-v1" &&
+    (input.shape == null || meta.shape_sha256 === input.shape.shapeSha256) &&
     meta.revision === input.modelRevision &&
     meta.character_sha256 === input.characterSha256 &&
     meta.character_id === input.characterId &&
