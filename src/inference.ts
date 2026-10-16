@@ -117,6 +117,10 @@ export class InferenceError extends Error {
 export type AnalysisFailureCode =
   | "ANALYSIS_TIMEOUT"
   | "ANALYSIS_UNAVAILABLE"
+  | "ANALYSIS_RATE_LIMITED"
+  | "ANALYSIS_DAILY_QUOTA_EXHAUSTED"
+  | "ANALYSIS_UPSTREAM_TIMEOUT"
+  | "ANALYSIS_UPSTREAM_ERROR"
   | "INFERENCE_FAILED";
 
 /**
@@ -144,14 +148,37 @@ export type AnalysisFailureCode =
  * (master-docs #6 「남는 질문」).
  */
 export function shouldRefundQuota(code: AnalysisFailureCode): boolean {
-  return code === "ANALYSIS_UNAVAILABLE";
+  // 기존에 모두 ANALYSIS_UNAVAILABLE로 환급하던 HTTP 503의 세부 사유다.
+  // 원인 표시만 분리하고 차감/환급 정책은 바꾸지 않는다.
+  return code === "ANALYSIS_UNAVAILABLE"
+    || code === "ANALYSIS_RATE_LIMITED"
+    || code === "ANALYSIS_DAILY_QUOTA_EXHAUSTED"
+    || code === "ANALYSIS_UPSTREAM_TIMEOUT"
+    || code === "ANALYSIS_UPSTREAM_ERROR";
 }
 
 export function analysisFailureCode(error: unknown): AnalysisFailureCode {
   if (error instanceof InferenceTimeoutError) return "ANALYSIS_TIMEOUT";
-  // 503은 HTTP 의미 그대로 "지금은 못 하지만 나중엔 된다"다. 추론이 이 상태로만
-  // 답하도록 계약을 맞춰 뒀으므로 본문 code를 파싱하지 않고 상태로 판단한다.
-  if (error instanceof InferenceError && error.status === 503) return "ANALYSIS_UNAVAILABLE";
+  if (error instanceof InferenceError && error.status === 503) {
+    // Standin-server #86: HTTP 503은 유지하되 detail.reason으로 원인을 구분한다.
+    // 알려진 계약만 읽고 제공자 원문/메시지는 클라이언트로 전달하지 않는다.
+    try {
+      const body: unknown = JSON.parse(error.detail);
+      if (body && typeof body === "object" && "detail" in body) {
+        const detail = body.detail;
+        if (detail && typeof detail === "object" && "code" in detail
+          && detail.code === "VLM_UNAVAILABLE" && "reason" in detail) {
+          switch (detail.reason) {
+            case "rate_limited": return "ANALYSIS_RATE_LIMITED";
+            case "daily_quota_exhausted": return "ANALYSIS_DAILY_QUOTA_EXHAUSTED";
+            case "timeout": return "ANALYSIS_UPSTREAM_TIMEOUT";
+            case "upstream_error": return "ANALYSIS_UPSTREAM_ERROR";
+          }
+        }
+      }
+    } catch { /* 구 서버/비 JSON 503은 기존 경로를 유지한다. */ }
+    return "ANALYSIS_UNAVAILABLE";
+  }
   return "INFERENCE_FAILED";
 }
 
@@ -319,6 +346,22 @@ export async function getPoseBvh(poseId: string): Promise<Response> {
 }
 
 // GET /pose/{id}/thumbnail?view=... → PNG 원본 응답
+/** 포즈 라이브러리 한 페이지(관리자 모아 보기). 쿼리는 호출하는 쪽이 검증해서 넘긴다. */
+export async function listLibraryPoses(params: URLSearchParams): Promise<Response> {
+  return fetch(`${config.inferenceBaseUrl}/poses?${params.toString()}`, {
+    headers: { ...authHeaders() },
+    signal: AbortSignal.timeout(10_000),
+  });
+}
+
+/** 포즈 라이브러리의 출처별·분류별 폴더. */
+export async function libraryFolders(): Promise<Response> {
+  return fetch(`${config.inferenceBaseUrl}/poses/folders`, {
+    headers: { ...authHeaders() },
+    signal: AbortSignal.timeout(10_000),
+  });
+}
+
 export async function getPoseThumbnail(
   poseId: string,
   view: string,
