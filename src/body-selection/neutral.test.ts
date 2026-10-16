@@ -37,3 +37,11 @@ test("approved neutral preview binds body hash and does not expose local path", 
     await rm(folder, { recursive: true, force: true });
   }
 });
+
+
+test("T-pose is the confirmed neutral catalog pose; legacy attention remains compatible", () => {
+  const c = catalog(1), a = c.assets[0];
+  a.neutralPreview = { path: "/approved/t.png", sha256: "a".repeat(64), characterSha256: a.assetSha256, pose: "t_pose", framing: "body-comparison.v1" };
+  assert.equal(parseCatalog(c).assets[0].neutralPreview?.pose, "t_pose");
+  assert.equal(neutralMetadata(a)?.pose, "t_pose");
+});

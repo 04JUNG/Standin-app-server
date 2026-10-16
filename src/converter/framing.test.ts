@@ -204,3 +204,27 @@ test("camera is forwarded and an older converter cannot silently drop it", async
     { code: "CONVERTER_INTEGRITY" },
   );
 });
+
+test("shape controls are forwarded and a converter ignoring their digest is rejected", async () => {
+  const shape = { schemaVersion: "body-shape.v1" as const, controls: { muscle: 1.5 }, shapeSha256: "d".repeat(64) };
+  let calls = 0;
+  const run = (hash: string | null) => convertFramed({ ...input, shape }, {
+    baseUrl: "https://converter.invalid",
+    fetch: (async (_url, request) => {
+      calls++;
+      assert.deepEqual(JSON.parse((request!.body as FormData).get("shape") as string), shape);
+      return Response.json({ ...payload(), shape_sha256: hash });
+    }) as typeof fetch,
+  });
+  await assert.rejects(run(null), /integrity/);
+  await assert.rejects(run("e".repeat(64)), /integrity/);
+  await run(shape.shapeSha256);
+  assert.equal(calls, 3);
+});
+
+test("shaped GLB must bind its embedded shape digest as well as the response", async () => {
+  const shape = { schemaVersion: "body-shape.v1" as const, controls: { muscle: 1 }, shapeSha256: "d".repeat(64) };
+  const shaped = { ...input, shape, previewFormat: "model" as const, modelRevision: "b".repeat(64), characterSha256: "a".repeat(64) };
+  await assert.rejects(convertFramed(shaped, deps({ ...modelPayload(), shape_sha256: shape.shapeSha256 })), { code: "CONVERTER_INTEGRITY" });
+  await convertFramed(shaped, deps({ ...modelPayload({ shape_sha256: shape.shapeSha256 }), shape_sha256: shape.shapeSha256 }));
+});

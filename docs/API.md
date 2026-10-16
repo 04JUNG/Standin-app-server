@@ -1124,11 +1124,13 @@ BVH downloads and final FBX/refined/cropped export contracts are unchanged.
 - `PUT .../body-selection`: `intent: "manual"`일 때만 `shape: { controls: { key: number } }`를 받는다. 빠진 key는 default, 모르는 key·범위 밖·step에 맞지 않는 값은 `400 INVALID_SHAPE`, 조절을 선언하지 않은 체형은 `409 SHAPE_UNSUPPORTED`. 모든 값이 default면 `shape: null`로 저장한다(평범한 asset과 같은 렌더 키).
 - `body-selection` 응답: `shape: { schemaVersion, controls, shapeSha256 } | null`. `shapeSha256 = sha256(["body-shape.v1", characterId, assetSha256, sorted controls])`. 체형이 더는 조절을 선언하지 않으면 `resolutionStatus: "unavailable"`.
 - `GET/PUT /v1/installations/current/body-preferences`: `shapeDefault: { characterId, controls } | null`("내 기본값")과 읽기 전용 `shapeEditable: [{ characterId, shape, displayName?, neutralPreview?, shapeRuntime? }]`. `displayName`·`neutralPreview`·`shapeRuntime`은 body-options와 같은 메타데이터로, 작업 밖의 설정 화면이 체형 이름·고정 그림·실시간 3D를 그릴 때 쓴다(서버 경로는 내보내지 않음). PUT에서 `shapeDefault` key를 빼면 저장된 값을 유지한다(구 클라이언트 호환). 클라이언트는 "내 기본값"을 저장할 때 `defaultCharacterId`와 `shapeDefault.characterId`를 같은 체형으로 맞춰 보낸다.
-- ⚠ converter가 수치를 아직 받지 않는다. `shape`가 있는 선택은 `body-previews`와 체형 FBX export에서 `409 BODY_SHAPE_RENDER_UNSUPPORTED`로 거절한다 — 조절 전 체형을 조절한 것처럼 그리거나 저장하지 않는다. converter 연동 후 이 가드를 바꾼다.
+- `BODY_SHAPE_BAKE_ENABLED=false`(기본)이면 `shape`가 있는 선택은 `body-previews`와 체형 FBX export에서 `409 BODY_SHAPE_RENDER_UNSUPPORTED`로 거절한다 — 조절 전 체형을 조절한 것처럼 그리거나 저장하지 않는다.
+- `BODY_SHAPE_BAKE_ENABLED=true`는 검증된 shape-bake.v1 converter와 일치하는 카탈로그를 배포한 뒤에만 켠다. on에서는 `/convert-framed`에 저장된 shape 전체를 전달하고 응답 shape_sha256을 검증한다. 캐시 키에도 shapeSha256을 포함한다.
+- 수치 변경 Top-K GLB는 정적 라이브러리 자산을 재사용하지 않고 PNG로 폴백한다. 최종 검토 GLB는 실제 최종 FBX에서 만들어진다.
 - 실시간 체형 미리보기(`standin-shape-runtime.v1`, 2026-10-15): manifest asset에 `shapeRuntime: { path, sha256, bytes, format: "standin-shape-runtime.v1", rules, preset }`. `shape`가 없는 asset에 선언하면 카탈로그 전체를 닫는다. `rules`는 `^[a-z0-9][a-z0-9.-]{0,63}$`, `preset`은 `^[A-Z][A-Z0-9_]{0,31}$`, `bytes` ≤ 32 MiB.
   - `GET .../body-options`: 수치 조절이 열린 체형에만 `shapeRuntime: { url, sha256, bytes, format, rules, preset }`(로컬 경로 없음). 같은 규칙의 프리셋은 같은 자산을 가리키고 `preset`만 다르다.
   - `GET /v1/models/:characterId/shape-runtime/:sha256`: 승인된 바이트를 그대로 준다(`application/octet-stream`, `Cache-Control: private, max-age=86400, immutable`). 크기·`SSR1` 머리·sha256이 manifest와 다르거나 체형 편집이 꺼져 있으면 404.
-  - 클라이언트가 sha256·형식·규칙을 다시 검사하고 앱 안에서 계산해 "내 체형" 박스에만 그린다. 서버의 미리보기·FBX(converter)와는 별개다 — 이 자산이 있다고 수치 체형 렌더가 열리지는 않는다(위 409 가드 유지).
+  - 클라이언트가 sha256·형식·규칙을 다시 검사하고 앱 안에서 계산해 "내 체형" 박스에만 그린다. 서버의 미리보기·FBX(converter)와는 별개다 — 이 자산이 있다고 수치 체형 렌더가 열리지는 않는다(`BODY_SHAPE_BAKE_ENABLED=false`일 때 409 가드 유지).
 
 ## 체형 Top-K 미리보기 자산 (2026-10-08, 1~2단계)
 

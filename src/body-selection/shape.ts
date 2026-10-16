@@ -2,8 +2,8 @@
  * Shape-key body controls (`body-shape.v1`).
  *
  * The operator declares which catalog assets accept numeric controls; the BFF only
- * validates, stores and echoes them. It never bakes a body. Until the converter can
- * render a shaped body, previews and exports refuse shaped selections instead of
+ * validates, stores and echoes them. It never bakes a body. Until verified shape baking is explicitly enabled,
+ * previews and exports refuse shaped selections instead of
  * silently rendering the unshaped asset (see `assertShapeRenderable`).
  */
 import { createHash } from "node:crypto";
@@ -192,9 +192,9 @@ export function shapeEditable(catalog: BodyCatalog) {
 }
 
 /**
- * The converter does not accept shape controls yet. Rendering the plain asset for a
+ * The shape-bake feature is opt-in. Rendering the plain asset for a
  * shaped selection would show and save a body the user did not choose.
  */
 export function shapeRenderable(selection: { shape?: BodyShape | null }) {
-  return !selection.shape;
+  return !selection.shape || config.bodyShapeBakeEnabled;
 }

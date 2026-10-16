@@ -14,7 +14,7 @@ export interface BodyAsset extends BodyRef {
     path: string;
     sha256: string;
     characterSha256: string;
-    pose: "attention";
+    pose: "t_pose" | "attention";
     framing: "body-comparison.v1";
   };
   supportedPoseIds: string[];

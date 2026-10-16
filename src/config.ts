@@ -14,6 +14,7 @@ export const config = {
    * entry declares `shape` are editable, and shaped selections cannot render until the
    * converter accepts controls.
    */
+  bodyShapeBakeEnabled: env("BODY_SHAPE_BAKE_ENABLED", "false") === "true",
   bodyShapeEditEnabled: env("BODY_SHAPE_EDIT_ENABLED", "false") === "true",
   port: Number(process.env.PORT ?? 8080),
   // BFF 공개 URL(OAuth 콜백·이메일 인증 링크 구성용)

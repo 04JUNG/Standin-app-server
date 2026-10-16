@@ -268,6 +268,7 @@ export function createFramingRoutes(overrides: Partial<typeof defaults> = {}, bo
         body?.resolvedBody && runtime
           ? {
               expectedCharacterSha256: body.resolvedBody.assetSha256,
+              shape: body.shape,
               expectedPreviewRevision: runtime.previewRevision,
             }
           : {};
@@ -325,7 +326,7 @@ export function createFramingRoutes(overrides: Partial<typeof defaults> = {}, bo
                 deps.convertFramed,
               )
             : cache.get(key, () =>
-                deps.convertFramed({ bvhBytes, characterId, scope }),
+                deps.convertFramed({ bvhBytes, characterId, scope, ...expected }),
               );
       let libraryModel: Buffer | undefined;
       // The stored artifact, not a client's refine flag, decides whether the
