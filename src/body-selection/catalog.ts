@@ -57,9 +57,11 @@ export function parseCatalog(value: unknown): BodyCatalog {
       (a.shape === undefined || !validShapeSource(a.shapeSource))
     )
       throw new Error("invalid shape source");
-    // The live preview must come from the same controller the converter bakes with.
+    // The live preview must come from the same controller the converter bakes with:
+    // a v2 runtime always names its source; any runtime next to a declared source must match it.
     if (
-      a.shapeRuntime?.format === "standin-shape-runtime.v2" &&
+      (a.shapeRuntime?.format === "standin-shape-runtime.v2" || a.shapeSource) &&
+      a.shapeRuntime &&
       a.shapeRuntime.rules !== a.shapeSource?.rules
     )
       throw new Error("shape runtime does not match shape source");

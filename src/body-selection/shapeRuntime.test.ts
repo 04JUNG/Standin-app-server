@@ -112,3 +112,37 @@ test("an SSR2 runtime is served only when its header names the catalog's source"
     await rm(folder, { recursive: true, force: true });
   }
 });
+
+test("a v1 runtime next to a declared source is served only with the same source in its header", async () => {
+  const folder = await mkdtemp(join(tmpdir(), "body-runtime-v1-source-"));
+  try {
+    const source = { rules: "standin-body-0.7.1", blendSha256: "1".repeat(64), controllerSha256: "2".repeat(64) };
+    const ssr1 = (header: object) => {
+      let text = Buffer.from(JSON.stringify(header));
+      text = Buffer.concat([text, Buffer.alloc((4 - (text.length % 4)) % 4, 32)]);
+      const size = Buffer.alloc(4);
+      size.writeUInt32LE(text.length);
+      return Buffer.concat([Buffer.from("SSR1"), size, text, Buffer.alloc(16)]);
+    };
+    const setup = (bytes: Buffer, rules = source.rules) => {
+      const c = catalog(1),
+        a = c.assets[0]!;
+      a.shape = spec;
+      a.shapeSource = source;
+      a.shapeRuntime = { path: join(folder, "rt1.ssr"), sha256: sha256Hex(bytes), bytes: bytes.length, format: "standin-shape-runtime.v1", rules, preset: "BASE" };
+      return { c, a };
+    };
+    const withSource = ssr1({ rules: source.rules, source: { blendSha256: source.blendSha256, controllerSha256: source.controllerSha256 } });
+    const ok = setup(withSource);
+    await writeFile(ok.a.shapeRuntime!.path, withSource);
+    assert.equal(parseCatalog(ok.c).assets.length, 1);
+    assert.deepEqual(await readShapeRuntime(ok.a), withSource);
+    const old = ssr1({ rules: source.rules });
+    const legacy = setup(old);
+    await writeFile(legacy.a.shapeRuntime!.path, old);
+    await assert.rejects(readShapeRuntime(legacy.a), /source mismatch/);
+    assert.throws(() => parseCatalog(setup(withSource, "standin-body-0.6.10").c), /does not match shape source/);
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
+});

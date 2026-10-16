@@ -70,12 +70,14 @@ export async function readShapeRuntime(asset: BodyAsset) {
     !bytes.subarray(0, 4).equals(MAGIC[r.format]!)
   )
     throw new Error("invalid shape runtime");
-  if (r.format === SHAPE_RUNTIME_FORMAT_V2 && !headerMatchesSource(bytes, asset))
+  // Whenever the catalog names a source (shaped bodies are baked from it), the runtime header
+  // must name the same files — v2 always does, v1 since 2026-10-16.
+  if ((r.format === SHAPE_RUNTIME_FORMAT_V2 || asset.shapeSource) && !headerMatchesSource(bytes, asset))
     throw new Error("shape runtime source mismatch");
   return bytes;
 }
 
-/** SSR2 header names its authoring source; never serve one built from another source. */
+/** SSR1/SSR2 headers name their authoring source; never serve one built from another source. */
 function headerMatchesSource(bytes: Buffer, asset: BodyAsset) {
   try {
     const size = bytes.readUInt32LE(4);
