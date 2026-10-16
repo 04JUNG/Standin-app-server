@@ -205,15 +205,25 @@ test("camera is forwarded and an older converter cannot silently drop it", async
   );
 });
 
+const source = { rules: "standin-body-0.7.1", blendSha256: "1".repeat(64), controllerSha256: "2".repeat(64) };
+const lineage = (over: Record<string, unknown> = {}) => ({
+  rules: source.rules,
+  blend_sha256: source.blendSha256,
+  controller_sha256: source.controllerSha256,
+  ...over,
+});
+
 test("shape controls are forwarded and a converter ignoring their digest is rejected", async () => {
   const shape = { schemaVersion: "body-shape.v1" as const, controls: { muscle: 1.5 }, shapeSha256: "d".repeat(64) };
   let calls = 0;
-  const run = (hash: string | null) => convertFramed({ ...input, shape }, {
+  const run = (hash: string | null) => convertFramed({ ...input, shape, shapeSource: source }, {
     baseUrl: "https://converter.invalid",
     fetch: (async (_url, request) => {
       calls++;
-      assert.deepEqual(JSON.parse((request!.body as FormData).get("shape") as string), shape);
-      return Response.json({ ...payload(), shape_sha256: hash });
+      const form = request!.body as FormData;
+      assert.deepEqual(JSON.parse(form.get("shape") as string), shape);
+      assert.deepEqual(JSON.parse(form.get("expected_shape_source") as string), source);
+      return Response.json({ ...payload(), shape_sha256: hash, shape_bake: lineage({ shape_sha256: hash }) });
     }) as typeof fetch,
   });
   await assert.rejects(run(null), /integrity/);
@@ -222,9 +232,19 @@ test("shape controls are forwarded and a converter ignoring their digest is reje
   assert.equal(calls, 3);
 });
 
+test("a shaped body is baked only from the source the catalog promised", async () => {
+  const shape = { schemaVersion: "body-shape.v1" as const, controls: { muscle: 1.5 }, shapeSha256: "d".repeat(64) };
+  const respond = (bake: unknown) => deps({ ...payload(), shape_sha256: shape.shapeSha256, shape_bake: bake });
+  // No source → never call the converter with a shape it could bake from any version.
+  await assert.rejects(convertFramed({ ...input, shape }, respond(lineage())), { code: "CONVERTER_INTEGRITY" });
+  for (const bad of [undefined, null, lineage({ rules: "standin-body-0.7.0" }), lineage({ blend_sha256: "9".repeat(64) }), lineage({ controller_sha256: "9".repeat(64) })])
+    await assert.rejects(convertFramed({ ...input, shape, shapeSource: source }, respond(bad)), { code: "CONVERTER_INTEGRITY" });
+  await convertFramed({ ...input, shape, shapeSource: source }, respond(lineage()));
+});
+
 test("shaped GLB must bind its embedded shape digest as well as the response", async () => {
   const shape = { schemaVersion: "body-shape.v1" as const, controls: { muscle: 1 }, shapeSha256: "d".repeat(64) };
-  const shaped = { ...input, shape, previewFormat: "model" as const, modelRevision: "b".repeat(64), characterSha256: "a".repeat(64) };
-  await assert.rejects(convertFramed(shaped, deps({ ...modelPayload(), shape_sha256: shape.shapeSha256 })), { code: "CONVERTER_INTEGRITY" });
-  await convertFramed(shaped, deps({ ...modelPayload({ shape_sha256: shape.shapeSha256 }), shape_sha256: shape.shapeSha256 }));
+  const shaped = { ...input, shape, shapeSource: source, previewFormat: "model" as const, modelRevision: "b".repeat(64), characterSha256: "a".repeat(64) };
+  await assert.rejects(convertFramed(shaped, deps({ ...modelPayload(), shape_sha256: shape.shapeSha256, shape_bake: lineage() })), { code: "CONVERTER_INTEGRITY" });
+  await convertFramed(shaped, deps({ ...modelPayload({ shape_sha256: shape.shapeSha256 }), shape_sha256: shape.shapeSha256, shape_bake: lineage() }));
 });

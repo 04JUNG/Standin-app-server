@@ -481,3 +481,85 @@ test("shape specs may name controls and set how many are basic", () => {
   };
   assert.throws(() => parseCatalog(long), /invalid shape spec/);
 });
+
+const source = { rules: "standin-body-0.7.1", blendSha256: "1".repeat(64), controllerSha256: "2".repeat(64) };
+const runtimeV2 = {
+  path: "/srv/body/runtime-male-0-7-1.ssr",
+  sha256: "a".repeat(64),
+  bytes: 1024,
+  format: "standin-shape-runtime.v2" as const,
+  rules: "standin-body-0.7.1",
+  preset: "BULK",
+};
+
+test("with baking on, a shaped selection renders only from a declared source", () => {
+  const c = shaped();
+  const previous = config.bodyShapeBakeEnabled;
+  Object.assign(config, { bodyShapeBakeEnabled: true });
+  try {
+    withFlag(true, () => {
+      const shape = bodyShape(c.assets[1], { height: 190 });
+      assert.equal(shapeRenderable({ shape }), false);
+      assert.equal(shapeRenderable({ shape, shapeSource: null }), false);
+      assert.equal(shapeRenderable({ shape, shapeSource: { ...source, rules: "Bad" } }), false);
+      assert.equal(shapeRenderable({ shape, shapeSource: source }), true);
+    });
+  } finally {
+    Object.assign(config, { bodyShapeBakeEnabled: previous });
+  }
+});
+
+test("catalog binds shape source, v2 runtime and grid-aligned defaults", () => {
+  const ok = shaped();
+  ok.assets[1] = { ...ok.assets[1], shapeSource: source, shapeRuntime: runtimeV2 };
+  assert.deepEqual(parseCatalog(ok).assets[1].shapeSource, source);
+  const cases: [Partial<BodyCatalog["assets"][number]>, RegExp][] = [
+    [{ shape: undefined, shapeSource: source }, /invalid shape source/],
+    [{ shapeSource: { ...source, blendSha256: "x" } }, /invalid shape source/],
+    [{ shapeSource: { ...source, extra: 1 } as never }, /invalid shape source/],
+    [{ shapeRuntime: runtimeV2 }, /does not match shape source/],
+    [{ shapeSource: { ...source, rules: "standin-body-0.7.0" }, shapeRuntime: runtimeV2 }, /does not match shape source/],
+    // .927 is not reachable from .90 in steps of .01: every request would fail.
+    [{ shape: { schemaVersion: "body-shape.v1", controls: [{ key: "head_scale", min: 0.9, max: 1, step: 0.01, default: 0.927 }] } }, /invalid shape spec/],
+  ];
+  for (const [change, error] of cases) {
+    const c = shaped();
+    c.assets[1] = { ...c.assets[1], ...change } as BodyCatalog["assets"][number];
+    assert.throws(() => parseCatalog(c), error);
+  }
+  const aligned = shaped();
+  aligned.assets[1] = { ...aligned.assets[1], shape: { schemaVersion: "body-shape.v1", controls: [{ key: "head_scale", min: 0.907, max: 1, step: 0.01, default: 0.927 }] } };
+  assert.equal(parseCatalog(aligned).assets[1].shape?.controls[0]?.default, 0.927);
+});
+
+test("runtime metadata names the source the client must find in the runtime header", async () => {
+  const { shapeRuntimeMetadata } = await import("./shapeRuntime.js");
+  const c = shaped();
+  const asset = { ...c.assets[1], shapeSource: source, shapeRuntime: runtimeV2 };
+  assert.deepEqual(shapeRuntimeMetadata(asset)?.source, source);
+  assert.equal(shapeRuntimeMetadata(asset)?.format, "standin-shape-runtime.v2");
+  assert.equal("path" in shapeRuntimeMetadata(asset)!, false);
+});
+
+test("a shaped selection reads back with the source its asset is baked from (never stored)", async () => {
+  const { readSelection } = await import("./store.js");
+  const sourced = () => {
+    const c = shaped();
+    c.assets[1] = { ...c.assets[1]!, shapeSource: source };
+    return c;
+  };
+  const c = sourced();
+  const initial = resolveBody(0, snapshot(defaultPreferences(), c), { status: "unavailable", body: null, reasonCodes: [] }, c, ["pose-a"]);
+  await withFlagAsync(true, async () => {
+    const { db, rows } = memoryDb(initial);
+    const change = { intent: "manual" as const, characterId: "character-1", shape: { controls: { height: 186 } }, expectedRevision: 0, mutationId: "mutation-source-1" };
+    await writeSelection(db, "owner", "job_test", 0, change, { catalog: sourced, check: async () => "ok" as const });
+    assert.equal("shapeSource" in rows.selection, false);
+    const read = await readSelection(db, "owner", "job_test", 0, sourced());
+    assert.deepEqual(read.shapeSource, source);
+    // Catalog without a source: the shape stays saved but cannot render.
+    const bare = await readSelection(db, "owner", "job_test", 0, shaped());
+    assert.equal(bare.shapeSource, null);
+    assert.equal(shapeRenderable(bare), false);
+  });
+});

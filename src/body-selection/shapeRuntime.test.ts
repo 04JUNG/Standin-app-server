@@ -72,3 +72,43 @@ test("validShapeRuntime rejects missing input", () => {
   assert.equal(validShapeRuntime(null, spec), false);
   assert.equal(validShapeRuntime(undefined, spec), false);
 });
+
+test("an SSR2 runtime is served only when its header names the catalog's source", async () => {
+  const folder = await mkdtemp(join(tmpdir(), "body-runtime-v2-"));
+  try {
+    const source = { rules: "standin-body-0.7.1", blendSha256: "1".repeat(64), controllerSha256: "2".repeat(64) };
+    const ssr2 = (header: object) => {
+      let text = Buffer.from(JSON.stringify(header));
+      text = Buffer.concat([text, Buffer.alloc((4 - (text.length % 4)) % 4, 32)]);
+      const size = Buffer.alloc(4);
+      size.writeUInt32LE(text.length);
+      return Buffer.concat([Buffer.from("SSR2"), size, text, Buffer.alloc(16)]);
+    };
+    const asset = (bytes: Buffer) => {
+      const c = catalog(1),
+        a = c.assets[0]!;
+      a.shape = spec;
+      a.shapeSource = source;
+      a.shapeRuntime = {
+        path: join(folder, "rt2.ssr"),
+        sha256: sha256Hex(bytes),
+        bytes: bytes.length,
+        format: "standin-shape-runtime.v2",
+        rules: source.rules,
+        preset: "BASE",
+      };
+      return { c, a };
+    };
+    const good = ssr2({ rules: source.rules, source: { blendSha256: source.blendSha256, controllerSha256: source.controllerSha256 } });
+    const ok = asset(good);
+    await writeFile(ok.a.shapeRuntime!.path, good);
+    assert.equal(parseCatalog(ok.c).assets.length, 1);
+    assert.deepEqual(await readShapeRuntime(ok.a), good);
+    const other = ssr2({ rules: source.rules, source: { blendSha256: "9".repeat(64), controllerSha256: source.controllerSha256 } });
+    const bad = asset(other);
+    await writeFile(bad.a.shapeRuntime!.path, other);
+    await assert.rejects(readShapeRuntime(bad.a), /source mismatch/);
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
+});

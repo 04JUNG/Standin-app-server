@@ -291,16 +291,15 @@ function revalidate(
         }
       : value.recommendation;
   // A shaped choice is only valid while its asset still accepts the same controls.
-  const shapeLost =
-    !!value.shape &&
-    !shapeSpec(
-      catalog.assets.find(
-        (a) => a.characterId === value.resolvedBody?.characterId,
-      ),
-    );
+  const asset = catalog.assets.find(
+    (a) => a.characterId === value.resolvedBody?.characterId,
+  );
+  const shapeLost = !!value.shape && !shapeSpec(asset);
   return {
     ...value,
     shape: value.shape ?? null,
+    // Derived, never stored: the source a shaped body must be baked with right now.
+    ...(value.shape ? { shapeSource: asset?.shapeSource ?? null } : {}),
     recommendation,
     resolutionStatus:
       (value.resolvedBody && !eligible(value.resolvedBody, catalog, poses)) ||

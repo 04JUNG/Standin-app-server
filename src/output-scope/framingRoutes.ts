@@ -269,6 +269,7 @@ export function createFramingRoutes(overrides: Partial<typeof defaults> = {}, bo
           ? {
               expectedCharacterSha256: body.resolvedBody.assetSha256,
               shape: body.shape,
+              shapeSource: body.shapeSource,
               expectedPreviewRevision: runtime.previewRevision,
             }
           : {};

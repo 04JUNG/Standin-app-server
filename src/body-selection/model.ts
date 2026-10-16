@@ -1,5 +1,5 @@
 /** Body choices are independent of pose selection. No inference is performed here. */
-import type { BodyShape, ShapeDefault, ShapeSpec } from "./shape.js";
+import type { BodyShape, ShapeDefault, ShapeSource, ShapeSpec } from "./shape.js";
 export interface BodyRef {
   bodyId: string;
   bodyVersion: string;
@@ -20,6 +20,8 @@ export interface BodyAsset extends BodyRef {
   supportedPoseIds: string[];
   /** Operator-declared numeric controls (`body-shape.v1`). Absent = fixed body. */
   shape?: ShapeSpec;
+  /** Authoring source shaped selections of this asset are baked from. Requires `shape`. */
+  shapeSource?: ShapeSource;
   /**
    * Live preview data for the client (`standin-shape-runtime.v1`). Shared by every preset of the
    * same rules; `preset` picks the starting values. Offered only together with `shape`.
@@ -28,7 +30,7 @@ export interface BodyAsset extends BodyRef {
     path: string;
     sha256: string;
     bytes: number;
-    format: "standin-shape-runtime.v1";
+    format: "standin-shape-runtime.v1" | "standin-shape-runtime.v2";
     rules: string;
     preset: string;
   };
@@ -70,6 +72,11 @@ export interface BodySelection {
   manualCharacterId: string | null;
   /** Manual numeric controls on top of `resolvedBody`. Null = the asset as cataloged. */
   shape?: BodyShape | null;
+  /**
+   * Derived on read from the current catalog (never stored): the source the converter must
+   * bake `shape` with. Null when the asset declares none — then the shape cannot render.
+   */
+  shapeSource?: ShapeSource | null;
   recommendation: BodyRecommendation;
   resolvedBody: BodyRef | null;
   resolvedSource:

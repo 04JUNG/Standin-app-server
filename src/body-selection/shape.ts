@@ -31,6 +31,42 @@ export interface BodyShape {
   controls: Record<string, number>;
   shapeSha256: string;
 }
+/**
+ * The authoring source a shaped body is baked from (`standin_body.py` VERSION + file hashes).
+ * The catalog binds it to an asset; the converter must bake with exactly this source and the
+ * live-preview runtime must have been built from it. Any difference fails closed.
+ */
+export interface ShapeSource {
+  rules: string;
+  blendSha256: string;
+  controllerSha256: string;
+}
+export const SHAPE_RULES = /^[a-z0-9][a-z0-9.-]{0,63}$/;
+const SHA256 = /^[a-f0-9]{64}$/;
+export function validShapeSource(v: unknown): v is ShapeSource {
+  const s = v as ShapeSource | null;
+  return (
+    !!s &&
+    typeof s === "object" &&
+    Object.keys(s).length === 3 &&
+    typeof s.rules === "string" &&
+    SHAPE_RULES.test(s.rules) &&
+    typeof s.blendSha256 === "string" &&
+    SHA256.test(s.blendSha256) &&
+    typeof s.controllerSha256 === "string" &&
+    SHA256.test(s.controllerSha256)
+  );
+}
+export function sameShapeSource(a: ShapeSource | null | undefined, b: unknown) {
+  const v = b as Partial<ShapeSource> | null | undefined;
+  return (
+    !!a &&
+    !!v &&
+    v.rules === a.rules &&
+    v.blendSha256 === a.blendSha256 &&
+    v.controllerSha256 === a.controllerSha256
+  );
+}
 export interface ShapeDefault {
   characterId: string;
   controls: Record<string, number>;
@@ -72,6 +108,8 @@ export function validShapeSpec(spec: unknown): spec is ShapeSpec {
       !(c.step > 0) ||
       c.default < c.min ||
       c.default > c.max ||
+      // A default off its own grid would make every request for this body invalid.
+      !onGrid(c, c.default) ||
       (c.label !== undefined &&
         (typeof c.label !== "string" || c.label.length < 1 || c.label.length > 24))
     )
@@ -84,6 +122,11 @@ export function validShapeSpec(spec: unknown): spec is ShapeSpec {
 /** Shape editing is offered only when the flag is on and the asset declares a spec. */
 export function shapeSpec(asset: BodyAsset | undefined): ShapeSpec | null {
   return config.bodyShapeEditEnabled && asset?.shape ? asset.shape : null;
+}
+
+function onGrid(c: ShapeControl, v: number) {
+  const n = (v - c.min) / c.step;
+  return Math.abs(n - Math.round(n)) <= 1e-5;
 }
 
 /** Stable precision: values are snapped to the declared step before hashing. */
@@ -192,9 +235,16 @@ export function shapeEditable(catalog: BodyCatalog) {
 }
 
 /**
- * The shape-bake feature is opt-in. Rendering the plain asset for a
- * shaped selection would show and save a body the user did not choose.
+ * The shape-bake feature is opt-in. Rendering the plain asset for a shaped selection would
+ * show and save a body the user did not choose, so a shaped selection renders only when
+ * baking is on **and** its asset names the authoring source the converter must bake with.
  */
-export function shapeRenderable(selection: { shape?: BodyShape | null }) {
-  return !selection.shape || config.bodyShapeBakeEnabled;
+export function shapeRenderable(selection: {
+  shape?: BodyShape | null;
+  shapeSource?: ShapeSource | null;
+}) {
+  return (
+    !selection.shape ||
+    (config.bodyShapeBakeEnabled && validShapeSource(selection.shapeSource))
+  );
 }

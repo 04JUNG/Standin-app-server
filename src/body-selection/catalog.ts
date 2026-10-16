@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { config } from "../config.js";
 import type { BodyCatalog } from "./model.js";
-import { validShapeSpec } from "./shape.js";
+import { validShapeSource, validShapeSpec } from "./shape.js";
 import { validShapeRuntime } from "./shapeRuntime.js";
 export const emptyCatalog = (): BodyCatalog => ({
   version: "unavailable",
@@ -52,6 +52,17 @@ export function parseCatalog(value: unknown): BodyCatalog {
       throw new Error("invalid shape spec");
     if (a.shapeRuntime !== undefined && !validShapeRuntime(a.shapeRuntime, a.shape))
       throw new Error("invalid shape runtime");
+    if (
+      a.shapeSource !== undefined &&
+      (a.shape === undefined || !validShapeSource(a.shapeSource))
+    )
+      throw new Error("invalid shape source");
+    // The live preview must come from the same controller the converter bakes with.
+    if (
+      a.shapeRuntime?.format === "standin-shape-runtime.v2" &&
+      a.shapeRuntime.rules !== a.shapeSource?.rules
+    )
+      throw new Error("shape runtime does not match shape source");
     if (
       a.displayName !== undefined &&
       (typeof a.displayName !== "string" ||

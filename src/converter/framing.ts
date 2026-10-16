@@ -1,5 +1,5 @@
 /** Paired FBX + PNG from the same final artifact. No pose inference lives here. */
-import type { BodyShape } from "../body-selection/shape.js";
+import { sameShapeSource, type BodyShape, type ShapeSource } from "../body-selection/shape.js";
 import { config } from "../config.js";
 import {
   ConverterError,
@@ -23,6 +23,8 @@ export interface FramedArtifact {
 }
 export interface FramedInput {
   shape?: BodyShape | null;
+  /** Required with `shape`: the converter must bake from exactly this authoring source. */
+  shapeSource?: ShapeSource | null;
   bvhBytes: Uint8Array;
   characterId: string;
   scope: BodyScope;
@@ -66,6 +68,19 @@ async function boundedJson(
     reader.releaseLock();
   }
 }
+/** The converter's own lineage must name the source the catalog promised. */
+function bakedFrom(lineage: unknown, source: ShapeSource | null | undefined) {
+  const v = lineage as Record<string, unknown> | null;
+  return (
+    !!v &&
+    typeof v === "object" &&
+    sameShapeSource(source, {
+      rules: v.rules,
+      blendSha256: v.blend_sha256,
+      controllerSha256: v.controller_sha256,
+    })
+  );
+}
 export async function convertFramed(
   input: FramedInput,
   overrides: Partial<ConverterDeps> = {},
@@ -76,6 +91,8 @@ export async function convertFramed(
   for (const value of [input.expectedCharacterSha256, input.expectedPreviewRevision])
     if (value !== undefined && !/^[a-f0-9]{64}$/.test(value))
       throw new ConverterError("CONVERTER_INTEGRITY", "invalid expected asset lineage");
+  if (input.shape && !input.shapeSource)
+    throw new ConverterError("CONVERTER_INTEGRITY", "shaped body without an approved source");
   const digest = sha256Hex(input.bvhBytes);
   const body = new FormData();
   body.set(
@@ -84,7 +101,10 @@ export async function convertFramed(
     "final.bvh",
   );
   body.set("character_id", input.characterId);
-  if (input.shape) body.set("shape", JSON.stringify(input.shape));
+  if (input.shape) {
+    body.set("shape", JSON.stringify(input.shape));
+    body.set("expected_shape_source", JSON.stringify(input.shapeSource));
+  }
   body.set("output_scope", input.scope);
   body.set("preview_view", "front");
   if (input.previewFormat) body.set("preview_format", input.previewFormat);
@@ -99,7 +119,11 @@ export async function convertFramed(
       method: "POST",
       body,
       signal: AbortSignal.timeout(
-        Math.max(deps.timeoutMs, input.cameraRotation ? 300_000 : 0),
+        Math.max(
+          deps.timeoutMs,
+          input.cameraRotation ? 300_000 : 0,
+          input.shape ? config.converterShapeTimeoutMs : 0,
+        ),
       ),
     });
   } catch (error) {
@@ -144,6 +168,7 @@ export async function convertFramed(
       (input.expectedCharacterSha256 !== undefined && value.character_sha256 !== input.expectedCharacterSha256) ||
       (input.expectedPreviewRevision !== undefined && value.preview_revision !== input.expectedPreviewRevision) ||
       (input.shape != null && value.shape_sha256 !== input.shape.shapeSha256) ||
+      (input.shape != null && !bakedFrom(value.shape_bake, input.shapeSource)) ||
       value.solver_version !== EXPECTED_SOLVER_VERSION ||
       value.framing_version !== FRAMING_VERSION ||
       value.output_scope !== input.scope ||

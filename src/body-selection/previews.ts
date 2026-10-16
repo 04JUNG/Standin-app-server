@@ -143,6 +143,7 @@ export async function bodyPreviewManifest(
         selection.selectionRevision,
         body,
         selection.shape ?? null,
+        selection.shapeSource ?? null,
         "full",
         runtime,
         candidates,
@@ -157,6 +158,7 @@ export async function bodyPreviewManifest(
     selectionRevision: selection.selectionRevision,
     resolvedBody: body,
     shape: selection.shape ?? null,
+    shapeSource: selection.shapeSource ?? null,
     renderKey,
     outputScope: "full" as const,
     // Manifest readiness is not successful rendering; bytes are fetched on demand.
@@ -305,6 +307,7 @@ export function createBodyPreviewRoutes(
           bvhBytes,
           characterId: manifest.resolvedBody.characterId,
           shape: manifest.shape,
+          shapeSource: manifest.shapeSource,
           scope: "full",
           cameraRotation: candidate.camera.rotation,
           expectedCharacterSha256: manifest.resolvedBody.assetSha256,

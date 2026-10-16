@@ -88,6 +88,11 @@ export const config = {
    */
   converterTimeoutMs: Number(process.env.CONVERTER_TIMEOUT_MS ?? 35_000),
   /**
+   * 수치 체형 굽기 호출 상한. converter의 `CONVERTER_SHAPE_TIMEOUT_SECONDS`(기본 300초)보다 커야 한다.
+   * 굽기는 원본 .blend를 두 번 열고 접촉 보정을 돌려 한 번에 30~110초(2 vCPU 실측) 걸린다.
+   */
+  converterShapeTimeoutMs: Number(process.env.CONVERTER_SHAPE_TIMEOUT_MS ?? 320_000),
+  /**
    * **기본** 캐릭터. 클라이언트가 `characterId`를 보내지 않으면 이 값으로 변환한다(ADR-013).
    *
    * 목록은 `GET /v1/models`가 converter `GET /characters`를 프록시해 노출하고, 표현(한국어
