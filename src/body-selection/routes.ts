@@ -33,7 +33,20 @@ const id = (v: unknown): v is string =>
 export function parsePreferenceChange(raw: unknown): PreferenceChange {
   const v = obj(raw);
   mutation(v);
-  only(v, ["mode", "defaultCharacterId", "expectedRevision", "mutationId"]);
+  only(v, [
+    "mode",
+    "defaultCharacterId",
+    "shapeDefault",
+    "expectedRevision",
+    "mutationId",
+  ]);
+  // Contents are checked against the catalog in the store; only the envelope here.
+  if (
+    "shapeDefault" in v &&
+    v.shapeDefault !== null &&
+    (typeof v.shapeDefault !== "object" || Array.isArray(v.shapeDefault))
+  )
+    throw new BodyError("INVALID_INPUT", 400);
   if (
     !["auto", "fixed_default"].includes(String(v.mode)) ||
     !(v.defaultCharacterId === null || id(v.defaultCharacterId)) ||
@@ -45,12 +58,26 @@ export function parsePreferenceChange(raw: unknown): PreferenceChange {
 export function parseSelectionChange(raw: unknown): SelectionChange {
   const v = obj(raw);
   mutation(v);
-  only(v, ["intent", "characterId", "expectedRevision", "mutationId"]);
+  only(v, ["intent", "characterId", "shape", "expectedRevision", "mutationId"]);
   if (
     !["inherit", "auto", "manual"].includes(String(v.intent)) ||
     (v.intent === "manual" ? !id(v.characterId) : "characterId" in v)
   )
     throw new BodyError("INVALID_INPUT", 400);
+  if ("shape" in v) {
+    const shape = v.shape as Record<string, unknown> | null;
+    if (
+      v.intent !== "manual" ||
+      !shape ||
+      typeof shape !== "object" ||
+      Array.isArray(shape) ||
+      Object.keys(shape).some((k) => k !== "controls") ||
+      !shape.controls ||
+      typeof shape.controls !== "object" ||
+      Array.isArray(shape.controls)
+    )
+      throw new BodyError("INVALID_INPUT", 400);
+  }
   return v as unknown as SelectionChange;
 }
 function base(enabled: () => boolean, paths: string[] = ["*"]) {

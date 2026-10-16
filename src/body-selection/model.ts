@@ -1,4 +1,5 @@
 /** Body choices are independent of pose selection. No inference is performed here. */
+import type { BodyShape, ShapeDefault, ShapeSpec } from "./shape.js";
 export interface BodyRef {
   bodyId: string;
   bodyVersion: string;
@@ -17,6 +18,20 @@ export interface BodyAsset extends BodyRef {
     framing: "body-comparison.v1";
   };
   supportedPoseIds: string[];
+  /** Operator-declared numeric controls (`body-shape.v1`). Absent = fixed body. */
+  shape?: ShapeSpec;
+  /**
+   * Live preview data for the client (`standin-shape-runtime.v1`). Shared by every preset of the
+   * same rules; `preset` picks the starting values. Offered only together with `shape`.
+   */
+  shapeRuntime?: {
+    path: string;
+    sha256: string;
+    bytes: number;
+    format: "standin-shape-runtime.v1";
+    rules: string;
+    preset: string;
+  };
 }
 export interface BodyCatalog {
   version: string;
@@ -28,6 +43,8 @@ export interface BodyPreferences {
   scope: "installation";
   mode: "auto" | "fixed_default";
   defaultCharacterId: string | null;
+  /** "내 기본값": saved controls for one shape-capable character. Optional for old rows. */
+  shapeDefault?: ShapeDefault | null;
   revision: number;
 }
 export interface BodyPolicy {
@@ -51,6 +68,8 @@ export interface BodySelection {
   personIndex: number;
   intent: BodyIntent;
   manualCharacterId: string | null;
+  /** Manual numeric controls on top of `resolvedBody`. Null = the asset as cataloged. */
+  shape?: BodyShape | null;
   recommendation: BodyRecommendation;
   resolvedBody: BodyRef | null;
   resolvedSource:
@@ -119,6 +138,7 @@ export function resolveBody(
   intent: BodyIntent = "inherit",
   manual: BodyRef | null = null,
   revision = 0,
+  shape: BodyShape | null = null,
 ): BodySelection {
   const state: BodySelection = {
     schemaVersion: "body-selection.v1",
@@ -126,6 +146,7 @@ export function resolveBody(
     intent,
     manualCharacterId:
       intent === "manual" ? (manual?.characterId ?? null) : null,
+    shape: intent === "manual" ? shape : null,
     recommendation,
     resolvedBody: null,
     resolvedSource: null,

@@ -20,6 +20,7 @@ import {
   type PreviewRuntime,
 } from "../converter/previewRuntime.js";
 import { bodyRef, type BodyRef } from "./model.js";
+import { shapeRenderable } from "./shape.js";
 import { BodyError, bodyStore } from "./store.js";
 
 export const BODY_PREVIEW_SCHEMA = "body-previews.v1";
@@ -110,6 +111,8 @@ export async function bodyPreviewManifest(
         : "BODY_UNAVAILABLE",
       409,
     );
+  if (!shapeRenderable(selection))
+    throw new BodyError("BODY_SHAPE_RENDER_UNSUPPORTED", 409);
   const body = bodyRef(selection.resolvedBody);
   if ((await deps.checkCharacter(body.characterId)) !== "ok")
     throw new BodyError("BODY_UNAVAILABLE", 409);

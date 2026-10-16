@@ -1,3 +1,4 @@
+import { shapeRenderable } from "../body-selection/shape.js";
 import { bodyUxAvailable } from "../body-selection/availability.js";
 import { bodyStore, BodyError } from "../body-selection/store.js";
 import { sameBody } from "../body-selection/model.js";
@@ -163,6 +164,12 @@ export function createFramingRoutes(overrides: Partial<typeof defaults> = {}, bo
           409,
           "BODY_PREVIEW_STALE",
           "체형이 변경되었습니다. 다시 확인해 주세요.",
+        );
+      if (bodyMode && body && !shapeRenderable(body))
+        return fail(
+          409,
+          "BODY_SHAPE_RENDER_UNSUPPORTED",
+          "조절한 체형은 아직 저장할 수 없습니다. 기본 체형으로 되돌린 뒤 다시 시도해 주세요.",
         );
       if (bodyMode && !validCamera(candidate.camera))
         return fail(

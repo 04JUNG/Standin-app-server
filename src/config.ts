@@ -9,6 +9,12 @@ export const config = {
   bodyUxEnabled: env("BODY_UX_ENABLED", "false") === "true",
   bodySelectionEnabled: env("BODY_SELECTION_ENABLED", "false") === "true",
   bodyCatalogPath: env("BODY_CATALOG_PATH", "config/body-models.json"),
+  /**
+   * Numeric body controls (`body-shape.v1`). Even when on, only assets whose catalog
+   * entry declares `shape` are editable, and shaped selections cannot render until the
+   * converter accepts controls.
+   */
+  bodyShapeEditEnabled: env("BODY_SHAPE_EDIT_ENABLED", "false") === "true",
   port: Number(process.env.PORT ?? 8080),
   // BFF 공개 URL(OAuth 콜백·이메일 인증 링크 구성용)
   publicUrl: env("PUBLIC_URL", "http://localhost:8080"),
