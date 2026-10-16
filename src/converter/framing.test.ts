@@ -260,3 +260,18 @@ test("current converter framing works for health and paired artifacts; old/unkno
     await assert.rejects(convertFramed(input, deps({ ...payload(), framing_version })), { code: "CONVERTER_INTEGRITY" });
   }
 });
+
+test("requested hands are transmitted and mismatched bake receipts cannot be exported", async () => {
+  const hands = { left: "fist", right: "open", library_version: "hand-library-v1", library_sha256: "a".repeat(64), revision: 1 };
+  const receipt = { left: "fist", right: "open", library_version: "hand-library-v1", version: "hand-bake-v1" };
+  const overrides = deps({ ...payload(), hands: receipt });
+  const fetcher = overrides.fetch;
+  overrides.fetch = (async (url, init) => {
+    assert.equal((init!.body as FormData).get("hand_left"), "fist");
+    assert.equal((init!.body as FormData).get("hand_right"), "open");
+    return fetcher(url, init);
+  }) as typeof fetch;
+  await convertFramed({ ...input, hands }, overrides);
+  for (const bad of [null, { ...receipt, left: "relaxed" }, { ...receipt, library_version: "old" }, { ...receipt, version: "unknown" }])
+    await assert.rejects(convertFramed({ ...input, hands }, deps({ ...payload(), hands: bad })), { code: "CONVERTER_INTEGRITY" });
+});

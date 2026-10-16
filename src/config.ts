@@ -6,6 +6,10 @@ function env(key: string, def = ""): string {
 }
 
 export const config = {
+  handSelectionEnabled: env("HAND_SELECTION_ENABLED", "false") === "true",
+  semanticSearchEnabled: env("SEMANTIC_SEARCH_ENABLED", "false") === "true",
+  semanticSearchPerMinute: Math.max(1, Number(env("SEMANTIC_SEARCH_PER_MINUTE", "10")) || 10),
+  semanticSearchTimeoutMs: Math.max(1000, Number(env("SEMANTIC_SEARCH_TIMEOUT_MS", "30000")) || 30000),
   bodyUxEnabled: env("BODY_UX_ENABLED", "false") === "true",
   bodySelectionEnabled: env("BODY_SELECTION_ENABLED", "false") === "true",
   bodyCatalogPath: env("BODY_CATALOG_PATH", "config/body-models.json"),

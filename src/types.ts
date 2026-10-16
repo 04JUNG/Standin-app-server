@@ -70,6 +70,8 @@ export interface PoseCandidate {
   reviewRequired?: boolean;
   notExactMatch?: boolean;
   searchCamera?: import("./routed-search.js").SearchPreviewCamera;
+  semantic?: { familyId: string; alternate: boolean; description: string; near?: boolean };
+  sourceBvhSha256?: string;
   camera?: CandidateCamera;
   id: string; // unique exposed candidate id (pose + view)
   poseId: string;
@@ -88,7 +90,9 @@ export interface PoseCandidate {
 
 export interface AnalysisResult {
   jobId: string;
-  image: { width: number; height: number };
+  source?: "image" | "semantic";
+  semantic?: { query: string; index: Record<string, string> };
+  image: { width: number; height: number } | null;
   inferenceMetadata: {
     deploymentVersion: string;
     vlmProvider: string;
@@ -110,6 +114,7 @@ export interface AnalysisResult {
    * 추론 endpoint가 살아 있어도 BFF flag가 꺼져 있으면 여기서 false가 나간다.
    */
   capabilities: {
+    handSelection?: boolean;
     bodySelection?: boolean;
     bodyRecommendation?: boolean;
     bodyPreviews?: boolean;
@@ -140,6 +145,8 @@ export type ExportFormat = "bvh" | "fbx";
 export interface AnalysisPerson {
   posePresentation?: import("./pose-presentation.js").PosePresentation;
   routedSearch?: import("./routed-search.js").RoutedSearch;
+  hands?: import("./hands/model.js").PersonHands;
+  handSelection?: import("./hands/model.js").HandSelection;
   bodyRecommendation?: BodyRecommendation;
   bodySelection?: BodySelection;
   bodyPreviewManifestUrl?: string;

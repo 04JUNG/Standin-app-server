@@ -77,7 +77,7 @@ const CONCURRENCY_RETRY_SECONDS = 10;
 
 export interface JobInput {
   installationId: string;
-  source: "capture" | "file" | "clipboard";
+  source: "capture" | "file" | "clipboard" | "semantic";
   mime: string;
   size: number;
   width: number | null;
@@ -97,7 +97,7 @@ async function insertJob(
     // 형식을 바꾸면 앱의 작업 기록 재진입이 조용히 라이브 분석 경로로 떨어진다.
     id: `job_${randomUUID()}`,
     userId,
-    status: "queued",
+    status: input?.source === "semantic" ? "running" : "queued",
     createdAt: now,
     updatedAt: now,
     result: null,
@@ -129,8 +129,7 @@ async function insertJob(
       input?.height ?? null,
     ],
   );
-  if (config.bodySelectionEnabled && input?.installationId)
-    await captureBodyPolicy(executor, job.id, input.installationId);
+  if (config.bodySelectionEnabled && input?.installationId && input.source !== "semantic") await captureBodyPolicy(executor, job.id, input.installationId);
   return job;
 }
 
@@ -183,7 +182,8 @@ export async function createJobWithLimits(
       ).toISOString();
       const res = await client.query(
         `SELECT count(*)::int AS running FROM jobs
-         WHERE installation_id = $1 AND status IN ('queued','running') AND created_at > $2`,
+         WHERE installation_id = $1 AND status IN ('queued','running') AND created_at > $2
+           AND (source IS NULL OR source <> 'semantic')`,
         [input.installationId, cutoff],
       );
       const running = (res.rows[0] as { running: number }).running;
@@ -598,6 +598,7 @@ export async function persistAnalysisRecords(
   refineContexts: RefineContext[] = [],
   signals: PersonSignals[] = [],
   cutSummary: CutSummary | null = null,
+  complete = false,
 ): Promise<void> {
   const contextByPerson = new Map(
     refineContexts.map((ctx) => [ctx.personIndex, ctx]),
@@ -694,7 +695,11 @@ export async function persistAnalysisRecords(
         );
       }
     }
-    await initializeBodySelections(client, jobId, result);
+    if (result.source !== "semantic") await initializeBodySelections(client, jobId, result);
+    if (complete) await client.query(
+      "UPDATE jobs SET status='completed', result_json=$2, updated_at=$3, completed_at=$3 WHERE id=$1",
+      [jobId, JSON.stringify(result), new Date().toISOString()],
+    );
     await client.query(
       `UPDATE jobs
        SET inference_metadata_json = $2, input_width = COALESCE(input_width, $3),
@@ -703,10 +708,15 @@ export async function persistAnalysisRecords(
       [
         jobId,
         JSON.stringify(result.inferenceMetadata),
-        result.image.width,
-        result.image.height,
+        result.image?.width ?? null,
+        result.image?.height ?? null,
         cutSummary ? JSON.stringify(cutSummary) : null,
       ],
     );
   });
+}
+
+/** Text search has its own rate counter and never enters the image worker/quotas. */
+export async function createSemanticJob(installationId: string, userId: string | null): Promise<Job> {
+  return createJob(userId, null, { installationId, source: "semantic", mime: "application/json", size: 0, width: null, height: null });
 }

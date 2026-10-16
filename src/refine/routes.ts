@@ -93,7 +93,7 @@ export function createRefineRoutes(overrides: Partial<typeof defaults> = {}) {
     const selected = owned.result?.candidatesByPerson
       .find((p) => p.personIndex === personIndex)
       ?.candidates.find((p) => p.id === candidateId);
-    if (restrictedCandidate(selected) || selected?.refineAllowed === false)
+    if (owned.result?.source === "semantic" || restrictedCandidate(selected) || selected?.refineAllowed === false)
       return c.json(
         errorEnvelope(
           "CANDIDATE_REFINE_FORBIDDEN",

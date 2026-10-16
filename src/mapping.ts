@@ -1,6 +1,7 @@
 // 계약 번역 = BFF가 소유하는 책임.
 //  - 추론의 원시 distance → 클라 UI 라벨(matchLevel)
 //  - 추론의 {detail} → 클라 오류봉투 {error:{code,...}}
+import { readHands } from "./hands/model.js";
 import { isBodyScope, resolveOutputScope } from "./output-scope/model.js";
 import {
   mapPosePresentation,
@@ -115,6 +116,7 @@ function mapPerson(p: UpstreamPerson): AnalysisPerson {
   const candidateCount = p.candidates.length;
   return {
     personIndex: p.index,
+    ...(p.hands !== undefined ? { hands: readHands(p.hands) } : {}),
     outputScope: resolveOutputScope({
       detected: isBodyScope(p.output_scope?.detected)
         ? p.output_scope.detected

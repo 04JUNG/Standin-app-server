@@ -109,6 +109,12 @@ poseRoutes.get("/:id/export", async (c) => {
     );
   }
 
+  if (format === "fbx") {
+    const job = await getOwnedJob(jobId, installationId);
+    if (job?.result?.candidatesByPerson.find((p) => p.personIndex === personIndex)?.handSelection)
+      return c.json(errorEnvelope("HAND_REVIEW_REQUIRED", "손이 적용된 최종 미리보기를 확인한 뒤 저장해 주세요.", c.get("requestId")), 409);
+  }
+
   // FBX가 꺼진 배포에서 fbx 요청이 오면 조용히 BVH로 바꾸지 않는다. 사용자가 고른 포맷과
   // 저장된 파일이 달라지면 클립스튜디오에서 열리지 않는 이유를 알 방법이 없다.
   if (format === "fbx" && !converterEnabled()) {
@@ -225,6 +231,12 @@ poseRoutes.get("/:id/export", async (c) => {
     finalBvh = new Uint8Array(await upstream.arrayBuffer());
   }
 
+  const job = await getOwnedJob(jobId, installationId);
+  const exposed = job?.result?.candidatesByPerson.find((p) => p.personIndex === personIndex)?.candidates.find((p) => p.id === candidateId && p.poseId === poseId);
+  if (!exposed || (exposed.sourceBvhSha256 && (artifact.variant !== "base" || sha256Hex(finalBvh) !== exposed.sourceBvhSha256))) {
+    await failed("POSE_UNAVAILABLE");
+    return c.json(errorEnvelope("POSE_UNAVAILABLE", "포즈가 변경되었습니다. 다시 검색해 주세요.", c.get("requestId")), 409);
+  }
   if (format === "bvh") {
     await recordExport({
       installationId,
@@ -241,7 +253,6 @@ poseRoutes.get("/:id/export", async (c) => {
 
   // ── FBX: 확정한 바이트 하나만 converter로 보낸다 ──────────────────────────
   const finalBvhSha256 = sha256Hex(finalBvh);
-  const job = await getOwnedJob(jobId, installationId);
   const candidate = job?.result?.candidatesByPerson.find(p => p.personIndex === personIndex)?.candidates.find(p => p.id === candidateId && p.poseId === poseId);
   if (!candidate) return c.json(errorEnvelope("INVALID_EXPORT", "선택된 후보가 아닙니다.", c.get("requestId")), 409);
   if (variant === "base" && candidate.camera && finalBvhSha256 !== candidate.camera.source_bvh_sha256)
@@ -286,6 +297,10 @@ poseRoutes.get("/:id/export", async (c) => {
       converterStatus(converterError.code),
     );
   }
+
+  const current = await getOwnedJob(jobId, installationId);
+  if (current?.result?.candidatesByPerson.find((p) => p.personIndex === personIndex)?.handSelection)
+    return c.json(errorEnvelope("HAND_REVIEW_REQUIRED", "손이 적용된 최종 미리보기를 확인한 뒤 저장해 주세요.", c.get("requestId")), 409);
 
   log.info({
     type: "converter",
