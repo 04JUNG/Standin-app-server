@@ -291,7 +291,28 @@ hot path이기 때문이다.
 
 `error`(status=`failed`)에는 `INFERENCE_FAILED`, `ANALYSIS_TIMEOUT`, `ANALYSIS_UNAVAILABLE`, `INPUT_STORAGE_FAILED`, `ABANDONED`가 들어간다.
 `ANALYSIS_TIMEOUT`은 추론이 상한 시간(`ANALYSIS_TIMEOUT_MS`, 기본 120초) 안에 응답하지 않은 경우다 — 추론이 거절한 `INFERENCE_FAILED`와 구분한다.
-`ANALYSIS_UNAVAILABLE`은 상류 VLM이 혼잡해 지금은 분석할 수 없는 경우다(추론이 `503`으로 알려 준다 — Standin-server `docs/API_CONTRACT.md` §7-1).
+`ANALYSIS_UNAVAILABLE`은 상류 VLM 혼잡 또는 구 서버/미지원 본문의 `503`이다.
+Standin-server #86의 `503 detail.code=VLM_UNAVAILABLE`은 `detail.reason`을 아래처럼
+기존 `error` 문자열에 구분 저장한다. 작업 기록의 `errorCode`에도 같은 값이 내려간다.
+
+| 추론 `reason` | Job `error` / 기록 `errorCode` | 앱 안내 |
+|---|---|---|
+| `rate_limited` | `ANALYSIS_RATE_LIMITED` | AI 요청 한도에 일시 도달, 잠시 기다린 뒤 재시도 |
+| `daily_quota_exhausted` | `ANALYSIS_DAILY_QUOTA_EXHAUSTED` | AI 제공 서비스의 일일 한도 소진, 즉시 재시도 버튼 없음 |
+| `upstream_unavailable` | `ANALYSIS_UNAVAILABLE` | 혼잡/일시 이용 불가, 잠시 후 재시도 |
+| `timeout` | `ANALYSIS_UPSTREAM_TIMEOUT` | AI 응답 시간 초과, 잠시 후 재시도 |
+| `upstream_error` | `ANALYSIS_UPSTREAM_ERROR` | AI 서비스 일시 오류, 잠시 후 재시도 |
+
+일일 한도는 사용자 설치의 주간 한도와 다르며 초기화 시각을 추정하지 않는다.
+제공자 원문/메시지는 노출하지 않는다. 비 JSON·누락·미지원 reason은 기존
+`ANALYSIS_UNAVAILABLE`로 유지한다. HTTP 503의 기존 환급 결과는 모든 세부 코드에 보존한다.
+BFF 자체의 `ANALYSIS_TIMEOUT`과 400/500 등의 분류·환급은 바뀌지 않는다.
+이번 변경은 DB 구조와 재시도 실행 정책을 변경하지 않는다. 정확한 `retry_after_seconds`
+영속화·카운트다운은 포함하지 않으며 숫자 대기 시간을 임의로 표시하지 않는다.
+배포는 새 코드를 해석하는 클라이언트를 먼저 배포한 뒤 BFF를 배포한다. 구 클라이언트는
+새 코드를 일반 실패로 표시할 수 있다. 과거 저장된 실패 사유는 소급 재분류하지 않는다.
+
+기존 `ANALYSIS_UNAVAILABLE`은
 **같은 이미지로 잠시 후 다시 시도하면 되는 상태**이므로, 클라는 "다른 이미지로 다시 시도"가 아니라 "잠시 후 다시 시도"를 안내한다.
 `ABANDONED`는 배포·태스크 교체로 실행 중이던 Job이 유실된 경우다 — 러너가 아직 프로세스 내
 fire-and-forget이라 생길 수 있고, 서버가 주기적으로 정리해 무응답 대신 명시적 실패로 만든다.

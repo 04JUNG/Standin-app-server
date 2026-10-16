@@ -489,6 +489,9 @@ export const SCHEMA = `
 
   CREATE INDEX IF NOT EXISTS export_events_job_person ON export_events (job_id, person_index);
   CREATE INDEX IF NOT EXISTS jobs_created_at ON jobs (created_at);
+  -- 시간대별 활동(관리자 대시보드)이 이벤트 시각만으로 범위를 훑는다. 위의
+  -- analytics_events_installation은 설치가 앞이라 이 질의에 쓰이지 않는다.
+  CREATE INDEX IF NOT EXISTS analytics_events_occurred ON analytics_events (occurred_at);
 
   /* 라이브러리 버전별 공백 측정(러프 데이터 선순환 P8). /v1/admin/product의 library 섹션과
      아래 daily_library_aggregates가 함께 읽는다. 인물 1명이 한 행이다.
