@@ -7,6 +7,7 @@ import { ConverterError } from "../converter/client.js";
 import {
   BodyError,
   bodyStore,
+  type CardChange,
   type PreferenceChange,
   type SelectionChange,
 } from "./store.js";
@@ -48,12 +49,56 @@ export function parsePreferenceChange(raw: unknown): PreferenceChange {
   )
     throw new BodyError("INVALID_INPUT", 400);
   if (
-    !["auto", "fixed_default"].includes(String(v.mode)) ||
+    !["auto", "fixed_default", "last_used"].includes(String(v.mode)) ||
     !(v.defaultCharacterId === null || id(v.defaultCharacterId)) ||
     (v.mode === "fixed_default" && !v.defaultCharacterId)
   )
     throw new BodyError("INVALID_INPUT", 400);
   return v as unknown as PreferenceChange;
+}
+const CARD_ID = /^[A-Za-z0-9_-]{1,64}$/;
+/** Envelope only; names, bodies and controls are checked against the catalog in the store. */
+export function parseCardChange(
+  op: CardChange["op"],
+  raw: unknown,
+  cardId?: string,
+): CardChange {
+  const v = obj(raw);
+  mutation(v);
+  const base = {
+    expectedRevision: v.expectedRevision as number,
+    mutationId: v.mutationId as string,
+  };
+  const controls = (c: unknown) =>
+    !!c && typeof c === "object" && !Array.isArray(c);
+  if (op !== "create" && !(cardId && CARD_ID.test(cardId)))
+    throw new BodyError("INVALID_INPUT", 400);
+  if (op === "create") {
+    only(v, ["name", "characterId", "controls", "expectedRevision", "mutationId"]);
+    if (typeof v.name !== "string" || !id(v.characterId) || !controls(v.controls))
+      throw new BodyError("INVALID_INPUT", 400);
+    return { ...base, op, name: v.name, characterId: v.characterId, controls: v.controls };
+  }
+  if (op === "update") {
+    only(v, ["name", "characterId", "controls", "expectedRevision", "mutationId"]);
+    if (
+      ("name" in v && typeof v.name !== "string") ||
+      ("characterId" in v && !id(v.characterId)) ||
+      ("controls" in v && !controls(v.controls)) ||
+      !["name", "characterId", "controls"].some((k) => k in v)
+    )
+      throw new BodyError("INVALID_INPUT", 400);
+    return {
+      ...base,
+      op,
+      cardId: cardId!,
+      ...("name" in v ? { name: v.name as string } : {}),
+      ...("characterId" in v ? { characterId: v.characterId as string } : {}),
+      ...("controls" in v ? { controls: v.controls } : {}),
+    };
+  }
+  only(v, ["expectedRevision", "mutationId"]);
+  return { ...base, op, cardId: cardId! };
 }
 export function parseSelectionChange(raw: unknown): SelectionChange {
   const v = obj(raw);
@@ -132,6 +177,39 @@ export function createBodyPreferenceRoutes(
       await store.savePreferences(
         c.get("installationId")!,
         parsePreferenceChange(await c.req.json().catch(() => null)),
+      ),
+    ),
+  );
+  // 체형 카드("주인공 A"). 응답은 GET과 같은 설정 전체(새 revision 포함).
+  app.post("/cards", async (c) =>
+    c.json(
+      await store.saveCards(
+        c.get("installationId")!,
+        parseCardChange("create", await c.req.json().catch(() => null)),
+      ),
+    ),
+  );
+  app.put("/cards/:cardId", async (c) =>
+    c.json(
+      await store.saveCards(
+        c.get("installationId")!,
+        parseCardChange(
+          "update",
+          await c.req.json().catch(() => null),
+          c.req.param("cardId"),
+        ),
+      ),
+    ),
+  );
+  app.delete("/cards/:cardId", async (c) =>
+    c.json(
+      await store.saveCards(
+        c.get("installationId")!,
+        parseCardChange(
+          "delete",
+          await c.req.json().catch(() => null),
+          c.req.param("cardId"),
+        ),
       ),
     ),
   );

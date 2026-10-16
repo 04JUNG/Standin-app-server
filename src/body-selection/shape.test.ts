@@ -10,7 +10,7 @@ import {
   type BodyCatalog,
   type BodySelection,
 } from "./model.js";
-import { parsePreferenceChange, parseSelectionChange } from "./routes.js";
+import { parseCardChange, parsePreferenceChange, parseSelectionChange } from "./routes.js";
 import {
   bodyShape,
   normalizeControls,
@@ -23,7 +23,11 @@ import {
 import {
   BodyError,
   bodyOptions,
+  cardsOf,
+  CARD_NAME_MAX,
+  MIGRATED_CARD_ID,
   presentPreferences,
+  writeCards,
   writePreferences,
   writeSelection,
   type BodyDb,
@@ -562,4 +566,178 @@ test("a shaped selection reads back with the source its asset is baked from (nev
     assert.equal(bare.shapeSource, null);
     assert.equal(shapeRenderable(bare), false);
   });
+});
+
+test("body cards: create, rename, reshape and delete, each a new revision", async () => {
+  const c = shaped();
+  const initial = resolveBody(
+    0,
+    snapshot(defaultPreferences(), c),
+    { status: "unavailable", body: null, reasonCodes: [] },
+    c,
+    ["pose-a"],
+  );
+  await withFlagAsync(true, async () => {
+    const { db, rows } = memoryDb(initial);
+    const m = (n: number) => ({ expectedRevision: n, mutationId: `card-mutation-${n}` });
+    const created = await writeCards(
+      db,
+      "owner",
+      { ...m(0), op: "create", name: "  주인공 A ", characterId: "character-1", controls: { height: 186 } },
+      deps,
+    );
+    assert.equal(created.revision, 1);
+    const [card] = created.cards!;
+    assert.equal(card!.name, "주인공 A");
+    assert.deepEqual(card!.controls, { height: 186, physique: 0 });
+    assert.match(card!.cardId, /^card_/);
+    // Replays return the stored answer instead of adding a second card.
+    const again = await writeCards(
+      db,
+      "owner",
+      { ...m(0), op: "create", name: "  주인공 A ", characterId: "character-1", controls: { height: 186 } },
+      deps,
+    );
+    assert.equal(again.cards!.length, 1);
+
+    const renamed = await writeCards(db, "owner", { ...m(1), op: "update", cardId: card!.cardId, name: "주인공 B" }, deps);
+    assert.equal(renamed.cards![0]!.name, "주인공 B");
+    assert.deepEqual(renamed.cards![0]!.controls, card!.controls);
+    const reshaped = await writeCards(
+      db,
+      "owner",
+      { ...m(2), op: "update", cardId: card!.cardId, controls: { physique: 0.5 } },
+      deps,
+    );
+    assert.deepEqual(reshaped.cards![0]!.controls, { height: 178, physique: 0.5 });
+    assert.equal(reshaped.cards![0]!.name, "주인공 B");
+
+    for (const [change, code] of [
+      [{ ...m(3), op: "update", cardId: card!.cardId, name: " " }, /INVALID_CARD_NAME/],
+      [{ ...m(3), op: "update", cardId: card!.cardId, name: "가".repeat(CARD_NAME_MAX + 1) }, /INVALID_CARD_NAME/],
+      [{ ...m(3), op: "update", cardId: "card_missing", name: "x" }, /CARD_NOT_FOUND/],
+      // Presets (no shape) are not cards.
+      [{ ...m(3), op: "create", name: "x", characterId: "character-0", controls: {} }, /SHAPE_UNSUPPORTED/],
+      [{ ...m(3), op: "create", name: "x", characterId: "character-1", controls: { height: 999 } }, /INVALID_SHAPE/],
+      [{ expectedRevision: 2, mutationId: "card-stale-1", op: "delete", cardId: card!.cardId }, /BODY_PREFERENCE_CONFLICT/],
+    ] as const)
+      await assert.rejects(writeCards(db, "owner", change as never, deps), code);
+
+    const deleted = await writeCards(db, "owner", { ...m(3), op: "delete", cardId: card!.cardId }, deps);
+    assert.deepEqual(deleted.cards, []);
+    assert.equal((rows.preferences as { revision: number }).revision, 4);
+  });
+});
+
+test("an older 내 기본값 shows up as a card and deleting it clears the old value", async () => {
+  const c = shaped();
+  const legacy = {
+    ...defaultPreferences(),
+    mode: "auto" as const,
+    shapeDefault: { characterId: "character-1", controls: { height: 170, physique: 0 } },
+    revision: 3,
+  };
+  assert.deepEqual(cardsOf(defaultPreferences()), []);
+  assert.equal(cardsOf(legacy)[0]!.cardId, MIGRATED_CARD_ID);
+  assert.equal(cardsOf(legacy)[0]!.controls.height, 170);
+  const initial = resolveBody(0, snapshot(legacy, c), { status: "unavailable", body: null, reasonCodes: [] }, c, ["pose-a"]);
+  await withFlagAsync(true, async () => {
+    const { db, rows } = memoryDb(initial);
+    rows.preferences = legacy;
+    const renamed = await writeCards(
+      db,
+      "owner",
+      { expectedRevision: 3, mutationId: "legacy-card-1", op: "update", cardId: MIGRATED_CARD_ID, name: "주인공" },
+      deps,
+    );
+    assert.deepEqual(renamed.cards!.map((x) => x.name), ["주인공"]);
+    const gone = await writeCards(
+      db,
+      "owner",
+      { expectedRevision: 4, mutationId: "legacy-card-2", op: "delete", cardId: MIGRATED_CARD_ID },
+      deps,
+    );
+    assert.deepEqual(gone.cards, []);
+    assert.equal(gone.shapeDefault, null);
+    assert.deepEqual(cardsOf(gone), []);
+  });
+});
+
+test("a hand-picked body becomes the next job's starting body without a revision bump", async () => {
+  const c = shaped();
+  const rec = { status: "available" as const, body: snapshot(defaultPreferences(), c).catalogDefault, reasonCodes: [] };
+  const initial = resolveBody(0, snapshot(defaultPreferences(), c), rec, c, ["pose-a"]);
+  await withFlagAsync(true, async () => {
+    const { db, rows } = memoryDb(initial);
+    rows.preferences = { ...defaultPreferences(), revision: 7 };
+    const at = new Date("2026-10-16T00:00:00Z");
+    await writeSelection(
+      db,
+      "owner",
+      "job_test",
+      0,
+      {
+        intent: "manual",
+        characterId: "character-1",
+        shape: { controls: { height: 190 } },
+        expectedRevision: 0,
+        mutationId: "last-used-1",
+      },
+      deps,
+      () => at,
+    );
+    const prefs = rows.preferences as ReturnType<typeof defaultPreferences>;
+    assert.equal(prefs.revision, 7);
+    assert.deepEqual(prefs.lastUsed, {
+      characterId: "character-1",
+      controls: { height: 190, physique: 0 },
+      usedAt: at.toISOString(),
+    });
+
+    // Next job: starts with that body and its controls.
+    const next = resolveBody(1, snapshot(prefs, c), rec, c, ["pose-a"]);
+    assert.equal(next.resolvedSource, "last_used");
+    assert.equal(next.resolvedBody?.characterId, "character-1");
+    assert.equal(next.shape?.controls.height, 190);
+    assert.equal(next.intent, "inherit");
+    // Auto mode keeps the recommendation.
+    assert.equal(resolveBody(1, snapshot({ ...prefs, mode: "auto" }, c), rec, c, ["pose-a"]).resolvedSource, "auto_recommendation");
+    // A body these poses cannot use is skipped (here nothing else fits either).
+    assert.equal(resolveBody(1, snapshot(prefs, c), rec, c, ["pose-z"]).resolvedSource, null);
+    // Controls the catalog no longer accepts are dropped, never rendered as the plain asset.
+    const stale = { ...prefs, lastUsed: { ...prefs.lastUsed!, controls: { weight: 1 } } };
+    assert.equal(snapshot(stale, c).lastUsed, null);
+  });
+  // Shape editing off: a shaped last-used body is not offered.
+  const prefs = { ...defaultPreferences(), lastUsed: { characterId: "character-1", controls: { height: 190 }, usedAt: "x" } };
+  assert.equal(snapshot(prefs, c).lastUsed, null);
+  const plain = { ...prefs, lastUsed: { ...prefs.lastUsed, characterId: "character-2", controls: null } };
+  assert.equal(resolveBody(0, snapshot(plain, c), rec, c, ["pose-a"]).resolvedSource, "last_used");
+});
+
+test("card routes accept only their envelopes", () => {
+  const base = { expectedRevision: 0, mutationId: "mutation-1" };
+  assert.equal(
+    parseCardChange("create", { ...base, name: "A", characterId: "character-1", controls: {} }).op,
+    "create",
+  );
+  assert.deepEqual(parseCardChange("update", { ...base, name: "B" }, "card_1"), {
+    ...base,
+    op: "update",
+    cardId: "card_1",
+    name: "B",
+  });
+  assert.equal(parseCardChange("delete", base, "my-default").op, "delete");
+  for (const [op, raw, id] of [
+    ["create", { ...base, name: "A", characterId: "character-1" }, undefined],
+    ["create", { ...base, name: "A", characterId: "character-1", controls: [] }, undefined],
+    ["create", { ...base, name: 1, characterId: "character-1", controls: {} }, undefined],
+    ["update", { ...base }, "card_1"],
+    ["update", { ...base, name: "B", extra: 1 }, "card_1"],
+    ["update", { ...base, name: "B" }, "../x"],
+    ["delete", { ...base, name: "B" }, "card_1"],
+    ["delete", { ...base }, undefined],
+  ] as const)
+    assert.throws(() => parseCardChange(op, raw, id), BodyError);
+  assert.equal(parsePreferenceChange({ ...base, mode: "last_used", defaultCharacterId: null }).mode, "last_used");
 });
