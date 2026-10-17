@@ -114,3 +114,10 @@ Standin-server `codex/body-preview-contract`의 `converter_api/body_preview.py` 
 ## 후속 구현 (2026-10-08)
 
 앱 UI 및 최종 확인·Export 연결은 [BODY_SELECTION_UI_CONTRACT.md](BODY_SELECTION_UI_CONTRACT.md)를 따른다. `bodyPreviews`는 이제 기본 off인 `BODY_UX_ENABLED`로 별도 제어한다. 위의 고정 false 설명을 대체한다.
+
+## 2026-10-17 추론 계약 호환 보완
+
+- 현재 converter의 `skin-regions-v2-shoulder-head`를 `/preview-contract`, `/healthz`, `/convert-framed`에서 동일하게 검증한다. 이전/알 수 없는 프레이밍 버전은 계속 거절한다. 기존 네 출력 범위는 그대로 지원하며 `shoulder_head` UI 추가는 별도 작업이다.
+- 후보 카메라는 v1과 v2를 지원한다. v2는 search-fit reference, 투영/거리, 좌우 라벨, pose/query 연결, COCO17 관측 마스크와 SO(3) 회전을 검증한다. manifest의 pose_id도 후보와 같아야 한다.
+- manifest와 refine 전달 과정에서 v2 투영·마스크·query hash를 보존한다. 현재 체형 미리보기/FBX converter는 회전을 사용하며, 검색의 원근 투영까지 재현한다고 보장하지 않는다.
+- 회귀 검증: 현재 버전의 health/contract/paired artifact, 구 버전 거절, v2 PNG/GLB/검토/내보내기, 잘못된 v2 거절, refine 원본 camera 전달. 기존 v1 카메라 경로도 유지한다.

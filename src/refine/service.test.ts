@@ -563,3 +563,18 @@ test("an explicit null bvh body is treated as a contract violation, not encoded"
   assert.equal(stored.length, 0, '"null" 문자열을 조정본으로 올리면 안 된다');
   assert.equal(saved[0]?.objectKey, null);
 });
+
+test("stored v2 camera is forwarded intact to refine, including its search projection and query binding", async () => {
+  const camera = { version: "candidate-camera-v2" as const, reference: "search-fit" as const,
+    rotation: [[1,0,0],[0,1,0],[0,0,1]], source_bvh_sha256: "a".repeat(64),
+    canonical_yaw: 0, display_view: "front", status: "fitted" as const, fit_error: 0.1,
+    facing_source: "geometry_only" as const, depth_ambiguous: true,
+    projection: "perspective" as const, distance_torso: 4, labels_swapped: true,
+    pose_id: "pose-1", query_sha256: "b".repeat(64), observed_joint_mask: Array(17).fill(true) };
+  const context = deps({ loadCandidate: async () => ({ poseId: "pose-1", view: "front", distance: 0.21, camera }) });
+  const upstream = context.base.refineUpstream;
+  let request: RefineUpstreamRequest | undefined;
+  context.base.refineUpstream = async (input) => { request = input; return upstream(input); };
+  await runRefine(INPUT, context.base);
+  assert.deepEqual(request?.camera, camera);
+});

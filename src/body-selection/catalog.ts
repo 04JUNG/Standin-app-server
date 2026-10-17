@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { config } from "../config.js";
 import type { BodyCatalog } from "./model.js";
+import { validShapeSource, validShapeSpec } from "./shape.js";
+import { validShapeRuntime } from "./shapeRuntime.js";
 export const emptyCatalog = (): BodyCatalog => ({
   version: "unavailable",
   defaultCharacterId: null,
@@ -42,10 +44,27 @@ export function parseCatalog(value: unknown): BodyCatalog {
       (!a.neutralPreview.path.startsWith("/") ||
         !/^[a-f0-9]{64}$/.test(a.neutralPreview.sha256) ||
         a.neutralPreview.characterSha256 !== a.assetSha256 ||
-        a.neutralPreview.pose !== "attention" ||
+        !["t_pose", "attention"].includes(a.neutralPreview.pose) ||
         a.neutralPreview.framing !== "body-comparison.v1")
     )
       throw new Error("invalid neutral preview");
+    if (a.shape !== undefined && !validShapeSpec(a.shape))
+      throw new Error("invalid shape spec");
+    if (a.shapeRuntime !== undefined && !validShapeRuntime(a.shapeRuntime, a.shape))
+      throw new Error("invalid shape runtime");
+    if (
+      a.shapeSource !== undefined &&
+      (a.shape === undefined || !validShapeSource(a.shapeSource))
+    )
+      throw new Error("invalid shape source");
+    // The live preview must come from the same controller the converter bakes with:
+    // a v2 runtime always names its source; any runtime next to a declared source must match it.
+    if (
+      (a.shapeRuntime?.format === "standin-shape-runtime.v2" || a.shapeSource) &&
+      a.shapeRuntime &&
+      a.shapeRuntime.rules !== a.shapeSource?.rules
+    )
+      throw new Error("shape runtime does not match shape source");
     if (
       a.displayName !== undefined &&
       (typeof a.displayName !== "string" ||

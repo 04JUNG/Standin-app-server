@@ -20,6 +20,7 @@ import {
   type PreviewRuntime,
 } from "../converter/previewRuntime.js";
 import { bodyRef, type BodyRef } from "./model.js";
+import { shapeRenderable } from "./shape.js";
 import { BodyError, bodyStore } from "./store.js";
 
 export const BODY_PREVIEW_SCHEMA = "body-previews.v1";
@@ -49,10 +50,28 @@ export function validCamera(
 ): camera is CandidateCamera {
   if (
     !camera ||
-    camera.version !== "candidate-camera-v1" ||
+    !["candidate-camera-v1", "candidate-camera-v2"].includes(camera.version) ||
     !/^[a-f0-9]{64}$/.test(camera.source_bvh_sha256)
   )
     return false;
+  if (camera.version === "candidate-camera-v1") {
+    if (camera.reference !== "pelvis-torso-yaw") return false;
+  } else {
+    const mask = camera.observed_joint_mask;
+    if (
+      camera.reference !== "search-fit" ||
+      !["orthographic", "perspective"].includes(camera.projection) ||
+      (camera.projection === "perspective"
+        ? typeof camera.distance_torso !== "number" || !Number.isFinite(camera.distance_torso) || camera.distance_torso < 0.8
+        : camera.distance_torso !== null) ||
+      typeof camera.labels_swapped !== "boolean" ||
+      typeof camera.pose_id !== "string" || !camera.pose_id ||
+      typeof camera.query_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(camera.query_sha256) ||
+      !Number.isFinite(camera.fit_error) || camera.fit_error < 0 ||
+      !Array.isArray(mask) || mask.length !== 17 || mask.some((v) => typeof v !== "boolean") ||
+      ![5, 6, 11, 12].every((i) => mask[i]) || mask.slice(5).filter(Boolean).length < 6
+    ) return false;
+  }
   const m = camera.rotation;
   if (
     !Array.isArray(m) ||
@@ -110,6 +129,8 @@ export async function bodyPreviewManifest(
         : "BODY_UNAVAILABLE",
       409,
     );
+  if (!shapeRenderable(selection))
+    throw new BodyError("BODY_SHAPE_RENDER_UNSUPPORTED", 409);
   const body = bodyRef(selection.resolvedBody);
   if ((await deps.checkCharacter(body.characterId)) !== "ok")
     throw new BodyError("BODY_UNAVAILABLE", 409);
@@ -117,7 +138,8 @@ export async function bodyPreviewManifest(
     throw new BodyError("BODY_PREVIEW_UNAVAILABLE", 503);
   const ids = new Set<string>();
   const candidates = person.candidates.map((c) => {
-    if (!c.bvhAvailable || !validCamera(c.camera) || ids.has(c.id))
+    if (!c.bvhAvailable || !validCamera(c.camera) ||
+        (c.camera.version === "candidate-camera-v2" && c.camera.pose_id !== c.poseId) || ids.has(c.id))
       throw new BodyError("BODY_PREVIEW_UNSUPPORTED", 409);
     ids.add(c.id);
     return {
@@ -139,6 +161,8 @@ export async function bodyPreviewManifest(
         personIndex,
         selection.selectionRevision,
         body,
+        selection.shape ?? null,
+        selection.shapeSource ?? null,
         "full",
         runtime,
         candidates,
@@ -152,6 +176,8 @@ export async function bodyPreviewManifest(
     personIndex,
     selectionRevision: selection.selectionRevision,
     resolvedBody: body,
+    shape: selection.shape ?? null,
+    shapeSource: selection.shapeSource ?? null,
     renderKey,
     outputScope: "full" as const,
     // Manifest readiness is not successful rendering; bytes are fetched on demand.
@@ -285,6 +311,8 @@ export function createBodyPreviewRoutes(
     if (sha256Hex(bvhBytes) !== candidate.sourceBvhSha256)
       throw new BodyError("POSE_UNAVAILABLE", 409);
     let bytes: Uint8Array;
+    if (format === "glb" && manifest.shape)
+      throw new ConverterError("PREVIEW_NOT_READY", "shaped Top-K uses verified PNG; static library GLB is not valid");
     if (format === "glb")
       bytes = await deps.getModel(
         candidate.sourceBvhSha256,
@@ -297,6 +325,8 @@ export function createBodyPreviewRoutes(
         {
           bvhBytes,
           characterId: manifest.resolvedBody.characterId,
+          shape: manifest.shape,
+          shapeSource: manifest.shapeSource,
           scope: "full",
           cameraRotation: candidate.camera.rotation,
           expectedCharacterSha256: manifest.resolvedBody.assetSha256,

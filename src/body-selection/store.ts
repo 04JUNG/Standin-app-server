@@ -1,5 +1,6 @@
+import { shapeRuntimeMetadata } from "./shapeRuntime.js";
 import { neutralMetadata } from "./neutral.js";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import { pool, transaction } from "../db.js";
 import type { AnalysisResult, AnalysisPerson } from "../types.js";
@@ -7,11 +8,20 @@ import { config } from "../config.js";
 import { checkCharacter } from "../characters/service.js";
 import { loadBodyCatalog } from "./catalog.js";
 import {
+  bodyShape,
+  shapeDefault,
+  shapeEditable,
+  shapeSpec,
+  ShapeInputError,
+  type BodyShape,
+} from "./shape.js";
+import {
   bodyRef,
   defaultPreferences,
   eligible,
   resolveBody,
   snapshot,
+  type BodyCard,
   type BodyCatalog,
   type BodyIntent,
   type BodyPolicy,
@@ -35,10 +45,93 @@ export interface Mutation {
 export interface PreferenceChange extends Mutation {
   mode: BodyPreferences["mode"];
   defaultCharacterId: string | null;
+  /** Absent keeps the saved value; null clears it. */
+  shapeDefault?: unknown;
 }
+/** Card edits. Each bumps the preferences revision like any other preference write. */
+export type CardChange = Mutation &
+  (
+    | {
+        op: "create";
+        name: string;
+        characterId: string;
+        controls: unknown;
+      }
+    | {
+        op: "update";
+        cardId: string;
+        name?: string;
+        characterId?: string;
+        controls?: unknown;
+      }
+    | { op: "delete"; cardId: string }
+  );
+export const CARD_LIMIT = 48;
+export const CARD_NAME_MAX = 24;
+/** Id of the card made from an older "내 기본값" (shapeDefault) when cards are first read. */
+export const MIGRATED_CARD_ID = "my-default";
 export interface SelectionChange extends Mutation {
   intent: BodyIntent;
   characterId?: string;
+  /** Manual only: `{ controls }` for a shape-capable asset. */
+  shape?: { controls: unknown };
+}
+function shapeError(e: unknown): never {
+  if (e instanceof ShapeInputError)
+    throw new BodyError(e.code, e.code === "INVALID_SHAPE" ? 400 : 409);
+  throw e;
+}
+/**
+ * Characters the settings page may edit, with what it needs to show them outside a job:
+ * the name, the neutral preview and the live-preview runtime (same metadata as body-options).
+ */
+export function presentShapeEditable(catalog: BodyCatalog) {
+  const byId = new Map(catalog.assets.map((a) => [a.characterId, a]));
+  return shapeEditable(catalog).map((entry) => {
+    const a = byId.get(entry.characterId)!;
+    return {
+      ...entry,
+      ...(a.displayName ? { displayName: a.displayName } : {}),
+      ...(a.neutralPreview ? { neutralPreview: neutralMetadata(a) } : {}),
+      ...(a.shapeRuntime ? { shapeRuntime: shapeRuntimeMetadata(a) } : {}),
+    };
+  });
+}
+/** Preferences as the client sees them: stored value plus what the catalog allows. */
+export type PresentedPreferences = BodyPreferences & {
+  shapeEditable?: ReturnType<typeof presentShapeEditable>;
+};
+export function presentPreferences(
+  value: BodyPreferences,
+  catalog: BodyCatalog = loadBodyCatalog(),
+): PresentedPreferences {
+  return {
+    ...value,
+    shapeDefault: value.shapeDefault ?? null,
+    cards: cardsOf(value),
+    lastUsed: value.lastUsed ?? null,
+    shapeEditable: presentShapeEditable(catalog),
+  };
+}
+/**
+ * Saved cards. Rows written before cards existed show their "내 기본값" as one card so the
+ * user keeps it; the first card write stores that list for real.
+ */
+export function cardsOf(value: BodyPreferences): BodyCard[] {
+  if (value.cards) return value.cards;
+  const mine = value.shapeDefault;
+  if (!mine) return [];
+  const epoch = new Date(0).toISOString();
+  return [
+    {
+      cardId: MIGRATED_CARD_ID,
+      name: "내 기본 체형",
+      characterId: mine.characterId,
+      controls: mine.controls,
+      createdAt: epoch,
+      updatedAt: epoch,
+    },
+  ];
 }
 export const bodyDeps = { catalog: loadBodyCatalog, check: checkCharacter };
 export type BodyDeps = typeof bodyDeps;
@@ -106,10 +199,13 @@ export async function writePreferences(
     [owner],
   );
   if (!lock.rows.length) throw new BodyError("NOT_FOUND", 404);
+  const keepShape = !("shapeDefault" in change);
   const previous = await replay(db, owner, "preferences", change, [
     change.mode,
     change.defaultCharacterId,
     change.expectedRevision,
+    // Old clients never send the key; their replay hash must stay unchanged.
+    ...(keepShape ? [] : [change.shapeDefault ?? null]),
   ]);
   if (previous.value) return previous.value as BodyPreferences;
   const current = await readPreferences(db, owner);
@@ -126,10 +222,21 @@ export async function writePreferences(
     if ((await deps.check(change.defaultCharacterId)) !== "ok")
       throw new BodyError("BODY_UNAVAILABLE", 409);
   }
+  let nextShape = current.shapeDefault ?? null;
+  if (!keepShape) {
+    try {
+      nextShape = shapeDefault(deps.catalog(), change.shapeDefault ?? null);
+    } catch (e) {
+      shapeError(e);
+    }
+    if (nextShape && (await deps.check(nextShape.characterId)) !== "ok")
+      throw new BodyError("BODY_UNAVAILABLE", 409);
+  }
   const value: BodyPreferences = {
     ...current,
     mode: change.mode,
     defaultCharacterId: change.defaultCharacterId,
+    shapeDefault: nextShape,
     revision: current.revision + 1,
   };
   await db.query(
@@ -139,6 +246,136 @@ export async function writePreferences(
   );
   await remember(db, owner, "preferences", null, change, previous.hash, value);
   return value;
+}
+async function storePreferences(db: BodyDb, owner: string, value: BodyPreferences) {
+  await db.query(
+    `INSERT INTO body_preferences (installation_id,value) VALUES ($1,$2)
+    ON CONFLICT (installation_id) DO UPDATE SET value=EXCLUDED.value`,
+    [owner, JSON.stringify(value)],
+  );
+}
+function cardName(raw: unknown) {
+  const name = typeof raw === "string" ? raw.trim() : "";
+  if (!name || [...name].length > CARD_NAME_MAX)
+    throw new BodyError("INVALID_CARD_NAME", 400);
+  return name;
+}
+/** A card always carries controls for a shape-capable body (same rule as "내 기본값"). */
+async function cardBody(characterId: string, controls: unknown, deps: BodyDeps) {
+  let body;
+  try {
+    body = shapeDefault(deps.catalog(), { characterId, controls });
+  } catch (e) {
+    shapeError(e);
+  }
+  if (!body) throw new BodyError("INVALID_SHAPE", 400);
+  if ((await deps.check(body.characterId)) !== "ok")
+    throw new BodyError("BODY_UNAVAILABLE", 409);
+  return body;
+}
+export async function writeCards(
+  db: BodyDb,
+  owner: string,
+  change: CardChange,
+  deps: BodyDeps = bodyDeps,
+  now: () => Date = () => new Date(),
+): Promise<BodyPreferences> {
+  const lock = await db.query(
+    "SELECT id FROM installations WHERE id=$1 FOR UPDATE",
+    [owner],
+  );
+  if (!lock.rows.length) throw new BodyError("NOT_FOUND", 404);
+  const { expectedRevision, mutationId, ...payload } = change;
+  void mutationId;
+  const previous = await replay(db, owner, "preferences", change, [
+    "cards",
+    expectedRevision,
+    payload,
+  ]);
+  if (previous.value) return previous.value as BodyPreferences;
+  const current = await readPreferences(db, owner);
+  expect(current.revision, expectedRevision, "BODY_PREFERENCE_CONFLICT");
+  const cards = cardsOf(current);
+  const at = now().toISOString();
+  const find = (id: string) => {
+    const i = cards.findIndex((c) => c.cardId === id);
+    if (i < 0) throw new BodyError("CARD_NOT_FOUND", 404);
+    return i;
+  };
+  let next: BodyCard[];
+  if (change.op === "create") {
+    if (cards.length >= CARD_LIMIT) throw new BodyError("CARD_LIMIT", 409);
+    const body = await cardBody(change.characterId, change.controls, deps);
+    next = [
+      ...cards,
+      {
+        cardId: "card_" + randomUUID(),
+        name: cardName(change.name),
+        ...body,
+        createdAt: at,
+        updatedAt: at,
+      },
+    ];
+  } else if (change.op === "update") {
+    const i = find(change.cardId);
+    const card = cards[i]!;
+    const reshape = "characterId" in change || "controls" in change;
+    const body = reshape
+      ? await cardBody(
+          change.characterId ?? card.characterId,
+          change.controls ?? card.controls,
+          deps,
+        )
+      : null;
+    next = cards.map((c, j) =>
+      j === i
+        ? {
+            ...c,
+            ...(change.name !== undefined ? { name: cardName(change.name) } : {}),
+            ...(body ?? {}),
+            updatedAt: at,
+          }
+        : c,
+    );
+  } else {
+    const i = find(change.cardId);
+    next = cards.filter((_, j) => j !== i);
+  }
+  const value: BodyPreferences = {
+    ...current,
+    cards: next,
+    // The migrated card *is* the old "내 기본값"; deleting it must not bring it back.
+    ...(change.op === "delete" && change.cardId === MIGRATED_CARD_ID
+      ? { shapeDefault: null }
+      : {}),
+    revision: current.revision + 1,
+  };
+  await storePreferences(db, owner, value);
+  await remember(db, owner, "preferences", null, change, previous.hash, value);
+  return value;
+}
+/**
+ * Remembers a hand-picked body for the next job (`last_used`). Same transaction as the
+ * selection write; it does not bump the preferences revision so an open settings screen
+ * does not get a conflict for something it never edits.
+ */
+async function recordLastUsed(
+  db: BodyDb,
+  owner: string,
+  value: BodySelection,
+  now: () => Date,
+) {
+  if (value.resolvedSource !== "manual" || !value.resolvedBody) return;
+  await db.query("SELECT id FROM installations WHERE id=$1 FOR UPDATE", [owner]);
+  const current = await readPreferences(db, owner);
+  await storePreferences(db, owner, {
+    ...current,
+    lastUsed: {
+      characterId: value.resolvedBody.characterId,
+      controls: value.shape?.controls ?? null,
+      usedAt: now().toISOString(),
+    },
+  });
 }
 /** Capture once, before queue dispatch. Does not contact the converter or run inference. */
 export async function captureBodyPolicy(
@@ -228,11 +465,20 @@ function revalidate(
           reasonCodes: ["body_asset_unavailable"],
         }
       : value.recommendation;
+  // A shaped choice is only valid while its asset still accepts the same controls.
+  const asset = catalog.assets.find(
+    (a) => a.characterId === value.resolvedBody?.characterId,
+  );
+  const shapeLost = !!value.shape && !shapeSpec(asset);
   return {
     ...value,
+    shape: value.shape ?? null,
+    // Derived, never stored: the source a shaped body must be baked with right now.
+    ...(value.shape ? { shapeSource: asset?.shapeSource ?? null } : {}),
     recommendation,
     resolutionStatus:
-      value.resolvedBody && !eligible(value.resolvedBody, catalog, poses)
+      (value.resolvedBody && !eligible(value.resolvedBody, catalog, poses)) ||
+      shapeLost
         ? "unavailable"
         : value.resolutionStatus,
   };
@@ -259,6 +505,7 @@ export async function writeSelection(
   index: number,
   change: SelectionChange,
   deps: BodyDeps = bodyDeps,
+  now: () => Date = () => new Date(),
 ): Promise<BodySelection> {
   const { person, policy } = await ownedPerson(db, owner, jobId, index, true);
   const resource = `${jobId}:${index}`;
@@ -266,6 +513,7 @@ export async function writeSelection(
     change.intent,
     change.characterId ?? null,
     change.expectedRevision,
+    ...(change.shape ? [change.shape] : []),
   ]);
   if (previous.value) return previous.value as BodySelection;
   const catalog = deps.catalog();
@@ -289,6 +537,16 @@ export async function writeSelection(
     throw new BodyError("INVALID_CHARACTER", 400);
   if (manual && !eligible(manual, catalog, poses))
     throw new BodyError("BODY_POSE_UNSUPPORTED", 409);
+  let shape: BodyShape | null = null;
+  if (change.shape) {
+    if (change.intent !== "manual" || !manual)
+      throw new BodyError("INVALID_INPUT", 400);
+    try {
+      shape = bodyShape(manual, change.shape.controls);
+    } catch (e) {
+      shapeError(e);
+    }
+  }
   const value = resolveBody(
     index,
     policy,
@@ -298,6 +556,7 @@ export async function writeSelection(
     change.intent,
     manual ? bodyRef(manual) : null,
     current.selectionRevision + 1,
+    shape,
   );
   if (value.resolutionStatus !== "ready" || !value.resolvedBody)
     throw new BodyError(
@@ -313,6 +572,7 @@ export async function writeSelection(
     [jobId, index, JSON.stringify(value)],
   );
   await remember(db, owner, resource, jobId, change, previous.hash, value);
+  await recordLastUsed(db, owner, value, now);
   return value;
 }
 export async function bodyOptions(
@@ -339,6 +599,10 @@ export async function bodyOptions(
         bodyRef: bodyRef(a),
         ...(a.displayName ? { displayName: a.displayName } : {}),
         ...(a.neutralPreview ? { neutralPreview: neutralMetadata(a) } : {}),
+        ...(shapeSpec(a) ? { shape: shapeSpec(a) } : {}),
+        ...(shapeSpec(a) && a.shapeRuntime
+          ? { shapeRuntime: shapeRuntimeMetadata(a) }
+          : {}),
         selectable: reasons.length === 0,
         reasonCodes: reasons,
       };
@@ -373,9 +637,16 @@ export async function attachBodySelections(
   };
 }
 export const bodyStore = {
-  preferences: (owner: string) => readPreferences(pool, owner),
-  savePreferences: (owner: string, change: PreferenceChange) =>
-    transaction((db) => writePreferences(db, owner, change)),
+  preferences: async (owner: string) =>
+    presentPreferences(await readPreferences(pool, owner)),
+  savePreferences: async (owner: string, change: PreferenceChange) =>
+    presentPreferences(
+      await transaction((db) => writePreferences(db, owner, change)),
+    ),
+  saveCards: async (owner: string, change: CardChange) =>
+    presentPreferences(
+      await transaction((db) => writeCards(db, owner, change)),
+    ),
   selection: (owner: string, job: string, index: number) =>
     readSelection(pool, owner, job, index),
   saveSelection: (

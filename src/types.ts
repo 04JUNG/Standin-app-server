@@ -24,11 +24,9 @@ export type SkeletonSource = "full_image" | "crop_retry" | "none";
 export type CoverageClass = "full" | "reduced" | "sparse" | "upper_only" | "insufficient";
 
 /** Server-owned camera; consumers must not derive it from the legacy search view. */
-export interface CandidateCamera {
-  version: "candidate-camera-v1";
+interface CandidateCameraBase {
   rotation: number[][];
   source_bvh_sha256: string;
-  reference: "pelvis-torso-yaw";
   canonical_yaw: number;
   display_view: string;
   status: "fitted" | "canonical_fallback";
@@ -36,6 +34,20 @@ export interface CandidateCamera {
   facing_source: "person_observation" | "geometry_only";
   depth_ambiguous: boolean;
 }
+
+export type CandidateCamera = CandidateCameraBase & (
+  | { version: "candidate-camera-v1"; reference: "pelvis-torso-yaw" }
+  | {
+      version: "candidate-camera-v2";
+      reference: "search-fit";
+      projection: "orthographic" | "perspective";
+      distance_torso: number | null;
+      labels_swapped: boolean;
+      pose_id: string;
+      query_sha256: string;
+      observed_joint_mask: boolean[];
+    }
+);
 
 export interface PoseCandidate {
   camera?: CandidateCamera;

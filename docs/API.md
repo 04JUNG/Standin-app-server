@@ -557,7 +557,7 @@ POST와 **같은 두 단계 소유권 검사**를 거친다 — job이 이 insta
   - 실패·이탈: `analysis_failed`, `rerun_requested`, `export_completed`, `export_failed`, `capture_failed`
   - 자동 업데이트: `update_check`, `update_installed`, `update_failed`
 - ⚠ **허용 목록에 없는 이름이 배치에 하나라도 섞이면 배치 전체를 `400 INVALID_INPUT`으로 거절한다.** 클라이언트는 4xx를 영구 거절로 보고 그 배치를 버리므로, 같이 실린 정상 이벤트까지 사라진다. **클라이언트에 새 이벤트를 넣기 전에 이 목록을 먼저 배포한다.** 목록에 항목을 더하는 것은 구버전 클라이언트에 영향이 없다.
-- `PUT /v1/analysis/jobs/{jobId}/selections`: `[{personIndex,candidateId}]`를 멱등 저장하며 해당 작업에서 노출된 후보인지 검증한다.
+- `PUT /v1/analysis/jobs/{jobId}/selections`: `[{personIndex,candidateId}]`를 멱등 저장하며 해당 작업에서 노출된 후보인지 검증한다. 요청은 그 작업의 확정 집합을 **대체**한다 — 목록에 없는 인물(사용자가 내보내기를 끈 인물)의 이전 확정은 지운다.
 - `POST /v1/analysis/jobs/{jobId}/feedback`: `good | person_missing | skeleton_wrong | candidates_irrelevant | export_problem | other`만 허용한다.
 
 ---
@@ -1127,7 +1127,7 @@ BVH downloads and final FBX/refined/cropped export contracts are unchanged.
 
 `BODY_SELECTION_ENABLED=true`인 새 작업에서 선택적 body 추천·선택 저장 계약을 제공한다. 기본은 off다.
 
-- GET/PUT `/v1/installations/current/body-preferences`: 설치별 기본 캐릭터와 auto/fixed_default 설정.
+- GET/PUT `/v1/installations/current/body-preferences`: 설치별 기본 캐릭터와 last_used/auto/fixed_default 설정, 체형 카드(아래 "체형 카드").
 - GET/PUT `/v1/analysis/jobs/{jobId}/people/{personIndex}/body-selection`: inherit/manual/auto 선택 저장·조회.
 - GET 같은 인물 경로의 `/body-options`: 적용 가능한 승인 체형 목록.
 - GET result에 person별 bodyRecommendation/bodySelection 추가. 기존 포즈 후보는 유지한다.
@@ -1135,6 +1135,35 @@ BVH downloads and final FBX/refined/cropped export contracts are unchanged.
 - capabilities.bodyPreviews는 false다. 이 단계는 이미지 렌더와 Export 체형 연결 완료를 의미하지 않는다.
 
 요청/응답·오류·승인 manifest·호환 정책의 정본: [체형 선택 저장 설계](BODY_SELECTION_DESIGN.md).
+
+### 체형 수치 조절 (body-shape.v1, 2026-10-14)
+
+`BODY_SHAPE_EDIT_ENABLED=true`이고 승인 manifest의 asset에 `shape`가 선언된 체형만 수치 조절을 연다. 기본은 off이며, 끄면 기존 응답과 같다.
+
+- manifest asset: `shape: { schemaVersion: "body-shape.v1", controls: [{ key, min, max, step, default, label? }], basic? }`. `label`(1–24자)은 화면 이름 — 체형마다 같은 key를 달리 부를 수 있다(예: 여성 `physique`="지방"). `basic`(1–12, 컨트롤 수 이하)은 앞에서부터 기본으로 보일 조절 수, 없으면 5(남성 5개 위3·아래2, 여성 7개 위4·아래3). key는 `^[a-z][a-z0-9_]{0,39}$`, `min < max`, `step > 0`, `default ∈ [min,max]`. 형식이 틀리면 카탈로그 전체를 닫는다.
+- `GET .../body-options`: 조절 가능한 체형에만 `shape`(위 spec)를 싣는다.
+- `PUT .../body-selection`: `intent: "manual"`일 때만 `shape: { controls: { key: number } }`를 받는다. 빠진 key는 default, 모르는 key·범위 밖·step에 맞지 않는 값은 `400 INVALID_SHAPE`, 조절을 선언하지 않은 체형은 `409 SHAPE_UNSUPPORTED`. 모든 값이 default면 `shape: null`로 저장한다(평범한 asset과 같은 렌더 키).
+- `body-selection` 응답: `shape: { schemaVersion, controls, shapeSha256 } | null`. `shapeSha256 = sha256(["body-shape.v1", characterId, assetSha256, sorted controls])`. 체형이 더는 조절을 선언하지 않으면 `resolutionStatus: "unavailable"`.
+- `GET/PUT /v1/installations/current/body-preferences`: `shapeDefault: { characterId, controls } | null`("내 기본값")과 읽기 전용 `shapeEditable: [{ characterId, shape, displayName?, neutralPreview?, shapeRuntime? }]`. `displayName`·`neutralPreview`·`shapeRuntime`은 body-options와 같은 메타데이터로, 작업 밖의 설정 화면이 체형 이름·고정 그림·실시간 3D를 그릴 때 쓴다(서버 경로는 내보내지 않음). PUT에서 `shapeDefault` key를 빼면 저장된 값을 유지한다(구 클라이언트 호환). 클라이언트는 "내 기본값"을 저장할 때 `defaultCharacterId`와 `shapeDefault.characterId`를 같은 체형으로 맞춰 보낸다.
+- `BODY_SHAPE_BAKE_ENABLED=false`(기본)이면 `shape`가 있는 선택은 `body-previews`와 체형 FBX export에서 `409 BODY_SHAPE_RENDER_UNSUPPORTED`로 거절한다 — 조절 전 체형을 조절한 것처럼 그리거나 저장하지 않는다.
+- `BODY_SHAPE_BAKE_ENABLED=true`는 검증된 shape-bake.v2 converter와 일치하는 카탈로그를 배포한 뒤에만 켠다. on에서는 `/convert-framed`에 저장된 shape 전체와 `expected_shape_source`를 전달하고, 응답 `shape_sha256`과 `shape_bake`(rules·blend_sha256·controller_sha256)가 약속한 원본과 같은지 검증한다. 캐시 키에도 shapeSha256과 원본을 포함한다. 수치 체형 호출 상한은 `CONVERTER_SHAPE_TIMEOUT_MS`(기본 320000, converter `CONVERTER_SHAPE_TIMEOUT_SECONDS` 300보다 크게)다 — 굽기 1회 30~110초 실측.
+- **체형 원본 바인딩 (2026-10-16 확정)**: manifest asset에 `shapeSource: { rules, blendSha256, controllerSha256 }`(컨트롤러 `VERSION`과 .blend·`standin_body.py` SHA-256). `shape`가 없는 asset에 선언하거나 형식이 틀리면 카탈로그를 닫는다. 수치 선택은 읽을 때마다 현재 카탈로그에서 `shapeSource`를 붙여 돌려주고(저장하지 않음), 원본이 없으면 굽기가 켜져 있어도 `409 BODY_SHAPE_RENDER_UNSUPPORTED`다. converter가 다른 원본이면 `409 SHAPE_SOURCE_MISMATCH` → BFF `CONVERTER_REJECTED`.
+- 수치 변경 Top-K GLB는 정적 라이브러리 자산을 재사용하지 않고 PNG로 폴백한다. 최종 검토 GLB는 실제 최종 FBX에서 만들어진다.
+- 실시간 체형 미리보기(`standin-shape-runtime.v1`, 2026-10-15 / `v2`, 2026-10-16): manifest asset에 `shapeRuntime: { path, sha256, bytes, format: "standin-shape-runtime.v1" | "standin-shape-runtime.v2", rules, preset }`. v2(표본 자산, 머리 `SSR2`)는 버전에 매이지 않고 머리말에 원본 해시를 담는다 — v2를 선언한 asset은 `shapeSource.rules`가 같아야 하고(아니면 카탈로그를 닫음), 서빙할 때 머리말의 원본이 `shapeSource`와 다르면 404다. `shape`가 없는 asset에 선언하면 카탈로그 전체를 닫는다. `rules`는 `^[a-z0-9][a-z0-9.-]{0,63}$`, `preset`은 `^[A-Z][A-Z0-9_]{0,31}$`, `bytes` ≤ 32 MiB.
+  - `GET .../body-options`: 수치 조절이 열린 체형에만 `shapeRuntime: { url, sha256, bytes, format, rules, preset, source? }`(로컬 경로 없음). `source`는 asset의 `shapeSource`이며, 앱은 자산 머리말의 원본과 다르면 실시간 3D를 끄고 고정 그림을 쓴다. 같은 규칙의 프리셋은 같은 자산을 가리키고 `preset`만 다르다.
+  - `GET /v1/models/:characterId/shape-runtime/:sha256`: 승인된 바이트를 그대로 준다(`application/octet-stream`, `Cache-Control: private, max-age=86400, immutable`). 크기·`SSR1` 머리·sha256이 manifest와 다르거나 체형 편집이 꺼져 있으면 404.
+  - 클라이언트가 sha256·형식·규칙을 다시 검사하고 앱 안에서 계산해 "내 체형" 박스에만 그린다. 서버의 미리보기·FBX(converter)와는 별개다 — 이 자산이 있다고 수치 체형 렌더가 열리지는 않는다(`BODY_SHAPE_BAKE_ENABLED=false`일 때 409 가드 유지).
+
+### 체형 카드 · 마지막 사용 체형 (2026-10-16)
+
+체형 커스텀에서 만든 체형을 이름 붙인 카드("주인공 A")로 저장하고, 새 작업은 마지막으로 직접 고른 체형으로 시작한다. 카드는 설치(installation) 단위로 body-preferences 안에 저장된다.
+
+- `GET .../body-preferences` 응답에 `cards: [{ cardId, name, characterId, controls, createdAt, updatedAt }]`와 `lastUsed: { characterId, controls | null, usedAt } | null`이 붙는다. 카드가 생기기 전 행에 `shapeDefault`("내 기본값")가 있으면 그 값을 `cardId: "my-default"`, 이름 "내 기본 체형"인 카드 한 장으로 보여 준다(첫 카드 쓰기 때 실제로 저장됨). 그 카드를 지우면 `shapeDefault`도 지운다.
+- `POST .../body-preferences/cards` `{ name, characterId, controls, expectedRevision, mutationId }` — 카드 추가. `PUT .../cards/{cardId}` `{ name?, characterId?, controls?, expectedRevision, mutationId }` — 이름 변경·수치 변경(하나 이상). `DELETE .../cards/{cardId}` `{ expectedRevision, mutationId }`. 셋 다 응답은 GET과 같은 설정 전체이고 `revision`이 1 오른다(설정 PUT과 같은 revision·mutationId 규칙, 충돌은 `409 BODY_PREFERENCE_CONFLICT`).
+  - 이름은 앞뒤 공백을 지운 1–24자(`400 INVALID_CARD_NAME`). 카드는 수치 조절이 열린 체형만(`409 SHAPE_UNSUPPORTED`), controls는 `shapeDefault`와 같은 규칙으로 정규화한다(`400 INVALID_SHAPE`). 최대 48장(`409 CARD_LIMIT`), 없는 카드는 `404 CARD_NOT_FOUND`. 카탈로그 프리셋은 카드가 아니다 — 이름을 바꾸거나 지울 수 없다.
+  - 카드의 성별은 따로 저장하지 않는다. `characterId`(기준 체형)의 종류를 따른다.
+- `mode`에 `last_used`가 추가됐고 새 설치의 기본값이다. `PUT .../body-selection`이 `manual`로 성공하면 그 체형과 수치를 `lastUsed`에 적는다(설정 `revision`은 올리지 않는다 — 설정 화면이 건드리지 않는 값이라 충돌을 만들지 않게). 새 작업의 `inherit` 인물은 `lastUsed`가 그 포즈에 쓸 수 있으면 그 체형·수치로 시작하고 `resolvedSource: "last_used"`가 된다. 쓸 수 없거나 수치가 지금 카탈로그 규칙에 맞지 않으면 기존 순서(추천 → 사용자 기본 → 카탈로그 기본)로 내려간다. `auto`·`fixed_default` 행은 이전과 같다.
+  - ⚠ `lastUsed`에 수치가 있으면 그 인물의 선택에도 `shape`가 붙으므로 위 `BODY_SHAPE_RENDER_UNSUPPORTED` 가드가 똑같이 적용된다.
 
 ## 체형 Top-K 미리보기 자산 (2026-10-08, 1~2단계)
 

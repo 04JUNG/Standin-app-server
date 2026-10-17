@@ -1,5 +1,7 @@
 import { loadBodyCatalog } from "../body-selection/catalog.js";
 import { readNeutral } from "../body-selection/neutral.js";
+import { readShapeRuntime } from "../body-selection/shapeRuntime.js";
+import { shapeSpec } from "../body-selection/shape.js";
 import { sha256Hex } from "../converter/client.js";
 import { config } from "../config.js";
 // GET /v1/models — 저장할 체형 목록(Standin-client docs/08 §8-1, ADR-013).
@@ -50,6 +52,33 @@ characterRoutes.get("/", async (c) => {
       );
     }
     throw error;
+  }
+});
+
+// Live body preview data. Content-addressed by sha256, and only while shape editing is on.
+characterRoutes.get("/:characterId/shape-runtime/:sha", async (c) => {
+  const asset = config.bodySelectionEnabled
+    ? loadBodyCatalog().assets.find(
+        (a) => a.characterId === c.req.param("characterId"),
+      )
+    : undefined;
+  if (
+    !asset?.shapeRuntime ||
+    !shapeSpec(asset) ||
+    asset.shapeRuntime.sha256 !== c.req.param("sha")
+  )
+    return c.notFound();
+  try {
+    const bytes = await readShapeRuntime(asset);
+    if (sha256Hex(bytes) !== asset.shapeRuntime.sha256) return c.notFound();
+    return new Response(new Uint8Array(bytes), {
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "Cache-Control": "private, max-age=86400, immutable",
+      },
+    });
+  } catch {
+    return c.notFound();
   }
 });
 
