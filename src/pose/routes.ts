@@ -1,3 +1,5 @@
+import { createRoutedPreviewRoutes } from "../routed-preview.js";
+import { createReleaseGuard } from "../release-policy.js";
 import { createAlignedRoutes } from "../candidate-camera/routes.js";
 import { getOwnedJob } from "../jobs/store.js";
 import { cameraArtifact } from "../candidate-camera/artifacts.js";
@@ -23,6 +25,8 @@ import {
 } from "../converter/client.js";
 
 export const poseRoutes = new Hono<AppEnv>();
+poseRoutes.use("/:id/export", createReleaseGuard());
+poseRoutes.route("/", createRoutedPreviewRoutes());
 poseRoutes.route("/", createFramingRoutes());
 poseRoutes.route("/", createAlignedRoutes());
 

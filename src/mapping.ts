@@ -2,6 +2,7 @@
 //  - 추론의 원시 distance → 클라 UI 라벨(matchLevel)
 //  - 추론의 {detail} → 클라 오류봉투 {error:{code,...}}
 import { isBodyScope, resolveOutputScope } from "./output-scope/model.js";
+import { mapRoutedSearch } from "./routed-search.js";
 import { config } from "./config.js";
 import { converterEnabled } from "./converter/client.js";
 import { mapBodyRecommendations } from "./body-selection/recommendation.js";
@@ -156,6 +157,15 @@ export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
     // BFF는 다른 기준으로 다시 정렬하지 않는다(요구서 §3-1).
     candidatesByPerson: (cut.people ?? []).map((p) => {
       const person = mapPerson(p);
+      const routed = mapRoutedSearch(jobId, p);
+      if (routed) {
+        person.routedSearch = routed.summary;
+        person.candidateCount = routed.candidates.length;
+        person.fallbackMode = routed.candidates.length ? "soft" : "hard";
+        person.confidence = "low";
+        person.refineAllowed = false;
+        person.refinableLimbs = [];
+      }
       if (bodies) person.bodyRecommendation = bodies.get(p.index);
       person.candidateShortfallReason =
         person.candidateCount === 0 && p.quality_reasons?.includes("head_search_unsupported")
@@ -165,7 +175,7 @@ export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
             : cut.route === "core"
               ? "UPSTREAM_FEWER_THAN_REQUESTED"
               : "ANALYSIS_ROUTE_SKIPPED";
-      person.candidates = p.candidates.map((c, i): PoseCandidate => ({
+      person.candidates = routed?.candidates ?? p.candidates.map((c, i): PoseCandidate => ({
         id: `${c.pose_id}::${c.view}`,
         poseId: c.pose_id,
         rank: i + 1,
@@ -185,6 +195,8 @@ export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
         distance: c.distance,
         rerankScore: c.rerank_score,
       }));
+      if (routed) person.candidateShortfallReason = routed.candidates.length
+        ? "ROUTED_REVIEW_ONLY" : `ROUTED_${routed.summary.status.toUpperCase()}`;
       return person;
     }),
   };

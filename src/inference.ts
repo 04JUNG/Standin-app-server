@@ -12,6 +12,9 @@ import { currentContext } from "./requestContext.js";
  * 실패시키는 대신 `mapping.ts`가 low/refine-off 쪽으로 안전하게 해석한다.
  */
 export interface UpstreamPerson {
+  dynamic_search?: unknown;
+  semantic_candidates?: unknown;
+  search_routing?: unknown;
   output_scope?: { detected?: unknown; source?: unknown };
   /** 인물별 action·view(추론 `person_tags`). 공백 분석용이며 공개 응답에는 넣지 않는다. */
   person_tags?: { action?: unknown; view?: unknown; source?: unknown };

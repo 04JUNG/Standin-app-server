@@ -302,6 +302,7 @@ jobsRoutes.get("/:id/result", async (c) => {
     })),
     capabilities: {
       ...(await currentCapabilities()),
+      ...(result.candidatesByPerson.some(p => p.routedSearch) ? { bodyPreviews: false } : {}),
       ...(!result.candidatesByPerson
         .filter((p) => p.candidates.length)
         .every((p) => p.bodySelection)

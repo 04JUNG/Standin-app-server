@@ -50,6 +50,15 @@ export type CandidateCamera = CandidateCameraBase & (
 );
 
 export interface PoseCandidate {
+  source?: "dynamic" | "semantic";
+  rankScore?: number;
+  lookupAllowed?: boolean;
+  refineAllowed?: boolean;
+  releaseAllowed?: boolean;
+  actualMeshValidated?: boolean;
+  reviewRequired?: boolean;
+  notExactMatch?: boolean;
+  searchCamera?: import("./routed-search.js").SearchPreviewCamera;
   camera?: CandidateCamera;
   id: string; // unique exposed candidate id (pose + view)
   poseId: string;
@@ -118,6 +127,7 @@ export interface AnalysisResult {
 export type ExportFormat = "bvh" | "fbx";
 
 export interface AnalysisPerson {
+  routedSearch?: import("./routed-search.js").RoutedSearch;
   bodyRecommendation?: BodyRecommendation;
   bodySelection?: BodySelection;
   bodyPreviewManifestUrl?: string;
