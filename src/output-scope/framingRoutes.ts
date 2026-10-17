@@ -1,3 +1,4 @@
+import { restrictedCandidate } from "../routed-search.js";
 import { shapeRenderable } from "../body-selection/shape.js";
 import { bodyUxAvailable } from "../body-selection/availability.js";
 import { bodyStore, BodyError } from "../body-selection/store.js";
@@ -108,6 +109,8 @@ export function createFramingRoutes(overrides: Partial<typeof defaults> = {}, bo
       ))
     )
       return fail(409, "INVALID_EXPORT", "작업에서 선택된 후보가 아닙니다.");
+    if (format === "fbx" && restrictedCandidate(candidate))
+      return fail(409, "CANDIDATE_RELEASE_FORBIDDEN", "검수용 후보는 저장할 수 없습니다.");
     if (scope !== resolveOutputScope(person?.outputScope).resolved)
       return fail(
         409,

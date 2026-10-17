@@ -1,5 +1,19 @@
 # API 계약 — BFF가 클라(Tauri)에 노출하는 `/v1`
 
+## 동적 검색 조회 전용 후보 (2026-10-17)
+
+`candidatesByPerson[].routedSearch`는 route/status/reason, 근접·구도 참고 개수, 별도 생성 검수 상태,
+기본 인체 여부를 보존합니다. `candidates[].source=dynamic|semantic`인 후보는 `rankScore`를 가지며
+기하 `distance`로 변환하지 않습니다. `lookupAllowed=true`, `refineAllowed=false`,
+`releaseAllowed=false`, `actualMeshValidated=false`, `reviewRequired=true`, `bvhAvailable=false`입니다.
+`searchCamera`는 검색 카메라 메타데이터이며 기존 정렬 렌더 camera 계약과 구별합니다.
+
+`GET /v1/pose-candidates/:id/lookup-thumbnail?jobId=...&personIndex=...&candidateId=...`는
+소유권·후보 ID·포즈를 검증한 정면 참고 이미지를 제공합니다. 검색 시점의 정렬 렌더라고 표시하지 않습니다.
+해당 후보의 refine은 409 `CANDIDATE_REFINE_FORBIDDEN`, BVH/FBX/framed FBX 저장은
+409 `CANDIDATE_RELEASE_FORBIDDEN`으로 거부합니다. 생성·근접·구도·기본 인체 결과는 정식 후보로 합치지 않습니다.
+상세는 [동적 검색 연결](ROUTED_SEARCH_INTEGRATION.md)을 참조합니다.
+
 ## 빠른 후보 카드 (2026-10-08)
 
 카메라가 지정된 후보에는 기존 `thumbnailUrl`(정확한 각도의 느린 렌더)과 함께
@@ -1178,3 +1192,23 @@ BVH downloads and final FBX/refined/cropped export contracts are unchanged.
 ## 체형 선택 UI 계약
 
 [최종 확인·Export 및 차렷 카드 계약](BODY_SELECTION_UI_CONTRACT.md)을 추가한다. 기존 경로와 호환되는 opt-in 확장이다.
+
+
+## pose_presentation v1 (2026-10-18)
+
+추론 PR #99(develop 831efd38)의 `people[].pose_presentation`이 non-null이면 표시 기준은 이 계약이다.
+BFF는 인물별 `posePresentation`으로 전달하며 library/review/generated 그룹, 순위, 개별 검색·생성 상태, 카메라, scope, 정책을 보존한다.
+null/미포함만 기존 dynamic_search 경로를 유지한다. 알 수 없는 버전·계약 오류는 오류 표시로 남기며 다른 후보로 대체하지 않는다.
+
+BVH 본문과 내부 경로는 공개 결과 JSON에 포함하지 않는다. 기존 analysis_people.refine_context_json의
+비공개 posePresentationAssets에 보관하므로 기존 작업 소유권·보관·삭제 정책을 따른다.
+앱은 BFF의 `GET /v1/analysis/jobs/:jobId/people/:index/pose-previews/:candidateId/:sha256`만 사용한다.
+라이브러리는 고정 추론 getPoseBvh를 통해 읽고 SHA를 확인한다. 생성은 UTF-8 본문 바이트의 SHA를 검증하며 라이브러리 조회하지 않는다.
+소유권·후보·인물·해시 불일치는 404/409이고 임의 URL이나 다른 파일로 폴백하지 않는다.
+이 조회는 preview 전용이며 export 권한이 아니다. 모든 신규 후보의 auto_apply/refine/export/release/actual_mesh_validated=false를 유지한다.
+
+앱은 BVH frame 0의 관절을 Three.js로 렌더하고, hip midpoint 이동·hip-to-shoulder 길이 정규화 후
+서버 rotation을 한 번 적용한다. 원근은 xy=(x,-y)/(z+distance_torso), 정사영은 xy=(x,-y)와 동등한 투영을 사용한다.
+full/half/shoulder_head/head 범위를 적용하며 카메라 또는 범위가 유효하지 않으면 표시 실패를 알린다.
+미리보기에서 좌우 회전과 기준 시점 복원이 가능하다. 관절 기반 뷰어이며 실제 체형 메시의 피부 안전 인증이나 보정·저장 기능은 제공하지 않는다.
+기본 인체 계획은 미렌더 상태로 표시한다. 제공된 비공개 BVH/JSON은 Git에 올리지 않는다.

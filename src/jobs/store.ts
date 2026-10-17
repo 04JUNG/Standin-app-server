@@ -1,6 +1,9 @@
 // Job 저장소(PostgreSQL). result는 JSON 문자열로 저장.
 // 인터페이스(createJob/getJob/updateJob)는 유지하되 Promise를 돌려준다.
-import { captureBodyPolicy, initializeBodySelections } from "../body-selection/store.js";
+import {
+  captureBodyPolicy,
+  initializeBodySelections,
+} from "../body-selection/store.js";
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { config } from "../config.js";
@@ -58,7 +61,9 @@ function toJob(r: JobRow): Job {
     status: r.status,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
-    result: r.result_json ? (JSON.parse(r.result_json) as AnalysisResult) : null,
+    result: r.result_json
+      ? (JSON.parse(r.result_json) as AnalysisResult)
+      : null,
     errorCode: r.error_code,
     rerunOf: r.rerun_of,
     installationId: r.installation_id,
@@ -124,7 +129,8 @@ async function insertJob(
       input?.height ?? null,
     ],
   );
-  if (config.bodySelectionEnabled && input?.installationId) await captureBodyPolicy(executor, job.id, input.installationId);
+  if (config.bodySelectionEnabled && input?.installationId)
+    await captureBodyPolicy(executor, job.id, input.installationId);
   return job;
 }
 
@@ -133,7 +139,7 @@ export async function createJob(
   rerunOf: string | null = null,
   input?: JobInput,
 ): Promise<Job> {
-  return transaction(client => insertJob(client, userId, rerunOf, input));
+  return transaction((client) => insertJob(client, userId, rerunOf, input));
 }
 
 /**
@@ -157,17 +163,24 @@ export async function createJobWithLimits(
   const week = weeklyWindow(nowMs);
   // 개발자 단말은 세지 않는다. 자기 한도에 막히면 정작 한도를 확인해야 할 때 확인하지 못한다.
   // 인증(requireInstallation)을 통과한 뒤에만 여기 오므로 ID를 흉내 내 우회할 수 없다.
-  const exempt = isQuotaExempt(input.installationId, config.quotaExemptInstallations);
+  const exempt = isQuotaExempt(
+    input.installationId,
+    config.quotaExemptInstallations,
+  );
   if (exempt) {
     // 우회는 조용히 일어나면 안 된다 — 지표에서 "한도가 안 걸리네"의 원인을 찾을 수 있어야 한다.
     log.info({ type: "quota_exempt", installationId: input.installationId });
   }
   return transaction(async (client) => {
-    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [input.installationId]);
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+      input.installationId,
+    ]);
 
     if (!exempt && !isDisabled(config.quotaInstallationConcurrent)) {
       // 오래된 Job은 세지 않는다 — 배포로 유실된 running Job이 설치를 영구히 막는다.
-      const cutoff = new Date(nowMs - config.analysisStaleAfterSeconds * 1000).toISOString();
+      const cutoff = new Date(
+        nowMs - config.analysisStaleAfterSeconds * 1000,
+      ).toISOString();
       const res = await client.query(
         `SELECT count(*)::int AS running FROM jobs
          WHERE installation_id = $1 AND status IN ('queued','running') AND created_at > $2`,
@@ -175,9 +188,13 @@ export async function createJobWithLimits(
       );
       const running = (res.rows[0] as { running: number }).running;
       if (running >= config.quotaInstallationConcurrent) {
-        throw new LimitExceededError("CONCURRENCY_LIMIT", CONCURRENCY_RETRY_SECONDS, {
-          limit: config.quotaInstallationConcurrent,
-        });
+        throw new LimitExceededError(
+          "CONCURRENCY_LIMIT",
+          CONCURRENCY_RETRY_SECONDS,
+          {
+            limit: config.quotaInstallationConcurrent,
+          },
+        );
       }
     }
 
@@ -193,13 +210,22 @@ export async function createJobWithLimits(
         throw new LimitExceededError(
           "WEEKLY_QUOTA_EXCEEDED",
           secondsUntil(week.resetAtMs, nowMs),
-          { limit: config.quotaInstallationWeekly, retryAt: kstIsoString(week.resetAtMs) },
+          {
+            limit: config.quotaInstallationWeekly,
+            retryAt: kstIsoString(week.resetAtMs),
+          },
         );
       }
     }
 
     if (!exempt && !isDisabled(config.quotaGlobalDaily)) {
-      const ok = await tryConsume("global_day", "all", day, config.quotaGlobalDaily, client);
+      const ok = await tryConsume(
+        "global_day",
+        "all",
+        day,
+        config.quotaGlobalDaily,
+        client,
+      );
       if (!ok) {
         throw new LimitExceededError(
           "GLOBAL_QUOTA_EXCEEDED",
@@ -217,7 +243,9 @@ export async function createJobWithLimits(
  * 커밋 뒤에 요청이 실패했을 때 소비한 쿼터를 돌려준다(예: 입력 저장 실패, 상류 혼잡).
  * best-effort — 실패해도 요청 처리를 막지 않는다.
  */
-export async function refundAnalysisQuota(installationId: string): Promise<void> {
+export async function refundAnalysisQuota(
+  installationId: string,
+): Promise<void> {
   // 애초에 세지 않은 설치에는 돌려줄 것도 없다.
   if (isQuotaExempt(installationId, config.quotaExemptInstallations)) return;
   const nowMs = Date.now();
@@ -270,7 +298,9 @@ export async function failJob(
  */
 export async function failStaleJobs(): Promise<number> {
   const now = new Date();
-  const cutoff = new Date(now.getTime() - config.analysisStaleAfterSeconds * 1000).toISOString();
+  const cutoff = new Date(
+    now.getTime() - config.analysisStaleAfterSeconds * 1000,
+  ).toISOString();
   return execute(
     `UPDATE jobs SET status = 'failed', error_code = 'ABANDONED',
        updated_at = $1, completed_at = $1
@@ -279,7 +309,10 @@ export async function failStaleJobs(): Promise<number> {
   );
 }
 
-export async function getOwnedJob(id: string, installationId: string): Promise<Job | undefined> {
+export async function getOwnedJob(
+  id: string,
+  installationId: string,
+): Promise<Job | undefined> {
   const row = await queryOne<JobRow>(
     "SELECT * FROM jobs WHERE id = $1 AND installation_id = $2",
     [id, installationId],
@@ -330,7 +363,13 @@ export async function listJobHistory(
        AND ($3::text IS NULL OR (j.created_at, j.id) < ($3, $4))
      ORDER BY j.created_at DESC, j.id DESC
      LIMIT $5`,
-    [installationId, status, cursor?.createdAt ?? null, cursor?.id ?? null, limit + 1],
+    [
+      installationId,
+      status,
+      cursor?.createdAt ?? null,
+      cursor?.id ?? null,
+      limit + 1,
+    ],
   );
 }
 
@@ -356,7 +395,10 @@ export async function deleteOwnedJob(
 ): Promise<DeleteJobOutcome> {
   return transaction(async (client) => {
     // 소유·상태 판정과 삭제 사이에 워커가 상태를 바꾸지 못하게 잠근다.
-    const owned = await client.query<{ status: JobStatus; input_s3_key: string | null }>(
+    const owned = await client.query<{
+      status: JobStatus;
+      input_s3_key: string | null;
+    }>(
       "SELECT status, input_s3_key FROM jobs WHERE id = $1 AND installation_id = $2 FOR UPDATE",
       [id, installationId],
     );
@@ -374,7 +416,14 @@ export async function deleteOwnedJob(
 /** 확정 선택 목록. 작업 기록 상세가 이전 선택을 화면에 되살릴 때 쓴다. */
 export async function listConfirmedSelections(
   jobId: string,
-): Promise<Array<{ personIndex: number; candidateId: string; rank: number; confirmedAt: string }>> {
+): Promise<
+  Array<{
+    personIndex: number;
+    candidateId: string;
+    rank: number;
+    confirmedAt: string;
+  }>
+> {
   const rows = await query<{
     person_index: number;
     candidate_id: string;
@@ -461,7 +510,10 @@ export async function getJob(id: string): Promise<Job | undefined> {
  * 이전 구현은 "읽어서 병합 후 통째로 쓰기"였는데, 태스크가 여러 개면 두 갱신이
  * 서로를 덮어쓸 수 있다. 넘어온 필드만 COALESCE 없이 직접 지정해 그 창을 없앤다.
  */
-export async function updateJob(id: string, patch: Partial<Job>): Promise<void> {
+export async function updateJob(
+  id: string,
+  patch: Partial<Job>,
+): Promise<void> {
   const sets: string[] = ["updated_at = $2"];
   const params: unknown[] = [id, new Date().toISOString()];
 
@@ -547,16 +599,27 @@ export async function persistAnalysisRecords(
   signals: PersonSignals[] = [],
   cutSummary: CutSummary | null = null,
 ): Promise<void> {
-  const contextByPerson = new Map(refineContexts.map((ctx) => [ctx.personIndex, ctx]));
-  const signalsByPerson = new Map(signals.map((signal) => [signal.personIndex, signal]));
+  const contextByPerson = new Map(
+    refineContexts.map((ctx) => [ctx.personIndex, ctx]),
+  );
+  const signalsByPerson = new Map(
+    signals.map((signal) => [signal.personIndex, signal]),
+  );
   await transaction(async (client) => {
     // 분석 중에 동의 철회로 작업이 지워졌으면 결과를 쓰지 않는다. FK가 없어 그대로 INSERT하면
     // 존재하지 않는 job_id의 관절 행이 남고, 어떤 삭제 경로도 그 행을 다시 찾지 못한다.
     // 삭제 쪽(retention.ts::deleteJobs)도 같은 행을 먼저 잠그므로 둘은 차례로만 지나간다.
-    const job = await client.query("SELECT 1 FROM jobs WHERE id = $1 FOR UPDATE", [jobId]);
+    const job = await client.query(
+      "SELECT 1 FROM jobs WHERE id = $1 FOR UPDATE",
+      [jobId],
+    );
     if (job.rowCount === 0) return;
-    await client.query("DELETE FROM analysis_candidates WHERE job_id = $1", [jobId]);
-    await client.query("DELETE FROM analysis_people WHERE job_id = $1", [jobId]);
+    await client.query("DELETE FROM analysis_candidates WHERE job_id = $1", [
+      jobId,
+    ]);
+    await client.query("DELETE FROM analysis_people WHERE job_id = $1", [
+      jobId,
+    ]);
     for (const person of result.candidatesByPerson) {
       const ctx = contextByPerson.get(person.personIndex);
       const signal = signalsByPerson.get(person.personIndex);
@@ -596,6 +659,7 @@ export async function persistAnalysisRecords(
                 scores: ctx.scores,
                 qualityReasons: ctx.qualityReasons,
                 qualityTrace: ctx.qualityTrace,
+                posePresentationAssets: ctx.posePresentationAssets,
               })
             : null,
           ctx?.rawScores ? JSON.stringify(ctx.rawScores) : null,

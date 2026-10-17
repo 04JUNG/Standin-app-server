@@ -2,6 +2,11 @@
 //  - 추론의 원시 distance → 클라 UI 라벨(matchLevel)
 //  - 추론의 {detail} → 클라 오류봉투 {error:{code,...}}
 import { isBodyScope, resolveOutputScope } from "./output-scope/model.js";
+import {
+  mapPosePresentation,
+  type PrivatePreviewAsset,
+} from "./pose-presentation.js";
+import { mapRoutedSearch } from "./routed-search.js";
 import { config } from "./config.js";
 import { converterEnabled } from "./converter/client.js";
 import { mapBodyRecommendations } from "./body-selection/recommendation.js";
@@ -56,7 +61,11 @@ const SKELETON_STATES = new Set<SkeletonState>([
   "missing",
   "invalid",
 ]);
-const SKELETON_SOURCES = new Set<SkeletonSource>(["full_image", "crop_retry", "none"]);
+const SKELETON_SOURCES = new Set<SkeletonSource>([
+  "full_image",
+  "crop_retry",
+  "none",
+]);
 const COVERAGE_CLASSES = new Set<CoverageClass>([
   "full",
   "reduced",
@@ -72,8 +81,14 @@ const COVERAGE_CLASSES = new Set<CoverageClass>([
  * insufficient. 모르는 값을 낙관적으로 해석하면 순차 배포 창에서 저정보 결과가 그대로
  * "높은 일치 + refine 허용"으로 나간다.
  */
-function narrow<T extends string>(allowed: Set<T>, value: unknown, fallback: T): T {
-  return typeof value === "string" && allowed.has(value as T) ? (value as T) : fallback;
+function narrow<T extends string>(
+  allowed: Set<T>,
+  value: unknown,
+  fallback: T,
+): T {
+  return typeof value === "string" && allowed.has(value as T)
+    ? (value as T)
+    : fallback;
 }
 
 function personConfidence(p: UpstreamPerson): PersonConfidence {
@@ -86,7 +101,10 @@ function personConfidence(p: UpstreamPerson): PersonConfidence {
  * `confidence=low`와 `candidates=[]`는 같은 상태가 아니다. 전자는 참고용 후보를 보여주고,
  * 후자는 이 인물에 자동 후보가 없다고 알린다.
  */
-function fallbackMode(confidence: PersonConfidence, candidateCount: number): FallbackMode {
+function fallbackMode(
+  confidence: PersonConfidence,
+  candidateCount: number,
+): FallbackMode {
   if (candidateCount === 0) return "hard";
   if (confidence !== "high") return "soft";
   return "none";
@@ -98,9 +116,14 @@ function mapPerson(p: UpstreamPerson): AnalysisPerson {
   return {
     personIndex: p.index,
     outputScope: resolveOutputScope({
-      detected: isBodyScope(p.output_scope?.detected) ? p.output_scope.detected : null,
-      detectionSource: p.output_scope?.source === "vlm_person" || p.output_scope?.source === "legacy_shot"
-        ? p.output_scope.source : "unknown",
+      detected: isBodyScope(p.output_scope?.detected)
+        ? p.output_scope.detected
+        : null,
+      detectionSource:
+        p.output_scope?.source === "vlm_person" ||
+        p.output_scope?.source === "legacy_shot"
+          ? p.output_scope.source
+          : "unknown",
     }),
     box: p.box,
     tags: p.tags,
@@ -126,7 +149,9 @@ function mapPerson(p: UpstreamPerson): AnalysisPerson {
 }
 
 export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
-  const bodies = config.bodySelectionEnabled ? mapBodyRecommendations(cut, loadBodyCatalog()) : undefined;
+  const bodies = config.bodySelectionEnabled
+    ? mapBodyRecommendations(cut, loadBodyCatalog())
+    : undefined;
   return {
     jobId,
     image: cut.image,
@@ -156,35 +181,76 @@ export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
     // BFF는 다른 기준으로 다시 정렬하지 않는다(요구서 §3-1).
     candidatesByPerson: (cut.people ?? []).map((p) => {
       const person = mapPerson(p);
+      const presentation = mapPosePresentation(
+        p.pose_presentation,
+        p.index,
+        jobId,
+      );
+      const routed = presentation ? null : mapRoutedSearch(jobId, p);
+      if (routed) {
+        person.routedSearch = routed.summary;
+        person.candidateCount = routed.candidates.length;
+        person.fallbackMode = routed.candidates.length ? "soft" : "hard";
+        person.confidence = "low";
+        person.refineAllowed = false;
+        person.refinableLimbs = [];
+      }
       if (bodies) person.bodyRecommendation = bodies.get(p.index);
       person.candidateShortfallReason =
-        person.candidateCount === 0 && p.quality_reasons?.includes("head_search_unsupported")
+        person.candidateCount === 0 &&
+        p.quality_reasons?.includes("head_search_unsupported")
           ? "HEAD_SEARCH_UNSUPPORTED"
           : person.candidateCount >= 5
             ? null
             : cut.route === "core"
               ? "UPSTREAM_FEWER_THAN_REQUESTED"
               : "ANALYSIS_ROUTE_SKIPPED";
-      person.candidates = p.candidates.map((c, i): PoseCandidate => ({
-        id: `${c.pose_id}::${c.view}`,
-        poseId: c.pose_id,
-        rank: i + 1,
-        view: c.view,
-        tags: Object.values(c.camera ? { ...c.tags, view: c.camera.display_view } : (c.tags ?? {})),
-        ...(c.camera ? { camera: c.camera } : {}),
-        matchLevel: matchLevelForPerson(person.confidence, c.distance),
-        bvhAvailable: true,
-        thumbnailUrl: c.camera
-          ? `/v1/pose-candidates/${encodeURIComponent(c.pose_id)}/aligned?jobId=${encodeURIComponent(jobId)}&personIndex=${p.index}&candidateId=${encodeURIComponent(`${c.pose_id}::${c.view}`)}`
-          : c.thumbnail_url
-          ? `/v1/pose-candidates/${encodeURIComponent(c.pose_id)}/thumbnail?view=${encodeURIComponent(c.view)}`
-          : undefined,
-        ...(c.camera && c.thumbnail_url
-          ? { quickThumbnailUrl: `/v1/pose-candidates/${encodeURIComponent(c.pose_id)}/thumbnail?view=${encodeURIComponent(c.view)}` }
-          : {}),
-        distance: c.distance,
-        rerankScore: c.rerank_score,
-      }));
+      person.candidates =
+        routed?.candidates ??
+        p.candidates.map((c, i): PoseCandidate => ({
+          id: `${c.pose_id}::${c.view}`,
+          poseId: c.pose_id,
+          rank: i + 1,
+          view: c.view,
+          tags: Object.values(
+            c.camera
+              ? { ...c.tags, view: c.camera.display_view }
+              : (c.tags ?? {}),
+          ),
+          ...(c.camera ? { camera: c.camera } : {}),
+          matchLevel: matchLevelForPerson(person.confidence, c.distance),
+          bvhAvailable: true,
+          thumbnailUrl: c.camera
+            ? `/v1/pose-candidates/${encodeURIComponent(c.pose_id)}/aligned?jobId=${encodeURIComponent(jobId)}&personIndex=${p.index}&candidateId=${encodeURIComponent(`${c.pose_id}::${c.view}`)}`
+            : c.thumbnail_url
+              ? `/v1/pose-candidates/${encodeURIComponent(c.pose_id)}/thumbnail?view=${encodeURIComponent(c.view)}`
+              : undefined,
+          ...(c.camera && c.thumbnail_url
+            ? {
+                quickThumbnailUrl: `/v1/pose-candidates/${encodeURIComponent(c.pose_id)}/thumbnail?view=${encodeURIComponent(c.view)}`,
+              }
+            : {}),
+          distance: c.distance,
+          rerankScore: c.rerank_score,
+        }));
+      if (presentation) {
+        person.posePresentation = presentation.presentation;
+        person.candidates = [];
+        const count =
+          presentation.presentation.library_candidates.length +
+          presentation.presentation.review_candidates.length +
+          presentation.presentation.generated_candidates.length;
+        person.candidateCount = count;
+        person.fallbackMode = count ? "soft" : "hard";
+        person.confidence = "low";
+        person.refineAllowed = false;
+        person.refinableLimbs = [];
+        person.candidateShortfallReason = "POSE_PRESENTATION";
+      }
+      if (routed)
+        person.candidateShortfallReason = routed.candidates.length
+          ? "ROUTED_REVIEW_ONLY"
+          : `ROUTED_${routed.summary.status.toUpperCase()}`;
       return person;
     }),
   };
@@ -197,6 +263,7 @@ export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
  * 있다. `/analyze` 시점에 여기서 뽑아 DB에 넣고, refine 호출 때 DB에서만 읽는다.
  */
 export interface RefineContext {
+  posePresentationAssets?: Record<string, PrivatePreviewAsset>;
   personIndex: number;
   keypoints: number[][] | null;
   scores: number[] | null;
@@ -217,6 +284,11 @@ export interface RefineContext {
 export function extractRefineContexts(cut: CutResult): RefineContext[] {
   return (cut.people ?? []).map((p) => ({
     personIndex: p.index,
+    posePresentationAssets: mapPosePresentation(
+      p.pose_presentation,
+      p.index,
+      "private",
+    )?.assets,
     keypoints: p.keypoints ?? p.skeleton?.keypoints ?? null,
     scores: p.scores ?? p.skeleton?.scores ?? null,
     rawScores: p.raw_scores ?? null,
@@ -239,7 +311,11 @@ export function extractRefineContexts(cut: CutResult): RefineContext[] {
  */
 export interface PersonSignals {
   personIndex: number;
-  personTags: { action: string | null; view: string | null; source: string | null };
+  personTags: {
+    action: string | null;
+    view: string | null;
+    source: string | null;
+  };
   outputScope: { detected: string | null; source: string | null };
   rankDistance: number | null;
   distanceMetric: string | null;
@@ -263,7 +339,9 @@ export interface CutSummary {
 
 /** 어휘 값·버전 문자열만 받는다. 길이 상한은 이상한 응답이 DB를 채우지 않게 하는 방어다. */
 function shortText(value: unknown): string | null {
-  return typeof value === "string" && value.length > 0 && value.length <= 80 ? value : null;
+  return typeof value === "string" && value.length > 0 && value.length <= 80
+    ? value
+    : null;
 }
 
 function finiteNumber(value: unknown): number | null {
@@ -291,7 +369,9 @@ export function extractPersonSignals(cut: CutResult): PersonSignals[] {
 
 export function extractCutSummary(cut: CutResult): CutSummary {
   const tags =
-    cut.vlm_tags && typeof cut.vlm_tags === "object" && !Array.isArray(cut.vlm_tags)
+    cut.vlm_tags &&
+    typeof cut.vlm_tags === "object" &&
+    !Array.isArray(cut.vlm_tags)
       ? cut.vlm_tags
       : null;
   return {
