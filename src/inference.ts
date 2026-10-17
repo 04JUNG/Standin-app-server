@@ -12,6 +12,7 @@ import { currentContext } from "./requestContext.js";
  * 실패시키는 대신 `mapping.ts`가 low/refine-off 쪽으로 안전하게 해석한다.
  */
 export interface UpstreamPerson {
+  pose_presentation?: unknown;
   dynamic_search?: unknown;
   semantic_candidates?: unknown;
   search_routing?: unknown;
@@ -153,11 +154,13 @@ export type AnalysisFailureCode =
 export function shouldRefundQuota(code: AnalysisFailureCode): boolean {
   // 기존에 모두 ANALYSIS_UNAVAILABLE로 환급하던 HTTP 503의 세부 사유다.
   // 원인 표시만 분리하고 차감/환급 정책은 바꾸지 않는다.
-  return code === "ANALYSIS_UNAVAILABLE"
-    || code === "ANALYSIS_RATE_LIMITED"
-    || code === "ANALYSIS_DAILY_QUOTA_EXHAUSTED"
-    || code === "ANALYSIS_UPSTREAM_TIMEOUT"
-    || code === "ANALYSIS_UPSTREAM_ERROR";
+  return (
+    code === "ANALYSIS_UNAVAILABLE" ||
+    code === "ANALYSIS_RATE_LIMITED" ||
+    code === "ANALYSIS_DAILY_QUOTA_EXHAUSTED" ||
+    code === "ANALYSIS_UPSTREAM_TIMEOUT" ||
+    code === "ANALYSIS_UPSTREAM_ERROR"
+  );
 }
 
 export function analysisFailureCode(error: unknown): AnalysisFailureCode {
@@ -169,17 +172,28 @@ export function analysisFailureCode(error: unknown): AnalysisFailureCode {
       const body: unknown = JSON.parse(error.detail);
       if (body && typeof body === "object" && "detail" in body) {
         const detail = body.detail;
-        if (detail && typeof detail === "object" && "code" in detail
-          && detail.code === "VLM_UNAVAILABLE" && "reason" in detail) {
+        if (
+          detail &&
+          typeof detail === "object" &&
+          "code" in detail &&
+          detail.code === "VLM_UNAVAILABLE" &&
+          "reason" in detail
+        ) {
           switch (detail.reason) {
-            case "rate_limited": return "ANALYSIS_RATE_LIMITED";
-            case "daily_quota_exhausted": return "ANALYSIS_DAILY_QUOTA_EXHAUSTED";
-            case "timeout": return "ANALYSIS_UPSTREAM_TIMEOUT";
-            case "upstream_error": return "ANALYSIS_UPSTREAM_ERROR";
+            case "rate_limited":
+              return "ANALYSIS_RATE_LIMITED";
+            case "daily_quota_exhausted":
+              return "ANALYSIS_DAILY_QUOTA_EXHAUSTED";
+            case "timeout":
+              return "ANALYSIS_UPSTREAM_TIMEOUT";
+            case "upstream_error":
+              return "ANALYSIS_UPSTREAM_ERROR";
           }
         }
       }
-    } catch { /* 구 서버/비 JSON 503은 기존 경로를 유지한다. */ }
+    } catch {
+      /* 구 서버/비 JSON 503은 기존 경로를 유지한다. */
+    }
     return "ANALYSIS_UNAVAILABLE";
   }
   return "INFERENCE_FAILED";
@@ -219,7 +233,8 @@ export async function analyze(file: Blob, hint = ""): Promise<CutResult> {
       signal: AbortSignal.timeout(config.analysisTimeoutMs),
     });
   } catch (error) {
-    if (isAbortTimeout(error)) throw new InferenceTimeoutError(config.analysisTimeoutMs);
+    if (isAbortTimeout(error))
+      throw new InferenceTimeoutError(config.analysisTimeoutMs);
     throw error;
   }
   if (!res.ok) {
@@ -322,7 +337,9 @@ export interface RefineUpstreamThumbnail {
  * 명시적 timeout을 둔다(BFF-07). refine은 사용자가 저장을 기다리는 동기 경로이므로
  * 추론이 느려질 때 무한정 붙잡고 있으면 저장 흐름 전체가 멈춘다.
  */
-export async function refine(req: RefineUpstreamRequest): Promise<RefineUpstreamResponse> {
+export async function refine(
+  req: RefineUpstreamRequest,
+): Promise<RefineUpstreamResponse> {
   const res = await fetch(`${config.inferenceBaseUrl}/refine`, {
     method: "POST",
     body: JSON.stringify(req),
@@ -350,7 +367,9 @@ export async function getPoseBvh(poseId: string): Promise<Response> {
 
 // GET /pose/{id}/thumbnail?view=... → PNG 원본 응답
 /** 포즈 라이브러리 한 페이지(관리자 모아 보기). 쿼리는 호출하는 쪽이 검증해서 넘긴다. */
-export async function listLibraryPoses(params: URLSearchParams): Promise<Response> {
+export async function listLibraryPoses(
+  params: URLSearchParams,
+): Promise<Response> {
   return fetch(`${config.inferenceBaseUrl}/poses?${params.toString()}`, {
     headers: { ...authHeaders() },
     signal: AbortSignal.timeout(10_000),
@@ -404,17 +423,24 @@ export async function inferenceStatus(): Promise<{
       headers: authHeaders(),
       signal: AbortSignal.timeout(config.healthTimeoutMs),
     });
-    const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
-    const library = body?.pose_library as Record<string, unknown> | null | undefined;
+    const body = (await res.json().catch(() => null)) as Record<
+      string,
+      unknown
+    > | null;
+    const library = body?.pose_library as
+      Record<string, unknown> | null | undefined;
     return {
       healthy: res.ok,
       library:
         library && typeof library.version === "string"
           ? {
               version: library.version,
-              source: typeof library.source === "string" ? library.source : null,
+              source:
+                typeof library.source === "string" ? library.source : null,
               contentSha256:
-                typeof library.content_sha256 === "string" ? library.content_sha256 : null,
+                typeof library.content_sha256 === "string"
+                  ? library.content_sha256
+                  : null,
             }
           : null,
     };

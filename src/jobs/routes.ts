@@ -8,6 +8,7 @@ import { createBodySelectionRoutes } from "../body-selection/routes.js";
 import { attachBodySelections } from "../body-selection/store.js";
 import { createOutputScopeRoutes } from "../output-scope/routes.js";
 import { resolveOutputScope } from "../output-scope/model.js";
+import { createPresentationRoutes } from "../pose-presentation.js";
 import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
 import { errorEnvelope } from "../mapping.js";
@@ -50,6 +51,7 @@ const RESULT_INPUT_URL_TTL_SECONDS = 900;
 jobsRoutes.route("/", createBodySelectionRoutes());
 jobsRoutes.route("/", createBodyPreviewRoutes());
 jobsRoutes.route("/", refineRoutes);
+jobsRoutes.route("/", createPresentationRoutes());
 jobsRoutes.route("/", createOutputScopeRoutes());
 
 // POST /v1/analysis/jobs — 이미지 업로드 → jobId 즉시 반환(추론은 백그라운드)
@@ -302,7 +304,11 @@ jobsRoutes.get("/:id/result", async (c) => {
     })),
     capabilities: {
       ...(await currentCapabilities()),
-      ...(result.candidatesByPerson.some(p => p.routedSearch) ? { bodyPreviews: false } : {}),
+      ...(result.candidatesByPerson.some(
+        (p) => p.routedSearch || p.posePresentation,
+      )
+        ? { bodyPreviews: false }
+        : {}),
       ...(!result.candidatesByPerson
         .filter((p) => p.candidates.length)
         .every((p) => p.bodySelection)

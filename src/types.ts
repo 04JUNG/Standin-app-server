@@ -1,9 +1,17 @@
-export type { BodyPreferences, BodyRef, BodySelection, BodyRecommendation } from "./body-selection/model.js";
+export type {
+  BodyPreferences,
+  BodyRef,
+  BodySelection,
+  BodyRecommendation,
+} from "./body-selection/model.js";
 // 클라(Tauri)와의 /v1 계약 타입.
 // ⚠ 클라 `endpoints.ts`의 타입과 단일 소스로 공유하는 것이 목표(드리프트 방지).
 //   나중에 공용 패키지(packages/contract)로 승격 검토.
 
-import type { BodyRecommendation, BodySelection } from "./body-selection/model.js";
+import type {
+  BodyRecommendation,
+  BodySelection,
+} from "./body-selection/model.js";
 import type { OutputScope } from "./output-scope/model.js";
 
 export type MatchLevel = "high" | "medium" | "low";
@@ -19,9 +27,11 @@ export type AnalysisJobStatus = "queued" | "running" | "completed" | "failed";
 export type FallbackMode = "none" | "soft" | "hard";
 
 export type PersonConfidence = "high" | "low";
-export type SkeletonState = "valid" | "partial" | "suspect" | "missing" | "invalid";
+export type SkeletonState =
+  "valid" | "partial" | "suspect" | "missing" | "invalid";
 export type SkeletonSource = "full_image" | "crop_retry" | "none";
-export type CoverageClass = "full" | "reduced" | "sparse" | "upper_only" | "insufficient";
+export type CoverageClass =
+  "full" | "reduced" | "sparse" | "upper_only" | "insufficient";
 
 /** Server-owned camera; consumers must not derive it from the legacy search view. */
 interface CandidateCameraBase {
@@ -35,19 +45,20 @@ interface CandidateCameraBase {
   depth_ambiguous: boolean;
 }
 
-export type CandidateCamera = CandidateCameraBase & (
-  | { version: "candidate-camera-v1"; reference: "pelvis-torso-yaw" }
-  | {
-      version: "candidate-camera-v2";
-      reference: "search-fit";
-      projection: "orthographic" | "perspective";
-      distance_torso: number | null;
-      labels_swapped: boolean;
-      pose_id: string;
-      query_sha256: string;
-      observed_joint_mask: boolean[];
-    }
-);
+export type CandidateCamera = CandidateCameraBase &
+  (
+    | { version: "candidate-camera-v1"; reference: "pelvis-torso-yaw" }
+    | {
+        version: "candidate-camera-v2";
+        reference: "search-fit";
+        projection: "orthographic" | "perspective";
+        distance_torso: number | null;
+        labels_swapped: boolean;
+        pose_id: string;
+        query_sha256: string;
+        observed_joint_mask: boolean[];
+      }
+  );
 
 export interface PoseCandidate {
   source?: "dynamic" | "semantic";
@@ -127,6 +138,7 @@ export interface AnalysisResult {
 export type ExportFormat = "bvh" | "fbx";
 
 export interface AnalysisPerson {
+  posePresentation?: import("./pose-presentation.js").PosePresentation;
   routedSearch?: import("./routed-search.js").RoutedSearch;
   bodyRecommendation?: BodyRecommendation;
   bodySelection?: BodySelection;
