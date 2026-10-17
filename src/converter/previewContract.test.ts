@@ -148,6 +148,8 @@ test("runtime contract is validated; unavailable/old/oversize responses fail clo
     {},
     { ...contract, model_revision: "bad" },
     { ...contract, solver_version: "old" },
+    { ...contract, framing_version: "skin-regions-v1" },
+    { ...contract, framing_version: "skin-regions-v99" },
     "x".repeat(8193),
   ])
     await assert.rejects(getPreviewRuntime(fetcher(value)), {
@@ -203,4 +205,12 @@ test("PNG fallback forwards expected body/runtime and checks both after conversi
   await assert.rejects(run({ preview_revision: "e".repeat(64) }), {
     code: "CONVERTER_INTEGRITY",
   });
+});
+
+// Literal copied from inference #91, not the BFF constant: catch cross-repo drift.
+test("current inference preview contract accepts shoulder/head framing", async () => {
+  const runtime = await getPreviewRuntime((async () => Response.json({
+    ...contract, framing_version: "skin-regions-v2-shoulder-head",
+  })) as typeof fetch);
+  assert.equal(runtime.framingVersion, "skin-regions-v2-shoulder-head");
 });

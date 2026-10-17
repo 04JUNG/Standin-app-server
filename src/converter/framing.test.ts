@@ -248,3 +248,15 @@ test("shaped GLB must bind its embedded shape digest as well as the response", a
   await assert.rejects(convertFramed(shaped, deps({ ...modelPayload(), shape_sha256: shape.shapeSha256, shape_bake: lineage() })), { code: "CONVERTER_INTEGRITY" });
   await convertFramed(shaped, deps({ ...modelPayload({ shape_sha256: shape.shapeSha256 }), shape_sha256: shape.shapeSha256, shape_bake: lineage() }));
 });
+
+test("current converter framing works for health and paired artifacts; old/unknown versions fail closed", async () => {
+  const health = { ok: true, solver_version: EXPECTED_SOLVER_VERSION,
+    framing_version: "skin-regions-v2-shoulder-head",
+    output_scopes: ["full", "half", "bust", "shoulder_head", "head"] };
+  assert.equal(await framingAvailable(deps(health)), true);
+  await convertFramed(input, deps({ ...payload(), framing_version: health.framing_version }));
+  for (const framing_version of ["skin-regions-v1", "skin-regions-v99", null]) {
+    assert.equal(await framingAvailable(deps({ ...health, framing_version })), false);
+    await assert.rejects(convertFramed(input, deps({ ...payload(), framing_version })), { code: "CONVERTER_INTEGRITY" });
+  }
+});

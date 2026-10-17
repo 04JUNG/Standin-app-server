@@ -6,7 +6,8 @@ import type { Job } from "../jobs/store.js";
 import type { BodySelection } from "../body-selection/model.js";
 import { sha256Hex } from "../converter/client.js";
 import { createFramingRoutes } from "./framingRoutes.js";
-function setup() {
+import type { CandidateCamera } from "../types.js";
+function setup(version: "candidate-camera-v1" | "candidate-camera-v2" = "candidate-camera-v1") {
   const source = new TextEncoder().encode("base BVH");
   const state = {
     revision: 1,
@@ -48,8 +49,9 @@ function setup() {
     solverVersion: "solver",
     framingVersion: "framing",
   });
-  const camera = {
-    version: "candidate-camera-v1",
+  const common = {
+    canonical_yaw: 0, display_view: "front", status: "fitted" as const,
+    fit_error: 0.1, facing_source: "geometry_only" as const, depth_ambiguous: true,
     source_bvh_sha256: sha256Hex(source),
     rotation: [
       [1, 0, 0],
@@ -57,6 +59,11 @@ function setup() {
       [0, 0, 1],
     ],
   };
+  const camera: CandidateCamera = version === "candidate-camera-v1"
+    ? { ...common, version, reference: "pelvis-torso-yaw" }
+    : { ...common, version, reference: "search-fit", projection: "perspective",
+        distance_torso: 4, labels_swapped: true, pose_id: "pose",
+        query_sha256: "d".repeat(64), observed_joint_mask: Array(17).fill(true) };
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
     c.set("installationId", "owner");
@@ -228,4 +235,13 @@ test("merged final-model path preserves body receipt, hash checks and paired exp
   assert.equal(state.calls, 1);
   state.revision++;
   assert.equal((await request({format: "model"})).status, 409);
+});
+
+test("v2 search camera permits body review and paired export with the same receipt", async () => {
+  const { state, request } = setup("candidate-camera-v2");
+  const preview = await request();
+  assert.equal(preview.status, 200);
+  const download = await request({ format: "fbx", reviewKey: preview.headers.get("X-Standin-Review-Key")! });
+  assert.equal(download.status, 200);
+  assert.equal(state.calls, 1);
 });

@@ -10,6 +10,7 @@ import { EXPECTED_SOLVER_VERSION, sha256Hex } from "../converter/client.js";
 import { FRAMING_VERSION } from "../converter/framing.js";
 import {
   createBodyPreviewRoutes,
+  validCamera,
   bodyPreviewManifestUrl,
   type BodyPreviewManifest,
 } from "./previews.js";
@@ -321,4 +322,38 @@ test("disabled, old camera and malformed parameters fail closed", async () => {
     ).status,
     400,
   );
+});
+
+function searchCamera(base: CandidateCamera, poseId: string): Extract<CandidateCamera, { version: "candidate-camera-v2" }> {
+  return { ...base, version: "candidate-camera-v2", reference: "search-fit",
+    projection: "perspective", distance_torso: 4, labels_swapped: true,
+    pose_id: poseId, query_sha256: "d".repeat(64), observed_joint_mask: Array(17).fill(true) };
+}
+test("v2 search cameras retain projection/binding metadata through manifest and both preview transports", async () => {
+  const s = setup();
+  for (const c of s.analysis.candidatesByPerson[0].candidates)
+    c.camera = searchCamera(c.camera!, c.poseId);
+  const m = await s.manifest();
+  assert.deepEqual(m.candidates[0].camera, s.analysis.candidatesByPerson[0].candidates[0].camera);
+  assert.equal((await s.app.request(m.candidates[0].thumbnailUrl)).status, 200);
+  assert.equal((await s.app.request(m.candidates[0].previewModel.url)).status, 200);
+  // Preview uses its rotation; projection/mask remain unchanged for inference refine.
+  assert.equal(s.state.convertCalls, 1);
+  const camera = s.analysis.candidatesByPerson[0].candidates[0].camera!;
+  if (camera.version !== "candidate-camera-v2") throw new Error("v2 expected");
+  camera.pose_id = "another-pose";
+  assert.equal((await s.app.request(bodyPreviewManifestUrl(s.jobId, 0))).status, 409);
+});
+test("v2 camera validation rejects incomplete binding, bad projection and unsafe rotation", () => {
+  const base = setup().analysis.candidatesByPerson[0].candidates[0].camera!;
+  assert.equal(validCamera(base), true);
+  const camera = searchCamera(base, "pose-0");
+  assert.equal(validCamera(camera), true);
+  assert.equal(validCamera({ ...camera, projection: "orthographic", distance_torso: null }), true);
+  for (const change of [
+    { reference: "pelvis-torso-yaw" }, { projection: "unknown" }, { distance_torso: 0.7 },
+    { distance_torso: Infinity }, { labels_swapped: undefined }, { query_sha256: "bad" },
+    { observed_joint_mask: Array(17).fill(false) }, { observed_joint_mask: Array(16).fill(true) },
+    { pose_id: "" }, { rotation: [[1,0,0],[0,1,0],[0,0,-1]] }, { fit_error: NaN },
+  ]) assert.equal(validCamera({ ...camera, ...change } as CandidateCamera), false);
 });

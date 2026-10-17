@@ -50,10 +50,28 @@ export function validCamera(
 ): camera is CandidateCamera {
   if (
     !camera ||
-    camera.version !== "candidate-camera-v1" ||
+    !["candidate-camera-v1", "candidate-camera-v2"].includes(camera.version) ||
     !/^[a-f0-9]{64}$/.test(camera.source_bvh_sha256)
   )
     return false;
+  if (camera.version === "candidate-camera-v1") {
+    if (camera.reference !== "pelvis-torso-yaw") return false;
+  } else {
+    const mask = camera.observed_joint_mask;
+    if (
+      camera.reference !== "search-fit" ||
+      !["orthographic", "perspective"].includes(camera.projection) ||
+      (camera.projection === "perspective"
+        ? typeof camera.distance_torso !== "number" || !Number.isFinite(camera.distance_torso) || camera.distance_torso < 0.8
+        : camera.distance_torso !== null) ||
+      typeof camera.labels_swapped !== "boolean" ||
+      typeof camera.pose_id !== "string" || !camera.pose_id ||
+      typeof camera.query_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(camera.query_sha256) ||
+      !Number.isFinite(camera.fit_error) || camera.fit_error < 0 ||
+      !Array.isArray(mask) || mask.length !== 17 || mask.some((v) => typeof v !== "boolean") ||
+      ![5, 6, 11, 12].every((i) => mask[i]) || mask.slice(5).filter(Boolean).length < 6
+    ) return false;
+  }
   const m = camera.rotation;
   if (
     !Array.isArray(m) ||
@@ -120,7 +138,8 @@ export async function bodyPreviewManifest(
     throw new BodyError("BODY_PREVIEW_UNAVAILABLE", 503);
   const ids = new Set<string>();
   const candidates = person.candidates.map((c) => {
-    if (!c.bvhAvailable || !validCamera(c.camera) || ids.has(c.id))
+    if (!c.bvhAvailable || !validCamera(c.camera) ||
+        (c.camera.version === "candidate-camera-v2" && c.camera.pose_id !== c.poseId) || ids.has(c.id))
       throw new BodyError("BODY_PREVIEW_UNSUPPORTED", 409);
     ids.add(c.id);
     return {

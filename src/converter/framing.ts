@@ -10,7 +10,8 @@ import {
 } from "./client.js";
 import type { BodyScope } from "../output-scope/model.js";
 
-export const FRAMING_VERSION = "skin-regions-v1";
+// Match the deployed converter contract; unknown/older framing still fails closed.
+export const FRAMING_VERSION = "skin-regions-v2-shoulder-head";
 const MAX_RESPONSE = 48 * 1024 * 1024;
 export interface FramedArtifact {
   fbx: Uint8Array;
