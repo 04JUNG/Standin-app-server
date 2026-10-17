@@ -24,6 +24,7 @@ export function createReleaseGuard(
       );
     if (
       job?.status !== "completed" ||
+      job.result?.source === "semantic" ||
       !candidate ||
       restrictedCandidate(candidate)
     )

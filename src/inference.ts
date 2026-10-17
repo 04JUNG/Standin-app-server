@@ -1,3 +1,4 @@
+import { SemanticError } from "./semantic/contract.js";
 // 도원 추론 서버 호출을 한 곳에 격리한다(계약이 바뀌어도 여기만 수정).
 // 계약 원본: Standin-server/docs/API_CONTRACT.md
 import type { CandidateCamera } from "./types.js";
@@ -16,6 +17,7 @@ export interface UpstreamPerson {
   dynamic_search?: unknown;
   semantic_candidates?: unknown;
   search_routing?: unknown;
+  hands?: unknown;
   output_scope?: { detected?: unknown; source?: unknown };
   /** 인물별 action·view(추론 `person_tags`). 공백 분석용이며 공개 응답에는 넣지 않는다. */
   person_tags?: { action?: unknown; view?: unknown; source?: unknown };
@@ -356,11 +358,12 @@ export async function refine(
 // 디스크에서 조정본을 받아오던 경로인데, 이제 조정본은 /refine 응답 본문으로만 온다.
 
 // GET /pose/{id}/bvh → 원본 응답(상태·바디를 호출측이 그대로 프록시)
-export async function getPoseBvh(poseId: string): Promise<Response> {
+export async function getPoseBvh(poseId: string, signal?: AbortSignal): Promise<Response> {
   return fetch(
     `${config.inferenceBaseUrl}/pose/${encodeURIComponent(poseId)}/bvh`,
     {
       headers: authHeaders(),
+      signal: signal ?? AbortSignal.timeout(10_000),
     },
   );
 }
@@ -469,4 +472,41 @@ async function safeText(res: Response): Promise<string> {
   } catch {
     return "";
   }
+}
+
+// Hand metadata uses the same internal authentication and timeout as other reads.
+export async function getHandCatalog(): Promise<Response> {
+  return fetch(`${config.inferenceBaseUrl}/hands/catalog`, {
+    headers: authHeaders(), signal: AbortSignal.timeout(config.healthTimeoutMs),
+  });
+}
+export async function getHandThumbnail(preset: string, side: "left" | "right", etag?: string): Promise<Response> {
+  return fetch(`${config.inferenceBaseUrl}/hands/${encodeURIComponent(preset)}/thumbnail?side=${side}`, {
+    headers: { ...authHeaders(), ...(etag ? { "If-None-Match": etag } : {}) },
+    signal: AbortSignal.timeout(config.healthTimeoutMs),
+  });
+}
+
+/** Direct user text only; never run VLM or refine on this path. Do not log the query/body. */
+export async function searchSemantic(query: string, topK: number, signal?: AbortSignal): Promise<unknown> {
+  const response = await fetch(`${config.inferenceBaseUrl}/semantic-search`, {
+    method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ query, topK }),
+    signal: signal ?? AbortSignal.timeout(config.semanticSearchTimeoutMs),
+  });
+  const body: unknown = await response.json().catch(() => null);
+  if (!response.ok && !(body && typeof body === "object" && "status" in body && body.status === "error"))
+    throw new SemanticError(response.status === 422 ? "INVALID_INPUT" : "SEMANTIC_UNAVAILABLE", response.status === 422 ? 400 : 503);
+  return body;
+}
+export async function semanticReadiness(): Promise<boolean> {
+  try {
+    const response = await fetch(`${config.inferenceBaseUrl}/healthz`, {
+      headers: authHeaders(), signal: AbortSignal.timeout(config.healthTimeoutMs),
+    });
+    const body: unknown = await response.json();
+    if (!response.ok || !body || typeof body !== "object" || !("semantic_text" in body)) return false;
+    const semantic = body.semantic_text;
+    return !!semantic && typeof semantic === "object" && "ready" in semantic && semantic.ready === true;
+  } catch { return false; }
 }

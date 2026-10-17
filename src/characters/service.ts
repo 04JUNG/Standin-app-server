@@ -1,3 +1,4 @@
+import { handSelectionAvailable } from "../hands/service.js";
 import { bodyUxAvailable } from "../body-selection/availability.js";
 import { loadBodyCatalog } from "../body-selection/catalog.js";
 import { bodyRef, type BodyRef } from "../body-selection/model.js";
@@ -172,6 +173,7 @@ export async function characterSelectionEnabled(
 export async function currentCapabilities(
   overrides: Partial<CharacterDeps> = {},
 ): Promise<{
+  handSelection: boolean;
   bodySelection: boolean;
   bodyRecommendation: boolean;
   bodyPreviews: boolean;
@@ -184,6 +186,7 @@ export async function currentCapabilities(
   modelPreview: boolean;
 }> {
   return {
+    handSelection: await handSelectionAvailable(),
     bodySelection: config.bodySelectionEnabled,
     bodyRecommendation: config.bodySelectionEnabled,
     bodyPreviews: bodyUxAvailable(),

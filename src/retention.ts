@@ -109,7 +109,7 @@ export async function deleteInstallationData(
   // 주간 쿼터 카운터는 subject가 설치 ID다. 창이 끝나면 만료 청소가 지우지만, 철회한 설치의
   // ID를 그때까지 남길 이유가 없다.
   await client.query(
-    "DELETE FROM usage_counters WHERE scope = 'installation_week' AND subject = $1",
+    "DELETE FROM usage_counters WHERE scope IN ('installation_week', 'semantic_search', 'hand_preview') AND subject = $1",
     [installationId],
   );
 }

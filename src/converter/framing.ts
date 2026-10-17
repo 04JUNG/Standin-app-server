@@ -26,6 +26,7 @@ export interface FramedInput {
   shape?: BodyShape | null;
   /** Required with `shape`: the converter must bake from exactly this authoring source. */
   shapeSource?: ShapeSource | null;
+  hands?: import("../hands/model.js").HandBake;
   bvhBytes: Uint8Array;
   characterId: string;
   scope: BodyScope;
@@ -106,6 +107,10 @@ export async function convertFramed(
     body.set("shape", JSON.stringify(input.shape));
     body.set("expected_shape_source", JSON.stringify(input.shapeSource));
   }
+  if (input.hands) {
+    body.set("hand_left", input.hands.left);
+    body.set("hand_right", input.hands.right);
+  }
   body.set("output_scope", input.scope);
   body.set("preview_view", "front");
   if (input.previewFormat) body.set("preview_format", input.previewFormat);
@@ -162,6 +167,12 @@ export async function convertFramed(
       if (bytes.toString("base64") !== encoded) throw new Error(key);
       return bytes;
     };
+    if (input.hands) {
+      const hands = value.hands as Record<string, unknown> | null;
+      if (!hands || hands.left !== input.hands.left || hands.right !== input.hands.right ||
+          hands.library_version !== input.hands.library_version || hands.version !== "hand-bake-v1")
+        throw new Error("hand lineage");
+    }
     const fbx = decode("fbx_base64"),
       preview = decode("preview_base64");
     if (

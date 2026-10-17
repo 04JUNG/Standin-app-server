@@ -1,5 +1,7 @@
+import { createSemanticRoutes } from "./semantic/routes.js";
 // Standin BFF (앱 서버) 엔트리포인트.
 // 경계: [Tauri] ──/v1──> [BFF: 이 서버] ──HTTP──> [도원 추론 서버]
+import { createHandRoutes } from "./hands/routes.js";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -130,6 +132,7 @@ app.use(
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowHeaders: [
       "Content-Type",
+      "If-None-Match",
       "Authorization",
       "X-Installation-Id",
       "X-Device-Token",
@@ -138,6 +141,10 @@ app.use(
     // 429 응답의 Retry-After를 웹뷰가 읽으려면 노출 목록에 있어야 한다(사용량 제한 안내).
     exposeHeaders: [
       "Retry-After",
+      "ETag",
+      "X-Standin-Hand-Revision",
+      "X-Standin-Preview-Only",
+      "X-Standin-Hand-Library-SHA256",
       "X-Standin-Review-Key",
       "X-Standin-Body-Render-Key",
       "X-Standin-Body-Revision",
@@ -199,9 +206,13 @@ app.on(
 );
 // 모델 목록도 설치 인증 뒤에 둔다. 분석·저장과 같은 계약이라 클라이언트가 같은
 // 헤더로 부른다(auth: false = Bearer 없음, X-Installation-Id/X-Device-Token).
+app.use("/v1/semantic-search", requireInstallation);
+app.use("/v1/semantic-search/*", requireInstallation);
+app.route("/v1/semantic-search", createSemanticRoutes());
 app.use("/v1/models", requireInstallation);
 app.use("/v1/models/*", requireInstallation);
 app.use("/v1/pose-candidates/*", requireInstallation);
+app.use("/v1/hands/*", requireInstallation);
 app.use("/v1/events/*", requireInstallation);
 
 app.route("/v1/users", usersRoutes);
@@ -209,6 +220,7 @@ app.route("/v1/analysis/jobs", jobsRoutes);
 app.route("/v1/models", characterRoutes);
 app.route("/v1/pose-candidates", poseRoutes);
 app.route("/v1/events", analyticsRoutes);
+app.route("/v1/hands", createHandRoutes());
 app.route("/v1/admin", adminRoutes);
 
 // DB가 준비된 뒤에 요청을 받는다. 실패하면 기동하지 않는다 —

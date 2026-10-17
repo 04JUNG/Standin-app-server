@@ -33,7 +33,7 @@ export interface PreviewCandidate {
   rank: number;
   camera_kind: string;
   render_camera: RenderCamera;
-  score_kind: "weighted_rrf" | null;
+  score_kind: "weighted_rrf" | "semantic_similarity" | null;
   rank_score: number | null;
   score_is_accuracy: false;
   asset: {

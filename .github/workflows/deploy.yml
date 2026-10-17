@@ -98,6 +98,11 @@ jobs:
           task-definition: taskdef.json
           container-name: bff
           image: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          environment-variables: |
+            HAND_SELECTION_ENABLED=${{ vars.HAND_SELECTION_ENABLED || 'false' }}
+            SEMANTIC_SEARCH_ENABLED=${{ vars.SEMANTIC_SEARCH_ENABLED || 'false' }}
+            SEMANTIC_SEARCH_PER_MINUTE=${{ vars.SEMANTIC_SEARCH_PER_MINUTE || '10' }}
+            SEMANTIC_SEARCH_TIMEOUT_MS=${{ vars.SEMANTIC_SEARCH_TIMEOUT_MS || '30000' }}
 
       - uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
@@ -126,6 +131,11 @@ jobs:
           task-definition: worker-taskdef.json
           container-name: analysis-worker
           image: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          environment-variables: |
+            HAND_SELECTION_ENABLED=${{ vars.HAND_SELECTION_ENABLED || 'false' }}
+            SEMANTIC_SEARCH_ENABLED=${{ vars.SEMANTIC_SEARCH_ENABLED || 'false' }}
+            SEMANTIC_SEARCH_PER_MINUTE=${{ vars.SEMANTIC_SEARCH_PER_MINUTE || '10' }}
+            SEMANTIC_SEARCH_TIMEOUT_MS=${{ vars.SEMANTIC_SEARCH_TIMEOUT_MS || '30000' }}
 
       - uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         if: env.ECS_WORKER_SERVICE != ''

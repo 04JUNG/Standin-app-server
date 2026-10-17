@@ -1212,3 +1212,28 @@ BVH 본문과 내부 경로는 공개 결과 JSON에 포함하지 않는다. 기
 full/half/shoulder_head/head 범위를 적용하며 카메라 또는 범위가 유효하지 않으면 표시 실패를 알린다.
 미리보기에서 좌우 회전과 기준 시점 복원이 가능하다. 관절 기반 뷰어이며 실제 체형 메시의 피부 안전 인증이나 보정·저장 기능은 제공하지 않는다.
 기본 인체 계획은 미렌더 상태로 표시한다. 제공된 비공개 BVH/JSON은 Git에 올리지 않는다.
+## 손 라이브러리 선택
+
+`HAND_SELECTION_ENABLED=true`이며 추론·converter의 손 라이브러리가 일치하면
+`capabilities.handSelection=true`를 반환한다. 기본은 false다.
+
+- `GET /v1/hands/catalog`: 분류·프리셋·인증된 썸네일 URL·library hash.
+- `GET /v1/hands/{preset}/thumbnail?side=left|right`: 인물 기준 양손 PNG.
+- `GET /v1/analysis/jobs/{id}/people/{index}/hands`: 저장된 손과 원본 추천.
+- `PUT /v1/analysis/jobs/{id}/people/{index}/hands`: `{left?, right?, library_sha256, expectedRevision}`.
+
+선택은 기존 Job 결과 JSON에 영속화하며 인물별 revision으로 경합을 막는다.
+손이 선택된 최종 `/framed` 요청은 `handSelectionRevision`을 요구하고,
+FBX 저장에는 미리보기의 `reviewKey`도 필요하다. BVH에는 손 모양을 굽지 않는다.
+요청·응답·오류·캐시·배포 조건은 [손 선택 연동](HAND_SELECTION_INTEGRATION.md)을 따른다.
+
+손 썸네일 `GET /v1/hands/{preset}/thumbnail`은 선택적 `library=<SHA-256>`을 검증한다.
+PNG/304 응답의 `X-Standin-Hand-Library-SHA256`으로 카탈로그 일치를 확인할 수 있다.
+미준비는 404 `HAND_THUMBNAIL_UNAVAILABLE`, 라이브러리 변경은 409 `HAND_LIBRARY_CHANGED`다.
+## 직접 자연어 포즈 검색
+
+`GET /v1/semantic-search/capabilities`, `POST /v1/semantic-search`는 설치 인증을 사용한다. `query`와 `topK`로 검색하고 정식 또는 근접 후보가 있으면 조회 전용 `jobId`를 반환한다. 신규 후보의 refine·release는 금지한다. 이미지 없는 `source=semantic` 결과의 `image`는 null이다. 자연어 작업은 refine/body camera 기능을 허용하지 않는다. 입력 제한, 별도 검색 rate limit, 오류, 기록·해시 계약은 [SEMANTIC_SEARCH_INTEGRATION.md](SEMANTIC_SEARCH_INTEGRATION.md)를 따른다.
+
+두 기능의 공통 흐름·통합 검증·PR 제출 범위는 [HANDS_SEMANTIC_INTEGRATION.md](HANDS_SEMANTIC_INTEGRATION.md)를 따른다. 자연어 결과도 준비된 handSelection capability를 유지해 수동 손 선택을 사용할 수 있다.
+
+손 조회 전용 PNG 및 문장 표시 계약의 최신 기준은 [통합 계약](HANDS_SEMANTIC_INTEGRATION.md)을 따른다. 문장 API는 추론 PR #96의 candidates/near_candidates를 별도 그룹으로 보존하며 source/tags/mirror_alternates를 전송하거나 가정하지 않는다.

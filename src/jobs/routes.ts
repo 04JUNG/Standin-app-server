@@ -1,5 +1,8 @@
+import { createHandPreviewRoutes } from "../hands/preview.js";
+import { semanticCapabilities } from "../semantic/contract.js";
 // /v1/analysis/jobs — 분석 Job 생성·폴링·결과.
 // 동기 추론을 "제출→폴링" 비동기 계약으로 감싼다(클라 08_API_CONTRACT.md 형태).
+import { createHandSelectionRoutes } from "../hands/routes.js";
 import {
   createBodyPreviewRoutes,
   bodyPreviewManifestUrl,
@@ -52,6 +55,8 @@ jobsRoutes.route("/", createBodySelectionRoutes());
 jobsRoutes.route("/", createBodyPreviewRoutes());
 jobsRoutes.route("/", refineRoutes);
 jobsRoutes.route("/", createPresentationRoutes());
+jobsRoutes.route("/", createHandSelectionRoutes());
+jobsRoutes.route("/", createHandPreviewRoutes());
 jobsRoutes.route("/", createOutputScopeRoutes());
 
 // POST /v1/analysis/jobs — 이미지 업로드 → jobId 즉시 반환(추론은 백그라운드)
@@ -303,7 +308,7 @@ jobsRoutes.get("/:id/result", async (c) => {
       })),
     })),
     capabilities: {
-      ...(await currentCapabilities()),
+      ...(result.source === "semantic" ? semanticCapabilities(await currentCapabilities()) : await currentCapabilities()),
       ...(result.candidatesByPerson.some(
         (p) => p.routedSearch || p.posePresentation,
       )

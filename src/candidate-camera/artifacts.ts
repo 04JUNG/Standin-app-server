@@ -26,6 +26,7 @@ export function cameraArtifact(
     input.modelRevision,
     input.characterSha256,
     input.shape?.shapeSha256 ?? null,
+    input.hands,
   ]);
   return cache.get(key, () => convert(input));
 }

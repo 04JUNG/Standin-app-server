@@ -1,3 +1,4 @@
+import type { HandBake } from "../hands/model.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Hono } from "hono";
@@ -33,6 +34,10 @@ function libraryModel(characterSha = "b".repeat(64)) {
 
 function setup() {
   const state = {
+    hands: null as HandBake | null,
+    changeHandDuringConversion: false,
+    sentHands: null as HandBake | null,
+    pinnedSemanticSource: undefined as string | undefined,
     owner: true,
     confirmed: true,
     scope: "half" as "half" | "head" | "full",
@@ -68,6 +73,7 @@ function setup() {
                     outputScope: resolveOutputScope({ selection: state.scope }),
                     candidates: [
                       {
+                        sourceBvhSha256: state.pinnedSemanticSource,
                         id: "pick",
                         poseId: "pose",
                         camera:
@@ -112,12 +118,15 @@ function setup() {
         state.libraryReads++;
         return libraryModel(state.libraryCharacter);
       },
+      handBakeFor: async () => state.hands,
       converterEnabled: () => true,
       modelPreviewIdentity: async () => ({
         modelRevision: state.revision,
         characterSha256: "b".repeat(64),
       }),
       convertFramed: async (input) => {
+        state.sentHands = input.hands ?? null;
+        if (state.changeHandDuringConversion && state.hands) state.hands = { ...state.hands, left: "open", revision: state.hands.revision + 1 };
         state.calls++;
         await state.pending;
         if (state.changeDuringConversion) state.scope = "head";
@@ -300,5 +309,66 @@ test("a refinement stored after review invalidates the pinned original source", 
     expectedBvhSha256: sourceSha,
   });
   assert.equal(response.status, 409);
+  assert.equal(state.calls, 0);
+});
+
+const handFixture: HandBake = { left: "fist", right: "relaxed", library_sha256: "a".repeat(64), library_version: "hand-library-v1", revision: 1 };
+test("hand preview and download reuse the exact baked pair and require the reviewed revision", async () => {
+  const { state, request } = setup();
+  state.hands = { ...handFixture };
+  assert.equal((await request({ jobId: "hands-pair" })).status, 409);
+  const query = { jobId: "hands-pair", handSelectionRevision: "1" };
+  const preview = await request(query);
+  assert.equal(preview.status, 200);
+  assert.deepEqual(state.sentHands, handFixture);
+  assert.equal(preview.headers.get("X-Standin-Hand-Revision"), "1");
+  assert.equal(preview.headers.get("X-Standin-Hand-Library-SHA256"), handFixture.library_sha256);
+  const reviewKey = preview.headers.get("X-Standin-Review-Key")!;
+  const unreviewed = await request({ ...query, format: "fbx" });
+  assert.equal(unreviewed.status, 409);
+  assert.equal((await unreviewed.json() as { error: { code: string } }).error.code, "HAND_REVIEW_REQUIRED");
+  const download = await request({ ...query, format: "fbx", reviewKey });
+  assert.equal(download.status, 200);
+  assert.equal(await download.text(), "fbx");
+  assert.equal(state.calls, 1);
+  state.hands = { ...handFixture, left: "open", revision: 2 };
+  assert.equal((await request({ ...query, format: "fbx", reviewKey })).status, 409);
+  assert.equal((await request({ ...query, handSelectionRevision: "2" })).status, 200);
+  assert.equal(state.calls, 2);
+  assert.equal((await request({ ...query, handSelectionRevision: "2", format: "fbx", reviewKey })).status, 409);
+});
+test("hand changes during conversion discard the old output", async () => {
+  const { state, request } = setup();
+  state.hands = { ...handFixture };
+  state.changeHandDuringConversion = true;
+  const response = await request({ handSelectionRevision: "1" });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json() as { error: { code: string } }).error.code, "HANDS_CHANGED");
+});
+test("a selected hand disables the unmodified precomputed model shortcut", async () => {
+  const { state, request } = setup();
+  state.scope = "full";
+  state.hands = { ...handFixture };
+  const response = await request({ outputScope: "full", handSelectionRevision: "1", format: "model", useLibraryModel: "true" });
+  assert.equal(response.status, 200);
+  assert.equal(state.libraryReads, 0);
+  assert.deepEqual(state.sentHands, handFixture);
+});
+test("semantic source identity survives preview/download cache and rejects changed BVH", async () => {
+  const { state, request } = setup();
+  state.pinnedSemanticSource = sourceSha;
+  const query = { jobId: "semantic-paired" };
+  assert.equal(await (await request(query)).text(), "png");
+  assert.equal(await (await request({ ...query, format: "fbx" })).text(), "fbx");
+  assert.equal(state.calls, 1);
+  state.pinnedSemanticSource = "f".repeat(64);
+  assert.equal((await request(query)).status, 409);
+  assert.equal(state.calls, 1);
+});
+test("semantic candidate never exports a stale refined artifact", async () => {
+  const { state, request } = setup();
+  state.pinnedSemanticSource = sourceSha;
+  state.refined = true;
+  assert.equal((await request()).status, 409);
   assert.equal(state.calls, 0);
 });
