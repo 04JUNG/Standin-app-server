@@ -1313,3 +1313,15 @@ reviewKey를 사용한다. 렌더 중 원본·카메라·체형·수치/source �
 기존 포즈 커버리지 검사와 참고/생성/semantic 후보의 저장 금지, actual_mesh_validated=false,
 auto/refine 금지는 유지한다. 후보가 없는 참고 인물은 저장 가능한 다른 인물의 체형 기능을
 비활성화하지 않으며, 별도의 조회 전용 체형 미리보기를 유지한다.
+
+
+## 체형 Top-K 출력 범위 연결 (2026-10-18)
+
+body-previews.v1의 outputScope는 기존 full 전용에서 full/half/bust/head로 확장한다.
+저장된 인물 범위를 resolveOutputScope로 재계산하고, 해당 값이 없을 때만 유효한 presentation 범위를 사용한다.
+동일 범위가 manifest/renderKey/PNG/GLB에 결합되며 변경 중인 이전 요청은 BODY_PREVIEW_STALE이다.
+full GLB는 posed-mesh-v1, 부분 GLB는 scope·camera rotation이 적용된 framed-mesh-v1이다.
+부분 GLB의 modelRevision은 framed exporter revision이다. 앱에서 rotation을 중복 적용하지 않는다.
+수치 조절 체형 또는 부분 모델 capability가 없는 경우 GLB의 PREVIEW_NOT_READY(503) 뒤 같은 manifest의 PNG로 폴백한다.
+권한·무결성·stale 오류에는 PNG 폴백하지 않는다. 원본 BVH·후보 순위·Export 정책은 바꾸지 않는다.
+구 앱은 full만 허용하므로 새 BFF와 앱의 릴리스를 함께 조율해야 한다.

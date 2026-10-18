@@ -15,6 +15,7 @@ import { errorEnvelope } from "../mapping.js";
 import type { PrivatePreviewAsset } from "../pose-presentation.js";
 import { tryConsume } from "../limits/store.js";
 import { fixedWindow } from "../limits/policy.js";
+import { resolveOutputScope } from "../output-scope/model.js";
 const cache = new FramedArtifactCache(64 * 1024 * 1024, 300_000, 4);
 const defaults = {
   getOwnedJob,
@@ -169,8 +170,14 @@ export function createHandPreviewRoutes(
           return fail(409, "HANDS_CHANGED");
         const hands = await deps.handBakeFor({ handSelection: selection });
         if (!hands) return fail(409, "HANDS_CHANGED");
-        const scope = presentation!.output_scope;
-        if (!["full", "half", "shoulder_head", "head"].includes(scope ?? ""))
+        const scope = person?.outputScope
+          ? resolveOutputScope(person.outputScope).resolved
+          : presentation!.output_scope;
+        if (
+          !["full", "half", "bust", "shoulder_head", "head"].includes(
+            scope ?? "",
+          )
+        )
           return fail(409, "PREVIEW_UNAVAILABLE");
         const characterId = deps.characterId();
         if ((await deps.checkCharacter(characterId)) !== "ok")
@@ -195,14 +202,18 @@ export function createHandPreviewRoutes(
             scope:
               scope === "shoulder_head"
                 ? "bust"
-                : (scope as "full" | "half" | "head"),
+                : (scope as "full" | "half" | "bust" | "head"),
             hands,
           }),
         );
         const current = await deps.getOwnedJob(jobId, owner);
-        const live = current?.result?.candidatesByPerson.find(
+        const livePerson = current?.result?.candidatesByPerson.find(
           (p) => p.personIndex === index,
-        )?.posePresentation;
+        );
+        const live = livePerson?.posePresentation;
+        const liveScope = livePerson?.outputScope
+          ? resolveOutputScope(livePerson.outputScope).resolved
+          : live?.output_scope;
         if (
           current?.status !== "completed" ||
           !live ||
@@ -211,7 +222,7 @@ export function createHandPreviewRoutes(
             ...live.review_candidates,
             ...live.generated_candidates,
           ].some((p) => p.candidate_id === id && p.asset.bvh_sha256 === hash) ||
-          live.output_scope !== scope
+          liveScope !== scope
         )
           return fail(409, "PREVIEW_SOURCE_CHANGED");
         const after = await deps.selection(owner, jobId, index);

@@ -10,6 +10,7 @@ import type {
 } from "../pose-presentation.js";
 import { readHands, type HandSelection } from "./model.js";
 import { createHandPreviewRoutes } from "./preview.js";
+import { resolveOutputScope } from "../output-scope/model.js";
 function fixture(inline = false) {
   const text = "HIERARCHY authored fixture",
     hash = createHash("sha256").update(text).digest("hex"),
@@ -61,6 +62,7 @@ function fixture(inline = false) {
     owned: true,
     rate: true,
     calls: 0,
+    expectedScope: "half",
     reads: 0,
     changed: false,
     after: () => {},
@@ -90,7 +92,7 @@ function fixture(inline = false) {
       },
       convertFramed: async (input) => {
         state.calls++;
-        assert.equal(input.scope, "half");
+        assert.equal(input.scope, state.expectedScope);
         assert.equal(input.hands?.left, "fist");
         state.after();
         return {
@@ -144,6 +146,20 @@ test("changed hands during conversion discard the stale PNG", async () => {
     state.selection.revision++;
   };
   assert.equal((await app.request(url)).status, 409);
+});
+test("stored scope wins over presentation for hand preview; late scope changes are rejected", async () => {
+  const { app, state, url, result } = fixture();
+  const person = result.result!.candidatesByPerson[0];
+  person.outputScope = resolveOutputScope({
+    selection: "bust",
+    detected: "half",
+  });
+  state.expectedScope = "bust";
+  state.after = () => {
+    person.outputScope = resolveOutputScope({ selection: "head" });
+  };
+  assert.equal((await app.request(url)).status, 409);
+  assert.equal(state.calls, 1);
 });
 test("revoked ownership during conversion discards the PNG", async () => {
   const { app, state, url } = fixture();

@@ -7,7 +7,8 @@ import type { Job } from "../jobs/store.js";
 import type { CandidateCamera } from "../types.js";
 import type { PreviewRuntime } from "../converter/previewRuntime.js";
 import { EXPECTED_SOLVER_VERSION, sha256Hex } from "../converter/client.js";
-import { FRAMING_VERSION } from "../converter/framing.js";
+import { FRAMING_VERSION, type FramedInput } from "../converter/framing.js";
+import { resolveOutputScope } from "../output-scope/model.js";
 import {
   createBodyPreviewRoutes,
   validCamera,
@@ -76,6 +77,8 @@ function setup(count = 5) {
     poseCalls: 0,
     modelCalls: 0,
     convertCalls: 0,
+    inputs: [] as FramedInput[],
+    framedAvailable: true,
     afterRender: () => {},
     runtime: {
       schemaVersion: "body-preview-runtime.v1",
@@ -108,6 +111,13 @@ function setup(count = 5) {
         structuredClone(state.selections[i]),
       checkCharacter: async () => (state.available ? "ok" : "unavailable"),
       getPreviewRuntime: async () => structuredClone(state.runtime),
+      modelPreviewIdentity: async () =>
+        state.framedAvailable
+          ? {
+              modelRevision: "f".repeat(64),
+              characterSha256: state.selections[0].resolvedBody!.assetSha256,
+            }
+          : null,
       getPoseBvh: async () => {
         state.poseCalls++;
         return new Response(state.corruptBvh ? "wrong" : bvh, {
@@ -126,7 +136,7 @@ function setup(count = 5) {
         state.convertCalls++;
         assert.deepEqual(input.cameraRotation, rotation);
         assert.deepEqual(input.bvhBytes, new Uint8Array(bvh));
-        assert.equal(input.scope, "full");
+        state.inputs.push(input);
         assert.deepEqual(input.shape, state.selections[0].shape ?? null);
         assert.equal(
           input.characterId,
@@ -230,6 +240,120 @@ test("all nine approved bodies change preview identity without changing Top-5", 
   assert.equal(keys.size, 9);
   assert.deepEqual(analysis, original);
 });
+
+test("half scope survives switching all nine bodies; PNG and scoped GLB bind the new body", async () => {
+  const s = setup();
+  s.analysis.candidatesByPerson[0].outputScope = resolveOutputScope({
+    detected: "half",
+  });
+  const order = s.analysis.candidatesByPerson[0].candidates.map((c) => c.id);
+  let previous: BodyPreviewManifest | undefined;
+  for (const asset of s.bodies.assets) {
+    s.state.selections[0] = {
+      ...s.state.selections[0],
+      resolvedBody: bodyRef(asset),
+      selectionRevision: s.state.selections[0].selectionRevision + 1,
+    };
+    const m = await s.manifest();
+    assert.equal(m.outputScope, "half");
+    assert.deepEqual(
+      m.candidates.map((c) => c.candidateId),
+      order,
+    );
+    if (previous) {
+      assert.notEqual(m.renderKey, previous.renderKey);
+      for (const url of [
+        previous.candidates[0].thumbnailUrl,
+        previous.candidates[0].previewModel.url,
+      ])
+        assert.equal((await s.app.request(url)).status, 409);
+    }
+    for (const url of [
+      m.candidates[0].thumbnailUrl,
+      m.candidates[0].previewModel.url,
+    ]) {
+      const response = await s.app.request(url);
+      assert.equal(response.status, 200);
+      assert.equal(
+        response.headers.get("X-Standin-Character-SHA256"),
+        asset.assetSha256,
+      );
+    }
+    for (const input of s.state.inputs.slice(-2)) {
+      assert.equal(input.scope, "half");
+      assert.equal(input.characterId, asset.characterId);
+      assert.equal(input.expectedCharacterSha256, asset.assetSha256);
+    }
+    previous = m;
+  }
+  assert.equal(s.state.modelCalls, 0);
+  assert.equal(s.state.convertCalls, 18);
+});
+
+test("half scope + numeric body changes use shaped PNG and reject unshaped library GLB", async (t) => {
+  const { config } = await import("../config.js");
+  const before = config.bodyShapeBakeEnabled;
+  Object.assign(config, { bodyShapeBakeEnabled: true });
+  t.after(() => Object.assign(config, { bodyShapeBakeEnabled: before }));
+  const s = setup();
+  s.analysis.candidatesByPerson[0].outputScope = resolveOutputScope({
+    selection: "half",
+  });
+  s.state.selections[0].shapeSource = {
+    rules: "test",
+    blendSha256: "e".repeat(64),
+    controllerSha256: "f".repeat(64),
+  };
+  let previous: BodyPreviewManifest | undefined;
+  for (const [height, digest] of [
+    [168, "c"],
+    [186, "d"],
+  ] as const) {
+    s.state.selections[0].shape = {
+      schemaVersion: "body-shape.v1",
+      controls: { height },
+      shapeSha256: digest.repeat(64),
+    };
+    s.state.selections[0].selectionRevision++;
+    const m = await s.manifest();
+    assert.equal(m.outputScope, "half");
+    if (previous)
+      assert.equal(
+        (await s.app.request(previous.candidates[0].thumbnailUrl)).status,
+        409,
+      );
+    const glb = await s.app.request(m.candidates[0].previewModel.url);
+    assert.equal(glb.status, 503);
+    assert.equal(await code(glb), "PREVIEW_NOT_READY");
+    assert.equal(
+      (await s.app.request(m.candidates[0].thumbnailUrl)).status,
+      200,
+    );
+    assert.equal(s.state.inputs.at(-1)?.scope, "half");
+    assert.equal(s.state.inputs.at(-1)?.shape?.controls.height, height);
+    assert.deepEqual(
+      s.state.inputs.at(-1)?.shapeSource,
+      s.state.selections[0].shapeSource,
+    );
+    previous = m;
+  }
+  assert.equal(s.state.modelCalls, 0);
+});
+
+test("missing scoped GLB capability keeps the same half PNG fallback available", async () => {
+  const s = setup();
+  s.state.framedAvailable = false;
+  s.analysis.candidatesByPerson[0].outputScope = resolveOutputScope({
+    detected: "half",
+  });
+  const m = await s.manifest();
+  assert.equal(
+    (await s.app.request(m.candidates[0].previewModel.url)).status,
+    503,
+  );
+  assert.equal((await s.app.request(m.candidates[0].thumbnailUrl)).status, 200);
+  assert.equal(s.state.inputs[0].scope, "half");
+});
 for (const format of ["glb", "png"] as const)
   test(`late ${format} cannot overwrite a newer selection`, async () => {
     const { app, state, manifest, bodies } = setup();
@@ -246,7 +370,14 @@ for (const format of ["glb", "png"] as const)
     assert.equal(r.status, 409);
     assert.equal(await code(r), "BODY_PREVIEW_STALE");
   });
-for (const change of ["body", "revision", "camera", "pose", "runtime"] as const)
+for (const change of [
+  "body",
+  "revision",
+  "camera",
+  "pose",
+  "runtime",
+  "scope",
+] as const)
   test(`${change} invalidates old URL before rendering`, async () => {
     const { app, state, manifest, analysis, bodies } = setup();
     const old = await manifest();
@@ -261,10 +392,92 @@ for (const change of ["body", "revision", "camera", "pose", "runtime"] as const)
       ];
     if (change === "pose") analysis.candidatesByPerson[0].candidates.reverse();
     if (change === "runtime") state.runtime.previewRevision = "c".repeat(64);
+    if (change === "scope")
+      analysis.candidatesByPerson[0].outputScope = resolveOutputScope({
+        selection: "half",
+      });
     const r = await app.request(old.candidates[0].thumbnailUrl);
     assert.equal(r.status, 409);
     assert.equal(await code(r), "BODY_PREVIEW_STALE");
     assert.equal(state.convertCalls, 0);
+  });
+
+for (const scope of ["full", "half", "bust", "head"] as const)
+  test(`${scope} binds the same scope to manifest, PNG and GLB without changing Top-5`, async () => {
+    const s = setup();
+    s.analysis.candidatesByPerson[0].outputScope = resolveOutputScope({
+      detected: scope,
+    });
+    const before = structuredClone(s.analysis);
+    const m = await s.manifest();
+    assert.equal(m.outputScope, scope);
+    assert.equal(m.candidates.length, 5);
+    assert.equal(
+      (await s.app.request(m.candidates[0].thumbnailUrl)).status,
+      200,
+    );
+    assert.equal(
+      (await s.app.request(m.candidates[0].previewModel.url)).status,
+      200,
+    );
+    assert.deepEqual(
+      s.state.inputs.map((i) => i.scope),
+      scope === "full" ? [scope] : [scope, scope],
+    );
+    if (scope !== "full") {
+      assert.equal(m.runtime.modelRevision, "f".repeat(64));
+      assert.notEqual(m.runtime.modelRevision, s.state.runtime.modelRevision);
+      assert.equal(s.state.modelCalls, 0);
+      assert.equal(s.state.inputs[1].previewFormat, "model");
+      assert.equal(s.state.inputs[1].modelRevision, m.runtime.modelRevision);
+      assert.equal(
+        s.state.inputs[1].characterSha256,
+        m.resolvedBody.assetSha256,
+      );
+    }
+    assert.deepEqual(s.analysis, before);
+  });
+
+test("user scope overrides detection and presentation; missing/invalid legacy scope falls back", async () => {
+  const s = setup();
+  makeManualPresentation(s.analysis.candidatesByPerson[0]);
+  const person = s.analysis.candidatesByPerson[0];
+  person.outputScope = resolveOutputScope({
+    selection: "head",
+    detected: "half",
+  });
+  assert.equal((await s.manifest()).outputScope, "head");
+  person.outputScope = resolveOutputScope({
+    selection: "auto",
+    detected: "bust",
+  });
+  assert.equal((await s.manifest()).outputScope, "bust");
+  delete person.outputScope;
+  person.posePresentation!.output_scope = "half";
+  assert.equal((await s.manifest()).outputScope, "half");
+  person.posePresentation!.output_scope = "invalid";
+  assert.equal((await s.manifest()).outputScope, "full");
+});
+
+for (const format of ["glb", "png"] as const)
+  test(`scope change during ${format} rendering rejects the late result`, async () => {
+    const s = setup();
+    s.analysis.candidatesByPerson[0].outputScope = resolveOutputScope({
+      selection: "half",
+    });
+    const m = await s.manifest();
+    s.state.afterRender = () => {
+      s.analysis.candidatesByPerson[0].outputScope = resolveOutputScope({
+        selection: "head",
+      });
+    };
+    const r = await s.app.request(
+      format === "glb"
+        ? m.candidates[0].previewModel.url
+        : m.candidates[0].thumbnailUrl,
+    );
+    assert.equal(r.status, 409);
+    assert.equal(await code(r), "BODY_PREVIEW_STALE");
   });
 test("other person's change does not invalidate this person's preview", async () => {
   const { app, state, manifest } = setup();

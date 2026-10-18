@@ -5,7 +5,7 @@ import { FRAMING_VERSION } from "./framing.js";
 export interface PreviewRuntime {
   schemaVersion: "body-preview-runtime.v1";
   previewRevision: string;
-  modelVersion: "posed-mesh-v1";
+  modelVersion: "posed-mesh-v1" | "framed-mesh-v1";
   modelRevision: string;
   solverVersion: string;
   framingVersion: string;
