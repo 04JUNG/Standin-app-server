@@ -39,7 +39,7 @@ const defaults = {
     );
   },
 };
-async function bytesFor(
+export async function previewAssetBytes(
   asset: PrivatePreviewAsset,
   fetchBvh: typeof getPoseBvh,
 ) {
@@ -176,7 +176,7 @@ export function createHandPreviewRoutes(
         if ((await deps.checkCharacter(characterId)) !== "ok")
           return fail(503, "HANDS_UNAVAILABLE");
         if (!(await deps.consume(owner))) return fail(429, "RATE_LIMITED");
-        const bvhBytes = await bytesFor(asset, deps.getPoseBvh);
+        const bvhBytes = await previewAssetBytes(asset, deps.getPoseBvh);
         const key = JSON.stringify([
           "hand-lookup",
           owner,

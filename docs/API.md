@@ -1237,3 +1237,16 @@ PNG/304 응답의 `X-Standin-Hand-Library-SHA256`으로 카탈로그 일치를 �
 두 기능의 공통 흐름·통합 검증·PR 제출 범위는 [HANDS_SEMANTIC_INTEGRATION.md](HANDS_SEMANTIC_INTEGRATION.md)를 따른다. 자연어 결과도 준비된 handSelection capability를 유지해 수동 손 선택을 사용할 수 있다.
 
 손 조회 전용 PNG 및 문장 표시 계약의 최신 기준은 [통합 계약](HANDS_SEMANTIC_INTEGRATION.md)을 따른다. 문장 API는 추론 PR #96의 candidates/near_candidates를 별도 그룹으로 보존하며 source/tags/mirror_alternates를 전송하거나 가정하지 않는다.
+
+### 자연어 검색 기본 남성 모델 미리보기
+
+`GET /v1/analysis/jobs/:job/people/:index/pose-previews/:candidate/:sha/model`
+
+완료된 semantic 작업 소유자만 조회할 수 있다. semantic-pose-presentation-v1의 full 라이브러리 검색/근접 후보만 지원하며 query(체형·format 포함)는 거절한다.
+기본 남성 `standin-master-v2`를 고정 사용한다. 사전 계산된 정확한 BVH/캐릭터/revision의 표면이 없으면 동일 BVH로 기본 남성 모델을 렌더한다.
+소유권·원본 BVH SHA·캐릭터 SHA·모델 revision을 확인하고, 작업 또는 모델 변경 시 응답을 폐기한다.
+응답은 `model/gltf-binary` GLB만 반환하며 FBX는 반환하지 않는다. `X-Standin-Preview-Only: true`,
+`X-Standin-Character-Id`, `X-Standin-Model-Version`, `X-Standin-Source-BVH-SHA256`,
+`X-Standin-Character-SHA256`, `X-Standin-Model-Revision`, `X-Standin-Artifact-SHA256`을 제공한다.
+20회/분/설치 한도이며 counter는 설치 데이터 삭제 시 함께 정리한다. 404(작업/후보/범위), 409(변경), 429(한도), 503(렌더/모델 실패)를 구분한다.
+신규 후보 refine/release/export 금지와 actual_mesh_validated=false를 유지한다. 체형 선택은 제공하지 않으며 손 선택의 별도 PNG 참고 렌더는 기존 경로를 유지한다.

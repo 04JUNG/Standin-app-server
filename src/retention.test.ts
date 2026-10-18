@@ -128,7 +128,7 @@ test("consent withdrawal clears refined artifacts, installation audits and the q
   assert.ok(texts.includes("DELETE FROM admin_access_audit WHERE installation_id = $1"));
   assert.ok(
     texts.includes(
-      "DELETE FROM usage_counters WHERE scope IN ('installation_week', 'semantic_search', 'hand_preview') AND subject = $1",
+      "DELETE FROM usage_counters WHERE scope IN ('installation_week', 'semantic_search', 'hand_preview', 'semantic_model_preview') AND subject = $1",
     ),
   );
 

@@ -1,3 +1,4 @@
+import { createSemanticModelRoutes } from "../semantic/model-preview.js";
 import { createHandPreviewRoutes } from "../hands/preview.js";
 import { semanticCapabilities } from "../semantic/contract.js";
 // /v1/analysis/jobs — 분석 Job 생성·폴링·결과.
@@ -57,6 +58,7 @@ jobsRoutes.route("/", refineRoutes);
 jobsRoutes.route("/", createPresentationRoutes());
 jobsRoutes.route("/", createHandSelectionRoutes());
 jobsRoutes.route("/", createHandPreviewRoutes());
+jobsRoutes.route("/", createSemanticModelRoutes());
 jobsRoutes.route("/", createOutputScopeRoutes());
 
 // POST /v1/analysis/jobs — 이미지 업로드 → jobId 즉시 반환(추론은 백그라운드)
