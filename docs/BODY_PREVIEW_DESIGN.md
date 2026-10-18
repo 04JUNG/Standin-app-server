@@ -29,7 +29,7 @@
 | jobId / personIndex              | 서버 Job·인물 ID                                                                       |
 | selectionRevision / resolvedBody | 실제 저장된 선택 버전과 BodyRef 전체                                                   |
 | renderKey                        | 해당 인물의 후보 묶음·체형·렌더 버전을 식별하는 SHA256                                 |
-| outputScope                      | `full`. Top-K 비교용이며 최종 Export 범위와 별개                                       |
+| outputScope                      | `full / half / bust / shoulder_head / head`. 인물별 저장된 출력 범위                                       |
 | status                           | `renderable`. 각 GLB/PNG 다운로드 성공을 뜻하지 않음                                   |
 | renderingExecuted                | false. 목록 조회만으로 Blender 실행이나 bake를 시작하지 않음                           |
 | runtime                          | previewRevision, modelVersion, modelRevision, solverVersion, framingVersion            |
@@ -37,7 +37,7 @@
 | candidates[].thumbnailUrl        | PNG 폴백 경로                                                                          |
 | candidates[].previewModel        | url, rotation, sourceSha, characterId, characterSha256, modelRevision, previewRevision |
 
-`renderKey`에는 owner/job/person/selectionRevision/BodyRef/full scope/runtime/후보 전체를 넣는다. 체형 hash, camera, 원본 BVH hash 또는 렌더 코드가 바뀌면 다른 key다. 다른 인물의 선택 변경은 현재 인물의 key를 바꾸지 않는다. 이 key는 인증 토큰이 아니며 매 요청 소유권을 다시 검사한다.
+`renderKey`에는 owner/job/person/selectionRevision/BodyRef/최종 scope/runtime/후보 전체를 넣는다. 체형 hash, camera, 원본 BVH hash 또는 렌더 코드가 바뀌면 다른 key다. 다른 인물의 선택 변경은 현재 인물의 key를 바꾸지 않는다. 이 key는 인증 토큰이 아니며 매 요청 소유권을 다시 검사한다.
 
 ### 바이트 조회
 
@@ -117,7 +117,19 @@ Standin-server `codex/body-preview-contract`의 `converter_api/body_preview.py` 
 
 ## 2026-10-17 추론 계약 호환 보완
 
-- 현재 converter의 `skin-regions-v2-shoulder-head`를 `/preview-contract`, `/healthz`, `/convert-framed`에서 동일하게 검증한다. 이전/알 수 없는 프레이밍 버전은 계속 거절한다. 기존 네 출력 범위는 그대로 지원하며 `shoulder_head` UI 추가는 별도 작업이다.
+- 현재 converter의 `skin-regions-v2-shoulder-head`를 `/preview-contract`, `/healthz`, `/convert-framed`에서 동일하게 검증한다. 이전/알 수 없는 프레이밍 버전은 계속 거절한다. 기존 범위를 유지하면서 `shoulder_head`를 별도 UI 범위로 지원한다.
 - 후보 카메라는 v1과 v2를 지원한다. v2는 search-fit reference, 투영/거리, 좌우 라벨, pose/query 연결, COCO17 관측 마스크와 SO(3) 회전을 검증한다. manifest의 pose_id도 후보와 같아야 한다.
 - manifest와 refine 전달 과정에서 v2 투영·마스크·query hash를 보존한다. 현재 체형 미리보기/FBX converter는 회전을 사용하며, 검색의 원근 투영까지 재현한다고 보장하지 않는다.
 - 회귀 검증: 현재 버전의 health/contract/paired artifact, 구 버전 거절, v2 PNG/GLB/검토/내보내기, 잘못된 v2 거절, refine 원본 camera 전달. 기존 v1 카메라 경로도 유지한다.
+
+
+## 출력 범위 연결 수정 (2026-10-18)
+
+- 인물의 저장된 `outputScope`를 기존 `resolveOutputScope`로 재계산한다. 사용자 수동 선택 > 자동 detected > full fallback 순서다. 저장된 범위가 없는 과거 작업만 유효한 `posePresentation.output_scope`를 참고하고, 없거나 지원하지 않는 값이면 full이다. 임의의 resolved 값은 신뢰하지 않는다.
+- shoulder_head를 별도 지원한다. 자동 출력은 인물의 meshScope(자동 bust → half), 수동 선택은 명시한 범위를 따른다.
+- 최종 범위가 manifest·renderKey·PNG/GLB 요청과 완료 직전 stale 검사에 동일하게 적용된다. 후보 ID·순위·개수·원본 BVH·Export 정책은 유지한다.
+- full GLB는 기존 사전 자산이다. 부분 GLB는 기존 convert-framed의 preview_format=model을 사용하며 scope와 camera rotation이 이미 반영된 framed-mesh-v1이다. 앱은 rotation을 다시 적용하지 않는다.
+- 부분 GLB는 /healthz의 framed exporter revision과 체형 hash를 사용한다. /preview-contract의 사전 GLB revision과 혼용하지 않는다. 부분 GLB capability가 없거나 수치 조절 체형이면 GLB는 503 PREVIEW_NOT_READY이며 같은 manifest의 검증된 PNG를 사용한다.
+- 손 적용 참고 PNG도 저장된 사용자 범위를 우선하며, 렌더 중 범위가 변경되면 이전 응답을 버린다.
+- 부분 manifest를 처리하는 새 앱과 BFF를 함께 릴리스해야 한다. full만 허용하는 구 앱은 부분 manifest를 처리하지 못한다.
+- 자동 검증은 fixture converter/카탈로그 및 WebGL 호출 대체를 사용한다. 실제 체형 파일·Blender·스테이징 설치 앱의 시각 E2E 성공을 의미하지 않는다.

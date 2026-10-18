@@ -18,7 +18,7 @@ export interface UpstreamPerson {
   semantic_candidates?: unknown;
   search_routing?: unknown;
   hands?: unknown;
-  output_scope?: { detected?: unknown; source?: unknown };
+  output_scope?: { detected?: unknown; source?: unknown; mesh_scope?: unknown };
   /** 인물별 action·view(추론 `person_tags`). 공백 분석용이며 공개 응답에는 넣지 않는다. */
   person_tags?: { action?: unknown; view?: unknown; source?: unknown };
   index: number;
@@ -358,7 +358,10 @@ export async function refine(
 // 디스크에서 조정본을 받아오던 경로인데, 이제 조정본은 /refine 응답 본문으로만 온다.
 
 // GET /pose/{id}/bvh → 원본 응답(상태·바디를 호출측이 그대로 프록시)
-export async function getPoseBvh(poseId: string, signal?: AbortSignal): Promise<Response> {
+export async function getPoseBvh(
+  poseId: string,
+  signal?: AbortSignal,
+): Promise<Response> {
   return fetch(
     `${config.inferenceBaseUrl}/pose/${encodeURIComponent(poseId)}/bvh`,
     {
@@ -477,36 +480,74 @@ async function safeText(res: Response): Promise<string> {
 // Hand metadata uses the same internal authentication and timeout as other reads.
 export async function getHandCatalog(): Promise<Response> {
   return fetch(`${config.inferenceBaseUrl}/hands/catalog`, {
-    headers: authHeaders(), signal: AbortSignal.timeout(config.healthTimeoutMs),
-  });
-}
-export async function getHandThumbnail(preset: string, side: "left" | "right", etag?: string): Promise<Response> {
-  return fetch(`${config.inferenceBaseUrl}/hands/${encodeURIComponent(preset)}/thumbnail?side=${side}`, {
-    headers: { ...authHeaders(), ...(etag ? { "If-None-Match": etag } : {}) },
+    headers: authHeaders(),
     signal: AbortSignal.timeout(config.healthTimeoutMs),
   });
 }
+export async function getHandThumbnail(
+  preset: string,
+  side: "left" | "right",
+  etag?: string,
+): Promise<Response> {
+  return fetch(
+    `${config.inferenceBaseUrl}/hands/${encodeURIComponent(preset)}/thumbnail?side=${side}`,
+    {
+      headers: { ...authHeaders(), ...(etag ? { "If-None-Match": etag } : {}) },
+      signal: AbortSignal.timeout(config.healthTimeoutMs),
+    },
+  );
+}
 
 /** Direct user text only; never run VLM or refine on this path. Do not log the query/body. */
-export async function searchSemantic(query: string, topK: number, signal?: AbortSignal): Promise<unknown> {
+export async function searchSemantic(
+  query: string,
+  topK: number,
+  signal?: AbortSignal,
+): Promise<unknown> {
   const response = await fetch(`${config.inferenceBaseUrl}/semantic-search`, {
-    method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" },
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
     body: JSON.stringify({ query, topK }),
     signal: signal ?? AbortSignal.timeout(config.semanticSearchTimeoutMs),
   });
   const body: unknown = await response.json().catch(() => null);
-  if (!response.ok && !(body && typeof body === "object" && "status" in body && body.status === "error"))
-    throw new SemanticError(response.status === 422 ? "INVALID_INPUT" : "SEMANTIC_UNAVAILABLE", response.status === 422 ? 400 : 503);
+  if (
+    !response.ok &&
+    !(
+      body &&
+      typeof body === "object" &&
+      "status" in body &&
+      body.status === "error"
+    )
+  )
+    throw new SemanticError(
+      response.status === 422 ? "INVALID_INPUT" : "SEMANTIC_UNAVAILABLE",
+      response.status === 422 ? 400 : 503,
+    );
   return body;
 }
 export async function semanticReadiness(): Promise<boolean> {
   try {
     const response = await fetch(`${config.inferenceBaseUrl}/healthz`, {
-      headers: authHeaders(), signal: AbortSignal.timeout(config.healthTimeoutMs),
+      headers: authHeaders(),
+      signal: AbortSignal.timeout(config.healthTimeoutMs),
     });
     const body: unknown = await response.json();
-    if (!response.ok || !body || typeof body !== "object" || !("semantic_text" in body)) return false;
+    if (
+      !response.ok ||
+      !body ||
+      typeof body !== "object" ||
+      !("semantic_text" in body)
+    )
+      return false;
     const semantic = body.semantic_text;
-    return !!semantic && typeof semantic === "object" && "ready" in semantic && semantic.ready === true;
-  } catch { return false; }
+    return (
+      !!semantic &&
+      typeof semantic === "object" &&
+      "ready" in semantic &&
+      semantic.ready === true
+    );
+  } catch {
+    return false;
+  }
 }

@@ -2,7 +2,11 @@
 //  - 추론의 원시 distance → 클라 UI 라벨(matchLevel)
 //  - 추론의 {detail} → 클라 오류봉투 {error:{code,...}}
 import { readHands } from "./hands/model.js";
-import { isBodyScope, resolveOutputScope } from "./output-scope/model.js";
+import {
+  isBodyScope,
+  resolveOutputScope,
+  resolvePersonOutputScope,
+} from "./output-scope/model.js";
 import {
   mapPosePresentation,
   type PrivatePreviewAsset,
@@ -121,11 +125,18 @@ function mapPerson(p: UpstreamPerson): AnalysisPerson {
       detected: isBodyScope(p.output_scope?.detected)
         ? p.output_scope.detected
         : null,
-      detectionSource:
-        p.output_scope?.source === "vlm_person" ||
-        p.output_scope?.source === "legacy_shot"
-          ? p.output_scope.source
-          : "unknown",
+      meshScope: isBodyScope(p.output_scope?.mesh_scope)
+        ? p.output_scope.mesh_scope
+        : null,
+      detectionSource: [
+        "vlm_person",
+        "vlm_description",
+        "legacy_shot",
+        "observed_legs",
+      ].includes(String(p.output_scope?.source))
+        ? (p.output_scope!
+            .source as import("./output-scope/model.js").DetectionSource)
+        : "unknown",
     }),
     box: p.box,
     tags: p.tags,
@@ -237,11 +248,19 @@ export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
         }));
       if (presentation) {
         person.posePresentation = presentation.presentation;
+        person.outputScope = resolvePersonOutputScope(person);
+        person.posePresentation.output_scope = person.outputScope.resolved;
         // A known library BVH can be chosen by the author through the existing
         // confirmation/review/export flow. Reference and generated rows stay preview-only.
-        const library = ["ready", "review_ready"].includes(presentation.presentation.status) &&
-          ["ok", "partial_error"].includes(presentation.presentation.search_status)
-          ? presentation.presentation.library_candidates : [];
+        const library =
+          ["ready", "review_ready"].includes(
+            presentation.presentation.status,
+          ) &&
+          ["ok", "partial_error"].includes(
+            presentation.presentation.search_status,
+          )
+            ? presentation.presentation.library_candidates
+            : [];
         person.candidates = library.map((candidate) => ({
           id: candidate.candidate_id,
           poseId: candidate.pose_id!,

@@ -1,3 +1,5 @@
+import { handBakeFor } from "../hands/service.js";
+import { HandError } from "../hands/model.js";
 /** Read-only Top-K previews bound to the persisted body choice. No search/refine mutation. */
 import { manualPresentationCamera } from "../pose-presentation.js";
 import { Hono } from "hono";
@@ -9,7 +11,7 @@ import { getPoseBvh } from "../inference.js";
 import { checkCharacter } from "../characters/service.js";
 import { errorEnvelope } from "../mapping.js";
 import { cameraArtifact } from "../candidate-camera/artifacts.js";
-import { convertFramed } from "../converter/framing.js";
+import { convertFramed, modelPreviewIdentity } from "../converter/framing.js";
 import {
   ConverterError,
   converterEnabled,
@@ -22,6 +24,7 @@ import {
 } from "../converter/previewRuntime.js";
 import { bodyRef, type BodyRef } from "./model.js";
 import { shapeRenderable } from "./shape.js";
+import { previewScope } from "../output-scope/preview.js";
 import { BodyError, bodyStore } from "./store.js";
 
 export const BODY_PREVIEW_SCHEMA = "body-previews.v1";
@@ -36,6 +39,8 @@ const defaults = {
   checkCharacter,
   getPoseBvh,
   getPreviewRuntime,
+  modelPreviewIdentity,
+  handBakeFor,
   convertFramed,
   getModel: (source: string, body: BodyRef, runtime: PreviewRuntime) =>
     getPreviewModel(source, body.characterId, fetch, {
@@ -128,6 +133,8 @@ export async function bodyPreviewManifest(
     (p) => p.personIndex === personIndex,
   );
   if (!person) throw new BodyError("NOT_FOUND", 404);
+  const outputScope = previewScope(person);
+  const hands = await deps.handBakeFor(person);
   // selection() checks the current catalog, job policy snapshot and installation ownership.
   const selection = await deps.selection(owner, jobId, personIndex);
   if (!person.candidates.length)
@@ -167,7 +174,20 @@ export async function bodyPreviewManifest(
       sourceBvhSha256: manual?.sourceBvhSha256 ?? c.camera!.source_bvh_sha256,
     };
   });
-  const runtime = await deps.getPreviewRuntime();
+  let runtime = await deps.getPreviewRuntime();
+  if (outputScope !== "full") {
+    const framed = await deps.modelPreviewIdentity(body.characterId);
+    if (framed) {
+      if (framed.characterSha256 !== body.assetSha256)
+        throw new ConverterError("CONVERTER_INTEGRITY", "framed body mismatch");
+      // Scoped models use the framed exporter revision, not the offline posed exporter.
+      runtime = {
+        ...runtime,
+        modelVersion: "framed-mesh-v1",
+        modelRevision: framed.modelRevision,
+      };
+    }
+  }
   const renderKey = sha256Hex(
     Buffer.from(
       JSON.stringify([
@@ -179,7 +199,8 @@ export async function bodyPreviewManifest(
         body,
         selection.shape ?? null,
         selection.shapeSource ?? null,
-        "full",
+        outputScope,
+        hands,
         runtime,
         candidates,
       ]),
@@ -195,7 +216,8 @@ export async function bodyPreviewManifest(
     shape: selection.shape ?? null,
     shapeSource: selection.shapeSource ?? null,
     renderKey,
-    outputScope: "full" as const,
+    outputScope,
+    hands,
     // Manifest readiness is not successful rendering; bytes are fetched on demand.
     status: "renderable" as const,
     renderingExecuted: false as const,
@@ -244,6 +266,11 @@ export function createBodyPreviewRoutes(
       await next();
     });
   app.onError((error, c) => {
+    if (error instanceof HandError)
+      return c.json(
+        errorEnvelope(error.code, error.message, c.get("requestId")),
+        error.status,
+      );
     if (error instanceof BodyError)
       return c.json(
         errorEnvelope(
@@ -327,12 +354,21 @@ export function createBodyPreviewRoutes(
     if (sha256Hex(bvhBytes) !== candidate.sourceBvhSha256)
       throw new BodyError("POSE_UNAVAILABLE", 409);
     let bytes: Uint8Array;
-    if (format === "glb" && manifest.shape)
+    if (format === "glb" && (manifest.shape || manifest.hands))
       throw new ConverterError(
         "PREVIEW_NOT_READY",
         "shaped Top-K uses verified PNG; static library GLB is not valid",
       );
-    if (format === "glb")
+    if (
+      format === "glb" &&
+      manifest.outputScope !== "full" &&
+      manifest.runtime.modelVersion !== "framed-mesh-v1"
+    )
+      throw new ConverterError(
+        "PREVIEW_NOT_READY",
+        "scoped GLB unavailable; use verified PNG",
+      );
+    if (format === "glb" && manifest.outputScope === "full")
       bytes = await deps.getModel(
         candidate.sourceBvhSha256,
         manifest.resolvedBody,
@@ -346,16 +382,25 @@ export function createBodyPreviewRoutes(
           characterId: manifest.resolvedBody.characterId,
           shape: manifest.shape,
           shapeSource: manifest.shapeSource,
-          scope: "full",
+          scope: manifest.outputScope,
+          ...(manifest.hands ? { hands: manifest.hands } : {}),
           cameraRotation: candidate.camera.rotation,
           expectedCharacterSha256: manifest.resolvedBody.assetSha256,
           expectedPreviewRevision: manifest.runtime.previewRevision,
+          ...(format === "glb"
+            ? {
+                previewFormat: "model" as const,
+                modelRevision: manifest.runtime.modelRevision,
+                characterSha256: manifest.resolvedBody.assetSha256,
+              }
+            : {}),
         },
         deps.convertFramed,
       );
       if (
         artifact.characterSha256 !== manifest.resolvedBody.assetSha256 ||
-        artifact.previewRevision !== manifest.runtime.previewRevision
+        artifact.previewRevision !== manifest.runtime.previewRevision ||
+        artifact.sourceBvhSha256 !== candidate.sourceBvhSha256
       )
         throw new ConverterError(
           "CONVERTER_INTEGRITY",
@@ -378,6 +423,13 @@ export function createBodyPreviewRoutes(
         "X-Standin-Preview-Revision": manifest.runtime.previewRevision,
         "X-Standin-Model-Revision": manifest.runtime.modelRevision,
         "X-Standin-Artifact-SHA256": sha256Hex(bytes),
+        "X-Standin-Output-Scope": manifest.outputScope,
+        ...(manifest.hands
+          ? {
+              "X-Standin-Hand-Revision": String(manifest.hands.revision),
+              "X-Standin-Hand-Library-SHA256": manifest.hands.library_sha256,
+            }
+          : {}),
       },
     });
   });

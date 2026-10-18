@@ -10,6 +10,7 @@ import type {
 } from "../pose-presentation.js";
 import { readHands, type HandSelection } from "./model.js";
 import { createHandPreviewRoutes } from "./preview.js";
+import { resolveOutputScope } from "../output-scope/model.js";
 function fixture(inline = false) {
   const text = "HIERARCHY authored fixture",
     hash = createHash("sha256").update(text).digest("hex"),
@@ -29,6 +30,28 @@ function fixture(inline = false) {
   const candidate = {
     candidate_id: id,
     pose_id: inline ? null : "pose",
+    render_camera: {
+      version: "pose-preview-camera-v1",
+      projection: "orthographic",
+      rotation: [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ],
+      yaw_degrees: 0,
+      pitch_degrees: 0,
+      roll_degrees: 0,
+      distance_torso: null,
+      basis: "right-handed-Y-up",
+      rotation_order: "Rz@Rx@Ry_column_vectors",
+      origin: "hip_midpoint",
+      scale: "hip_to_shoulder_midpoint_length",
+      screen_y: "down",
+      projection_rule: "xy=(x,-y)",
+      projection_matches_search: false,
+      fit_to_rough_pixels: false,
+      bvh_camera_rotation_applied: false,
+    },
     asset: {
       transport: inline ? "inline_bvh" : "library_bvh",
       bvh_sha256: hash,
@@ -61,6 +84,7 @@ function fixture(inline = false) {
     owned: true,
     rate: true,
     calls: 0,
+    expectedScope: "half",
     reads: 0,
     changed: false,
     after: () => {},
@@ -90,7 +114,11 @@ function fixture(inline = false) {
       },
       convertFramed: async (input) => {
         state.calls++;
-        assert.equal(input.scope, "half");
+        assert.deepEqual(
+          input.cameraRotation,
+          candidate.render_camera.rotation,
+        );
+        assert.equal(input.scope, state.expectedScope);
         assert.equal(input.hands?.left, "fist");
         state.after();
         return {
@@ -144,6 +172,20 @@ test("changed hands during conversion discard the stale PNG", async () => {
     state.selection.revision++;
   };
   assert.equal((await app.request(url)).status, 409);
+});
+test("stored scope wins over presentation for hand preview; late scope changes are rejected", async () => {
+  const { app, state, url, result } = fixture();
+  const person = result.result!.candidatesByPerson[0];
+  person.outputScope = resolveOutputScope({
+    selection: "bust",
+    detected: "half",
+  });
+  state.expectedScope = "bust";
+  state.after = () => {
+    person.outputScope = resolveOutputScope({ selection: "head" });
+  };
+  assert.equal((await app.request(url)).status, 409);
+  assert.equal(state.calls, 1);
 });
 test("revoked ownership during conversion discards the PNG", async () => {
   const { app, state, url } = fixture();
