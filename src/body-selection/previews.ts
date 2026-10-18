@@ -1,3 +1,5 @@
+import { handBakeFor } from "../hands/service.js";
+import { HandError } from "../hands/model.js";
 /** Read-only Top-K previews bound to the persisted body choice. No search/refine mutation. */
 import { manualPresentationCamera } from "../pose-presentation.js";
 import { Hono } from "hono";
@@ -38,6 +40,7 @@ const defaults = {
   getPoseBvh,
   getPreviewRuntime,
   modelPreviewIdentity,
+  handBakeFor,
   convertFramed,
   getModel: (source: string, body: BodyRef, runtime: PreviewRuntime) =>
     getPreviewModel(source, body.characterId, fetch, {
@@ -131,6 +134,7 @@ export async function bodyPreviewManifest(
   );
   if (!person) throw new BodyError("NOT_FOUND", 404);
   const outputScope = previewScope(person);
+  const hands = await deps.handBakeFor(person);
   // selection() checks the current catalog, job policy snapshot and installation ownership.
   const selection = await deps.selection(owner, jobId, personIndex);
   if (!person.candidates.length)
@@ -196,6 +200,7 @@ export async function bodyPreviewManifest(
         selection.shape ?? null,
         selection.shapeSource ?? null,
         outputScope,
+        hands,
         runtime,
         candidates,
       ]),
@@ -212,6 +217,7 @@ export async function bodyPreviewManifest(
     shapeSource: selection.shapeSource ?? null,
     renderKey,
     outputScope,
+    hands,
     // Manifest readiness is not successful rendering; bytes are fetched on demand.
     status: "renderable" as const,
     renderingExecuted: false as const,
@@ -260,6 +266,11 @@ export function createBodyPreviewRoutes(
       await next();
     });
   app.onError((error, c) => {
+    if (error instanceof HandError)
+      return c.json(
+        errorEnvelope(error.code, error.message, c.get("requestId")),
+        error.status,
+      );
     if (error instanceof BodyError)
       return c.json(
         errorEnvelope(
@@ -343,7 +354,7 @@ export function createBodyPreviewRoutes(
     if (sha256Hex(bvhBytes) !== candidate.sourceBvhSha256)
       throw new BodyError("POSE_UNAVAILABLE", 409);
     let bytes: Uint8Array;
-    if (format === "glb" && manifest.shape)
+    if (format === "glb" && (manifest.shape || manifest.hands))
       throw new ConverterError(
         "PREVIEW_NOT_READY",
         "shaped Top-K uses verified PNG; static library GLB is not valid",
@@ -372,6 +383,7 @@ export function createBodyPreviewRoutes(
           shape: manifest.shape,
           shapeSource: manifest.shapeSource,
           scope: manifest.outputScope,
+          ...(manifest.hands ? { hands: manifest.hands } : {}),
           cameraRotation: candidate.camera.rotation,
           expectedCharacterSha256: manifest.resolvedBody.assetSha256,
           expectedPreviewRevision: manifest.runtime.previewRevision,
@@ -411,6 +423,13 @@ export function createBodyPreviewRoutes(
         "X-Standin-Preview-Revision": manifest.runtime.previewRevision,
         "X-Standin-Model-Revision": manifest.runtime.modelRevision,
         "X-Standin-Artifact-SHA256": sha256Hex(bytes),
+        "X-Standin-Output-Scope": manifest.outputScope,
+        ...(manifest.hands
+          ? {
+              "X-Standin-Hand-Revision": String(manifest.hands.revision),
+              "X-Standin-Hand-Library-SHA256": manifest.hands.library_sha256,
+            }
+          : {}),
       },
     });
   });

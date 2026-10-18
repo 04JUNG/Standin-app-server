@@ -14,7 +14,7 @@ import {
   personBodyContext,
 } from "../body-selection/store.js";
 import { createOutputScopeRoutes } from "../output-scope/routes.js";
-import { resolveOutputScope } from "../output-scope/model.js";
+import { resolvePersonOutputScope } from "../output-scope/model.js";
 import {
   createPresentationRoutes,
   manualPresentationCamera,
@@ -302,7 +302,15 @@ jobsRoutes.get("/:id/result", async (c) => {
             ),
           }
         : {}),
-      outputScope: resolveOutputScope(person.outputScope),
+      outputScope: resolvePersonOutputScope(person),
+      ...(person.posePresentation
+        ? {
+            posePresentation: {
+              ...person.posePresentation,
+              output_scope: resolvePersonOutputScope(person).resolved,
+            },
+          }
+        : {}),
       candidates: person.candidates.map((candidate) => ({
         ...candidate,
         ...(candidate.camera && candidate.thumbnailUrl

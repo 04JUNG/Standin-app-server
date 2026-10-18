@@ -80,6 +80,7 @@ function setup(count = 5) {
     inputs: [] as FramedInput[],
     framedAvailable: true,
     afterRender: () => {},
+    hands: null as import("../hands/model.js").HandBake | null,
     runtime: {
       schemaVersion: "body-preview-runtime.v1",
       previewRevision: "a".repeat(64),
@@ -111,6 +112,7 @@ function setup(count = 5) {
         structuredClone(state.selections[i]),
       checkCharacter: async () => (state.available ? "ok" : "unavailable"),
       getPreviewRuntime: async () => structuredClone(state.runtime),
+      handBakeFor: async () => structuredClone(state.hands),
       modelPreviewIdentity: async () =>
         state.framedAvailable
           ? {
@@ -134,6 +136,7 @@ function setup(count = 5) {
       },
       convertFramed: async (input) => {
         state.convertCalls++;
+        assert.deepEqual(input.hands ?? null, state.hands);
         assert.deepEqual(input.cameraRotation, rotation);
         assert.deepEqual(input.bvhBytes, new Uint8Array(bvh));
         state.inputs.push(input);
@@ -402,10 +405,11 @@ for (const change of [
     assert.equal(state.convertCalls, 0);
   });
 
-for (const scope of ["full", "half", "bust", "head"] as const)
+for (const scope of ["full", "half", "bust", "shoulder_head", "head"] as const)
   test(`${scope} binds the same scope to manifest, PNG and GLB without changing Top-5`, async () => {
     const s = setup();
     s.analysis.candidatesByPerson[0].outputScope = resolveOutputScope({
+      selection: scope,
       detected: scope,
     });
     const before = structuredClone(s.analysis);
@@ -451,7 +455,7 @@ test("user scope overrides detection and presentation; missing/invalid legacy sc
     selection: "auto",
     detected: "bust",
   });
-  assert.equal((await s.manifest()).outputScope, "bust");
+  assert.equal((await s.manifest()).outputScope, "half");
   delete person.outputScope;
   person.posePresentation!.output_scope = "half";
   assert.equal((await s.manifest()).outputScope, "half");
@@ -645,4 +649,32 @@ test("owned manually selectable library Top-5 retain body/shape previews without
     (await s.app.request(bodyPreviewManifestUrl(s.jobId, 0))).status,
     409,
   );
+});
+
+test("selected hands bind PNG and a late change invalidates the entire body group", async () => {
+  const s = setup();
+  const plain = await s.manifest();
+  s.state.hands = {
+    left: "fist",
+    right: "relaxed",
+    revision: 2,
+    library_version: "v1",
+    library_sha256: "f".repeat(64),
+  };
+  const m = await s.manifest();
+  assert.notEqual(m.renderKey, plain.renderKey);
+  assert.equal(
+    (await s.app.request(m.candidates[0].previewModel.url)).status,
+    503,
+  );
+  const png = await s.app.request(m.candidates[0].thumbnailUrl);
+  assert.equal(png.status, 200);
+  assert.equal(png.headers.get("X-Standin-Hand-Revision"), "2");
+  assert.equal(png.headers.get("X-Standin-Output-Scope"), m.outputScope);
+  s.state.afterRender = () => {
+    s.state.hands!.revision++;
+  };
+  const response = await s.app.request(m.candidates[1].thumbnailUrl);
+  assert.equal(response.status, 409);
+  assert.equal(await code(response), "BODY_PREVIEW_STALE");
 });

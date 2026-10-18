@@ -1103,7 +1103,7 @@ JWT access(짧게) + refresh(회전). 비밀번호는 argon2 해시. `/v1/auth/*
 ### 부분 FBX 출력과 검토 미리보기 (2026-10-02)
 
 `outputScopeCropping`은 converter `/healthz`의 건강 상태, 고정 solver 버전,
-`framing_version=skin-regions-v1`, full/half/bust/head 지원을 확인한 경우에만 true다.
+`framing_version=skin-regions-v1`, full/half/bust/shoulder_head/head 지원을 확인한 경우에만 true다.
 false/누락이면 기존 전신 출력과 설정 저장 안내를 유지한다.
 
 `GET /v1/pose-candidates/:poseId/framed?jobId=…&personIndex=…&candidateId=…&outputScope=half&format=preview`
@@ -1277,7 +1277,7 @@ PNG/304 응답의 `X-Standin-Hand-Library-SHA256`으로 카탈로그 일치를 �
 `previewOnly=true`인 체형 선택은 카탈로그 자산 일치만 허용하며 기존 내보내기용 포즈 커버리지
 검증을 대체하지 않는다. 생성 후보는 비공개 inline BVH를 사용하고 라이브러리로 조회하지 않는다.
 
-PNG는 범위(full/half/bust/head)와 저장된 카메라 회전을 적용한 **정사영 참고 이미지**이다.
+PNG는 범위(full/half/bust/shoulder_head/head)와 저장된 카메라 회전을 적용한 **정사영 참고 이미지**이다.
 원근 검색 투영과 동일하다고 주장하지 않으며 관절용 BVH 전송은 기존 계약을 유지한다.
 성공해도 모든 후보의 `actual_mesh_validated`, `release_allowed`, `export_allowed`, `refine_allowed`는
 false다. 정식 후보 배열에 합치지 않는다.
@@ -1317,7 +1317,7 @@ auto/refine 금지는 유지한다. 후보가 없는 참고 인물은 저장 가
 
 ## 체형 Top-K 출력 범위 연결 (2026-10-18)
 
-body-previews.v1의 outputScope는 기존 full 전용에서 full/half/bust/head로 확장한다.
+body-previews.v1의 outputScope는 기존 full 전용에서 full/half/bust/shoulder_head/head로 확장한다.
 저장된 인물 범위를 resolveOutputScope로 재계산하고, 해당 값이 없을 때만 유효한 presentation 범위를 사용한다.
 동일 범위가 manifest/renderKey/PNG/GLB에 결합되며 변경 중인 이전 요청은 BODY_PREVIEW_STALE이다.
 full GLB는 posed-mesh-v1, 부분 GLB는 scope·camera rotation이 적용된 framed-mesh-v1이다.
@@ -1325,3 +1325,8 @@ full GLB는 posed-mesh-v1, 부분 GLB는 scope·camera rotation이 적용된 fra
 수치 조절 체형 또는 부분 모델 capability가 없는 경우 GLB의 PREVIEW_NOT_READY(503) 뒤 같은 manifest의 PNG로 폴백한다.
 권한·무결성·stale 오류에는 PNG 폴백하지 않는다. 원본 BVH·후보 순위·Export 정책은 바꾸지 않는다.
 구 앱은 full만 허용하므로 새 BFF와 앱의 릴리스를 함께 조율해야 한다.
+
+#### #91 추가분 통합
+#92의 framed exporter revision과 PNG fallback 계약을 유지한다. 최종 범위 resolver를 카드·선택 체형·손·최종 확인에 공통 적용한다. source는 vlm_person/vlm_description/legacy_shot/observed_legs/unknown을 보존하고 meshScope를 결과에 저장한다. 자동 범위는 meshScope를 사용하며 수동 범위가 우선이다. shoulder_head와 수동 bust는 구분한다. 검색 순위/원본 BVH/검수 권한은 변경하지 않는다.
+
+body manifest의 선택적 hands는 revision/library_sha256을 포함하며 renderKey와 PNG 손 identity에 결합한다. 손 선택이 있으면 GLB는 PREVIEW_NOT_READY이고 같은 manifest의 검증된 PNG를 사용한다. PNG/GLB 및 presentation body·손 PNG는 X-Standin-Output-Scope를 반환한다. 변경 중 늦은 범위·손·카메라 응답은 폐기한다.

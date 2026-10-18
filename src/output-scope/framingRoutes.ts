@@ -34,7 +34,7 @@ import {
   FRAMING_VERSION,
   modelPreviewIdentity,
 } from "../converter/framing.js";
-import { isBodyScope, resolveOutputScope } from "./model.js";
+import { isBodyScope, resolvePersonOutputScope } from "./model.js";
 
 const cache = new FramedArtifactCache();
 const defaults = {
@@ -125,7 +125,7 @@ export function createFramingRoutes(
         "CANDIDATE_RELEASE_FORBIDDEN",
         "검수용 후보는 저장할 수 없습니다.",
       );
-    if (scope !== resolveOutputScope(person?.outputScope).resolved)
+    if (scope !== resolvePersonOutputScope(person).resolved)
       return fail(
         409,
         "OUTPUT_SCOPE_CHANGED",
@@ -431,7 +431,7 @@ export function createFramingRoutes(
       );
       if (
         !currentPerson ||
-        resolveOutputScope(currentPerson.outputScope).resolved !== scope ||
+        resolvePersonOutputScope(currentPerson).resolved !== scope ||
         !(await deps.validateExportCandidate(
           installationId,
           jobId,

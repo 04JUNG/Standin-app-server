@@ -15,7 +15,10 @@ import {
   type AnalysisPersonRow,
 } from "./reviewDetail.js";
 
-const KEYPOINTS = Array.from({ length: 17 }, (_, index) => [index * 10, index * 5]);
+const KEYPOINTS = Array.from({ length: 17 }, (_, index) => [
+  index * 10,
+  index * 5,
+]);
 const SCORES = Array.from({ length: 17 }, () => 0.8);
 
 function row(overrides: Partial<AnalysisPersonRow> = {}): AnalysisPersonRow {
@@ -23,7 +26,11 @@ function row(overrides: Partial<AnalysisPersonRow> = {}): AnalysisPersonRow {
     person_index: 0,
     bbox_json: "[120,80,360,720]",
     tags_json: JSON.stringify({ shot: "full_half", action: "standing" }),
-    skeleton_json: JSON.stringify({ schema_version: "coco17-v1", keypoints: KEYPOINTS, scores: SCORES }),
+    skeleton_json: JSON.stringify({
+      schema_version: "coco17-v1",
+      keypoints: KEYPOINTS,
+      scores: SCORES,
+    }),
     confidence: "high",
     candidate_count: 5,
     candidate_shortfall_reason: null,
@@ -54,10 +61,13 @@ test("박스는 좌표 4개일 때만 받는다", () => {
 });
 
 test("태그는 문자열 값만 남긴다", () => {
-  assert.deepEqual(parseTags('{"action":"standing","count":3,"view":"front"}'), {
-    action: "standing",
-    view: "front",
-  });
+  assert.deepEqual(
+    parseTags('{"action":"standing","count":3,"view":"front"}'),
+    {
+      action: "standing",
+      view: "front",
+    },
+  );
   assert.deepEqual(parseTags("깨진 JSON"), {});
   assert.deepEqual(parseTags(null), {});
 });
@@ -73,7 +83,11 @@ test("관절 하나라도 모양이 틀리면 뼈대 전체를 버린다", () =>
 
 test("점수 길이가 관절 수와 다르면 점수만 비운다", () => {
   const parsed = parseSkeleton(
-    JSON.stringify({ schema_version: "coco17-v1", keypoints: KEYPOINTS, scores: [0.5] }),
+    JSON.stringify({
+      schema_version: "coco17-v1",
+      keypoints: KEYPOINTS,
+      scores: [0.5],
+    }),
   );
   assert.ok(parsed);
   assert.equal(parsed.keypoints.length, 17);
@@ -82,7 +96,9 @@ test("점수 길이가 관절 수와 다르면 점수만 비운다", () => {
 });
 
 test("schemaVersion은 camelCase와 snake_case를 모두 받는다", () => {
-  const camel = parseSkeleton(JSON.stringify({ schemaVersion: "coco17-v1", keypoints: KEYPOINTS }));
+  const camel = parseSkeleton(
+    JSON.stringify({ schemaVersion: "coco17-v1", keypoints: KEYPOINTS }),
+  );
   assert.equal(camel?.schemaVersion, "coco17-v1");
   const missing = parseSkeleton(JSON.stringify({ keypoints: KEYPOINTS }));
   assert.equal(missing?.schemaVersion, "unknown");
@@ -94,18 +110,29 @@ test("점수가 모두 0이면 마스킹 전 원본으로 바꾼다", () => {
   const zeroed = parseSkeleton(
     JSON.stringify({ keypoints: KEYPOINTS, scores: KEYPOINTS.map(() => 0) }),
   );
-  assert.deepEqual(pickJointScores(zeroed, SCORES), { values: SCORES, source: "raw" });
+  assert.deepEqual(pickJointScores(zeroed, SCORES), {
+    values: SCORES,
+    source: "raw",
+  });
 });
 
 test("유효한 점수가 하나라도 있으면 그 점수를 쓴다", () => {
   const partial = KEYPOINTS.map((_, index) => (index === 3 ? 0.4 : 0));
-  const skeleton = parseSkeleton(JSON.stringify({ keypoints: KEYPOINTS, scores: partial }));
-  assert.deepEqual(pickJointScores(skeleton, SCORES), { values: partial, source: "effective" });
+  const skeleton = parseSkeleton(
+    JSON.stringify({ keypoints: KEYPOINTS, scores: partial }),
+  );
+  assert.deepEqual(pickJointScores(skeleton, SCORES), {
+    values: partial,
+    source: "effective",
+  });
 });
 
 test("둘 다 없으면 점수 없음으로 둔다", () => {
   const skeleton = parseSkeleton(JSON.stringify({ keypoints: KEYPOINTS }));
-  assert.deepEqual(pickJointScores(skeleton, null), { values: [], source: "none" });
+  assert.deepEqual(pickJointScores(skeleton, null), {
+    values: [],
+    source: "none",
+  });
   assert.deepEqual(pickJointScores(null, null), { values: [], source: "none" });
 });
 
@@ -136,7 +163,9 @@ test("refine 입력과 원본 점수 배열은 응답에 넣지 않는다", () =
 });
 
 test("불리언 컬럼이 비어 있으면 거짓으로 좁힌다", () => {
-  const person = toReviewPerson(row({ refine_allowed: null, lower_body_observed: null }));
+  const person = toReviewPerson(
+    row({ refine_allowed: null, lower_body_observed: null }),
+  );
   assert.equal(person.refineAllowed, false);
   assert.equal(person.lowerBodyObserved, false);
 });
@@ -145,12 +174,27 @@ test("출력 범위는 result_json에서 꺼내 다시 계산한다", () => {
   const resultJson = JSON.stringify({
     candidatesByPerson: [
       // resolved를 믿지 않는다는 것을 보이려고 일부러 틀린 값을 넣는다.
-      { personIndex: 0, outputScope: { selection: "auto", detected: "bust", detectionSource: "vlm_person", resolved: "full" } },
-      { personIndex: 1, outputScope: { selection: "half", detected: null, detectionSource: "unknown" } },
+      {
+        personIndex: 0,
+        outputScope: {
+          selection: "auto",
+          detected: "bust",
+          detectionSource: "vlm_person",
+          resolved: "full",
+        },
+      },
+      {
+        personIndex: 1,
+        outputScope: {
+          selection: "half",
+          detected: null,
+          detectionSource: "unknown",
+        },
+      },
     ],
   });
   const scopes = outputScopesFromResult(resultJson);
-  assert.equal(scopes.get(0)?.resolved, "bust");
+  assert.equal(scopes.get(0)?.resolved, "half");
   assert.equal(scopes.get(0)?.resolutionSource, "auto");
   assert.equal(scopes.get(1)?.resolved, "half");
   assert.equal(scopes.get(1)?.resolutionSource, "user");
@@ -167,7 +211,14 @@ test("result_json이 없거나 깨져도 사람 목록은 나온다", () => {
 test("사람 순서마다 제 출력 범위가 붙는다", () => {
   const resultJson = JSON.stringify({
     candidatesByPerson: [
-      { personIndex: 1, outputScope: { selection: "auto", detected: "head", detectionSource: "vlm_person" } },
+      {
+        personIndex: 1,
+        outputScope: {
+          selection: "auto",
+          detected: "head",
+          detectionSource: "vlm_person",
+        },
+      },
     ],
   });
   const people = toReviewPeople([row(), row({ person_index: 1 })], resultJson);
@@ -186,24 +237,31 @@ test("인물별 태그를 꺼낸다", () => {
 
 test("태그가 전부 비면 null이다", () => {
   // "묻지 않았다"와 "물었는데 모른다"를 구분해야 해서 빈 껍데기를 만들지 않는다.
-  assert.equal(parsePersonTags('{"action":null,"view":null,"source":null}'), null);
+  assert.equal(
+    parsePersonTags('{"action":null,"view":null,"source":null}'),
+    null,
+  );
   assert.equal(parsePersonTags("{}"), null);
   assert.equal(parsePersonTags(null), null);
   assert.equal(parsePersonTags("깨진 JSON"), null);
 });
 
 test("모른다고 답한 인물은 source만 남는다", () => {
-  assert.deepEqual(parsePersonTags('{"action":null,"view":null,"source":"unknown"}'), {
-    action: null,
-    view: null,
-    source: "unknown",
-  });
+  assert.deepEqual(
+    parsePersonTags('{"action":null,"view":null,"source":"unknown"}'),
+    {
+      action: null,
+      view: null,
+      source: "unknown",
+    },
+  );
 });
 
 test("row에서 인물별 태그와 검색 신호가 함께 나온다", () => {
   const person = toReviewPerson(
     row({
-      person_tags_json: '{"action":"walking","view":"back","source":"vlm_person"}',
+      person_tags_json:
+        '{"action":"walking","view":"back","source":"vlm_person"}',
       rank_distance: 0.182,
       distance_metric: "pos",
       search_stability: "stable",
@@ -234,7 +292,14 @@ test("출력 범위는 result_json이 우선이고 없을 때만 컬럼으로 �
   // 사용자가 고른 구도를 추론 판정으로 덮지 않는다.
   const resultJson = JSON.stringify({
     candidatesByPerson: [
-      { personIndex: 0, outputScope: { selection: "bust", detected: "full", detectionSource: "vlm_person" } },
+      {
+        personIndex: 0,
+        outputScope: {
+          selection: "bust",
+          detected: "full",
+          detectionSource: "vlm_person",
+        },
+      },
     ],
   });
   const people = toReviewPeople(
@@ -255,7 +320,10 @@ test("출력 범위는 result_json이 우선이고 없을 때만 컬럼으로 �
 test("빈 출력 범위 컬럼은 범위를 만들어 내지 않는다", () => {
   assert.equal(scopeFromColumn(null), null);
   assert.equal(scopeFromColumn("{}"), null);
-  assert.equal(scopeFromColumn('{"detected":null,"source":"unknown"}')?.resolved, "full");
+  assert.equal(
+    scopeFromColumn('{"detected":null,"source":"unknown"}')?.resolved,
+    "full",
+  );
 });
 
 test("컷 요약을 꺼낸다", () => {
@@ -275,7 +343,9 @@ test("컷 요약을 꺼낸다", () => {
 });
 
 test("VLM이 아무 태그도 말하지 않았으면 vlmTags가 null이다", () => {
-  const summary = parseCutSummary(JSON.stringify({ route: "skip", vlmTags: {} }));
+  const summary = parseCutSummary(
+    JSON.stringify({ route: "skip", vlmTags: {} }),
+  );
   assert.equal(summary?.vlmTags, null);
   assert.equal(summary?.route, "skip");
   assert.equal(summary?.detectorCount, null);
