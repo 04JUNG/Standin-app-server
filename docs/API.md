@@ -1243,7 +1243,7 @@ PNG/304 응답의 `X-Standin-Hand-Library-SHA256`으로 카탈로그 일치를 �
 미준비는 404 `HAND_THUMBNAIL_UNAVAILABLE`, 라이브러리 변경은 409 `HAND_LIBRARY_CHANGED`다.
 ## 직접 자연어 포즈 검색
 
-`GET /v1/semantic-search/capabilities`, `POST /v1/semantic-search`는 설치 인증을 사용한다. `query`와 `topK`로 검색하고 정식 또는 근접 후보가 있으면 조회 전용 `jobId`를 반환한다. 신규 후보의 refine·release는 금지한다. 이미지 없는 `source=semantic` 결과의 `image`는 null이다. 자연어 작업은 refine/body camera 기능을 허용하지 않는다. 입력 제한, 별도 검색 rate limit, 오류, 기록·해시 계약은 [SEMANTIC_SEARCH_INTEGRATION.md](SEMANTIC_SEARCH_INTEGRATION.md)를 따른다.
+`GET /v1/semantic-search/capabilities`, `POST /v1/semantic-search`는 설치 인증을 사용한다. `query`와 `topK`(정수 1–20, 생략 시 5)로 검색하고 정식 또는 근접 후보가 있으면 조회 전용 `jobId`를 반환한다. 신규 후보의 refine·release는 금지한다. 이미지 없는 `source=semantic` 결과의 `image`는 null이다. 자연어 작업은 refine/body camera 기능을 허용하지 않는다. 입력 제한, 별도 검색 rate limit, 오류, 기록·해시 계약은 [SEMANTIC_SEARCH_INTEGRATION.md](SEMANTIC_SEARCH_INTEGRATION.md)를 따른다.
 
 두 기능의 공통 흐름·통합 검증·PR 제출 범위는 [HANDS_SEMANTIC_INTEGRATION.md](HANDS_SEMANTIC_INTEGRATION.md)를 따른다. 자연어 결과도 준비된 handSelection capability를 유지해 수동 손 선택을 사용할 수 있다.
 

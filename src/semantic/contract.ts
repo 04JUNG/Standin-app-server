@@ -1,5 +1,7 @@
 import type { AnalysisResult, PoseCandidate } from "../types.js";
 
+export const SEMANTIC_MAX_TOP_K = 20;
+
 export class SemanticError extends Error {
   constructor(
     public code:
@@ -55,7 +57,7 @@ export function readSearchInput(value: unknown): {
     query.length > 500 ||
     !Number.isInteger(topK) ||
     Number(topK) < 1 ||
-    Number(topK) > 10
+    Number(topK) > SEMANTIC_MAX_TOP_K
   )
     throw new SemanticError("INVALID_INPUT", 400);
   return { query, topK: Number(topK) };

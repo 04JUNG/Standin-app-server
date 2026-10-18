@@ -47,6 +47,7 @@ function setup() {
     upstream: response() as unknown,
     created: 0,
     calls: 0,
+    requestedTopK: 0,
     result: null as AnalysisResult | null,
     missingBvh: false,
     failed: false,
@@ -68,7 +69,7 @@ function setup() {
       },
       search: async (query, k) => {
         assert.equal(query, "던지는 자세");
-        assert.equal(k, 5);
+        state.requestedTopK = k;
         state.calls++;
         return state.upstream;
       },
@@ -127,11 +128,48 @@ test("input bounds and provenance cannot be overridden", () => {
     { query: "a".repeat(501) },
     { query: "a", source: "vlm" },
     { query: "a", tags: [] },
-    { query: "a", topK: 11 },
+    { query: "a", topK: 21 },
+    { query: "a", topK: 0 },
     { query: "a", topK: 1.5 },
   ])
     assert.throws(() => readSearchInput(body));
 });
+test("twenty results pass through the route and persisted presentation without truncation", async () => {
+  const { app, post, state } = setup();
+  assert.equal(
+    (
+      (await (await app.request("/search/capabilities")).json()) as {
+        maxTopK: number;
+      }
+    ).maxTopK,
+    20,
+  );
+  const upstream = response();
+  const template = upstream.candidates[0]!;
+  upstream.candidates = Array.from({ length: 20 }, (_, i) => ({
+    ...structuredClone(template),
+    rank: i + 1,
+    pose_id: `pose_${i + 1}`,
+    pose: { ...structuredClone(template.pose), pose_id: `pose_${i + 1}` },
+  }));
+  state.upstream = upstream;
+  assert.equal((await post({ query: "던지는 자세", topK: 20 })).status, 200);
+  assert.equal(state.requestedTopK, 20);
+  const person = state.result!.candidatesByPerson[0]!;
+  assert.equal(person.candidateCount, 20);
+  assert.deepEqual(
+    person.posePresentation!.library_candidates.map((c) => c.pose_id),
+    upstream.candidates.map((c) => c.pose_id),
+  );
+  assert(
+    person.candidates.every(
+      (c) => !!c.sourceBvhSha256 && c.refineAllowed === false,
+    ),
+  );
+  assert.equal((await post({ query: "던지는 자세", topK: 21 })).status, 400);
+  assert.equal(state.calls, 1);
+});
+
 test("owned job pins original and actual mirror ids, publishes no skeleton/refine/body camera", async () => {
   const { post, state } = setup();
   const res = await post();
@@ -278,13 +316,13 @@ test("inference uses internal auth, forced source user, bounded request and exac
     );
     assert.deepEqual(JSON.parse(String(init?.body)), {
       query: "던지기",
-      topK: 5,
+      topK: 20,
     });
     assert(init?.signal);
     return Response.json(response());
   };
   assert.equal(
-    ((await searchSemantic("던지기", 5)) as { status: string }).status,
+    ((await searchSemantic("던지기", 20)) as { status: string }).status,
     "ok",
   );
 });
