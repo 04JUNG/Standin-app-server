@@ -15,7 +15,10 @@ import {
 } from "../body-selection/store.js";
 import { createOutputScopeRoutes } from "../output-scope/routes.js";
 import { resolveOutputScope } from "../output-scope/model.js";
-import { createPresentationRoutes } from "../pose-presentation.js";
+import {
+  createPresentationRoutes,
+  manualPresentationCamera,
+} from "../pose-presentation.js";
 import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
 import { errorEnvelope } from "../mapping.js";
@@ -322,8 +325,12 @@ jobsRoutes.get("/:id/result", async (c) => {
         ? semanticCapabilities(await currentCapabilities())
         : await currentCapabilities()),
       ...(result.candidatesByPerson.some(
-        (p) => p.routedSearch || p.posePresentation,
-      )
+        (p) =>
+          p.candidates.length > 0 &&
+          (p.routedSearch ||
+            (p.posePresentation &&
+              !p.candidates.every((c) => manualPresentationCamera(p, c)))),
+      ) || !result.candidatesByPerson.some((p) => p.candidates.length > 0)
         ? { bodyPreviews: false }
         : {}),
       ...(!result.candidatesByPerson

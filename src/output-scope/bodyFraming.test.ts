@@ -6,10 +6,18 @@ import type { Job } from "../jobs/store.js";
 import type { BodySelection } from "../body-selection/model.js";
 import { sha256Hex } from "../converter/client.js";
 import { createFramingRoutes } from "./framingRoutes.js";
-import type { CandidateCamera } from "../types.js";
-function setup(version: "candidate-camera-v1" | "candidate-camera-v2" = "candidate-camera-v1") {
+import { makeManualPresentation } from "../body-selection/fixtures.js";
+import type { AnalysisPerson, CandidateCamera } from "../types.js";
+function setup(
+  version:
+    | "candidate-camera-v1"
+    | "candidate-camera-v2" = "candidate-camera-v1",
+) {
   const source = new TextEncoder().encode("base BVH");
   const state = {
+    manual: false,
+    manualCameraChanged: false,
+    shape: null as BodySelection["shape"],
     revision: 1,
     hash: "a".repeat(64),
     runtime: "b".repeat(64),
@@ -24,6 +32,14 @@ function setup(version: "candidate-camera-v1" | "candidate-camera-v2" = "candida
   };
   const body = (): BodySelection => ({
     schemaVersion: "body-selection.v1",
+    shape: state.shape,
+    shapeSource: state.shape
+      ? {
+          rules: "test",
+          blendSha256: "e".repeat(64),
+          controllerSha256: "f".repeat(64),
+        }
+      : null,
     personIndex: 0,
     intent: "manual",
     manualCharacterId: "chosen",
@@ -50,8 +66,12 @@ function setup(version: "candidate-camera-v1" | "candidate-camera-v2" = "candida
     framingVersion: "framing",
   });
   const common = {
-    canonical_yaw: 0, display_view: "front", status: "fitted" as const,
-    fit_error: 0.1, facing_source: "geometry_only" as const, depth_ambiguous: true,
+    canonical_yaw: 0,
+    display_view: "front",
+    status: "fitted" as const,
+    fit_error: 0.1,
+    facing_source: "geometry_only" as const,
+    depth_ambiguous: true,
     source_bvh_sha256: sha256Hex(source),
     rotation: [
       [1, 0, 0],
@@ -59,11 +79,37 @@ function setup(version: "candidate-camera-v1" | "candidate-camera-v2" = "candida
       [0, 0, 1],
     ],
   };
-  const camera: CandidateCamera = version === "candidate-camera-v1"
-    ? { ...common, version, reference: "pelvis-torso-yaw" }
-    : { ...common, version, reference: "search-fit", projection: "perspective",
-        distance_torso: 4, labels_swapped: true, pose_id: "pose",
-        query_sha256: "d".repeat(64), observed_joint_mask: Array(17).fill(true) };
+  const camera: CandidateCamera =
+    version === "candidate-camera-v1"
+      ? { ...common, version, reference: "pelvis-torso-yaw" }
+      : {
+          ...common,
+          version,
+          reference: "search-fit",
+          projection: "perspective",
+          distance_torso: 4,
+          labels_swapped: true,
+          pose_id: "pose",
+          query_sha256: "d".repeat(64),
+          observed_joint_mask: Array(17).fill(true),
+        };
+  function person() {
+    const p = {
+      personIndex: 0,
+      outputScope: { selection: state.scope },
+      candidates: [{ id: "pick", poseId: "pose", rank: 1, camera }],
+    } as unknown as AnalysisPerson;
+    if (state.manual) {
+      makeManualPresentation(p);
+      if (state.manualCameraChanged)
+        p.posePresentation!.library_candidates[0].render_camera.rotation = [
+          [0, 0, -1],
+          [0, 1, 0],
+          [1, 0, 0],
+        ];
+    }
+    return p;
+  }
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
     c.set("installationId", "owner");
@@ -81,13 +127,7 @@ function setup(version: "candidate-camera-v1" | "candidate-camera-v2" = "candida
             ? ({
                 status: "completed",
                 result: {
-                  candidatesByPerson: [
-                    {
-                      personIndex: 0,
-                      outputScope: { selection: state.scope },
-                      candidates: [{ id: "pick", poseId: "pose", camera }],
-                    },
-                  ],
+                  candidatesByPerson: [person()],
                 },
               } as Job)
             : undefined,
@@ -104,11 +144,17 @@ function setup(version: "candidate-camera-v1" | "candidate-camera-v2" = "candida
           new Response(source, { status: state.quarantine ? 409 : 200 }),
         checkCharacter: async () => "ok",
         converterEnabled: () => true,
-        modelPreviewIdentity: async () => ({characterSha256: state.hash, modelRevision: "c".repeat(64)}),
-        getPreviewModel: async () => {throw new Error("body review must use the verified artifact pair");},
+        modelPreviewIdentity: async () => ({
+          characterSha256: state.hash,
+          modelRevision: "c".repeat(64),
+        }),
+        getPreviewModel: async () => {
+          throw new Error("body review must use the verified artifact pair");
+        },
         convertFramed: async (input) => {
           state.calls++;
           assert.equal(input.characterId, "chosen");
+          assert.deepEqual(input.shape ?? null, state.shape);
           assert.equal(input.expectedCharacterSha256, state.hash);
           const fbx = new TextEncoder().encode(
             "FBX:" + new TextDecoder().decode(input.bvhBytes),
@@ -122,6 +168,7 @@ function setup(version: "candidate-camera-v1" | "candidate-camera-v2" = "candida
             characterSha256: state.hash,
             previewRevision: state.runtime,
           };
+          if (state.late === "camera") state.manualCameraChanged = true;
           if (state.late === "body") state.revision++;
           if (state.late === "runtime") state.runtime = "f".repeat(64);
           if (state.late === "refine") state.refined = true;
@@ -138,7 +185,7 @@ function setup(version: "candidate-camera-v1" | "candidate-camera-v2" = "candida
         new URLSearchParams({
           jobId,
           personIndex: "0",
-          candidateId: "pick",
+          candidateId: person().candidates[0].id,
           outputScope: "full",
           format: "preview",
           bodySelectionRevision: "1",
@@ -225,23 +272,60 @@ test("refined cache hit still checks base-pose quarantine", async () => {
 });
 
 test("merged final-model path preserves body receipt, hash checks and paired export reuse", async () => {
-  const {state, request} = setup();
-  const preview = await request({format: "model", useLibraryModel: "true"});
+  const { state, request } = setup();
+  const preview = await request({ format: "model", useLibraryModel: "true" });
   assert.equal(preview.status, 200);
   assert.equal(preview.headers.get("Content-Type"), "model/gltf-binary");
   assert.equal(preview.headers.get("X-Standin-Character-SHA256"), state.hash);
-  const download = await request({format: "fbx", previewType: "model", reviewKey: preview.headers.get("X-Standin-Review-Key")!});
+  const download = await request({
+    format: "fbx",
+    previewType: "model",
+    reviewKey: preview.headers.get("X-Standin-Review-Key")!,
+  });
   assert.equal(download.status, 200);
   assert.equal(state.calls, 1);
   state.revision++;
-  assert.equal((await request({format: "model"})).status, 409);
+  assert.equal((await request({ format: "model" })).status, 409);
 });
 
 test("v2 search camera permits body review and paired export with the same receipt", async () => {
   const { state, request } = setup("candidate-camera-v2");
   const preview = await request();
   assert.equal(preview.status, 200);
-  const download = await request({ format: "fbx", reviewKey: preview.headers.get("X-Standin-Review-Key")! });
+  const download = await request({
+    format: "fbx",
+    reviewKey: preview.headers.get("X-Standin-Review-Key")!,
+  });
   assert.equal(download.status, 200);
   assert.equal(state.calls, 1);
+});
+
+test("manual library numeric body uses one verified preview/export pair and rejects late camera changes", async (t) => {
+  const { config } = await import("../config.js");
+  const before = config.bodyShapeBakeEnabled;
+  Object.assign(config, { bodyShapeBakeEnabled: true });
+  t.after(() => Object.assign(config, { bodyShapeBakeEnabled: before }));
+  const { state, request } = setup();
+  state.manual = true;
+  state.shape = {
+    schemaVersion: "body-shape.v1",
+    controls: { height: 186 },
+    shapeSha256: "d".repeat(64),
+  };
+  const preview = await request();
+  assert.equal(preview.status, 200, await preview.clone().text());
+  const download = await request({
+    format: "fbx",
+    reviewKey: preview.headers.get("X-Standin-Review-Key")!,
+  });
+  assert.equal(download.status, 200, await download.clone().text());
+  assert.equal(state.calls, 1);
+  assert.equal(
+    download.headers.get("X-Standin-Artifact-SHA256"),
+    preview.headers.get("X-Standin-Artifact-SHA256"),
+  );
+  const late = setup();
+  late.state.manual = true;
+  late.state.late = "camera";
+  assert.equal((await late.request()).status, 409);
 });

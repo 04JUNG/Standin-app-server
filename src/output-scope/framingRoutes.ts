@@ -1,3 +1,4 @@
+import { manualPresentationCamera } from "../pose-presentation.js";
 import { restrictedCandidate } from "../routed-search.js";
 import { shapeRenderable } from "../body-selection/shape.js";
 import { handBakeFor } from "../hands/service.js";
@@ -54,7 +55,10 @@ const bodyDefaults = {
   runtime: getPreviewRuntime,
   enabled: bodyUxAvailable,
 };
-export function createFramingRoutes(overrides: Partial<typeof defaults> = {}, bodyDeps = bodyDefaults) {
+export function createFramingRoutes(
+  overrides: Partial<typeof defaults> = {},
+  bodyDeps = bodyDefaults,
+) {
   const deps = { ...defaults, ...overrides };
   const routes = new Hono<AppEnv>();
   routes.get("/:id/framed", async (c) => {
@@ -112,8 +116,15 @@ export function createFramingRoutes(overrides: Partial<typeof defaults> = {}, bo
       ))
     )
       return fail(409, "INVALID_EXPORT", "작업에서 선택된 후보가 아닙니다.");
-    if (format === "fbx" && (job.result?.source === "semantic" || restrictedCandidate(candidate)))
-      return fail(409, "CANDIDATE_RELEASE_FORBIDDEN", "검수용 후보는 저장할 수 없습니다.");
+    if (
+      format === "fbx" &&
+      (job.result?.source === "semantic" || restrictedCandidate(candidate))
+    )
+      return fail(
+        409,
+        "CANDIDATE_RELEASE_FORBIDDEN",
+        "검수용 후보는 저장할 수 없습니다.",
+      );
     if (scope !== resolveOutputScope(person?.outputScope).resolved)
       return fail(
         409,
@@ -144,10 +155,22 @@ export function createFramingRoutes(overrides: Partial<typeof defaults> = {}, bo
         : Promise.resolve();
     try {
       const hands = await deps.handBakeFor(person);
-      if (hands && c.req.query("handSelectionRevision") !== String(hands.revision))
-        return fail(409, "HANDS_CHANGED", "손 선택이 바뀌었습니다. 다시 확인해 주세요.");
+      if (
+        hands &&
+        c.req.query("handSelectionRevision") !== String(hands.revision)
+      )
+        return fail(
+          409,
+          "HANDS_CHANGED",
+          "손 선택이 바뀌었습니다. 다시 확인해 주세요.",
+        );
       const revision = c.req.query("bodySelectionRevision");
       const bodyMode = revision !== undefined;
+      const manual = bodyMode
+        ? manualPresentationCamera(person, candidate)
+        : null;
+      const cameraRotation =
+        manual?.camera.rotation ?? candidate.camera?.rotation;
       if (
         bodyMode &&
         (!/^(0|[1-9][0-9]*)$/.test(revision!) ||
@@ -180,7 +203,7 @@ export function createFramingRoutes(overrides: Partial<typeof defaults> = {}, bo
           "BODY_SHAPE_RENDER_UNSUPPORTED",
           "조절한 체형은 아직 저장할 수 없습니다. 기본 체형으로 되돌린 뒤 다시 시도해 주세요.",
         );
-      if (bodyMode && !validCamera(candidate.camera))
+      if (bodyMode && !validCamera(candidate.camera) && !manual)
         return fail(
           409,
           "BODY_PREVIEW_UNSUPPORTED",
@@ -230,7 +253,10 @@ export function createFramingRoutes(overrides: Partial<typeof defaults> = {}, bo
         if (!response.ok)
           return fail(409, "POSE_UNAVAILABLE", "이 포즈를 사용할 수 없습니다.");
         checkedBase = new Uint8Array(await response.arrayBuffer());
-        if (sha256Hex(checkedBase) !== candidate.camera!.source_bvh_sha256)
+        if (
+          sha256Hex(checkedBase) !==
+          (manual?.sourceBvhSha256 ?? candidate.camera!.source_bvh_sha256)
+        )
           return fail(
             409,
             "POSE_UNAVAILABLE",
@@ -250,8 +276,16 @@ export function createFramingRoutes(overrides: Partial<typeof defaults> = {}, bo
           );
         bvhBytes = new Uint8Array(await response.arrayBuffer());
       }
-      if (candidate.sourceBvhSha256 && (artifact.variant !== "base" || sha256Hex(bvhBytes) !== candidate.sourceBvhSha256))
-        return fail(409, "POSE_UNAVAILABLE", "포즈가 변경되었습니다. 다시 검색해 주세요.");
+      if (
+        candidate.sourceBvhSha256 &&
+        (artifact.variant !== "base" ||
+          sha256Hex(bvhBytes) !== candidate.sourceBvhSha256)
+      )
+        return fail(
+          409,
+          "POSE_UNAVAILABLE",
+          "포즈가 변경되었습니다. 다시 검색해 주세요.",
+        );
       if (
         artifact.variant === "base" &&
         candidate.camera &&
@@ -271,7 +305,8 @@ export function createFramingRoutes(overrides: Partial<typeof defaults> = {}, bo
         characterId,
         scope,
         FRAMING_VERSION,
-        candidate.camera?.rotation,
+        cameraRotation,
+        manual,
         body,
         runtime,
         hands,
@@ -314,34 +349,52 @@ export function createFramingRoutes(overrides: Partial<typeof defaults> = {}, bo
       const prepare = () =>
         useModel
           ? cameraArtifact(
-              [installationId, jobId, personIndex, candidateId, ...(bodyMode || hands ? [key] : [])],
+              [
+                installationId,
+                jobId,
+                personIndex,
+                candidateId,
+                ...(bodyMode || hands ? [key] : []),
+              ],
               {
                 bvhBytes,
                 ...(hands ? { hands } : {}),
                 characterId,
                 scope,
-                cameraRotation: candidate.camera?.rotation,
+                cameraRotation,
                 previewFormat: "model",
                 ...identity!,
                 ...expected,
               },
               deps.convertFramed,
             )
-          : candidate.camera
+          : cameraRotation
             ? cameraArtifact(
-                [installationId, jobId, personIndex, candidateId, ...(bodyMode || hands ? [key] : [])],
+                [
+                  installationId,
+                  jobId,
+                  personIndex,
+                  candidateId,
+                  ...(bodyMode || hands ? [key] : []),
+                ],
                 {
                   bvhBytes,
                   ...(hands ? { hands } : {}),
                   characterId,
                   scope,
-                  cameraRotation: candidate.camera.rotation,
+                  cameraRotation,
                   ...expected,
                 },
                 deps.convertFramed,
               )
             : cache.get(key, () =>
-                deps.convertFramed({ bvhBytes, characterId, scope, ...expected, ...(hands ? { hands } : {}) }),
+                deps.convertFramed({
+                  bvhBytes,
+                  characterId,
+                  scope,
+                  ...expected,
+                  ...(hands ? { hands } : {}),
+                }),
               );
       let libraryModel: Buffer | undefined;
       // The stored artifact, not a client's refine flag, decides whether the
@@ -393,13 +446,24 @@ export function createFramingRoutes(overrides: Partial<typeof defaults> = {}, bo
           "출력 설정이 바뀌었습니다. 다시 확인해 주세요.",
         );
       }
-      if (JSON.stringify(await deps.handBakeFor(currentPerson)) !== JSON.stringify(hands))
-        return fail(409, "HANDS_CHANGED", "손 선택이 바뀌었습니다. 다시 확인해 주세요.");
+      if (
+        JSON.stringify(await deps.handBakeFor(currentPerson)) !==
+        JSON.stringify(hands)
+      )
+        return fail(
+          409,
+          "HANDS_CHANGED",
+          "손 선택이 바뀌었습니다. 다시 확인해 주세요.",
+        );
       const reviewKey = sha256Hex(
         new TextEncoder().encode(JSON.stringify([key, result?.artifactSha256])),
       );
       if (hands && format === "fbx" && expectedReview !== reviewKey)
-        return fail(409, "HAND_REVIEW_REQUIRED", "변경된 손의 미리보기를 다시 확인해 주세요.");
+        return fail(
+          409,
+          "HAND_REVIEW_REQUIRED",
+          "변경된 손의 미리보기를 다시 확인해 주세요.",
+        );
       if (bodyMode) {
         const nowBody = await bodyDeps.selection(
           installationId,
@@ -418,12 +482,19 @@ export function createFramingRoutes(overrides: Partial<typeof defaults> = {}, bo
         const finalSha =
           nowArtifact.variant === "refined"
             ? sha256Hex(nowArtifact.bytes)
-            : candidate.camera!.source_bvh_sha256;
+            : (manualPresentationCamera(currentPerson, nowCandidate)
+                ?.sourceBvhSha256 ?? candidate.camera?.source_bvh_sha256);
         if (
           nowBody.resolutionStatus !== "ready" ||
           nowBody.selectionRevision !== body!.selectionRevision ||
           !sameBody(nowBody.resolvedBody!, body!.resolvedBody!) ||
           JSON.stringify(nowRuntime) !== JSON.stringify(runtime) ||
+          JSON.stringify(nowBody.shape) !== JSON.stringify(body!.shape) ||
+          JSON.stringify(nowBody.shapeSource) !==
+            JSON.stringify(body!.shapeSource) ||
+          JSON.stringify(
+            manualPresentationCamera(currentPerson, nowCandidate),
+          ) !== JSON.stringify(manual) ||
           JSON.stringify(nowCandidate?.camera) !==
             JSON.stringify(candidate.camera) ||
           finalSha !== sha256Hex(bvhBytes) ||
@@ -459,11 +530,13 @@ export function createFramingRoutes(overrides: Partial<typeof defaults> = {}, bo
           "Content-Length": String(bytes.byteLength),
           "Cache-Control": "private, no-store",
           "X-Standin-Output-Scope": scope,
-          ...(hands ? {
-            "X-Standin-Review-Key": reviewKey,
-            "X-Standin-Hand-Revision": String(hands.revision),
-            "X-Standin-Hand-Library-SHA256": hands.library_sha256,
-          } : {}),
+          ...(hands
+            ? {
+                "X-Standin-Review-Key": reviewKey,
+                "X-Standin-Hand-Revision": String(hands.revision),
+                "X-Standin-Hand-Library-SHA256": hands.library_sha256,
+              }
+            : {}),
           ...(bodyMode
             ? {
                 "X-Standin-Review-Key": reviewKey,
@@ -484,7 +557,10 @@ export function createFramingRoutes(overrides: Partial<typeof defaults> = {}, bo
       });
     } catch (error) {
       if (error instanceof HandError)
-        return c.json(errorEnvelope(error.code, error.message, c.get("requestId")), error.status);
+        return c.json(
+          errorEnvelope(error.code, error.message, c.get("requestId")),
+          error.status,
+        );
       if (error instanceof BodyError)
         return c.json(
           errorEnvelope(

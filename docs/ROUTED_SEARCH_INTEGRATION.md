@@ -1,5 +1,17 @@
 # 동적 라우팅 결과 연결
 
+## 2026-10-18: Top-5 직접 선택과 저장
+
+검증된 `posePresentation.library_candidates`만 일반 포즈 선택 목록으로 연결한다.
+사용자가 카드를 누르면 선택되고 기존 확정 → 최종 확인 → BVH/FBX 저장 흐름을 따른다.
+BFF가 `source=library`, `lookupAllowed=true`, `releaseAllowed=true`,
+`sourceBvhSha256`를 부여하며 저장 시 소유권·확정 선택·원본 BVH 해시를 검증한다.
+자동 적용과 refine은 켜지 않는다. 근접·구도·생성 후보는 기존 검수 전용 계약을 유지한다.
+카드는 정면 라이브러리 이미지를 사용하며 검색 원근 카메라를 출력 카메라로 위장하지 않는다.
+클라이언트의 확대·회전 모달은 제거한다. 양쪽 저장 화면은 기존 네이티브 파일 드래그를 사용한다.
+이전 배포에서 저장된 검수 전용 Job은 재검색해야 새 선택 목록을 받는다.
+아래의 `dynamic/semantic` 조회 전용 경로는 계속 차단한다.
+
 기준: 추론 develop `4d6e84c7`, BFF develop `ee2e9a12`, 클라이언트 develop `4b07a94e`.
 
 ## 결과 계약

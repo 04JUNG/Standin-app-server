@@ -133,6 +133,13 @@ test("authoritative presentation preserves groups/counts while private assets ne
   assert.equal(p.candidateCount, 2);
   assert.equal(p.fallbackMode, "soft");
   assert.equal(p.refineAllowed, false);
+  assert.equal(p.candidates.length, 1);
+  assert.equal(p.candidates[0].id, id);
+  assert.equal(p.candidates[0].source, "library");
+  assert.equal(p.candidates[0].releaseAllowed, true);
+  assert.equal(p.candidates[0].sourceBvhSha256, hash);
+  assert.equal(p.candidates[0].camera, undefined);
+  assert.equal(p.candidates[0].distance, undefined);
   assert.equal(p.posePresentation?.generated_candidates[0].pose_id, null);
   assert.equal(p.routedSearch, undefined);
   const text = JSON.stringify(result);
@@ -256,6 +263,17 @@ test("owned preview endpoint binds person/candidate/hash and never library-looks
     "PREVIEW_HASH_MISMATCH",
   );
 });
+
+for (const status of ["blocked", "error", "not_run", "no_result"]) {
+  test(`manual selection never promotes a ${status} presentation`, () => {
+    const value = raw();
+    value.search_status = status;
+    assert.equal(
+      mapCutResult("job", cut(value)).candidatesByPerson[0].candidates.length,
+      0,
+    );
+  });
+}
 
 test("selected-body preview binds private library/generated sources, shape, scope and stale choices without release", async (t) => {
   const { config } = await import("./config.js");
@@ -415,5 +433,10 @@ test("selected-body preview binds private library/generated sources, shape, scop
       .actual_mesh_validated,
     false,
   );
-  assert.deepEqual(result.candidatesByPerson[0].candidates, []);
+  const library = result.candidatesByPerson[0].candidates;
+  assert.equal(library.length, 1);
+  assert.equal(library[0].source, "library");
+  assert.equal(library[0].releaseAllowed, true);
+  assert.equal(library[0].refineAllowed, false);
+  assert.equal(library[0].sourceBvhSha256, hash);
 });

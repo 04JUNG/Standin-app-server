@@ -6,6 +6,17 @@
 
 export type CharacterGender = "male" | "female" | "unspecified";
 
+/** 2026-10-10 성인 고정 FBX 6종은 현재 남녀 쉐이프키 모델로 대체했다. */
+const retiredCharacters = new Set([
+  "body-female-athletic",
+  "body-female-base",
+  "body-female-muscular",
+  "body-male-athletic",
+  "body-male-base",
+  "body-male-muscular",
+]);
+export const isRetiredCharacter = (id: string): boolean => retiredCharacters.has(id);
+
 export interface CharacterPresentation {
   displayName: string;
   gender: CharacterGender;

@@ -1,5 +1,16 @@
 # API 계약 — BFF가 클라(Tauri)에 노출하는 `/v1`
 
+## Top-5 라이브러리 직접 선택 (2026-10-18)
+
+검색 완료(`ok/partial_error`)·표시 준비(`ready/review_ready`)인 검증된
+`posePresentation.library_candidates`는 일반 `candidates`에도 노출합니다.
+`source=library`, `lookupAllowed=true`, `releaseAllowed=true`, `sourceBvhSha256`로
+식별하며 사용자 선택·확정·최종 확인 후 기존 BVH/FBX 저장을 사용합니다. 서버가 원본
+해시와 소유권·확정 선택을 다시 검증합니다. refine/자동 적용은 허용하지 않습니다.
+정면 라이브러리 썸네일을 사용하며 검색 원근 카메라를 출력 카메라로 간주하지 않습니다.
+생성·근접·구도 참고와 `dynamic/semantic` 조회 전용 후보는 기존 저장 금지를 유지합니다.
+이전 검수 전용 Job은 재검색해야 이 선택 목록을 받습니다.
+
 ## 동적 검색 조회 전용 후보 (2026-10-17)
 
 `candidatesByPerson[].routedSearch`는 route/status/reason, 근접·구도 참고 개수, 별도 생성 검수 상태,
@@ -1288,3 +1299,17 @@ false다. 정식 후보 배열에 합치지 않는다.
 응답의 `X-Standin-Body-Revision`, `X-Standin-Body-Shape-SHA256`(`none` 또는 SHA-256), Character-Id/SHA, Model-Revision, 원본 BVH SHA 및 GLB digest를 검증한다.
 수치 조절 체형은 승인된 authoring source로 정확히 bake하며 미조절 모델로 대체하지 않는다. 변환 전후 선택 revision·body identity·shape/source·runtime 변경은 409로 응답을 폐기한다.
 query 없는 기존 dev.172는 기본 남성 미리보기를 유지한다. 신규 후보의 자동 적용·refine·export·release와 actual_mesh_validated 금지는 그대로다.
+
+
+### 수동 라이브러리 후보와 체형 결과의 통합 (2026-10-18)
+
+직접 선택 가능한 라이브러리 후보는 소유 작업의 presentation 라이브러리 행과 ID/pose/SHA가 모두
+일치해야 체형 Top-5와 저장 전 확인을 사용할 수 있다. 검색용 candidate-camera를 임의로 만들지
+않고 저장된 presentation 카메라의 회전만 정사영 체형 렌더에 적용한다. 체형·편집 수치·승인된
+shape source를 기존 변환기에 전달하며 PNG/GLB 확인과 FBX 다운로드는 같은 변환 결과와
+reviewKey를 사용한다. 렌더 중 원본·카메라·체형·수치/source 변경은 409로 폐기한다.
+
+새 수동 후보의 이 예외는 원본 해시가 확인된 라이브러리와 작가의 선택·확인에 한정된다.
+기존 포즈 커버리지 검사와 참고/생성/semantic 후보의 저장 금지, actual_mesh_validated=false,
+auto/refine 금지는 유지한다. 후보가 없는 참고 인물은 저장 가능한 다른 인물의 체형 기능을
+비활성화하지 않으며, 별도의 조회 전용 체형 미리보기를 유지한다.

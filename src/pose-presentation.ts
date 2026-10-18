@@ -1,6 +1,7 @@
 /** Versioned, lookup-only presentation. Assets stay in the private per-person context. */
 import { createHash } from "node:crypto";
 import { Hono } from "hono";
+import type { AnalysisPerson, PoseCandidate } from "./types.js";
 import type { AppEnv } from "./env.js";
 import { queryOne } from "./db.js";
 import { getOwnedJob } from "./jobs/store.js";
@@ -77,6 +78,45 @@ export interface PosePresentation {
   auto_apply_allowed: false;
   refine_allowed: false;
   export_allowed: false;
+}
+/** Only an explicitly selectable, owned library row can use its stored presentation camera.
+ * This does not fabricate a fitted candidate-camera contract or promote references/generation.
+ */
+export function manualPresentationCamera(
+  person: AnalysisPerson | undefined,
+  candidate: PoseCandidate | undefined,
+) {
+  const p = person?.posePresentation;
+  if (
+    !candidate ||
+    candidate.source !== "library" ||
+    candidate.lookupAllowed !== true ||
+    candidate.releaseAllowed !== true ||
+    !candidate.bvhAvailable ||
+    !candidate.sourceBvhSha256 ||
+    p?.version !== "dynamic-pose-presentation-v1" ||
+    !["ready", "review_ready"].includes(p.status) ||
+    !["ok", "partial_error"].includes(p.search_status)
+  )
+    return null;
+  const row = p.library_candidates.find(
+    (c) =>
+      c.candidate_id === candidate.id &&
+      c.pose_id === candidate.poseId &&
+      c.source === "library" &&
+      c.kind === "library_match" &&
+      c.asset.transport === "library_bvh" &&
+      c.asset.bvh_sha256 === candidate.sourceBvhSha256,
+  );
+  if (!row) return null;
+  try {
+    return {
+      camera: validateRenderCamera(row.render_camera),
+      sourceBvhSha256: row.asset.bvh_sha256,
+    };
+  } catch {
+    return null;
+  }
 }
 export interface PrivatePreviewAsset {
   transport: "library_bvh" | "inline_bvh";

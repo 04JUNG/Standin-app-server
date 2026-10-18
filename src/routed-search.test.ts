@@ -318,3 +318,22 @@ for (const format of ["bvh", "fbx"]) {
     assert.equal(artifactCalls, 0);
   });
 }
+
+test("manual library release requires stored permission and a source hash", async () => {
+  const allowed = structuredClone(job);
+  const candidate = allowed.result!.candidatesByPerson[0].candidates[0];
+  candidate.source = "library";
+  candidate.releaseAllowed = true;
+  candidate.lookupAllowed = true;
+  candidate.sourceBvhSha256 = "a".repeat(64);
+  const a = app();
+  a.use("/:id/export", createReleaseGuard(async () => allowed));
+  a.get("/:id/export", (c) => c.text("permitted after confirmation"));
+  const path = "/pose%201/export?jobId=job&personIndex=0&candidateId=dynamic%3A%3Apose%201";
+  assert.equal((await a.request(path)).status, 200);
+  candidate.releaseAllowed = false;
+  assert.equal((await a.request(path)).status, 409);
+  candidate.releaseAllowed = true;
+  candidate.sourceBvhSha256 = undefined;
+  assert.equal((await a.request(path)).status, 409);
+});
