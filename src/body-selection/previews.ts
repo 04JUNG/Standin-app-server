@@ -1,4 +1,7 @@
 /** Read-only Top-K previews bound to the persisted body choice. No search/refine mutation. */
+import { resolvePersonOutputScope } from "../output-scope/model.js";
+import { handBakeFor } from "../hands/service.js";
+import { HandError } from "../hands/model.js";
 import { manualPresentationCamera } from "../pose-presentation.js";
 import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
@@ -9,7 +12,7 @@ import { getPoseBvh } from "../inference.js";
 import { checkCharacter } from "../characters/service.js";
 import { errorEnvelope } from "../mapping.js";
 import { cameraArtifact } from "../candidate-camera/artifacts.js";
-import { convertFramed } from "../converter/framing.js";
+import { convertFramed, modelPreviewIdentity } from "../converter/framing.js";
 import {
   ConverterError,
   converterEnabled,
@@ -37,6 +40,8 @@ const defaults = {
   getPoseBvh,
   getPreviewRuntime,
   convertFramed,
+  modelPreviewIdentity,
+  handBakeFor,
   getModel: (source: string, body: BodyRef, runtime: PreviewRuntime) =>
     getPreviewModel(source, body.characterId, fetch, {
       characterSha256: body.assetSha256,
@@ -167,7 +172,15 @@ export async function bodyPreviewManifest(
       sourceBvhSha256: manual?.sourceBvhSha256 ?? c.camera!.source_bvh_sha256,
     };
   });
+  const scope = resolvePersonOutputScope(person).resolved;
+  const hands = await deps.handBakeFor(person);
   const runtime = await deps.getPreviewRuntime();
+  const framed = scope !== "full" || !!selection.shape || !!hands;
+  const identity = framed
+    ? await deps.modelPreviewIdentity(body.characterId)
+    : null;
+  if (framed && (!identity || identity.characterSha256 !== body.assetSha256))
+    throw new BodyError("BODY_PREVIEW_UNAVAILABLE", 503);
   const renderKey = sha256Hex(
     Buffer.from(
       JSON.stringify([
@@ -179,7 +192,9 @@ export async function bodyPreviewManifest(
         body,
         selection.shape ?? null,
         selection.shapeSource ?? null,
-        "full",
+        scope,
+        hands,
+        identity,
         runtime,
         candidates,
       ]),
@@ -195,7 +210,8 @@ export async function bodyPreviewManifest(
     shape: selection.shape ?? null,
     shapeSource: selection.shapeSource ?? null,
     renderKey,
-    outputScope: "full" as const,
+    outputScope: scope,
+    hands,
     // Manifest readiness is not successful rendering; bytes are fetched on demand.
     status: "renderable" as const,
     renderingExecuted: false as const,
@@ -211,7 +227,12 @@ export async function bodyPreviewManifest(
           sourceSha: c.sourceBvhSha256,
           characterId: body.characterId,
           characterSha256: body.assetSha256,
-          modelRevision: runtime.modelRevision,
+          modelRevision: identity?.modelRevision ?? runtime.modelRevision,
+          version: framed
+            ? ("framed-mesh-v1" as const)
+            : ("posed-mesh-v1" as const),
+          scope,
+          cameraApplied: framed,
           previewRevision: runtime.previewRevision,
         },
       };
@@ -244,6 +265,11 @@ export function createBodyPreviewRoutes(
       await next();
     });
   app.onError((error, c) => {
+    if (error instanceof HandError)
+      return c.json(
+        errorEnvelope(error.code, error.message, c.get("requestId")),
+        error.status,
+      );
     if (error instanceof BodyError)
       return c.json(
         errorEnvelope(
@@ -327,12 +353,8 @@ export function createBodyPreviewRoutes(
     if (sha256Hex(bvhBytes) !== candidate.sourceBvhSha256)
       throw new BodyError("POSE_UNAVAILABLE", 409);
     let bytes: Uint8Array;
-    if (format === "glb" && manifest.shape)
-      throw new ConverterError(
-        "PREVIEW_NOT_READY",
-        "shaped Top-K uses verified PNG; static library GLB is not valid",
-      );
-    if (format === "glb")
+    const framed = candidate.previewModel.cameraApplied;
+    if (format === "glb" && !framed)
       bytes = await deps.getModel(
         candidate.sourceBvhSha256,
         manifest.resolvedBody,
@@ -346,7 +368,15 @@ export function createBodyPreviewRoutes(
           characterId: manifest.resolvedBody.characterId,
           shape: manifest.shape,
           shapeSource: manifest.shapeSource,
-          scope: "full",
+          scope: manifest.outputScope,
+          ...(manifest.hands ? { hands: manifest.hands } : {}),
+          ...(format === "glb"
+            ? {
+                previewFormat: "model" as const,
+                modelRevision: candidate.previewModel.modelRevision,
+                characterSha256: manifest.resolvedBody.assetSha256,
+              }
+            : {}),
           cameraRotation: candidate.camera.rotation,
           expectedCharacterSha256: manifest.resolvedBody.assetSha256,
           expectedPreviewRevision: manifest.runtime.previewRevision,
@@ -354,6 +384,7 @@ export function createBodyPreviewRoutes(
         deps.convertFramed,
       );
       if (
+        artifact.sourceBvhSha256 !== candidate.sourceBvhSha256 ||
         artifact.characterSha256 !== manifest.resolvedBody.assetSha256 ||
         artifact.previewRevision !== manifest.runtime.previewRevision
       )
@@ -376,7 +407,14 @@ export function createBodyPreviewRoutes(
         "X-Standin-Character-SHA256": manifest.resolvedBody.assetSha256,
         "X-Standin-Source-BVH-SHA256": candidate.sourceBvhSha256,
         "X-Standin-Preview-Revision": manifest.runtime.previewRevision,
-        "X-Standin-Model-Revision": manifest.runtime.modelRevision,
+        "X-Standin-Model-Revision": candidate.previewModel.modelRevision,
+        "X-Standin-Output-Scope": manifest.outputScope,
+        ...(manifest.hands
+          ? {
+              "X-Standin-Hand-Revision": String(manifest.hands.revision),
+              "X-Standin-Hand-Library-SHA256": manifest.hands.library_sha256,
+            }
+          : {}),
         "X-Standin-Artifact-SHA256": sha256Hex(bytes),
       },
     });

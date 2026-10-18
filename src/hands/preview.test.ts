@@ -29,6 +29,28 @@ function fixture(inline = false) {
   const candidate = {
     candidate_id: id,
     pose_id: inline ? null : "pose",
+    render_camera: {
+      version: "pose-preview-camera-v1",
+      projection: "orthographic",
+      rotation: [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ],
+      yaw_degrees: 0,
+      pitch_degrees: 0,
+      roll_degrees: 0,
+      distance_torso: null,
+      basis: "right-handed-Y-up",
+      rotation_order: "Rz@Rx@Ry_column_vectors",
+      origin: "hip_midpoint",
+      scale: "hip_to_shoulder_midpoint_length",
+      screen_y: "down",
+      projection_rule: "xy=(x,-y)",
+      projection_matches_search: false,
+      fit_to_rough_pixels: false,
+      bvh_camera_rotation_applied: false,
+    },
     asset: {
       transport: inline ? "inline_bvh" : "library_bvh",
       bvh_sha256: hash,
@@ -90,7 +112,14 @@ function fixture(inline = false) {
       },
       convertFramed: async (input) => {
         state.calls++;
-        assert.equal(input.scope, "half");
+        assert.equal(
+          input.scope,
+          result.result!.candidatesByPerson[0].outputScope?.resolved ?? "half",
+        );
+        assert.deepEqual(
+          input.cameraRotation,
+          candidate.render_camera.rotation,
+        );
         assert.equal(input.hands?.left, "fist");
         state.after();
         return {
@@ -157,4 +186,31 @@ test("hand lookup cannot be switched to a release format", async () => {
   const { app, state, url } = fixture();
   assert.equal((await app.request(url + "&format=fbx")).status, 400);
   assert.equal(state.calls, 0);
+});
+
+test("manual shoulder/head scope is not aliased to bust in selected hand PNG", async () => {
+  const s = fixture();
+  s.result.result!.candidatesByPerson[0].outputScope = {
+    selection: "shoulder_head",
+    detected: "half",
+    detectionSource: "vlm_person",
+    resolved: "shoulder_head",
+    resolutionSource: "user",
+  };
+  const response = await s.app.request(s.url);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("X-Standin-Output-Scope"), "shoulder_head");
+});
+test("scope changed while hands render rejects the previous crop", async () => {
+  const s = fixture();
+  s.state.after = () => {
+    s.result.result!.candidatesByPerson[0].outputScope = {
+      selection: "head",
+      detected: "half",
+      detectionSource: "vlm_person",
+      resolved: "head",
+      resolutionSource: "user",
+    };
+  };
+  assert.equal((await s.app.request(s.url)).status, 409);
 });

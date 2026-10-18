@@ -1,3 +1,5 @@
+import { resolvePersonOutputScope } from "../output-scope/model.js";
+import { validateRenderCamera } from "../pose-presentation.js";
 /** PNG-only lookup of selected hands. Never returns FBX or promotes a pose's permissions. */
 import { Hono } from "hono";
 import { createHash } from "node:crypto";
@@ -169,8 +171,12 @@ export function createHandPreviewRoutes(
           return fail(409, "HANDS_CHANGED");
         const hands = await deps.handBakeFor({ handSelection: selection });
         if (!hands) return fail(409, "HANDS_CHANGED");
-        const scope = presentation!.output_scope;
-        if (!["full", "half", "shoulder_head", "head"].includes(scope ?? ""))
+        const scope = resolvePersonOutputScope(person).resolved;
+        if (
+          !["full", "half", "bust", "shoulder_head", "head"].includes(
+            scope ?? "",
+          )
+        )
           return fail(409, "PREVIEW_UNAVAILABLE");
         const characterId = deps.characterId();
         if ((await deps.checkCharacter(characterId)) !== "ok")
@@ -187,22 +193,23 @@ export function createHandPreviewRoutes(
           hands,
           characterId,
           scope,
+          candidate.render_camera,
         ]);
         const artifact = await cache.get(key, () =>
           deps.convertFramed({
             bvhBytes,
             characterId,
-            scope:
-              scope === "shoulder_head"
-                ? "bust"
-                : (scope as "full" | "half" | "head"),
+            scope,
+            cameraRotation: validateRenderCamera(candidate.render_camera)
+              .rotation,
             hands,
           }),
         );
         const current = await deps.getOwnedJob(jobId, owner);
-        const live = current?.result?.candidatesByPerson.find(
+        const livePerson = current?.result?.candidatesByPerson.find(
           (p) => p.personIndex === index,
-        )?.posePresentation;
+        );
+        const live = livePerson?.posePresentation;
         if (
           current?.status !== "completed" ||
           !live ||
@@ -211,7 +218,14 @@ export function createHandPreviewRoutes(
             ...live.review_candidates,
             ...live.generated_candidates,
           ].some((p) => p.candidate_id === id && p.asset.bvh_sha256 === hash) ||
-          live.output_scope !== scope
+          resolvePersonOutputScope(livePerson).resolved !== scope ||
+          JSON.stringify(
+            [
+              ...live.library_candidates,
+              ...live.review_candidates,
+              ...live.generated_candidates,
+            ].find((p) => p.candidate_id === id)?.render_camera,
+          ) !== JSON.stringify(candidate.render_camera)
         )
           return fail(409, "PREVIEW_SOURCE_CHANGED");
         const after = await deps.selection(owner, jobId, index);
@@ -228,6 +242,7 @@ export function createHandPreviewRoutes(
             "Content-Type": "image/png",
             "Cache-Control": "private, no-store",
             "X-Standin-Hand-Revision": revision,
+            "X-Standin-Output-Scope": scope,
             "X-Standin-Hand-Library-SHA256": selection.library_sha256,
             "X-Standin-Preview-Only": "true",
           },

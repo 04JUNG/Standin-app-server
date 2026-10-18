@@ -1,3 +1,8 @@
+import {
+  resolvePersonOutputScope,
+  resolveOutputScope,
+  type BodyScope,
+} from "../output-scope/model.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
@@ -77,6 +82,8 @@ function setup(count = 5) {
     modelCalls: 0,
     convertCalls: 0,
     afterRender: () => {},
+    inputs: [] as import("../converter/framing.js").FramedInput[],
+    hands: null as import("../hands/model.js").HandBake | null,
     runtime: {
       schemaVersion: "body-preview-runtime.v1",
       previewRevision: "a".repeat(64),
@@ -108,6 +115,11 @@ function setup(count = 5) {
         structuredClone(state.selections[i]),
       checkCharacter: async () => (state.available ? "ok" : "unavailable"),
       getPreviewRuntime: async () => structuredClone(state.runtime),
+      modelPreviewIdentity: async () => ({
+        modelRevision: "e".repeat(64),
+        characterSha256: state.selections[0].resolvedBody!.assetSha256,
+      }),
+      handBakeFor: async () => structuredClone(state.hands),
       getPoseBvh: async () => {
         state.poseCalls++;
         return new Response(state.corruptBvh ? "wrong" : bvh, {
@@ -124,9 +136,13 @@ function setup(count = 5) {
       },
       convertFramed: async (input) => {
         state.convertCalls++;
+        state.inputs.push(input);
         assert.deepEqual(input.cameraRotation, rotation);
         assert.deepEqual(input.bvhBytes, new Uint8Array(bvh));
-        assert.equal(input.scope, "full");
+        assert.equal(
+          input.scope,
+          resolvePersonOutputScope(analysis.candidatesByPerson[0]).resolved,
+        );
         assert.deepEqual(input.shape, state.selections[0].shape ?? null);
         assert.equal(
           input.characterId,
@@ -432,4 +448,70 @@ test("owned manually selectable library Top-5 retain body/shape previews without
     (await s.app.request(bodyPreviewManifestUrl(s.jobId, 0))).status,
     409,
   );
+});
+
+for (const scope of [
+  "full",
+  "half",
+  "bust",
+  "shoulder_head",
+  "head",
+] as BodyScope[])
+  test(`${scope} keeps five candidates and identical GLB/PNG scope`, async () => {
+    const s = setup();
+    s.analysis.candidatesByPerson[0].outputScope = resolveOutputScope({
+      selection: scope,
+    });
+    const m = await s.manifest();
+    assert.equal(m.outputScope, scope);
+    assert.equal(m.candidates.length, 5);
+    const c = m.candidates[0];
+    for (const url of [c.previewModel.url, c.thumbnailUrl]) {
+      const response = await s.app.request(url);
+      assert.equal(response.status, 200, await response.clone().text());
+      assert.equal(response.headers.get("X-Standin-Output-Scope"), scope);
+    }
+    assert.equal(c.previewModel.cameraApplied, scope !== "full");
+    assert.equal(s.state.modelCalls, scope === "full" ? 1 : 0);
+    assert.ok(s.state.inputs.every((i) => i.scope === scope));
+    if (scope !== "full")
+      assert.equal(s.state.inputs[0].previewFormat, "model");
+  });
+for (const format of ["glb", "png"])
+  test(`scope change during ${format} drops old bytes and invalidates cache key`, async () => {
+    const s = setup();
+    s.analysis.candidatesByPerson[0].outputScope = resolveOutputScope({
+      selection: "half",
+    });
+    const m = await s.manifest();
+    s.state.afterRender = () => {
+      s.analysis.candidatesByPerson[0].outputScope = resolveOutputScope({
+        selection: "head",
+      });
+    };
+    const c = m.candidates[0];
+    const response = await s.app.request(
+      format === "glb" ? c.previewModel.url : c.thumbnailUrl,
+    );
+    assert.equal(response.status, 409);
+    assert.equal(await code(response), "BODY_PREVIEW_STALE");
+    assert.notEqual((await s.manifest()).renderKey, m.renderKey);
+  });
+test("selected hands bind the body preview and late hand change is discarded", async () => {
+  const s = setup();
+  s.state.hands = {
+    left: "fist",
+    right: "relaxed",
+    revision: 2,
+    library_version: "v1",
+    library_sha256: "f".repeat(64),
+  };
+  const m = await s.manifest();
+  s.state.afterRender = () => {
+    s.state.hands!.revision++;
+  };
+  const response = await s.app.request(m.candidates[0].previewModel.url);
+  assert.equal(response.status, 409);
+  assert.equal(await code(response), "BODY_PREVIEW_STALE");
+  assert.equal(s.state.inputs[0].hands!.left, "fist");
 });

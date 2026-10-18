@@ -1,3 +1,4 @@
+import { isBodyScope, resolvePersonOutputScope } from "./output-scope/model.js";
 /** Versioned, lookup-only presentation. Assets stay in the private per-person context. */
 import { createHash } from "node:crypto";
 import { Hono } from "hono";
@@ -278,7 +279,7 @@ export function mapPosePresentation(
     const scope = raw.output_scope;
     if (
       scope !== null &&
-      !["full", "half", "shoulder_head", "head"].includes(String(scope))
+      !["full", "half", "bust", "shoulder_head", "head"].includes(String(scope))
     )
       throw Error("unsupported_output_scope");
     const presentation: PosePresentation = {
@@ -475,9 +476,10 @@ async function readPreview(
   hash: string,
 ) {
   const job = await deps.getOwnedJob(jobId, owner);
-  const p = job?.result?.candidatesByPerson.find(
+  const person = job?.result?.candidatesByPerson.find(
     (p) => p.personIndex === index,
-  )?.posePresentation;
+  );
+  const p = person?.posePresentation;
   const candidate =
     p && groups.flatMap((g) => p[g]).find((x) => x.candidate_id === id);
   if (
@@ -526,7 +528,7 @@ async function readPreview(
   }
   if (!bytes.length || bytes.length > 2_000_000 || sha(bytes) !== hash)
     throw new BodyError("PREVIEW_HASH_MISMATCH", 409);
-  return { candidate, scope: p!.output_scope, bytes };
+  return { candidate, scope: resolvePersonOutputScope(person).resolved, bytes };
 }
 export function createPresentationRoutes(overrides: Partial<PreviewDeps> = {}) {
   const deps = { ...defaults, ...overrides },
@@ -614,13 +616,8 @@ export function createPresentationRoutes(overrides: Partial<PreviewDeps> = {}) {
     const body = selection.resolvedBody;
     if ((await deps.checkCharacter(body.characterId)) !== "ok")
       throw new BodyError("BODY_UNAVAILABLE", 409);
-    const scope = preview.scope === "shoulder_head" ? "bust" : preview.scope;
-    if (
-      scope !== "full" &&
-      scope !== "half" &&
-      scope !== "bust" &&
-      scope !== "head"
-    )
+    const scope = preview.scope;
+    if (!isBodyScope(scope))
       throw new BodyError("BODY_PREVIEW_UNSUPPORTED", 409);
     const camera = validateRenderCamera(preview.candidate.render_camera),
       runtime = await deps.getPreviewRuntime();
@@ -655,8 +652,7 @@ export function createPresentationRoutes(overrides: Partial<PreviewDeps> = {}) {
       );
     // A late cached/render response must not win after body, camera, source, scope or runtime changes.
     const current = await readPreview(deps, owner, job, index, id, hash);
-    const currentScope =
-      current.scope === "shoulder_head" ? "bust" : current.scope;
+    const currentScope = current.scope;
     if (
       JSON.stringify([
         await deps.selection(owner, job, index),
@@ -671,6 +667,7 @@ export function createPresentationRoutes(overrides: Partial<PreviewDeps> = {}) {
         "Content-Type": "image/png",
         "Cache-Control": "private, no-store",
         "X-Standin-Body-Revision": rev,
+        "X-Standin-Output-Scope": scope,
         "X-Standin-Character-SHA256": body.assetSha256,
         "X-Standin-Shape-SHA256": selection.shape?.shapeSha256 ?? "none",
         "X-Standin-Source-BVH-SHA256": hash,

@@ -1315,3 +1315,12 @@ reviewKey를 사용한다. 렌더 중 원본·카메라·체형·수치/source �
 기존 포즈 커버리지 검사와 참고/생성/semantic 후보의 저장 금지, actual_mesh_validated=false,
 auto/refine 금지는 유지한다. 후보가 없는 참고 인물은 저장 가능한 다른 인물의 체형 기능을
 비활성화하지 않으며, 별도의 조회 전용 체형 미리보기를 유지한다.
+
+### 인물별 구도와 체형 미리보기
+`body-previews.v1.outputScope`는 `full|half|bust|shoulder_head|head`다. 수동 `outputScope.selection` > 유효한 인물별 detected > posePresentation.output_scope > full 순서로 결정하고 파생 resolved는 재계산한다. `bust`는 흉상, `shoulder_head`는 어깨 기준면부터 머리까지이며 서로 치환하지 않는다. 저장 및 작업 조회 응답의 presentation 범위도 이 최종값을 따른다.
+
+renderKey에는 최종 범위·손 선택·체형/shape·카메라·후보·런타임을 포함한다. full/고정/손 변경 없음은 기존 posed GLB를 사용하고, 나머지는 기존 convert-framed의 범위별 정적 GLB를 사용한다. manifest.previewModel의 `scope`, `version`, `cameraApplied`가 자산을 구분한다. framed 모델에는 회전이 이미 적용됐으므로 앱이 다시 회전하면 안 된다. `modelRevision`은 해당 framed 자산의 exporter revision이며 runtime.modelRevision(posed)과 다를 수 있다. PNG와 GLB는 X-Standin-Output-Scope 및 동일한 선택/원본/자산 identity 헤더를 반환한다. 손 선택이 있으면 Hand-Revision/Hand-Library-SHA256도 검증한다.
+
+선택 체형 PNG·손 적용 PNG·최종 확인 경로도 같은 resolver를 사용하고, 작업 후 scope/손/체형/카메라가 바뀌면 409로 폐기한다. 원본 BVH와 검색 순위, 후보 수, 검수 권한은 바뀌지 않는다. 숫자 카메라 회전과 원래 검색 projection metadata는 보존한다. 기존 Converter의 파생 이미지/모델 표시는 orthographic이며 픽셀 단위 검색 투영과 같다는 뜻이 아니다.
+
+클라이언트의 5종 범위 및 framed GLB 지원과 함께 배포해야 한다. 기존 full-only 앱은 새 manifest를 처리하지 못하므로 설치본 업데이트가 필요하다.
