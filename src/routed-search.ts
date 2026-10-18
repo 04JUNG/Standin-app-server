@@ -39,10 +39,12 @@ function previewCamera(value: unknown): SearchPreviewCamera | undefined {
 
 /** These sources are lookup-only even if a client or stale context claims otherwise. */
 export const restrictedCandidate = (
-  candidate: Pick<PoseCandidate, "source" | "releaseAllowed"> | undefined,
+  candidate: Pick<PoseCandidate, "source" | "releaseAllowed" | "lookupAllowed" | "sourceBvhSha256"> | undefined,
 ) =>
   candidate?.source === "dynamic" ||
   candidate?.source === "semantic" ||
+  (candidate?.source === "library" && (candidate.releaseAllowed !== true ||
+    candidate.lookupAllowed !== true || !/^[a-f0-9]{64}$/.test(candidate.sourceBvhSha256 ?? ""))) ||
   candidate?.releaseAllowed === false;
 
 /** Translate ranked retrieval into browseable candidates, never geometric confidence or export permission. */

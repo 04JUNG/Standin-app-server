@@ -1,5 +1,16 @@
 # API 계약 — BFF가 클라(Tauri)에 노출하는 `/v1`
 
+## Top-5 라이브러리 직접 선택 (2026-10-18)
+
+검색 완료(`ok/partial_error`)·표시 준비(`ready/review_ready`)인 검증된
+`posePresentation.library_candidates`는 일반 `candidates`에도 노출합니다.
+`source=library`, `lookupAllowed=true`, `releaseAllowed=true`, `sourceBvhSha256`로
+식별하며 사용자 선택·확정·최종 확인 후 기존 BVH/FBX 저장을 사용합니다. 서버가 원본
+해시와 소유권·확정 선택을 다시 검증합니다. refine/자동 적용은 허용하지 않습니다.
+정면 라이브러리 썸네일을 사용하며 검색 원근 카메라를 출력 카메라로 간주하지 않습니다.
+생성·근접·구도 참고와 `dynamic/semantic` 조회 전용 후보는 기존 저장 금지를 유지합니다.
+이전 검수 전용 Job은 재검색해야 이 선택 목록을 받습니다.
+
 ## 동적 검색 조회 전용 후보 (2026-10-17)
 
 `candidatesByPerson[].routedSearch`는 route/status/reason, 근접·구도 참고 개수, 별도 생성 검수 상태,

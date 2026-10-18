@@ -61,7 +61,7 @@ export type CandidateCamera = CandidateCameraBase &
   );
 
 export interface PoseCandidate {
-  source?: "dynamic" | "semantic";
+  source?: "dynamic" | "semantic" | "library";
   rankScore?: number;
   lookupAllowed?: boolean;
   refineAllowed?: boolean;

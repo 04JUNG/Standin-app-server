@@ -237,7 +237,29 @@ export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
         }));
       if (presentation) {
         person.posePresentation = presentation.presentation;
-        person.candidates = [];
+        // A known library BVH can be chosen by the author through the existing
+        // confirmation/review/export flow. Reference and generated rows stay preview-only.
+        const library = ["ready", "review_ready"].includes(presentation.presentation.status) &&
+          ["ok", "partial_error"].includes(presentation.presentation.search_status)
+          ? presentation.presentation.library_candidates : [];
+        person.candidates = library.map((candidate) => ({
+          id: candidate.candidate_id,
+          poseId: candidate.pose_id!,
+          rank: candidate.rank,
+          view: "front",
+          tags: ["검색 후보"],
+          matchLevel: "medium",
+          source: "library",
+          lookupAllowed: true,
+          refineAllowed: false,
+          releaseAllowed: true,
+          reviewRequired: true,
+          actualMeshValidated: false,
+          sourceBvhSha256: candidate.asset.bvh_sha256,
+          rankScore: candidate.rank_score ?? undefined,
+          bvhAvailable: true,
+          thumbnailUrl: `/v1/pose-candidates/${encodeURIComponent(candidate.pose_id!)}/thumbnail?view=front`,
+        }));
         const count =
           presentation.presentation.library_candidates.length +
           presentation.presentation.review_candidates.length +
