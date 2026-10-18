@@ -18,6 +18,7 @@ import {
   readSearchResponse,
   semanticResult,
   SemanticError,
+  SEMANTIC_MAX_TOP_K,
 } from "./contract.js";
 import type { PoseCandidate } from "../types.js";
 import { attachSemanticPresentation } from "./presentation.js";
@@ -75,7 +76,7 @@ export function createSemanticRoutes(overrides: Partial<typeof defaults> = {}) {
       {
         available: deps.enabled() && (await deps.readiness()),
         maxQueryLength: 500,
-        maxTopK: 10,
+        maxTopK: SEMANTIC_MAX_TOP_K,
       },
       200,
       { "Cache-Control": "private, no-store" },
