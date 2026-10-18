@@ -1250,3 +1250,14 @@ PNG/304 응답의 `X-Standin-Hand-Library-SHA256`으로 카탈로그 일치를 �
 `X-Standin-Character-SHA256`, `X-Standin-Model-Revision`, `X-Standin-Artifact-SHA256`을 제공한다.
 20회/분/설치 한도이며 counter는 설치 데이터 삭제 시 함께 정리한다. 404(작업/후보/범위), 409(변경), 429(한도), 503(렌더/모델 실패)를 구분한다.
 신규 후보 refine/release/export 금지와 actual_mesh_validated=false를 유지한다. 체형 선택은 제공하지 않으며 손 선택의 별도 PNG 참고 렌더는 기존 경로를 유지한다.
+
+### 자연어 검색의 조회 전용 체형 선택
+
+`semanticBodySelection=true`일 때 자연어 결과도 기존 인물별 `body-options`, `body-selection` GET/PUT과 체형 카드·수치 조절을 사용한다.
+`bodySelection.previewOnly=true`이며, 검색 후보를 기존 내보내기용 포즈 허용 목록에 추가하지 않는다. 선택 가능한 체형은 승인된 체형 카탈로그의 정확한 asset/rig/measurement identity와 converter 가용 상태를 확인한다. 기존 이미지 결과의 포즈 허용 목록 검사는 그대로다.
+새 semantic Job은 body policy를 캡처하고 선택을 초기화한다. 이전 semantic 기록은 소유권 행 잠금 아래 누락 상태만 초기화하며 수동 선택을 덮어쓰지 않는다. 체형 추천/이미지 기반 카메라/refine은 제공하지 않는다.
+
+`GET {preview_bvh_url}/model?bodyRevision=N`은 저장된 체형 revision만 받는다. characterId/shape/format을 query로 주입할 수 없다.
+응답의 `X-Standin-Body-Revision`, `X-Standin-Body-Shape-SHA256`(`none` 또는 SHA-256), Character-Id/SHA, Model-Revision, 원본 BVH SHA 및 GLB digest를 검증한다.
+수치 조절 체형은 승인된 authoring source로 정확히 bake하며 미조절 모델로 대체하지 않는다. 변환 전후 선택 revision·body identity·shape/source·runtime 변경은 409로 응답을 폐기한다.
+query 없는 기존 dev.172는 기본 남성 미리보기를 유지한다. 신규 후보의 자동 적용·refine·export·release와 actual_mesh_validated 금지는 그대로다.

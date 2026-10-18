@@ -437,3 +437,111 @@ test("preference reads and writes use the same UX gate for every flag combinatio
     Object.assign(config, previous);
   }
 });
+
+test("semantic preview eligibility does not loosen legacy pose-release allowlists", async () => {
+  const { bodyEligible, previewEligible } = await import("./model.js");
+  const c = catalog();
+  const ref = bodyRef(c.assets[0]);
+  assert.equal(bodyEligible(ref, c, ["new-semantic-pose"], false), false);
+  assert.equal(previewEligible(ref, c, ["new-semantic-pose"]), true);
+  assert.equal(
+    previewEligible({ ...ref, assetSha256: "f".repeat(64) }, c, [
+      "new-semantic-pose",
+    ]),
+    false,
+  );
+  const policy = snapshot(defaultPreferences(), c),
+    rec = { status: "disabled" as const, body: null, reasonCodes: [] };
+  const v = resolveBody(
+    0,
+    policy,
+    rec,
+    c,
+    ["new-semantic-pose"],
+    "manual",
+    ref,
+    0,
+    null,
+    true,
+  );
+  assert.equal(v.previewOnly, true);
+  assert.equal(v.resolutionStatus, "ready");
+  assert.notEqual(
+    resolveBody(0, policy, rec, c, ["new-semantic-pose"], "manual", ref)
+      .resolutionStatus,
+    "ready",
+  );
+});
+
+test("older semantic history initializes preview choices once without overwriting a manual revision", async () => {
+  const { ensureSemanticBodySelection, readSelection } =
+    await import("./store.js");
+  const { result } = await import("./fixtures.js");
+  const analysis = result();
+  analysis.source = "semantic";
+  analysis.image = null;
+  for (const p of analysis.candidatesByPerson)
+    for (const c of p.candidates) {
+      c.poseId = "new-semantic-pose";
+      c.refineAllowed = false;
+      c.releaseAllowed = false;
+    }
+  let policy: unknown = null;
+  const values = new Map<number, unknown>();
+  let writes = 0;
+  const db = {
+    query: async (sql: string, args: unknown[]) => {
+      if (sql.includes("SELECT status,result_json,body_policy_json"))
+        return {
+          rows:
+            args[1] === "owner"
+              ? [
+                  {
+                    status: "completed",
+                    result_json: JSON.stringify(analysis),
+                    body_policy_json: policy,
+                  },
+                ]
+              : [],
+        };
+      if (sql.includes("SELECT value FROM body_preferences"))
+        return { rows: [] };
+      if (sql.startsWith("UPDATE jobs SET body_policy_json")) {
+        if (!policy) {
+          policy = JSON.parse(args[1] as string);
+          writes++;
+        }
+        return { rows: [] };
+      }
+      if (sql.includes("SELECT body_policy_json FROM jobs"))
+        return { rows: [{ body_policy_json: policy }] };
+      if (sql.includes("INSERT INTO body_selections")) {
+        if (!values.has(args[1] as number))
+          values.set(args[1] as number, JSON.parse(args[2] as string));
+        return { rows: [] };
+      }
+      if (sql.includes("SELECT value FROM body_selections"))
+        return {
+          rows: values.has(args[1] as number)
+            ? [{ value: values.get(args[1] as number) }]
+            : [],
+        };
+      throw Error("unexpected test query");
+    },
+  } as unknown as import("./store.js").BodyDb;
+  const c = catalog();
+  await assert.rejects(
+    ensureSemanticBodySelection(db, "other", analysis.jobId, c),
+  );
+  await ensureSemanticBodySelection(db, "owner", analysis.jobId, c);
+  const first = await readSelection(db, "owner", analysis.jobId, 0, c);
+  assert.equal(first.previewOnly, true);
+  assert.equal(first.resolutionStatus, "ready");
+  values.set(0, { ...first, intent: "manual", selectionRevision: 4 });
+  await ensureSemanticBodySelection(db, "owner", analysis.jobId, c);
+  assert.equal(
+    (await readSelection(db, "owner", analysis.jobId, 0, c)).selectionRevision,
+    4,
+  );
+  assert.equal(writes, 1);
+});

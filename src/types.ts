@@ -116,6 +116,7 @@ export interface AnalysisResult {
   capabilities: {
     handSelection?: boolean;
     bodySelection?: boolean;
+    semanticBodySelection?: boolean;
     bodyRecommendation?: boolean;
     bodyPreviews?: boolean;
     /** Read-only versioned Top-K assets. Does not enable the end-to-end body UX. */
