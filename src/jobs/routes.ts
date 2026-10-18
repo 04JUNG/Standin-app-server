@@ -9,7 +9,7 @@ import {
   bodyPreviewManifestUrl,
 } from "../body-selection/previews.js";
 import { createBodySelectionRoutes } from "../body-selection/routes.js";
-import { attachBodySelections } from "../body-selection/store.js";
+import { attachBodySelections, personBodyContext } from "../body-selection/store.js";
 import { createOutputScopeRoutes } from "../output-scope/routes.js";
 import { resolveOutputScope } from "../output-scope/model.js";
 import { createPresentationRoutes } from "../pose-presentation.js";
@@ -310,7 +310,14 @@ jobsRoutes.get("/:id/result", async (c) => {
       })),
     })),
     capabilities: {
-      ...(result.source === "semantic" ? semanticCapabilities(await currentCapabilities()) : await currentCapabilities()),
+      presentationBodyPreviews:
+        (await currentCapabilities()).bodyPreviews === true &&
+        result.candidatesByPerson.some(
+          (p) => personBodyContext(p).previewOnly && !!p.bodySelection,
+        ),
+      ...(result.source === "semantic"
+        ? semanticCapabilities(await currentCapabilities())
+        : await currentCapabilities()),
       ...(result.candidatesByPerson.some(
         (p) => p.routedSearch || p.posePresentation,
       )

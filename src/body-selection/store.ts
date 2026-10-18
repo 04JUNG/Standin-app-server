@@ -247,7 +247,11 @@ export async function writePreferences(
   await remember(db, owner, "preferences", null, change, previous.hash, value);
   return value;
 }
-async function storePreferences(db: BodyDb, owner: string, value: BodyPreferences) {
+async function storePreferences(
+  db: BodyDb,
+  owner: string,
+  value: BodyPreferences,
+) {
   await db.query(
     `INSERT INTO body_preferences (installation_id,value) VALUES ($1,$2)
     ON CONFLICT (installation_id) DO UPDATE SET value=EXCLUDED.value`,
@@ -261,7 +265,11 @@ function cardName(raw: unknown) {
   return name;
 }
 /** A card always carries controls for a shape-capable body (same rule as "내 기본값"). */
-async function cardBody(characterId: string, controls: unknown, deps: BodyDeps) {
+async function cardBody(
+  characterId: string,
+  controls: unknown,
+  deps: BodyDeps,
+) {
   let body;
   try {
     body = shapeDefault(deps.catalog(), { characterId, controls });
@@ -331,7 +339,9 @@ export async function writeCards(
       j === i
         ? {
             ...c,
-            ...(change.name !== undefined ? { name: cardName(change.name) } : {}),
+            ...(change.name !== undefined
+              ? { name: cardName(change.name) }
+              : {}),
             ...(body ?? {}),
             updatedAt: at,
           }
@@ -366,7 +376,9 @@ async function recordLastUsed(
   now: () => Date,
 ) {
   if (value.resolvedSource !== "manual" || !value.resolvedBody) return;
-  await db.query("SELECT id FROM installations WHERE id=$1 FOR UPDATE", [owner]);
+  await db.query("SELECT id FROM installations WHERE id=$1 FOR UPDATE", [
+    owner,
+  ]);
   const current = await readPreferences(db, owner);
   await storePreferences(db, owner, {
     ...current,
@@ -390,6 +402,49 @@ export async function captureBodyPolicy(
     [jobId, JSON.stringify(policy)],
   );
 }
+/** Separate preview context: catalog pose coverage still gates every legacy export path. */
+export function personBodyContext(person: AnalysisPerson) {
+  const p = person.posePresentation;
+  const previewOnly =
+    !!p && ["dynamic-pose-presentation-v1", "semantic-pose-presentation-v1"].includes(p.version) &&
+    ["full", "half", "shoulder_head", "head"].includes(p.output_scope ?? "") &&
+    [p.library_candidates, p.review_candidates, p.generated_candidates].some(
+      (g) => g.length > 0,
+    );
+  return {
+    previewOnly,
+    poses: previewOnly
+      ? [
+          ...p!.library_candidates,
+          ...p!.review_candidates,
+          ...p!.generated_candidates,
+        ].map((c) => c.candidate_id)
+      : person.candidates.map((c) => c.poseId),
+  };
+}
+function initialBody(
+  person: AnalysisPerson,
+  policy: BodyPolicy,
+  catalog: BodyCatalog,
+) {
+  const context = personBodyContext(person);
+  return resolveBody(
+    person.personIndex,
+    policy,
+    person.bodyRecommendation ?? {
+      status: "disabled",
+      body: null,
+      reasonCodes: ["body_disabled"],
+    },
+    catalog,
+    context.poses,
+    "inherit",
+    null,
+    0,
+    null,
+    context.previewOnly,
+  );
+}
 /** Called under the existing persistAnalysisRecords job lock; retries never overwrite manual choices. */
 export async function initializeBodySelections(
   db: BodyDb,
@@ -404,18 +459,7 @@ export async function initializeBodySelections(
   const policy = rows[0]?.body_policy_json;
   if (!policy) return;
   for (const p of result.candidatesByPerson) {
-    const rec = p.bodyRecommendation ?? {
-      status: "disabled" as const,
-      body: null,
-      reasonCodes: ["body_disabled"],
-    };
-    const value = resolveBody(
-      p.personIndex,
-      policy,
-      rec,
-      catalog,
-      p.candidates.map((c) => c.poseId),
-    );
+    const value = initialBody(p, policy, catalog);
     await db.query(
       `INSERT INTO body_selections (job_id,person_index,value) VALUES ($1,$2,$3)
       ON CONFLICT (job_id,person_index) DO NOTHING`,
@@ -455,10 +499,10 @@ function revalidate(
   person: AnalysisPerson,
   catalog: BodyCatalog,
 ): BodySelection {
-  const poses = person.candidates.map((c) => c.poseId);
+  const { poses, previewOnly } = personBodyContext(person);
   const recommendation =
     value.recommendation.status === "available" &&
-    !eligible(value.recommendation.body, catalog, poses)
+    !eligible(value.recommendation.body, catalog, poses, previewOnly)
       ? {
           ...value.recommendation,
           status: "unavailable" as const,
@@ -477,7 +521,8 @@ function revalidate(
     ...(value.shape ? { shapeSource: asset?.shapeSource ?? null } : {}),
     recommendation,
     resolutionStatus:
-      (value.resolvedBody && !eligible(value.resolvedBody, catalog, poses)) ||
+      (value.resolvedBody &&
+        !eligible(value.resolvedBody, catalog, poses, previewOnly)) ||
       shapeLost
         ? "unavailable"
         : value.resolutionStatus,
@@ -490,13 +535,24 @@ export async function readSelection(
   index: number,
   catalog = loadBodyCatalog(),
 ): Promise<BodySelection> {
-  const { person } = await ownedPerson(db, owner, jobId, index);
+  const { person, policy } = await ownedPerson(db, owner, jobId, index);
   const { rows } = await db.query<{ value: BodySelection }>(
     "SELECT value FROM body_selections WHERE job_id=$1 AND person_index=$2",
     [jobId, index],
   );
   if (!rows[0]) throw new BodyError("BODY_SELECTION_UNSUPPORTED", 409);
-  return revalidate(rows[0].value, person, catalog);
+  const stored = rows[0].value;
+  // Old presentation jobs stored not_applicable because legacy candidates are empty.
+  // Resolve their original snapshot, not today's preferences; GET remains read-only.
+  const value =
+    personBodyContext(person).previewOnly &&
+    stored.resolutionStatus === "not_applicable"
+      ? {
+          ...initialBody(person, policy, catalog),
+          selectionRevision: stored.selectionRevision,
+        }
+      : stored;
+  return revalidate(value, person, catalog);
 }
 export async function writeSelection(
   db: BodyDb,
@@ -528,14 +584,14 @@ export async function writeSelection(
     change.expectedRevision,
     "BODY_SELECTION_CONFLICT",
   );
-  const poses = person.candidates.map((c) => c.poseId);
+  const { poses, previewOnly } = personBodyContext(person);
   if (!poses.length) throw new BodyError("BODY_NOT_APPLICABLE", 409);
   const manual = catalog.assets.find(
     (a) => a.characterId === change.characterId,
   );
   if (change.intent === "manual" && !manual)
     throw new BodyError("INVALID_CHARACTER", 400);
-  if (manual && !eligible(manual, catalog, poses))
+  if (manual && !eligible(manual, catalog, poses, previewOnly))
     throw new BodyError("BODY_POSE_UNSUPPORTED", 409);
   let shape: BodyShape | null = null;
   if (change.shape) {
@@ -557,6 +613,7 @@ export async function writeSelection(
     manual ? bodyRef(manual) : null,
     current.selectionRevision + 1,
     shape,
+    previewOnly,
   );
   if (value.resolutionStatus !== "ready" || !value.resolvedBody)
     throw new BodyError(
@@ -584,12 +641,12 @@ export async function bodyOptions(
 ) {
   const { person } = await ownedPerson(db, owner, jobId, index);
   const catalog = deps.catalog(),
-    poses = person.candidates.map((c) => c.poseId);
+    { poses, previewOnly } = personBodyContext(person);
   const characters = await Promise.all(
     catalog.assets.map(async (a) => {
       const reasons = !poses.length
         ? ["BODY_NOT_APPLICABLE"]
-        : !eligible(a, catalog, poses)
+        : !eligible(a, catalog, poses, previewOnly)
           ? ["BODY_POSE_UNSUPPORTED"]
           : (await deps.check(a.characterId)) !== "ok"
             ? ["BODY_UNAVAILABLE"]

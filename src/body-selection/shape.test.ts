@@ -10,7 +10,11 @@ import {
   type BodyCatalog,
   type BodySelection,
 } from "./model.js";
-import { parseCardChange, parsePreferenceChange, parseSelectionChange } from "./routes.js";
+import {
+  parseCardChange,
+  parsePreferenceChange,
+  parseSelectionChange,
+} from "./routes.js";
 import {
   bodyShape,
   normalizeControls,
@@ -22,6 +26,7 @@ import {
 } from "./shape.js";
 import {
   BodyError,
+  readSelection,
   bodyOptions,
   cardsOf,
   CARD_NAME_MAX,
@@ -54,7 +59,10 @@ function withFlag<T>(on: boolean, run: () => T): T {
     Object.assign(config, { bodyShapeEditEnabled: previous });
   }
 }
-async function withFlagAsync<T>(on: boolean, run: () => Promise<T>): Promise<T> {
+async function withFlagAsync<T>(
+  on: boolean,
+  run: () => Promise<T>,
+): Promise<T> {
   const previous = config.bodyShapeEditEnabled;
   Object.assign(config, { bodyShapeEditEnabled: on });
   try {
@@ -69,10 +77,22 @@ test("catalog accepts declared shape specs and rejects malformed ones", () => {
   for (const bad of [
     { ...spec(), schemaVersion: "body-shape.v0" },
     { ...spec(), controls: [] },
-    { ...spec(), controls: [{ key: "Height", min: 0, max: 1, step: 1, default: 0 }] },
-    { ...spec(), controls: [{ key: "h", min: 1, max: 1, step: 1, default: 1 }] },
-    { ...spec(), controls: [{ key: "h", min: 0, max: 1, step: 0, default: 0 }] },
-    { ...spec(), controls: [{ key: "h", min: 0, max: 1, step: 1, default: 2 }] },
+    {
+      ...spec(),
+      controls: [{ key: "Height", min: 0, max: 1, step: 1, default: 0 }],
+    },
+    {
+      ...spec(),
+      controls: [{ key: "h", min: 1, max: 1, step: 1, default: 1 }],
+    },
+    {
+      ...spec(),
+      controls: [{ key: "h", min: 0, max: 1, step: 0, default: 0 }],
+    },
+    {
+      ...spec(),
+      controls: [{ key: "h", min: 0, max: 1, step: 1, default: 2 }],
+    },
     { ...spec(), controls: [spec().controls[0], spec().controls[0]] },
   ]) {
     const c = catalog();
@@ -106,18 +126,27 @@ test("shapes are offered only behind the flag and only for declaring assets", ()
   const c = shaped();
   withFlag(false, () => {
     assert.deepEqual(shapeEditable(c), []);
-    assert.throws(() => bodyShape(c.assets[1], { height: 182 }), /SHAPE_UNSUPPORTED/);
+    assert.throws(
+      () => bodyShape(c.assets[1], { height: 182 }),
+      /SHAPE_UNSUPPORTED/,
+    );
   });
   withFlag(true, () => {
     assert.deepEqual(
       shapeEditable(c).map((e) => e.characterId),
       ["character-1"],
     );
-    assert.throws(() => bodyShape(c.assets[0], { height: 182 }), /SHAPE_UNSUPPORTED/);
+    assert.throws(
+      () => bodyShape(c.assets[0], { height: 182 }),
+      /SHAPE_UNSUPPORTED/,
+    );
     const a = bodyShape(c.assets[1], { height: 182 })!;
     const b = bodyShape(c.assets[1], { height: 182, physique: 0 })!;
     assert.equal(a.shapeSha256, b.shapeSha256);
-    assert.notEqual(a.shapeSha256, bodyShape(c.assets[1], { height: 183 })!.shapeSha256);
+    assert.notEqual(
+      a.shapeSha256,
+      bodyShape(c.assets[1], { height: 183 })!.shapeSha256,
+    );
     // Default values are the plain asset, not a forked cache key.
     assert.equal(bodyShape(c.assets[1], {}), null);
   });
@@ -132,10 +161,23 @@ test("shaped selections are never rendered as the plain asset", () => {
     assert.equal(shapeRenderable({ shape }), false);
     const policy = snapshot(defaultPreferences(), c);
     const rec = { status: "unavailable" as const, body: null, reasonCodes: [] };
-    const manual = resolveBody(0, policy, rec, c, ["pose-a"], "manual", c.assets[1], 1, shape);
+    const manual = resolveBody(
+      0,
+      policy,
+      rec,
+      c,
+      ["pose-a"],
+      "manual",
+      c.assets[1],
+      1,
+      shape,
+    );
     assert.equal(manual.shape?.controls.height, 190);
     // Shapes belong to manual choices only.
-    assert.equal(resolveBody(0, policy, rec, c, ["pose-a"], "auto", null, 1, shape).shape, null);
+    assert.equal(
+      resolveBody(0, policy, rec, c, ["pose-a"], "auto", null, 1, shape).shape,
+      null,
+    );
   });
 });
 
@@ -181,16 +223,34 @@ test("routes accept shape envelopes only where they make sense", () => {
 test("my-default shapes are validated against the catalog", () => {
   const c = shaped();
   withFlag(true, () => {
-    assert.deepEqual(shapeDefault(c, { characterId: "character-1", controls: { height: 170 } }), {
-      characterId: "character-1",
-      controls: { height: 170, physique: 0 },
-    });
+    assert.deepEqual(
+      shapeDefault(c, {
+        characterId: "character-1",
+        controls: { height: 170 },
+      }),
+      {
+        characterId: "character-1",
+        controls: { height: 170, physique: 0 },
+      },
+    );
     assert.equal(shapeDefault(c, null), null);
-    assert.throws(() => shapeDefault(c, { characterId: "character-0", controls: {} }), /SHAPE_UNSUPPORTED/);
-    assert.throws(() => shapeDefault(c, { characterId: "character-1" }), /INVALID_SHAPE/);
-    assert.throws(() => shapeDefault(c, { characterId: "character-1", controls: {}, x: 1 }), /INVALID_SHAPE/);
+    assert.throws(
+      () => shapeDefault(c, { characterId: "character-0", controls: {} }),
+      /SHAPE_UNSUPPORTED/,
+    );
+    assert.throws(
+      () => shapeDefault(c, { characterId: "character-1" }),
+      /INVALID_SHAPE/,
+    );
+    assert.throws(
+      () => shapeDefault(c, { characterId: "character-1", controls: {}, x: 1 }),
+      /INVALID_SHAPE/,
+    );
   });
-  assert.deepEqual(presentPreferences(defaultPreferences(), c).shapeEditable, []);
+  assert.deepEqual(
+    presentPreferences(defaultPreferences(), c).shapeEditable,
+    [],
+  );
   assert.equal(presentPreferences(defaultPreferences(), c).shapeDefault, null);
 });
 
@@ -220,12 +280,16 @@ test("settings get the name and live-preview runtime of each editable body", () 
 });
 
 /** In-memory stand-in for the few statements the body store issues. */
-function memoryDb(selection: BodySelection) {
-  const r = result();
+function memoryDb(selection: BodySelection, r = result()) {
   const rows = {
     selection: structuredClone(selection),
     preferences: null as unknown,
-    mutations: [] as Array<{ resource: string; id: string; hash: string; response: string }>,
+    mutations: [] as Array<{
+      resource: string;
+      id: string;
+      hash: string;
+      response: string;
+    }>,
   };
   const db: BodyDb = {
     query: (async (sql: string, params: unknown[] = []) => {
@@ -241,17 +305,27 @@ function memoryDb(selection: BodySelection) {
           ],
           rowCount: 1,
         };
-      if (sql.startsWith("SELECT id FROM installations")) return { rows: [{ id: "owner" }], rowCount: 1 };
+      if (sql.startsWith("SELECT id FROM installations"))
+        return { rows: [{ id: "owner" }], rowCount: 1 };
       if (sql.startsWith("SELECT payload_hash,response")) {
-        const hit = rows.mutations.find((m) => m.resource === params[1] && m.id === params[2]);
+        const hit = rows.mutations.find(
+          (m) => m.resource === params[1] && m.id === params[2],
+        );
         return hit
-          ? { rows: [{ payload_hash: hit.hash, response: JSON.parse(hit.response) }], rowCount: 1 }
+          ? {
+              rows: [
+                { payload_hash: hit.hash, response: JSON.parse(hit.response) },
+              ],
+              rowCount: 1,
+            }
           : empty;
       }
       if (sql.startsWith("SELECT value FROM body_selections"))
         return { rows: [{ value: rows.selection }], rowCount: 1 };
       if (sql.startsWith("SELECT value FROM body_preferences"))
-        return rows.preferences ? { rows: [{ value: rows.preferences }], rowCount: 1 } : empty;
+        return rows.preferences
+          ? { rows: [{ value: rows.preferences }], rowCount: 1 }
+          : empty;
       if (sql.startsWith("UPDATE body_selections")) {
         rows.selection = JSON.parse(params[2] as string);
         return empty;
@@ -295,17 +369,32 @@ test("manual shape writes are stored, replayed and rejected when unsupported", a
       expectedRevision: 0,
       mutationId: "mutation-shape-1",
     };
-    const saved = await writeSelection(db, "owner", "job_test", 0, change, deps);
+    const saved = await writeSelection(
+      db,
+      "owner",
+      "job_test",
+      0,
+      change,
+      deps,
+    );
     assert.equal(saved.shape?.controls.height, 186);
     assert.equal(rows.selection.shape?.shapeSha256, saved.shape?.shapeSha256);
     assert.equal(saved.selectionRevision, 1);
     // Same mutation id + same payload replays; a different payload conflicts.
     assert.equal(
-      (await writeSelection(db, "owner", "job_test", 0, change, deps)).selectionRevision,
+      (await writeSelection(db, "owner", "job_test", 0, change, deps))
+        .selectionRevision,
       1,
     );
     await assert.rejects(
-      writeSelection(db, "owner", "job_test", 0, { ...change, shape: { controls: { height: 187 } } }, deps),
+      writeSelection(
+        db,
+        "owner",
+        "job_test",
+        0,
+        { ...change, shape: { controls: { height: 187 } } },
+        deps,
+      ),
       /IDEMPOTENCY_CONFLICT/,
     );
     await assert.rejects(
@@ -314,7 +403,12 @@ test("manual shape writes are stored, replayed and rejected when unsupported", a
         "owner",
         "job_test",
         0,
-        { ...change, characterId: "character-0", expectedRevision: 1, mutationId: "mutation-shape-2" },
+        {
+          ...change,
+          characterId: "character-0",
+          expectedRevision: 1,
+          mutationId: "mutation-shape-2",
+        },
         deps,
       ),
       /SHAPE_UNSUPPORTED/,
@@ -325,7 +419,12 @@ test("manual shape writes are stored, replayed and rejected when unsupported", a
         "owner",
         "job_test",
         0,
-        { ...change, shape: { controls: { height: 999 } }, expectedRevision: 1, mutationId: "mutation-shape-3" },
+        {
+          ...change,
+          shape: { controls: { height: 999 } },
+          expectedRevision: 1,
+          mutationId: "mutation-shape-3",
+        },
         deps,
       ),
       /INVALID_SHAPE/,
@@ -336,7 +435,12 @@ test("manual shape writes are stored, replayed and rejected when unsupported", a
       "owner",
       "job_test",
       0,
-      { intent: "manual", characterId: "character-1", expectedRevision: 1, mutationId: "mutation-shape-4" },
+      {
+        intent: "manual",
+        characterId: "character-1",
+        expectedRevision: 1,
+        mutationId: "mutation-shape-4",
+      },
       deps,
     );
     assert.equal(plain.shape, null);
@@ -376,7 +480,9 @@ test("options advertise shape specs; preferences keep my-default shape across wr
     const { db } = memoryDb(initial);
     const options = await bodyOptions(db, "owner", "job_test", 0, deps);
     assert.deepEqual(
-      options.characters.map((o) => ("shape" in o ? o.characterId : null)).filter(Boolean),
+      options.characters
+        .map((o) => ("shape" in o ? o.characterId : null))
+        .filter(Boolean),
       ["character-1"],
     );
     const first = await writePreferences(
@@ -396,14 +502,25 @@ test("options advertise shape specs; preferences keep my-default shape across wr
     const second = await writePreferences(
       db,
       "owner",
-      { mode: "auto", defaultCharacterId: "character-2", expectedRevision: 1, mutationId: "pref-shape-2" },
+      {
+        mode: "auto",
+        defaultCharacterId: "character-2",
+        expectedRevision: 1,
+        mutationId: "pref-shape-2",
+      },
       deps,
     );
     assert.equal(second.shapeDefault?.controls.height, 170);
     const cleared = await writePreferences(
       db,
       "owner",
-      { mode: "auto", defaultCharacterId: null, shapeDefault: null, expectedRevision: 2, mutationId: "pref-shape-3" },
+      {
+        mode: "auto",
+        defaultCharacterId: null,
+        shapeDefault: null,
+        expectedRevision: 2,
+        mutationId: "pref-shape-3",
+      },
       deps,
     );
     assert.equal(cleared.shapeDefault, null);
@@ -411,7 +528,10 @@ test("options advertise shape specs; preferences keep my-default shape across wr
   await withFlagAsync(false, async () => {
     const { db } = memoryDb(initial);
     const options = await bodyOptions(db, "owner", "job_test", 0, deps);
-    assert.equal(options.characters.some((o) => "shape" in o), false);
+    assert.equal(
+      options.characters.some((o) => "shape" in o),
+      false,
+    );
   });
 });
 
@@ -439,11 +559,16 @@ test("options carry the live shape runtime only with shape editing on, without l
     c,
     ["pose-a"],
   );
-  const runtimeDeps = { catalog: withRuntime, check: async () => "ok" as const };
+  const runtimeDeps = {
+    catalog: withRuntime,
+    check: async () => "ok" as const,
+  };
   await withFlagAsync(true, async () => {
     const { db } = memoryDb(initial);
     const options = await bodyOptions(db, "owner", "job_test", 0, runtimeDeps);
-    const shaped1 = options.characters.find((o) => o.characterId === "character-1") as {
+    const shaped1 = options.characters.find(
+      (o) => o.characterId === "character-1",
+    ) as {
       shapeRuntime?: Record<string, unknown>;
     };
     assert.deepEqual(shaped1.shapeRuntime, {
@@ -458,7 +583,10 @@ test("options carry the live shape runtime only with shape editing on, without l
   await withFlagAsync(false, async () => {
     const { db } = memoryDb(initial);
     const options = await bodyOptions(db, "owner", "job_test", 0, runtimeDeps);
-    assert.equal(options.characters.some((o) => "shapeRuntime" in o), false);
+    assert.equal(
+      options.characters.some((o) => "shapeRuntime" in o),
+      false,
+    );
   });
 });
 
@@ -466,7 +594,11 @@ test("shape specs may name controls and set how many are basic", () => {
   const c = shaped();
   c.assets[1] = {
     ...c.assets[1],
-    shape: { ...spec(), basic: 2, controls: spec().controls.map((x) => ({ ...x, label: "키" })) },
+    shape: {
+      ...spec(),
+      basic: 2,
+      controls: spec().controls.map((x) => ({ ...x, label: "키" })),
+    },
   };
   assert.equal(parseCatalog(c).assets[1].shape?.basic, 2);
   for (const bad of [
@@ -481,12 +613,19 @@ test("shape specs may name controls and set how many are basic", () => {
   const long = shaped();
   long.assets[1] = {
     ...long.assets[1],
-    shape: { ...spec(), controls: spec().controls.map((x) => ({ ...x, label: "가".repeat(25) })) },
+    shape: {
+      ...spec(),
+      controls: spec().controls.map((x) => ({ ...x, label: "가".repeat(25) })),
+    },
   };
   assert.throws(() => parseCatalog(long), /invalid shape spec/);
 });
 
-const source = { rules: "standin-body-0.7.1", blendSha256: "1".repeat(64), controllerSha256: "2".repeat(64) };
+const source = {
+  rules: "standin-body-0.7.1",
+  blendSha256: "1".repeat(64),
+  controllerSha256: "2".repeat(64),
+};
 const runtimeV2 = {
   path: "/srv/body/runtime-male-0-7-1.ssr",
   sha256: "a".repeat(64),
@@ -505,7 +644,10 @@ test("with baking on, a shaped selection renders only from a declared source", (
       const shape = bodyShape(c.assets[1], { height: 190 });
       assert.equal(shapeRenderable({ shape }), false);
       assert.equal(shapeRenderable({ shape, shapeSource: null }), false);
-      assert.equal(shapeRenderable({ shape, shapeSource: { ...source, rules: "Bad" } }), false);
+      assert.equal(
+        shapeRenderable({ shape, shapeSource: { ...source, rules: "Bad" } }),
+        false,
+      );
       assert.equal(shapeRenderable({ shape, shapeSource: source }), true);
     });
   } finally {
@@ -515,31 +657,69 @@ test("with baking on, a shaped selection renders only from a declared source", (
 
 test("catalog binds shape source, v2 runtime and grid-aligned defaults", () => {
   const ok = shaped();
-  ok.assets[1] = { ...ok.assets[1], shapeSource: source, shapeRuntime: runtimeV2 };
+  ok.assets[1] = {
+    ...ok.assets[1],
+    shapeSource: source,
+    shapeRuntime: runtimeV2,
+  };
   assert.deepEqual(parseCatalog(ok).assets[1].shapeSource, source);
   const cases: [Partial<BodyCatalog["assets"][number]>, RegExp][] = [
     [{ shape: undefined, shapeSource: source }, /invalid shape source/],
     [{ shapeSource: { ...source, blendSha256: "x" } }, /invalid shape source/],
     [{ shapeSource: { ...source, extra: 1 } as never }, /invalid shape source/],
     [{ shapeRuntime: runtimeV2 }, /does not match shape source/],
-    [{ shapeSource: { ...source, rules: "standin-body-0.7.0" }, shapeRuntime: runtimeV2 }, /does not match shape source/],
+    [
+      {
+        shapeSource: { ...source, rules: "standin-body-0.7.0" },
+        shapeRuntime: runtimeV2,
+      },
+      /does not match shape source/,
+    ],
     // .927 is not reachable from .90 in steps of .01: every request would fail.
-    [{ shape: { schemaVersion: "body-shape.v1", controls: [{ key: "head_scale", min: 0.9, max: 1, step: 0.01, default: 0.927 }] } }, /invalid shape spec/],
+    [
+      {
+        shape: {
+          schemaVersion: "body-shape.v1",
+          controls: [
+            { key: "head_scale", min: 0.9, max: 1, step: 0.01, default: 0.927 },
+          ],
+        },
+      },
+      /invalid shape spec/,
+    ],
   ];
   for (const [change, error] of cases) {
     const c = shaped();
-    c.assets[1] = { ...c.assets[1], ...change } as BodyCatalog["assets"][number];
+    c.assets[1] = {
+      ...c.assets[1],
+      ...change,
+    } as BodyCatalog["assets"][number];
     assert.throws(() => parseCatalog(c), error);
   }
   const aligned = shaped();
-  aligned.assets[1] = { ...aligned.assets[1], shape: { schemaVersion: "body-shape.v1", controls: [{ key: "head_scale", min: 0.907, max: 1, step: 0.01, default: 0.927 }] } };
-  assert.equal(parseCatalog(aligned).assets[1].shape?.controls[0]?.default, 0.927);
+  aligned.assets[1] = {
+    ...aligned.assets[1],
+    shape: {
+      schemaVersion: "body-shape.v1",
+      controls: [
+        { key: "head_scale", min: 0.907, max: 1, step: 0.01, default: 0.927 },
+      ],
+    },
+  };
+  assert.equal(
+    parseCatalog(aligned).assets[1].shape?.controls[0]?.default,
+    0.927,
+  );
 });
 
 test("runtime metadata names the source the client must find in the runtime header", async () => {
   const { shapeRuntimeMetadata } = await import("./shapeRuntime.js");
   const c = shaped();
-  const asset = { ...c.assets[1], shapeSource: source, shapeRuntime: runtimeV2 };
+  const asset = {
+    ...c.assets[1],
+    shapeSource: source,
+    shapeRuntime: runtimeV2,
+  };
   assert.deepEqual(shapeRuntimeMetadata(asset)?.source, source);
   assert.equal(shapeRuntimeMetadata(asset)?.format, "standin-shape-runtime.v2");
   assert.equal("path" in shapeRuntimeMetadata(asset)!, false);
@@ -553,11 +733,26 @@ test("a shaped selection reads back with the source its asset is baked from (nev
     return c;
   };
   const c = sourced();
-  const initial = resolveBody(0, snapshot(defaultPreferences(), c), { status: "unavailable", body: null, reasonCodes: [] }, c, ["pose-a"]);
+  const initial = resolveBody(
+    0,
+    snapshot(defaultPreferences(), c),
+    { status: "unavailable", body: null, reasonCodes: [] },
+    c,
+    ["pose-a"],
+  );
   await withFlagAsync(true, async () => {
     const { db, rows } = memoryDb(initial);
-    const change = { intent: "manual" as const, characterId: "character-1", shape: { controls: { height: 186 } }, expectedRevision: 0, mutationId: "mutation-source-1" };
-    await writeSelection(db, "owner", "job_test", 0, change, { catalog: sourced, check: async () => "ok" as const });
+    const change = {
+      intent: "manual" as const,
+      characterId: "character-1",
+      shape: { controls: { height: 186 } },
+      expectedRevision: 0,
+      mutationId: "mutation-source-1",
+    };
+    await writeSelection(db, "owner", "job_test", 0, change, {
+      catalog: sourced,
+      check: async () => "ok" as const,
+    });
     assert.equal("shapeSource" in rows.selection, false);
     const read = await readSelection(db, "owner", "job_test", 0, sourced());
     assert.deepEqual(read.shapeSource, source);
@@ -579,11 +774,20 @@ test("body cards: create, rename, reshape and delete, each a new revision", asyn
   );
   await withFlagAsync(true, async () => {
     const { db, rows } = memoryDb(initial);
-    const m = (n: number) => ({ expectedRevision: n, mutationId: `card-mutation-${n}` });
+    const m = (n: number) => ({
+      expectedRevision: n,
+      mutationId: `card-mutation-${n}`,
+    });
     const created = await writeCards(
       db,
       "owner",
-      { ...m(0), op: "create", name: "  주인공 A ", characterId: "character-1", controls: { height: 186 } },
+      {
+        ...m(0),
+        op: "create",
+        name: "  주인공 A ",
+        characterId: "character-1",
+        controls: { height: 186 },
+      },
       deps,
     );
     assert.equal(created.revision, 1);
@@ -595,35 +799,102 @@ test("body cards: create, rename, reshape and delete, each a new revision", asyn
     const again = await writeCards(
       db,
       "owner",
-      { ...m(0), op: "create", name: "  주인공 A ", characterId: "character-1", controls: { height: 186 } },
+      {
+        ...m(0),
+        op: "create",
+        name: "  주인공 A ",
+        characterId: "character-1",
+        controls: { height: 186 },
+      },
       deps,
     );
     assert.equal(again.cards!.length, 1);
 
-    const renamed = await writeCards(db, "owner", { ...m(1), op: "update", cardId: card!.cardId, name: "주인공 B" }, deps);
+    const renamed = await writeCards(
+      db,
+      "owner",
+      { ...m(1), op: "update", cardId: card!.cardId, name: "주인공 B" },
+      deps,
+    );
     assert.equal(renamed.cards![0]!.name, "주인공 B");
     assert.deepEqual(renamed.cards![0]!.controls, card!.controls);
     const reshaped = await writeCards(
       db,
       "owner",
-      { ...m(2), op: "update", cardId: card!.cardId, controls: { physique: 0.5 } },
+      {
+        ...m(2),
+        op: "update",
+        cardId: card!.cardId,
+        controls: { physique: 0.5 },
+      },
       deps,
     );
-    assert.deepEqual(reshaped.cards![0]!.controls, { height: 178, physique: 0.5 });
+    assert.deepEqual(reshaped.cards![0]!.controls, {
+      height: 178,
+      physique: 0.5,
+    });
     assert.equal(reshaped.cards![0]!.name, "주인공 B");
 
     for (const [change, code] of [
-      [{ ...m(3), op: "update", cardId: card!.cardId, name: " " }, /INVALID_CARD_NAME/],
-      [{ ...m(3), op: "update", cardId: card!.cardId, name: "가".repeat(CARD_NAME_MAX + 1) }, /INVALID_CARD_NAME/],
-      [{ ...m(3), op: "update", cardId: "card_missing", name: "x" }, /CARD_NOT_FOUND/],
+      [
+        { ...m(3), op: "update", cardId: card!.cardId, name: " " },
+        /INVALID_CARD_NAME/,
+      ],
+      [
+        {
+          ...m(3),
+          op: "update",
+          cardId: card!.cardId,
+          name: "가".repeat(CARD_NAME_MAX + 1),
+        },
+        /INVALID_CARD_NAME/,
+      ],
+      [
+        { ...m(3), op: "update", cardId: "card_missing", name: "x" },
+        /CARD_NOT_FOUND/,
+      ],
       // Presets (no shape) are not cards.
-      [{ ...m(3), op: "create", name: "x", characterId: "character-0", controls: {} }, /SHAPE_UNSUPPORTED/],
-      [{ ...m(3), op: "create", name: "x", characterId: "character-1", controls: { height: 999 } }, /INVALID_SHAPE/],
-      [{ expectedRevision: 2, mutationId: "card-stale-1", op: "delete", cardId: card!.cardId }, /BODY_PREFERENCE_CONFLICT/],
+      [
+        {
+          ...m(3),
+          op: "create",
+          name: "x",
+          characterId: "character-0",
+          controls: {},
+        },
+        /SHAPE_UNSUPPORTED/,
+      ],
+      [
+        {
+          ...m(3),
+          op: "create",
+          name: "x",
+          characterId: "character-1",
+          controls: { height: 999 },
+        },
+        /INVALID_SHAPE/,
+      ],
+      [
+        {
+          expectedRevision: 2,
+          mutationId: "card-stale-1",
+          op: "delete",
+          cardId: card!.cardId,
+        },
+        /BODY_PREFERENCE_CONFLICT/,
+      ],
     ] as const)
-      await assert.rejects(writeCards(db, "owner", change as never, deps), code);
+      await assert.rejects(
+        writeCards(db, "owner", change as never, deps),
+        code,
+      );
 
-    const deleted = await writeCards(db, "owner", { ...m(3), op: "delete", cardId: card!.cardId }, deps);
+    const deleted = await writeCards(
+      db,
+      "owner",
+      { ...m(3), op: "delete", cardId: card!.cardId },
+      deps,
+    );
     assert.deepEqual(deleted.cards, []);
     assert.equal((rows.preferences as { revision: number }).revision, 4);
   });
@@ -634,27 +905,50 @@ test("an older 내 기본값 shows up as a card and deleting it clears the old v
   const legacy = {
     ...defaultPreferences(),
     mode: "auto" as const,
-    shapeDefault: { characterId: "character-1", controls: { height: 170, physique: 0 } },
+    shapeDefault: {
+      characterId: "character-1",
+      controls: { height: 170, physique: 0 },
+    },
     revision: 3,
   };
   assert.deepEqual(cardsOf(defaultPreferences()), []);
   assert.equal(cardsOf(legacy)[0]!.cardId, MIGRATED_CARD_ID);
   assert.equal(cardsOf(legacy)[0]!.controls.height, 170);
-  const initial = resolveBody(0, snapshot(legacy, c), { status: "unavailable", body: null, reasonCodes: [] }, c, ["pose-a"]);
+  const initial = resolveBody(
+    0,
+    snapshot(legacy, c),
+    { status: "unavailable", body: null, reasonCodes: [] },
+    c,
+    ["pose-a"],
+  );
   await withFlagAsync(true, async () => {
     const { db, rows } = memoryDb(initial);
     rows.preferences = legacy;
     const renamed = await writeCards(
       db,
       "owner",
-      { expectedRevision: 3, mutationId: "legacy-card-1", op: "update", cardId: MIGRATED_CARD_ID, name: "주인공" },
+      {
+        expectedRevision: 3,
+        mutationId: "legacy-card-1",
+        op: "update",
+        cardId: MIGRATED_CARD_ID,
+        name: "주인공",
+      },
       deps,
     );
-    assert.deepEqual(renamed.cards!.map((x) => x.name), ["주인공"]);
+    assert.deepEqual(
+      renamed.cards!.map((x) => x.name),
+      ["주인공"],
+    );
     const gone = await writeCards(
       db,
       "owner",
-      { expectedRevision: 4, mutationId: "legacy-card-2", op: "delete", cardId: MIGRATED_CARD_ID },
+      {
+        expectedRevision: 4,
+        mutationId: "legacy-card-2",
+        op: "delete",
+        cardId: MIGRATED_CARD_ID,
+      },
       deps,
     );
     assert.deepEqual(gone.cards, []);
@@ -665,8 +959,14 @@ test("an older 내 기본값 shows up as a card and deleting it clears the old v
 
 test("a hand-picked body becomes the next job's starting body without a revision bump", async () => {
   const c = shaped();
-  const rec = { status: "available" as const, body: snapshot(defaultPreferences(), c).catalogDefault, reasonCodes: [] };
-  const initial = resolveBody(0, snapshot(defaultPreferences(), c), rec, c, ["pose-a"]);
+  const rec = {
+    status: "available" as const,
+    body: snapshot(defaultPreferences(), c).catalogDefault,
+    reasonCodes: [],
+  };
+  const initial = resolveBody(0, snapshot(defaultPreferences(), c), rec, c, [
+    "pose-a",
+  ]);
   await withFlagAsync(true, async () => {
     const { db, rows } = memoryDb(initial);
     rows.preferences = { ...defaultPreferences(), revision: 7 };
@@ -701,37 +1001,77 @@ test("a hand-picked body becomes the next job's starting body without a revision
     assert.equal(next.shape?.controls.height, 190);
     assert.equal(next.intent, "inherit");
     // Auto mode keeps the recommendation.
-    assert.equal(resolveBody(1, snapshot({ ...prefs, mode: "auto" }, c), rec, c, ["pose-a"]).resolvedSource, "auto_recommendation");
+    assert.equal(
+      resolveBody(1, snapshot({ ...prefs, mode: "auto" }, c), rec, c, [
+        "pose-a",
+      ]).resolvedSource,
+      "auto_recommendation",
+    );
     // A body these poses cannot use is skipped (here nothing else fits either).
-    assert.equal(resolveBody(1, snapshot(prefs, c), rec, c, ["pose-z"]).resolvedSource, null);
+    assert.equal(
+      resolveBody(1, snapshot(prefs, c), rec, c, ["pose-z"]).resolvedSource,
+      null,
+    );
     // Controls the catalog no longer accepts are dropped, never rendered as the plain asset.
-    const stale = { ...prefs, lastUsed: { ...prefs.lastUsed!, controls: { weight: 1 } } };
+    const stale = {
+      ...prefs,
+      lastUsed: { ...prefs.lastUsed!, controls: { weight: 1 } },
+    };
     assert.equal(snapshot(stale, c).lastUsed, null);
   });
   // Shape editing off: a shaped last-used body is not offered.
-  const prefs = { ...defaultPreferences(), lastUsed: { characterId: "character-1", controls: { height: 190 }, usedAt: "x" } };
+  const prefs = {
+    ...defaultPreferences(),
+    lastUsed: {
+      characterId: "character-1",
+      controls: { height: 190 },
+      usedAt: "x",
+    },
+  };
   assert.equal(snapshot(prefs, c).lastUsed, null);
-  const plain = { ...prefs, lastUsed: { ...prefs.lastUsed, characterId: "character-2", controls: null } };
-  assert.equal(resolveBody(0, snapshot(plain, c), rec, c, ["pose-a"]).resolvedSource, "last_used");
+  const plain = {
+    ...prefs,
+    lastUsed: { ...prefs.lastUsed, characterId: "character-2", controls: null },
+  };
+  assert.equal(
+    resolveBody(0, snapshot(plain, c), rec, c, ["pose-a"]).resolvedSource,
+    "last_used",
+  );
 });
 
 test("card routes accept only their envelopes", () => {
   const base = { expectedRevision: 0, mutationId: "mutation-1" };
   assert.equal(
-    parseCardChange("create", { ...base, name: "A", characterId: "character-1", controls: {} }).op,
+    parseCardChange("create", {
+      ...base,
+      name: "A",
+      characterId: "character-1",
+      controls: {},
+    }).op,
     "create",
   );
-  assert.deepEqual(parseCardChange("update", { ...base, name: "B" }, "card_1"), {
-    ...base,
-    op: "update",
-    cardId: "card_1",
-    name: "B",
-  });
+  assert.deepEqual(
+    parseCardChange("update", { ...base, name: "B" }, "card_1"),
+    {
+      ...base,
+      op: "update",
+      cardId: "card_1",
+      name: "B",
+    },
+  );
   assert.equal(parseCardChange("delete", base, "my-default").op, "delete");
   for (const [op, raw, id] of [
     ["create", { ...base, name: "A", characterId: "character-1" }, undefined],
-    ["create", { ...base, name: "A", characterId: "character-1", controls: [] }, undefined],
-    ["create", { ...base, name: 1, characterId: "character-1", controls: {} }, undefined],
+    [
+      "create",
+      { ...base, name: "A", characterId: "character-1", controls: [] },
+      undefined,
+    ],
+    [
+      "create",
+      { ...base, name: 1, characterId: "character-1", controls: {} },
+      undefined,
+    ],
     ["update", { ...base }, "card_1"],
     ["update", { ...base, name: "B", extra: 1 }, "card_1"],
     ["update", { ...base, name: "B" }, "../x"],
@@ -739,5 +1079,100 @@ test("card routes accept only their envelopes", () => {
     ["delete", { ...base }, undefined],
   ] as const)
     assert.throws(() => parseCardChange(op, raw, id), BodyError);
-  assert.equal(parsePreferenceChange({ ...base, mode: "last_used", defaultCharacterId: null }).mode, "last_used");
+  assert.equal(
+    parsePreferenceChange({
+      ...base,
+      mode: "last_used",
+      defaultCharacterId: null,
+    }).mode,
+    "last_used",
+  );
+});
+
+test("presentation-only jobs resolve the original body snapshot and persist numeric selection without opening release coverage", async () => {
+  const c = shaped(),
+    policy = snapshot(defaultPreferences(), c);
+  const initial = resolveBody(
+    0,
+    policy,
+    { status: "disabled", body: null, reasonCodes: [] },
+    c,
+    [],
+  );
+  const analysis = result();
+  const person = analysis.candidatesByPerson[0];
+  person.candidates = [];
+  person.posePresentation = {
+    version: "dynamic-pose-presentation-v1",
+    output_scope: "half",
+    library_candidates: [{ candidate_id: "preview_" + "a".repeat(64) }],
+    review_candidates: [],
+    generated_candidates: [],
+  } as unknown as NonNullable<typeof person.posePresentation>;
+  await withFlagAsync(true, async () => {
+    const { db, rows } = memoryDb(initial, analysis);
+    const first = await readSelection(db, "owner", "job_test", 0, c);
+    assert.equal(first.previewOnly, true);
+    assert.equal(first.resolvedBody?.characterId, "character-0");
+    assert.equal(first.selectionRevision, 0);
+    assert.equal(rows.selection.resolutionStatus, "not_applicable"); // GET does not mutate.
+    // Text-search presentations share the same selection, without the fixed-male default override.
+    person.posePresentation!.version = "semantic-pose-presentation-v1";
+    assert.equal((await readSelection(db, "owner", "job_test", 0, c)).previewOnly, true);
+    const options = await bodyOptions(db, "owner", "job_test", 0, deps);
+    assert.ok(options.characters.every((c) => c.selectable));
+    const saved = await writeSelection(
+      db,
+      "owner",
+      "job_test",
+      0,
+      {
+        intent: "manual",
+        characterId: "character-1",
+        shape: { controls: { height: 186 } },
+        expectedRevision: 0,
+        mutationId: "presentation-shape",
+      },
+      deps,
+    );
+    assert.equal(saved.previewOnly, true);
+    assert.equal(saved.shape?.controls.height, 186);
+    assert.equal(saved.selectionRevision, 1);
+    assert.equal(
+      (await readSelection(db, "owner", "job_test", 0, c)).shape?.shapeSha256,
+      saved.shape?.shapeSha256,
+    );
+    assert.deepEqual(person.candidates, []);
+    const legacy = resolveBody(
+      0,
+      policy,
+      initial.recommendation,
+      c,
+      ["unvalidated-pose"],
+      "manual",
+      c.assets[1],
+    );
+    assert.equal(legacy.resolutionStatus, "unavailable");
+    assert.equal(legacy.previewOnly, undefined);
+    person.posePresentation = {
+      ...person.posePresentation!,
+      library_candidates: [],
+    };
+    await assert.rejects(
+      writeSelection(
+        db,
+        "owner",
+        "job_test",
+        0,
+        {
+          intent: "manual",
+          characterId: "character-1",
+          expectedRevision: 1,
+          mutationId: "empty-preview",
+        },
+        deps,
+      ),
+      /BODY_NOT_APPLICABLE/,
+    );
+  });
 });

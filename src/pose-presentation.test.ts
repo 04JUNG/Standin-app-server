@@ -256,3 +256,164 @@ test("owned preview endpoint binds person/candidate/hash and never library-looks
     "PREVIEW_HASH_MISMATCH",
   );
 });
+
+test("selected-body preview binds private library/generated sources, shape, scope and stale choices without release", async (t) => {
+  const { config } = await import("./config.js");
+  const before = config.bodyShapeBakeEnabled;
+  Object.assign(config, { bodyShapeBakeEnabled: true });
+  t.after(() => Object.assign(config, { bodyShapeBakeEnabled: before }));
+  const { catalog } = await import("./body-selection/fixtures.js");
+  const { resolveBody, snapshot, defaultPreferences } = await import(
+    "./body-selection/model.js"
+  );
+  const { personBodyContext } = await import("./body-selection/store.js");
+  const mapped = mapPosePresentation(raw(), 0, "body-job")!;
+  const result = mapCutResult("body-job", cut(raw()));
+  const context = personBodyContext(result.candidatesByPerson[0]);
+  assert.equal(context.previewOnly, true);
+  const cat = catalog();
+  let selection = resolveBody(
+    0,
+    snapshot(defaultPreferences(), cat),
+    { status: "disabled", body: null, reasonCodes: [] },
+    cat,
+    context.poses,
+    "inherit",
+    null,
+    0,
+    null,
+    true,
+  );
+  assert.equal(selection.resolutionStatus, "ready");
+  // The same unvalidated pose remains unavailable to the legacy release selection resolver.
+  assert.equal(
+    resolveBody(
+      0,
+      snapshot(defaultPreferences(), cat),
+      selection.recommendation,
+      cat,
+      ["unvalidated-pose"],
+    ).resolutionStatus,
+    "needs_selection",
+  );
+  let libraryCalls = 0,
+    renders = 0,
+    changeDuringRender = false;
+  const runtime = {
+    previewRevision: "c".repeat(64),
+    modelRevision: "d".repeat(64),
+  };
+  const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1]);
+  const app = new Hono<AppEnv>();
+  app.use("*", async (c, next) => {
+    c.set("installationId", "owner");
+    c.set("requestId", "req");
+    await next();
+  });
+  app.route(
+    "/",
+    createPresentationRoutes({
+      enabled: () => true,
+      getOwnedJob: async (job, owner) =>
+        job === "body-job" && owner === "owner"
+          ? ({ status: "completed", result } as Job)
+          : undefined,
+      loadAssets: async () => mapped.assets,
+      selection: async () => structuredClone(selection),
+      checkCharacter: async () => "ok",
+      getPreviewRuntime: async () =>
+        runtime as Awaited<
+          ReturnType<
+            typeof import("./converter/previewRuntime.js").getPreviewRuntime
+          >
+        >,
+      getPoseBvh: async () => {
+        libraryCalls++;
+        return new Response(bvh);
+      },
+      convertFramed: async (input) => {
+        renders++;
+        assert.equal(Buffer.from(input.bvhBytes).toString(), bvh);
+        assert.equal(input.characterId, selection.resolvedBody!.characterId);
+        assert.deepEqual(input.shape, selection.shape);
+        assert.deepEqual(input.cameraRotation, camera.rotation);
+        assert.equal(input.scope, "full");
+        if (changeDuringRender)
+          selection = {
+            ...selection,
+            selectionRevision: selection.selectionRevision + 1,
+          };
+        return {
+          fbx: new Uint8Array(),
+          preview: png,
+          conversionId: "test",
+          artifactSha256: "e".repeat(64),
+          sourceBvhSha256: hash,
+          characterSha256: input.expectedCharacterSha256,
+          previewRevision: runtime.previewRevision,
+        };
+      },
+    }),
+  );
+  const url = (
+    cid = gid,
+    revision = selection.selectionRevision,
+    job = "body-job",
+  ) => `/${job}/people/0/pose-previews/${cid}/${hash}/body/${revision}`;
+  let response = await app.request(url());
+  assert.equal(response.status, 200);
+  assert.equal(libraryCalls, 0);
+  assert.equal(response.headers.get("X-Standin-Preview-Only"), "true");
+  assert.equal(
+    response.headers.get("X-Standin-Preview-Projection"),
+    "orthographic",
+  );
+  assert.equal(
+    response.headers.get("X-Standin-Character-SHA256"),
+    selection.resolvedBody!.assetSha256,
+  );
+  assert.equal((await app.request(url(id))).status, 200);
+  assert.equal(libraryCalls, 2); // Before and after rendering/cache lookup.
+  assert.equal((await app.request(url(gid, 0, "foreign"))).status, 404);
+  assert.equal((await app.request(url(gid, 99))).status, 409);
+  assert.equal(
+    (await app.request(url() + "?characterId=untrusted")).status,
+    409,
+  );
+  selection = {
+    ...selection,
+    shape: {
+      schemaVersion: "body-shape.v1",
+      controls: { height: 0.5 },
+      shapeSha256: "f".repeat(64),
+    },
+    shapeSource: {
+      rules: "test",
+      blendSha256: "1".repeat(64),
+      controllerSha256: "2".repeat(64),
+    },
+    selectionRevision: 1,
+  };
+  response = await app.request(url());
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("X-Standin-Shape-SHA256"), "f".repeat(64));
+  selection = { ...selection, selectionRevision: 2 };
+  changeDuringRender = true;
+  response = await app.request(url());
+  assert.equal(response.status, 409);
+  assert.equal(
+    ((await response.json()) as { error: { code: string } }).error.code,
+    "BODY_PREVIEW_STALE",
+  );
+  assert.equal(renders, 4);
+  assert.equal(
+    result.candidatesByPerson[0].posePresentation!.export_allowed,
+    false,
+  );
+  assert.equal(
+    result.candidatesByPerson[0].posePresentation!.generated_candidates[0]
+      .actual_mesh_validated,
+    false,
+  );
+  assert.deepEqual(result.candidatesByPerson[0].candidates, []);
+});

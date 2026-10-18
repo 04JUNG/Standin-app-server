@@ -97,7 +97,9 @@ export interface BodyRecommendation {
   catalogSha256?: string;
   inputSha256?: string;
   selectionSource?:
-    "auto_best_effort" | "auto_default" | "auto_presentation_default";
+    | "auto_best_effort"
+    | "auto_default"
+    | "auto_presentation_default";
 }
 export type BodyIntent = "inherit" | "manual" | "auto";
 export interface BodySelection {
@@ -123,8 +125,13 @@ export interface BodySelection {
     | "catalog_default_fallback"
     | null;
   resolutionStatus:
-    "ready" | "needs_selection" | "unavailable" | "not_applicable";
+    | "ready"
+    | "needs_selection"
+    | "unavailable"
+    | "not_applicable";
   selectionRevision: number;
+  /** Lookup-only mesh preview; never authorizes release/export. */
+  previewOnly?: true;
   renderingExecuted: false;
 }
 export const defaultPreferences = (): BodyPreferences => ({
@@ -148,13 +155,14 @@ export function eligible(
   ref: BodyRef | null,
   catalog: BodyCatalog,
   poses: string[],
+  previewOnly = false,
 ): ref is BodyRef {
   return (
     !!ref &&
     catalog.assets.some(
       (a) =>
         sameBody(a, ref) &&
-        poses.every((id) => a.supportedPoseIds.includes(id)),
+        (previewOnly || poses.every((id) => a.supportedPoseIds.includes(id))),
     )
   );
 }
@@ -203,6 +211,7 @@ export function resolveBody(
   manual: BodyRef | null = null,
   revision = 0,
   shape: BodyShape | null = null,
+  previewOnly = false,
 ): BodySelection {
   const state: BodySelection = {
     schemaVersion: "body-selection.v1",
@@ -216,6 +225,7 @@ export function resolveBody(
     resolvedSource: null,
     resolutionStatus: "needs_selection",
     selectionRevision: revision,
+    ...(previewOnly ? { previewOnly: true as const } : {}),
     renderingExecuted: false,
   };
   if (!poses.length) return { ...state, resolutionStatus: "not_applicable" };
@@ -226,7 +236,9 @@ export function resolveBody(
     ...state,
     resolvedBody: ref,
     resolvedSource: source,
-    resolutionStatus: eligible(ref, catalog, poses) ? "ready" : "unavailable",
+    resolutionStatus: eligible(ref, catalog, poses, previewOnly)
+      ? "ready"
+      : "unavailable",
   });
   if (intent === "manual") return use(manual, "manual");
   if (intent === "inherit" && policy.preferences.mode === "fixed_default")
@@ -237,19 +249,19 @@ export function resolveBody(
     intent === "inherit" &&
     policy.preferences.mode === "last_used" &&
     last &&
-    eligible(last.body, catalog, poses)
+    eligible(last.body, catalog, poses, previewOnly)
   )
     return { ...use(last.body, "last_used"), shape: last.shape };
   if (
     recommendation.status === "available" &&
-    eligible(recommendation.body, catalog, poses)
+    eligible(recommendation.body, catalog, poses, previewOnly)
   )
     return use(recommendation.body, "auto_recommendation");
   // An explicit auto action never silently becomes a default.
   if (intent === "auto") return { ...state, resolutionStatus: "unavailable" };
-  if (eligible(policy.userDefault, catalog, poses))
+  if (eligible(policy.userDefault, catalog, poses, previewOnly))
     return use(policy.userDefault, "user_default_fallback");
-  if (eligible(policy.catalogDefault, catalog, poses))
+  if (eligible(policy.catalogDefault, catalog, poses, previewOnly))
     return use(policy.catalogDefault, "catalog_default_fallback");
   return state;
 }
