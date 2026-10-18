@@ -38,6 +38,7 @@ export interface RenderCamera {
 export interface MirrorComparison {
   family_id: string;
   original_pose_id: string;
+  original_bvh_sha256: string;
   original_candidate_id: string;
   is_mirror: boolean;
   observed_side: "left" | "right";
@@ -413,7 +414,7 @@ export function mapPosePresentation(
         if (c.kind === "mirror_reference") {
           const m = object(c.mirror_comparison);
           const original = presentation.library_candidates.find((p) => p.candidate_id === m.original_candidate_id && p.pose_id === m.original_pose_id);
-          if (!original || original.pose_id === pid || original.asset.bvh_sha256 === hash ||
+          if (!original || m.original_bvh_sha256 !== original.asset.bvh_sha256 || original.pose_id === pid || original.asset.bvh_sha256 === hash ||
               typeof m.family_id !== "string" || !m.family_id || m.family_id.length > 512 ||
               typeof m.is_mirror !== "boolean" || !["left", "right"].includes(String(m.observed_side)) ||
               !["left", "right"].includes(String(m.reference_side)) || m.observed_side === m.reference_side ||
@@ -421,7 +422,7 @@ export function mapPosePresentation(
               c.rank_score !== null || c.score_kind !== null)
             throw Error("invalid_mirror_reference");
           comparison = {
-            family_id: m.family_id, original_pose_id: original.pose_id!, original_candidate_id: original.candidate_id,
+            family_id: m.family_id, original_pose_id: original.pose_id!, original_bvh_sha256: original.asset.bvh_sha256, original_candidate_id: original.candidate_id,
             is_mirror: m.is_mirror, observed_side: m.observed_side as "left" | "right", reference_side: m.reference_side as "left" | "right",
             reason: "opposite_hand_reference", matches_observed_side: false,
           };

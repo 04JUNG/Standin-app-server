@@ -448,7 +448,7 @@ function mirrorFixture() {
     kind: "mirror_reference", rank_score: null, score_kind: null,
     asset: { ...candidate().asset, bvh_url: "/pose/test%20mirror/bvh", bvh_sha256: "d".repeat(64) },
     mirror_comparison: {
-      family_id: "family", original_pose_id: original.pose_id, original_candidate_id: original.candidate_id,
+      family_id: "family", original_pose_id: original.pose_id, original_bvh_sha256: original.asset.bvh_sha256, original_candidate_id: original.candidate_id,
       is_mirror: true, observed_side: "left", reference_side: "right", reason: "opposite_hand_reference", matches_observed_side: false,
     },
   };
