@@ -18,7 +18,6 @@ import {
 import {
   bodyRef,
   defaultPreferences,
-  eligible,
   bodyEligible,
   resolveBody,
   snapshot,
@@ -403,6 +402,53 @@ export async function captureBodyPolicy(
     [jobId, JSON.stringify(policy)],
   );
 }
+/** Separate preview context: catalog pose coverage still gates every legacy export path. */
+export function personBodyContext(person: AnalysisPerson, semantic = false) {
+  const p = person.posePresentation;
+  const presentationPreview =
+    !!p &&
+    ["dynamic-pose-presentation-v1", "semantic-pose-presentation-v1"].includes(
+      p.version,
+    ) &&
+    ["full", "half", "shoulder_head", "head"].includes(p.output_scope ?? "") &&
+    [p.library_candidates, p.review_candidates, p.generated_candidates].some(
+      (g) => g.length > 0,
+    );
+  return {
+    previewOnly: semantic || presentationPreview,
+    poses: presentationPreview
+      ? [
+          ...p!.library_candidates,
+          ...p!.review_candidates,
+          ...p!.generated_candidates,
+        ].map((c) => c.candidate_id)
+      : person.candidates.map((c) => c.poseId),
+  };
+}
+function initialBody(
+  person: AnalysisPerson,
+  policy: BodyPolicy,
+  catalog: BodyCatalog,
+  semantic = false,
+) {
+  const context = personBodyContext(person, semantic);
+  return resolveBody(
+    person.personIndex,
+    policy,
+    person.bodyRecommendation ?? {
+      status: "disabled",
+      body: null,
+      reasonCodes: ["body_disabled"],
+    },
+    catalog,
+    context.poses,
+    "inherit",
+    null,
+    0,
+    null,
+    context.previewOnly,
+  );
+}
 /** Called under the existing persistAnalysisRecords job lock; retries never overwrite manual choices. */
 export async function initializeBodySelections(
   db: BodyDb,
@@ -417,23 +463,7 @@ export async function initializeBodySelections(
   const policy = rows[0]?.body_policy_json;
   if (!policy) return;
   for (const p of result.candidatesByPerson) {
-    const rec = p.bodyRecommendation ?? {
-      status: "disabled" as const,
-      body: null,
-      reasonCodes: ["body_disabled"],
-    };
-    const value = resolveBody(
-      p.personIndex,
-      policy,
-      rec,
-      catalog,
-      p.candidates.map((c) => c.poseId),
-      "inherit",
-      null,
-      0,
-      null,
-      result.source === "semantic",
-    );
+    const value = initialBody(p, policy, catalog, result.source === "semantic");
     await db.query(
       `INSERT INTO body_selections (job_id,person_index,value) VALUES ($1,$2,$3)
       ON CONFLICT (job_id,person_index) DO NOTHING`,
@@ -475,9 +505,9 @@ function revalidate(
   value: BodySelection,
   person: AnalysisPerson,
   catalog: BodyCatalog,
-  previewOnly = false,
+  semantic = false,
 ): BodySelection {
-  const poses = person.candidates.map((c) => c.poseId);
+  const { poses, previewOnly } = personBodyContext(person, semantic);
   const recommendation =
     value.recommendation.status === "available" &&
     !bodyEligible(value.recommendation.body, catalog, poses, previewOnly)
@@ -514,13 +544,28 @@ export async function readSelection(
   index: number,
   catalog = loadBodyCatalog(),
 ): Promise<BodySelection> {
-  const { person, previewOnly } = await ownedPerson(db, owner, jobId, index);
+  const {
+    person,
+    policy,
+    previewOnly: semantic,
+  } = await ownedPerson(db, owner, jobId, index);
   const { rows } = await db.query<{ value: BodySelection }>(
     "SELECT value FROM body_selections WHERE job_id=$1 AND person_index=$2",
     [jobId, index],
   );
   if (!rows[0]) throw new BodyError("BODY_SELECTION_UNSUPPORTED", 409);
-  return revalidate(rows[0].value, person, catalog, previewOnly);
+  const stored = rows[0].value;
+  // Old presentation jobs stored not_applicable because legacy candidates are empty.
+  // Resolve their original snapshot, not today's preferences; GET remains read-only.
+  const value =
+    personBodyContext(person, semantic).previewOnly &&
+    stored.resolutionStatus === "not_applicable"
+      ? {
+          ...initialBody(person, policy, catalog, semantic),
+          selectionRevision: stored.selectionRevision,
+        }
+      : stored;
+  return revalidate(value, person, catalog, semantic);
 }
 export async function writeSelection(
   db: BodyDb,
@@ -531,13 +576,11 @@ export async function writeSelection(
   deps: BodyDeps = bodyDeps,
   now: () => Date = () => new Date(),
 ): Promise<BodySelection> {
-  const { person, policy, previewOnly } = await ownedPerson(
-    db,
-    owner,
-    jobId,
-    index,
-    true,
-  );
+  const {
+    person,
+    policy,
+    previewOnly: semantic,
+  } = await ownedPerson(db, owner, jobId, index, true);
   const resource = `${jobId}:${index}`;
   const previous = await replay(db, owner, resource, change, [
     change.intent,
@@ -558,7 +601,7 @@ export async function writeSelection(
     change.expectedRevision,
     "BODY_SELECTION_CONFLICT",
   );
-  const poses = person.candidates.map((c) => c.poseId);
+  const { poses, previewOnly } = personBodyContext(person, semantic);
   if (!poses.length) throw new BodyError("BODY_NOT_APPLICABLE", 409);
   const manual = catalog.assets.find(
     (a) => a.characterId === change.characterId,
@@ -613,9 +656,14 @@ export async function bodyOptions(
   index: number,
   deps: BodyDeps = bodyDeps,
 ) {
-  const { person, previewOnly } = await ownedPerson(db, owner, jobId, index);
+  const { person, previewOnly: semantic } = await ownedPerson(
+    db,
+    owner,
+    jobId,
+    index,
+  );
   const catalog = deps.catalog(),
-    poses = person.candidates.map((c) => c.poseId);
+    { poses, previewOnly } = personBodyContext(person, semantic);
   const characters = await Promise.all(
     catalog.assets.map(async (a) => {
       const reasons = !poses.length

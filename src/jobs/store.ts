@@ -129,7 +129,8 @@ async function insertJob(
       input?.height ?? null,
     ],
   );
-  if (config.bodySelectionEnabled && input?.installationId) await captureBodyPolicy(executor, job.id, input.installationId);
+  if (config.bodySelectionEnabled && input?.installationId)
+    await captureBodyPolicy(executor, job.id, input.installationId);
   return job;
 }
 
@@ -414,9 +415,7 @@ export async function deleteOwnedJob(
 }
 
 /** 확정 선택 목록. 작업 기록 상세가 이전 선택을 화면에 되살릴 때 쓴다. */
-export async function listConfirmedSelections(
-  jobId: string,
-): Promise<
+export async function listConfirmedSelections(jobId: string): Promise<
   Array<{
     personIndex: number;
     candidateId: string;
@@ -696,10 +695,11 @@ export async function persistAnalysisRecords(
       }
     }
     await initializeBodySelections(client, jobId, result);
-    if (complete) await client.query(
-      "UPDATE jobs SET status='completed', result_json=$2, updated_at=$3, completed_at=$3 WHERE id=$1",
-      [jobId, JSON.stringify(result), new Date().toISOString()],
-    );
+    if (complete)
+      await client.query(
+        "UPDATE jobs SET status='completed', result_json=$2, updated_at=$3, completed_at=$3 WHERE id=$1",
+        [jobId, JSON.stringify(result), new Date().toISOString()],
+      );
     await client.query(
       `UPDATE jobs
        SET inference_metadata_json = $2, input_width = COALESCE(input_width, $3),
@@ -717,6 +717,16 @@ export async function persistAnalysisRecords(
 }
 
 /** Text search has its own rate counter and never enters the image worker/quotas. */
-export async function createSemanticJob(installationId: string, userId: string | null): Promise<Job> {
-  return createJob(userId, null, { installationId, source: "semantic", mime: "application/json", size: 0, width: null, height: null });
+export async function createSemanticJob(
+  installationId: string,
+  userId: string | null,
+): Promise<Job> {
+  return createJob(userId, null, {
+    installationId,
+    source: "semantic",
+    mime: "application/json",
+    size: 0,
+    width: null,
+    height: null,
+  });
 }

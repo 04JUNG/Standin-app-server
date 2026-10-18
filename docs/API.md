@@ -1251,6 +1251,33 @@ PNG/304 응답의 `X-Standin-Hand-Library-SHA256`으로 카탈로그 일치를 �
 20회/분/설치 한도이며 counter는 설치 데이터 삭제 시 함께 정리한다. 404(작업/후보/범위), 409(변경), 429(한도), 503(렌더/모델 실패)를 구분한다.
 신규 후보 refine/release/export 금지와 actual_mesh_validated=false를 유지한다. 체형 선택은 제공하지 않으며 손 선택의 별도 PNG 참고 렌더는 기존 경로를 유지한다.
 
+## 조회 전용 포즈의 체형 참고 PNG (2026-10-18)
+
+`capabilities.presentationBodyPreviews`는 `posePresentation`의 조회 전용 후보에 저장된 인물별
+체형/수치를 적용하는 기능이다. 기존 `bodyPreviews`와 별개이며 저장·보정 권한을 부여하지 않는다.
+새 문장 검색 작업도 체형 설정을 시작 시점에 고정한다. 이전 이미지 작업의 `not_applicable`
+선택은 원래 작업의 설정 snapshot으로 조회 시 복원하며 GET은 저장 상태를 바꾸지 않는다.
+이전 문장 검색 작업은 아래 semantic 체형 선택 계약에 따라 소유권 잠금 아래 누락된 snapshot/선택만 초기화한다.
+
+`GET /v1/analysis/jobs/:job/people/:index/pose-previews/:candidate/:bvhSha/body/:selectionRevision`
+
+설치 인증·작업 소유권·인물·후보·비공개 BVH와 SHA를 검증하고 `body-selection`의 현재 체형,
+수치 및 승인된 shape source로 기존 converter를 호출한다. 임의 쿼리 덮어쓰기는 허용하지 않는다.
+`previewOnly=true`인 체형 선택은 카탈로그 자산 일치만 허용하며 기존 내보내기용 포즈 커버리지
+검증을 대체하지 않는다. 생성 후보는 비공개 inline BVH를 사용하고 라이브러리로 조회하지 않는다.
+
+PNG는 범위(full/half/bust/head)와 저장된 카메라 회전을 적용한 **정사영 참고 이미지**이다.
+원근 검색 투영과 동일하다고 주장하지 않으며 관절용 BVH 전송은 기존 계약을 유지한다.
+성공해도 모든 후보의 `actual_mesh_validated`, `release_allowed`, `export_allowed`, `refine_allowed`는
+false다. 정식 후보 배열에 합치지 않는다.
+
+응답은 `private, no-store`이며 `X-Standin-Body-Revision`, `Character-SHA256`, `Shape-SHA256`
+(고정 체형은 `none`), `Source-BVH-SHA256`, `Artifact-SHA256`, `Preview-Projection=orthographic`,
+`Preview-Only=true` 헤더를 보낸다(각 이름에 `X-Standin-` 접두사).
+캐시는 소유자/작업/인물/후보/체형/수치/원본/범위/카메라/런타임에 묶이고 렌더 후 다시 검증한다.
+선택이 바뀌면 409 `BODY_PREVIEW_STALE`, 미지원·원본 불일치면 409, 타 소유자면 404,
+변환기 비활성/실패면 503이다. 클라이언트는 구 체형이나 기본 체형으로 조용히 폴백하지 않는다.
+
 ### 자연어 검색의 조회 전용 체형 선택
 
 `semanticBodySelection=true`일 때 자연어 결과도 기존 인물별 `body-options`, `body-selection` GET/PUT과 체형 카드·수치 조절을 사용한다.

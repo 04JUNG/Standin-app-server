@@ -28,10 +28,18 @@ export type FallbackMode = "none" | "soft" | "hard";
 
 export type PersonConfidence = "high" | "low";
 export type SkeletonState =
-  "valid" | "partial" | "suspect" | "missing" | "invalid";
+  | "valid"
+  | "partial"
+  | "suspect"
+  | "missing"
+  | "invalid";
 export type SkeletonSource = "full_image" | "crop_retry" | "none";
 export type CoverageClass =
-  "full" | "reduced" | "sparse" | "upper_only" | "insufficient";
+  | "full"
+  | "reduced"
+  | "sparse"
+  | "upper_only"
+  | "insufficient";
 
 /** Server-owned camera; consumers must not derive it from the legacy search view. */
 interface CandidateCameraBase {
@@ -70,7 +78,12 @@ export interface PoseCandidate {
   reviewRequired?: boolean;
   notExactMatch?: boolean;
   searchCamera?: import("./routed-search.js").SearchPreviewCamera;
-  semantic?: { familyId: string; alternate: boolean; description: string; near?: boolean };
+  semantic?: {
+    familyId: string;
+    alternate: boolean;
+    description: string;
+    near?: boolean;
+  };
   sourceBvhSha256?: string;
   camera?: CandidateCamera;
   id: string; // unique exposed candidate id (pose + view)
@@ -119,6 +132,7 @@ export interface AnalysisResult {
     semanticBodySelection?: boolean;
     bodyRecommendation?: boolean;
     bodyPreviews?: boolean;
+    presentationBodyPreviews?: boolean;
     /** Read-only versioned Top-K assets. Does not enable the end-to-end body UX. */
     bodyPreviewAssets?: boolean;
     refine: boolean;

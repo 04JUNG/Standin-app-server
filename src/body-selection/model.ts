@@ -97,7 +97,9 @@ export interface BodyRecommendation {
   catalogSha256?: string;
   inputSha256?: string;
   selectionSource?:
-    "auto_best_effort" | "auto_default" | "auto_presentation_default";
+    | "auto_best_effort"
+    | "auto_default"
+    | "auto_presentation_default";
 }
 export type BodyIntent = "inherit" | "manual" | "auto";
 export interface BodySelection {
@@ -123,11 +125,14 @@ export interface BodySelection {
     | "catalog_default_fallback"
     | null;
   resolutionStatus:
-    "ready" | "needs_selection" | "unavailable" | "not_applicable";
+    | "ready"
+    | "needs_selection"
+    | "unavailable"
+    | "not_applicable";
   selectionRevision: number;
-  renderingExecuted: false;
-  /** Text search choices allow preview only, never promote pose release eligibility. */
+  /** Lookup-only mesh preview; never authorizes release/export. */
   previewOnly?: true;
+  renderingExecuted: false;
 }
 export const defaultPreferences = (): BodyPreferences => ({
   version: "body-preferences.v1",
@@ -238,8 +243,8 @@ export function resolveBody(
     resolvedSource: null,
     resolutionStatus: "needs_selection",
     selectionRevision: revision,
-    renderingExecuted: false,
     ...(previewOnly ? { previewOnly: true as const } : {}),
+    renderingExecuted: false,
   };
   if (!poses.length) return { ...state, resolutionStatus: "not_applicable" };
   const use = (
