@@ -144,6 +144,8 @@ app.use(
       "ETag",
       "X-Standin-Hand-Revision",
       "X-Standin-Preview-Only",
+      "X-Standin-Character-Id",
+      "X-Standin-Model-Version",
       "X-Standin-Hand-Library-SHA256",
       "X-Standin-Review-Key",
       "X-Standin-Body-Render-Key",

@@ -16,3 +16,10 @@
 - feature flags는 기본 false다. staging readiness 확인 후 staging GitHub environment 변수로만 활성화한다.
 
 상세 계약은 HAND_SELECTION_INTEGRATION.md, SEMANTIC_SEARCH_INTEGRATION.md에 있다.
+
+## 자연어 검색 기본 남성 메쉬 후속
+
+조회 전용 `/model` 경로는 자연어 검색의 기본 남성 카드·확대 뷰를 제공한다.
+손 카탈로그/추천 실패 여부와 무관하게 기본 모델을 표시한다. 체형 선택·손 적용·refine·release와 분리한다.
+기존 라이브러리 메쉬는 원본·캐릭터·revision을 검증하고, 미생성 표면만 convert-framed(model)로 준비한다.
+메쉬 조회는 신규 후보에 내보내기 권한을 부여하지 않는다.

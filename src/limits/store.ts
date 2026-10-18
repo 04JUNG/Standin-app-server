@@ -12,7 +12,8 @@ export type UsageScope =
   | "ip_register"
   | "ip_analyze"
   | "semantic_search"
-  | "hand_preview";
+  | "hand_preview"
+  | "semantic_model_preview";
 
 /** pool 또는 트랜잭션 client. Job 생성처럼 다른 쓰기와 묶어야 할 때 client를 넘긴다. */
 type Executor = Pool | PoolClient;
