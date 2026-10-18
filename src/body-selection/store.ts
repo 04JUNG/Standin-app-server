@@ -406,7 +406,10 @@ export async function captureBodyPolicy(
 export function personBodyContext(person: AnalysisPerson) {
   const p = person.posePresentation;
   const previewOnly =
-    !!p && ["dynamic-pose-presentation-v1", "semantic-pose-presentation-v1"].includes(p.version) &&
+    !!p &&
+    ["dynamic-pose-presentation-v1", "semantic-pose-presentation-v1"].includes(
+      p.version,
+    ) &&
     ["full", "half", "shoulder_head", "head"].includes(p.output_scope ?? "") &&
     [p.library_candidates, p.review_candidates, p.generated_candidates].some(
       (g) => g.length > 0,
