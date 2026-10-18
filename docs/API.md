@@ -1190,6 +1190,8 @@ BVH downloads and final FBX/refined/cropped export contracts are unchanged.
 - `mode`에 `last_used`가 추가됐고 새 설치의 기본값이다. `PUT .../body-selection`이 `manual`로 성공하면 그 체형과 수치를 `lastUsed`에 적는다(설정 `revision`은 올리지 않는다 — 설정 화면이 건드리지 않는 값이라 충돌을 만들지 않게). 새 작업의 `inherit` 인물은 `lastUsed`가 그 포즈에 쓸 수 있으면 그 체형·수치로 시작하고 `resolvedSource: "last_used"`가 된다. 쓸 수 없거나 수치가 지금 카탈로그 규칙에 맞지 않으면 기존 순서(추천 → 사용자 기본 → 카탈로그 기본)로 내려간다. `auto`·`fixed_default` 행은 이전과 같다.
   - ⚠ `lastUsed`에 수치가 있으면 그 인물의 선택에도 `shape`가 붙으므로 위 `BODY_SHAPE_RENDER_UNSUPPORTED` 가드가 똑같이 적용된다.
 
+구형 고정 성인 6종과 `body-teen-male`, `body-teen-female`은 모델·체형 옵션 목록과 직접 선택에서 제외한다. `body-child` 아동 체형은 유지한다. 기존 청소년 선택/마지막 사용 체형은 현재 카탈로그로 재검증하며, 지원 종료 모델을 다시 렌더하거나 자동으로 다른 체형으로 덮어쓰지 않는다.
+
 ## 체형 Top-K 미리보기 자산 (2026-10-08, 1~2단계)
 
 [체형 미리보기 계약](BODY_PREVIEW_DESIGN.md)을 따른다. 기존 설치 인증을 사용한다.
