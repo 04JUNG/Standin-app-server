@@ -35,11 +35,22 @@ export interface RenderCamera {
   fit_to_rough_pixels: false;
   bvh_camera_rotation_applied: false;
 }
+export interface MirrorComparison {
+  family_id: string;
+  original_pose_id: string;
+  original_candidate_id: string;
+  is_mirror: boolean;
+  observed_side: "left" | "right";
+  reference_side: "left" | "right";
+  reason: "opposite_hand_reference";
+  matches_observed_side: false;
+}
 export interface PreviewCandidate {
   candidate_id: string;
   pose_id: string | null;
   source: "library" | "generation";
   kind: string;
+  mirror_comparison?: MirrorComparison | null;
   rank: number;
   camera_kind: string;
   render_camera: RenderCamera;
@@ -73,6 +84,7 @@ export interface PosePresentation {
   library_candidates: PreviewCandidate[];
   review_candidates: PreviewCandidate[];
   generated_candidates: PreviewCandidate[];
+  mirror_comparison?: { status: "ready" | "unavailable" | "not_requested"; reason: string | null } | null;
   basic_model: { status: string; output_scope: string | null } | null;
   issues: string[];
   preview_status: string;
@@ -345,7 +357,7 @@ export function mapPosePresentation(
             ? ["library_match"]
             : generated
               ? ["generated_review"]
-              : ["near_match", "geometry_review", "framing_reference"];
+              : ["near_match", "geometry_review", "framing_reference", "mirror_reference"];
         if (
           !kinds.includes(String(c.kind)) ||
           c.source !== (generated ? "generation" : "library")
@@ -397,11 +409,29 @@ export function mapPosePresentation(
           (typeof c.rank_score !== "number" || !Number.isFinite(c.rank_score))
         )
           throw Error("invalid_rank_score");
+        let comparison: MirrorComparison | null = null;
+        if (c.kind === "mirror_reference") {
+          const m = object(c.mirror_comparison);
+          const original = presentation.library_candidates.find((p) => p.candidate_id === m.original_candidate_id && p.pose_id === m.original_pose_id);
+          if (!original || original.pose_id === pid || original.asset.bvh_sha256 === hash ||
+              typeof m.family_id !== "string" || !m.family_id || m.family_id.length > 512 ||
+              typeof m.is_mirror !== "boolean" || !["left", "right"].includes(String(m.observed_side)) ||
+              !["left", "right"].includes(String(m.reference_side)) || m.observed_side === m.reference_side ||
+              m.reason !== "opposite_hand_reference" || m.matches_observed_side !== false ||
+              c.rank_score !== null || c.score_kind !== null)
+            throw Error("invalid_mirror_reference");
+          comparison = {
+            family_id: m.family_id, original_pose_id: original.pose_id!, original_candidate_id: original.candidate_id,
+            is_mirror: m.is_mirror, observed_side: m.observed_side as "left" | "right", reference_side: m.reference_side as "left" | "right",
+            reason: "opposite_hand_reference", matches_observed_side: false,
+          };
+        } else if (c.mirror_comparison) throw Error("unexpected_mirror_reference");
         presentation[group].push({
           candidate_id: id,
           pose_id: pid as string | null,
           source: generated ? "generation" : "library",
           kind: String(c.kind),
+          ...(comparison ? { mirror_comparison: comparison } : {}),
           rank: c.rank as number,
           camera_kind: requireCode(c.camera_kind),
           render_camera: validateRenderCamera(c.render_camera),
@@ -422,6 +452,17 @@ export function mapPosePresentation(
           actual_mesh_validated: false,
         });
       }
+    }
+    const pair = raw.mirror_comparison;
+    if (presentation.review_candidates.some((p) => p.kind === "mirror_reference") && (!pair || object(pair).status !== "ready")) throw Error("invalid_mirror_status");
+    if (pair !== null && pair !== undefined) {
+      const m = object(pair);
+      if (!["ready", "unavailable", "not_requested"].includes(String(m.status))) throw Error("invalid_mirror_status");
+      if (m.status === "ready" && (
+          presentation.review_candidates.filter((p) => p.kind === "mirror_reference").length !== 1 ||
+          presentation.library_candidates.length + presentation.review_candidates.length > 5 ||
+          presentation.generated_candidates.length)) throw Error("invalid_mirror_budget");
+      presentation.mirror_comparison = { status: m.status as "ready" | "unavailable" | "not_requested", reason: code(m.reason) };
     }
     return { presentation, assets };
   } catch (error) {

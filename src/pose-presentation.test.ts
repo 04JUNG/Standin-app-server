@@ -440,3 +440,41 @@ test("selected-body preview binds private library/generated sources, shape, scop
   assert.equal(library[0].refineAllowed, false);
   assert.equal(library[0].sourceBvhSha256, hash);
 });
+
+function mirrorFixture() {
+  const original = candidate();
+  const mirror = {
+    ...candidate(), candidate_id: "preview_" + "c".repeat(64), pose_id: "test mirror",
+    kind: "mirror_reference", rank_score: null, score_kind: null,
+    asset: { ...candidate().asset, bvh_url: "/pose/test%20mirror/bvh", bvh_sha256: "d".repeat(64) },
+    mirror_comparison: {
+      family_id: "family", original_pose_id: original.pose_id, original_candidate_id: original.candidate_id,
+      is_mirror: true, observed_side: "left", reference_side: "right", reason: "opposite_hand_reference", matches_observed_side: false,
+    },
+  };
+  return { ...raw(), generation_status: null, library_candidates: [original], review_candidates: [mirror],
+    generated_candidates: [], mirror_comparison: { status: "ready", reason: "opposite_hand_reference" } };
+}
+test("opposite-hand reference preserves private BVH binding and is never a selectable match", () => {
+  const value = mirrorFixture();
+  const mapped = mapPosePresentation(value, 0, "job");
+  assert.equal(mapped!.presentation.review_candidates[0].mirror_comparison!.original_candidate_id, id);
+  assert.equal(mapped!.presentation.review_candidates[0].rank_score, null);
+  assert.equal(mapped!.assets[value.review_candidates[0].candidate_id].pose_id, "test mirror");
+  assert.equal(mapped!.presentation.review_candidates[0].export_allowed, false);
+  assert.equal(mapped!.presentation.library_candidates.length, 1);
+});
+for (const failure of ["orphan", "same_side", "score", "hash", "release", "budget"])
+  test(`rejects invalid mirror ${failure} instead of promoting it`, () => {
+    const v = mirrorFixture();
+    const m = v.review_candidates[0];
+    if (failure === "orphan") m.mirror_comparison.original_candidate_id = "preview_" + "e".repeat(64);
+    if (failure === "same_side") m.mirror_comparison.reference_side = "left";
+    if (failure === "score") (m as { rank_score: number | null }).rank_score = .9;
+    if (failure === "hash") m.asset.bvh_sha256 = v.library_candidates[0].asset.bvh_sha256;
+    if (failure === "release") m.release_allowed = true;
+    if (failure === "budget") v.library_candidates = Array.from({length:5}, (_,i) => ({...v.library_candidates[0], candidate_id: i ? "preview_" + String(i).repeat(64) : id}));
+    const p = mapPosePresentation(v, 0, "job")!.presentation;
+    assert.equal(p.status, "error");
+    assert.equal(p.review_candidates.length, 0);
+  });
