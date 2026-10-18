@@ -19,6 +19,7 @@ import {
   bodyRef,
   defaultPreferences,
   eligible,
+  bodyEligible,
   resolveBody,
   snapshot,
   type BodyCard,
@@ -247,7 +248,11 @@ export async function writePreferences(
   await remember(db, owner, "preferences", null, change, previous.hash, value);
   return value;
 }
-async function storePreferences(db: BodyDb, owner: string, value: BodyPreferences) {
+async function storePreferences(
+  db: BodyDb,
+  owner: string,
+  value: BodyPreferences,
+) {
   await db.query(
     `INSERT INTO body_preferences (installation_id,value) VALUES ($1,$2)
     ON CONFLICT (installation_id) DO UPDATE SET value=EXCLUDED.value`,
@@ -261,7 +266,11 @@ function cardName(raw: unknown) {
   return name;
 }
 /** A card always carries controls for a shape-capable body (same rule as "내 기본값"). */
-async function cardBody(characterId: string, controls: unknown, deps: BodyDeps) {
+async function cardBody(
+  characterId: string,
+  controls: unknown,
+  deps: BodyDeps,
+) {
   let body;
   try {
     body = shapeDefault(deps.catalog(), { characterId, controls });
@@ -331,7 +340,9 @@ export async function writeCards(
       j === i
         ? {
             ...c,
-            ...(change.name !== undefined ? { name: cardName(change.name) } : {}),
+            ...(change.name !== undefined
+              ? { name: cardName(change.name) }
+              : {}),
             ...(body ?? {}),
             updatedAt: at,
           }
@@ -366,7 +377,9 @@ async function recordLastUsed(
   now: () => Date,
 ) {
   if (value.resolvedSource !== "manual" || !value.resolvedBody) return;
-  await db.query("SELECT id FROM installations WHERE id=$1 FOR UPDATE", [owner]);
+  await db.query("SELECT id FROM installations WHERE id=$1 FOR UPDATE", [
+    owner,
+  ]);
   const current = await readPreferences(db, owner);
   await storePreferences(db, owner, {
     ...current,
@@ -415,6 +428,11 @@ export async function initializeBodySelections(
       rec,
       catalog,
       p.candidates.map((c) => c.poseId),
+      "inherit",
+      null,
+      0,
+      null,
+      result.source === "semantic",
     );
     await db.query(
       `INSERT INTO body_selections (job_id,person_index,value) VALUES ($1,$2,$3)
@@ -442,23 +460,27 @@ async function ownedPerson(
   if (!job) throw new BodyError("NOT_FOUND", 404);
   if (job.status !== "completed" || !job.result_json)
     throw new BodyError("NOT_READY", 409);
-  const person = (
-    JSON.parse(job.result_json) as AnalysisResult
-  ).candidatesByPerson.find((p) => p.personIndex === index);
+  const result = JSON.parse(job.result_json) as AnalysisResult;
+  const person = result.candidatesByPerson.find((p) => p.personIndex === index);
   if (!person) throw new BodyError("NOT_FOUND", 404);
   if (!job.body_policy_json)
     throw new BodyError("BODY_SELECTION_UNSUPPORTED", 409);
-  return { person, policy: job.body_policy_json };
+  return {
+    person,
+    policy: job.body_policy_json,
+    previewOnly: result.source === "semantic",
+  };
 }
 function revalidate(
   value: BodySelection,
   person: AnalysisPerson,
   catalog: BodyCatalog,
+  previewOnly = false,
 ): BodySelection {
   const poses = person.candidates.map((c) => c.poseId);
   const recommendation =
     value.recommendation.status === "available" &&
-    !eligible(value.recommendation.body, catalog, poses)
+    !bodyEligible(value.recommendation.body, catalog, poses, previewOnly)
       ? {
           ...value.recommendation,
           status: "unavailable" as const,
@@ -472,12 +494,14 @@ function revalidate(
   const shapeLost = !!value.shape && !shapeSpec(asset);
   return {
     ...value,
+    ...(previewOnly ? { previewOnly: true as const } : {}),
     shape: value.shape ?? null,
     // Derived, never stored: the source a shaped body must be baked with right now.
     ...(value.shape ? { shapeSource: asset?.shapeSource ?? null } : {}),
     recommendation,
     resolutionStatus:
-      (value.resolvedBody && !eligible(value.resolvedBody, catalog, poses)) ||
+      (value.resolvedBody &&
+        !bodyEligible(value.resolvedBody, catalog, poses, previewOnly)) ||
       shapeLost
         ? "unavailable"
         : value.resolutionStatus,
@@ -490,13 +514,13 @@ export async function readSelection(
   index: number,
   catalog = loadBodyCatalog(),
 ): Promise<BodySelection> {
-  const { person } = await ownedPerson(db, owner, jobId, index);
+  const { person, previewOnly } = await ownedPerson(db, owner, jobId, index);
   const { rows } = await db.query<{ value: BodySelection }>(
     "SELECT value FROM body_selections WHERE job_id=$1 AND person_index=$2",
     [jobId, index],
   );
   if (!rows[0]) throw new BodyError("BODY_SELECTION_UNSUPPORTED", 409);
-  return revalidate(rows[0].value, person, catalog);
+  return revalidate(rows[0].value, person, catalog, previewOnly);
 }
 export async function writeSelection(
   db: BodyDb,
@@ -507,7 +531,13 @@ export async function writeSelection(
   deps: BodyDeps = bodyDeps,
   now: () => Date = () => new Date(),
 ): Promise<BodySelection> {
-  const { person, policy } = await ownedPerson(db, owner, jobId, index, true);
+  const { person, policy, previewOnly } = await ownedPerson(
+    db,
+    owner,
+    jobId,
+    index,
+    true,
+  );
   const resource = `${jobId}:${index}`;
   const previous = await replay(db, owner, resource, change, [
     change.intent,
@@ -535,7 +565,7 @@ export async function writeSelection(
   );
   if (change.intent === "manual" && !manual)
     throw new BodyError("INVALID_CHARACTER", 400);
-  if (manual && !eligible(manual, catalog, poses))
+  if (manual && !bodyEligible(manual, catalog, poses, previewOnly))
     throw new BodyError("BODY_POSE_UNSUPPORTED", 409);
   let shape: BodyShape | null = null;
   if (change.shape) {
@@ -557,6 +587,7 @@ export async function writeSelection(
     manual ? bodyRef(manual) : null,
     current.selectionRevision + 1,
     shape,
+    previewOnly,
   );
   if (value.resolutionStatus !== "ready" || !value.resolvedBody)
     throw new BodyError(
@@ -582,14 +613,14 @@ export async function bodyOptions(
   index: number,
   deps: BodyDeps = bodyDeps,
 ) {
-  const { person } = await ownedPerson(db, owner, jobId, index);
+  const { person, previewOnly } = await ownedPerson(db, owner, jobId, index);
   const catalog = deps.catalog(),
     poses = person.candidates.map((c) => c.poseId);
   const characters = await Promise.all(
     catalog.assets.map(async (a) => {
       const reasons = !poses.length
         ? ["BODY_NOT_APPLICABLE"]
-        : !eligible(a, catalog, poses)
+        : !bodyEligible(a, catalog, poses, previewOnly)
           ? ["BODY_POSE_UNSUPPORTED"]
           : (await deps.check(a.characterId)) !== "ok"
             ? ["BODY_UNAVAILABLE"]
@@ -631,10 +662,41 @@ export async function attachBodySelections(
     candidatesByPerson: result.candidatesByPerson.map((p) => {
       const row = rows.find((r) => r.person_index === p.personIndex);
       return row
-        ? { ...p, bodySelection: revalidate(row.value, p, catalog) }
+        ? {
+            ...p,
+            bodySelection: revalidate(
+              row.value,
+              p,
+              catalog,
+              result.source === "semantic",
+            ),
+          }
         : p;
     }),
   };
+}
+export async function ensureSemanticBodySelection(
+  db: BodyDb,
+  owner: string,
+  jobId: string,
+  catalog = loadBodyCatalog(),
+) {
+  const { rows } = await db.query<{
+    status: string;
+    result_json: string | null;
+    body_policy_json: BodyPolicy | null;
+  }>(
+    "SELECT status,result_json,body_policy_json FROM jobs WHERE id=$1 AND installation_id=$2 FOR UPDATE",
+    [jobId, owner],
+  );
+  const job = rows[0];
+  if (!job) throw new BodyError("NOT_FOUND", 404);
+  if (job.status !== "completed" || !job.result_json)
+    throw new BodyError("NOT_READY", 409);
+  const result = JSON.parse(job.result_json) as AnalysisResult;
+  if (result.source !== "semantic") return;
+  if (!job.body_policy_json) await captureBodyPolicy(db, jobId, owner, catalog);
+  await initializeBodySelections(db, jobId, result, catalog);
 }
 export const bodyStore = {
   preferences: async (owner: string) =>
@@ -648,13 +710,23 @@ export const bodyStore = {
       await transaction((db) => writeCards(db, owner, change)),
     ),
   selection: (owner: string, job: string, index: number) =>
-    readSelection(pool, owner, job, index),
+    transaction(async (db) => {
+      await ensureSemanticBodySelection(db, owner, job);
+      return readSelection(db, owner, job, index);
+    }),
   saveSelection: (
     owner: string,
     job: string,
     index: number,
     change: SelectionChange,
-  ) => transaction((db) => writeSelection(db, owner, job, index, change)),
+  ) =>
+    transaction(async (db) => {
+      await ensureSemanticBodySelection(db, owner, job);
+      return writeSelection(db, owner, job, index, change);
+    }),
   options: (owner: string, job: string, index: number) =>
-    bodyOptions(pool, owner, job, index),
+    transaction(async (db) => {
+      await ensureSemanticBodySelection(db, owner, job);
+      return bodyOptions(db, owner, job, index);
+    }),
 };

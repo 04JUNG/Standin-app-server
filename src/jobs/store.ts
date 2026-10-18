@@ -129,7 +129,7 @@ async function insertJob(
       input?.height ?? null,
     ],
   );
-  if (config.bodySelectionEnabled && input?.installationId && input.source !== "semantic") await captureBodyPolicy(executor, job.id, input.installationId);
+  if (config.bodySelectionEnabled && input?.installationId) await captureBodyPolicy(executor, job.id, input.installationId);
   return job;
 }
 
@@ -695,7 +695,7 @@ export async function persistAnalysisRecords(
         );
       }
     }
-    if (result.source !== "semantic") await initializeBodySelections(client, jobId, result);
+    await initializeBodySelections(client, jobId, result);
     if (complete) await client.query(
       "UPDATE jobs SET status='completed', result_json=$2, updated_at=$3, completed_at=$3 WHERE id=$1",
       [jobId, JSON.stringify(result), new Date().toISOString()],

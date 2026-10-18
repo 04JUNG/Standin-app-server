@@ -1,4 +1,9 @@
-/** Fixed male surface for text results. This read-only GLB never grants export/refine. */
+import { BodyError, bodyStore } from "../body-selection/store.js";
+import { sameBody } from "../body-selection/model.js";
+import { shapeRenderable, sameShapeSource } from "../body-selection/shape.js";
+import { bodyUxAvailable } from "../body-selection/availability.js";
+import { getPreviewRuntime } from "../converter/previewRuntime.js";
+/** Owned text-result surfaces. Persisted body choices never grant export/refine. */
 import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
 import { getOwnedJob } from "../jobs/store.js";
@@ -25,6 +30,10 @@ export const SEMANTIC_CHARACTER_ID = "standin-master-v2";
 const cache = new FramedArtifactCache(64 * 1024 * 1024, 300_000, 2);
 const defaults = {
   getOwnedJob,
+  bodyEnabled: bodyUxAvailable,
+  shapeRenderable,
+  selection: bodyStore.selection,
+  getPreviewRuntime,
   getPoseBvh,
   checkCharacter,
   modelPreviewIdentity,
@@ -62,7 +71,7 @@ export function createSemanticModelRoutes(
         c.json(
           errorEnvelope(
             code,
-            "기본 남성 모델을 불러오지 못했습니다. 다시 시도해 주세요.",
+            "선택한 체형 모델을 불러오지 못했습니다. 다시 시도해 주세요.",
             c.get("requestId"),
           ),
           status,
@@ -73,7 +82,10 @@ export function createSemanticModelRoutes(
         hash = c.req.param("hash"),
         owner = c.get("installationId")!;
       if (
-        Object.keys(c.req.query()).length ||
+        Object.keys(c.req.query()).some((k) => k !== "bodyRevision") ||
+        (c.req.query("bodyRevision") !== undefined &&
+          (!/^\d+$/.test(c.req.query("bodyRevision")!) ||
+            !Number.isSafeInteger(Number(c.req.query("bodyRevision"))))) ||
         !/^\d+$/.test(c.req.param("index")) ||
         !Number.isSafeInteger(index) ||
         !/^preview_[a-f0-9]{64}$/.test(id) ||
@@ -110,24 +122,50 @@ export function createSemanticModelRoutes(
           asset.bvh_sha256 !== hash
         )
           return fail(409, "PREVIEW_SOURCE_CHANGED");
-        if ((await deps.checkCharacter(SEMANTIC_CHARACTER_ID)) !== "ok")
+        const requestedRevision = c.req.query("bodyRevision");
+        if (requestedRevision !== undefined && !deps.bodyEnabled())
+          return fail(503, "BODY_SELECTION_DISABLED");
+        const body =
+          requestedRevision === undefined
+            ? null
+            : await deps.selection(owner, jobId, index);
+        if (
+          body &&
+          (String(body.selectionRevision) !== requestedRevision ||
+            body.resolutionStatus !== "ready" ||
+            !body.resolvedBody)
+        )
+          return fail(409, "BODY_SELECTION_CONFLICT");
+        if (body && !deps.shapeRenderable(body))
+          return fail(409, "BODY_SHAPE_RENDER_UNSUPPORTED");
+        const characterId =
+          body?.resolvedBody?.characterId ?? SEMANTIC_CHARACTER_ID;
+        if ((await deps.checkCharacter(characterId)) !== "ok")
           return fail(503, "PREVIEW_UNAVAILABLE");
-        const identity = await deps.modelPreviewIdentity(SEMANTIC_CHARACTER_ID);
+        const identity = await deps.modelPreviewIdentity(characterId);
         if (!identity) return fail(503, "PREVIEW_UNAVAILABLE");
+        if (
+          body?.resolvedBody &&
+          identity.characterSha256 !== body.resolvedBody.assetSha256
+        )
+          return fail(409, "BODY_UNAVAILABLE");
+        const runtime = body ? await deps.getPreviewRuntime() : null;
         if (!(await deps.consume(owner))) return fail(429, "RATE_LIMITED");
         const bvhBytes = await previewAssetBytes(asset, deps.getPoseBvh);
         let data: Uint8Array | undefined,
           version = "posed-mesh-v1";
         try {
-          const library = await deps.getPreviewModel(
-            hash,
-            SEMANTIC_CHARACTER_ID,
-          );
+          if (body?.shape)
+            throw new ConverterError(
+              "PREVIEW_NOT_READY",
+              "shaped surface needs render",
+            );
+          const library = await deps.getPreviewModel(hash, characterId);
           if (
             !matchesLibraryModel(
               library,
               hash,
-              SEMANTIC_CHARACTER_ID,
+              characterId,
               identity.characterSha256,
             )
           )
@@ -146,15 +184,32 @@ export function createSemanticModelRoutes(
         if (!data) {
           version = "framed-mesh-v1";
           const artifact = await cache.get(
-            JSON.stringify([owner, jobId, index, id, hash, identity]),
+            JSON.stringify([
+              owner,
+              jobId,
+              index,
+              id,
+              hash,
+              characterId,
+              identity,
+              body,
+              runtime,
+            ]),
             () =>
               deps.convertFramed({
                 bvhBytes,
-                characterId: SEMANTIC_CHARACTER_ID,
+                characterId,
                 scope: "full",
                 previewFormat: "model",
                 ...identity,
                 expectedCharacterSha256: identity.characterSha256,
+                ...(body
+                  ? {
+                      shape: body.shape,
+                      shapeSource: body.shapeSource,
+                      expectedPreviewRevision: runtime!.previewRevision,
+                    }
+                  : {}),
               }),
           );
           data = artifact.preview;
@@ -172,19 +227,43 @@ export function createSemanticModelRoutes(
           )
         )
           return fail(409, "PREVIEW_SOURCE_CHANGED");
-        const after = await deps.modelPreviewIdentity(SEMANTIC_CHARACTER_ID);
+        const after = await deps.modelPreviewIdentity(characterId);
         if (
           !after ||
           after.characterSha256 !== identity.characterSha256 ||
           after.modelRevision !== identity.modelRevision
         )
           return fail(409, "PREVIEW_SOURCE_CHANGED");
+        if (body) {
+          const liveBody = await deps.selection(owner, jobId, index);
+          if (
+            liveBody.selectionRevision !== body.selectionRevision ||
+            liveBody.resolutionStatus !== "ready" ||
+            !liveBody.resolvedBody ||
+            !sameBody(liveBody.resolvedBody, body.resolvedBody!) ||
+            (liveBody.shape?.shapeSha256 ?? null) !==
+              (body.shape?.shapeSha256 ?? null) ||
+            (body.shape &&
+              !sameShapeSource(body.shapeSource, liveBody.shapeSource))
+          )
+            return fail(409, "BODY_SELECTION_CONFLICT");
+          const liveRuntime = await deps.getPreviewRuntime();
+          if (JSON.stringify(liveRuntime) !== JSON.stringify(runtime))
+            return fail(409, "PREVIEW_SOURCE_CHANGED");
+        }
         return new Response(data, {
           headers: {
             "Content-Type": "model/gltf-binary",
             "Cache-Control": "private, no-store",
             "X-Standin-Preview-Only": "true",
-            "X-Standin-Character-Id": SEMANTIC_CHARACTER_ID,
+            ...(body
+              ? {
+                  "X-Standin-Body-Revision": String(body.selectionRevision),
+                  "X-Standin-Body-Shape-SHA256":
+                    body.shape?.shapeSha256 ?? "none",
+                }
+              : {}),
+            "X-Standin-Character-Id": characterId,
             "X-Standin-Model-Version": version,
             "X-Standin-Source-BVH-SHA256": hash,
             "X-Standin-Character-SHA256": identity.characterSha256,
@@ -193,7 +272,9 @@ export function createSemanticModelRoutes(
           },
         });
       } catch (e) {
-        return e instanceof HandError ? fail(e.status, e.code) : fail(503, "PREVIEW_UNAVAILABLE");
+        return e instanceof HandError || e instanceof BodyError
+          ? fail(e.status, e.code)
+          : fail(503, "PREVIEW_UNAVAILABLE");
       }
     },
   );

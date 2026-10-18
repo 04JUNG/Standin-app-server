@@ -1,3 +1,4 @@
+import type { BodySelection } from "../body-selection/model.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID, createHash } from "node:crypto";
@@ -9,7 +10,7 @@ import {
   createSemanticModelRoutes,
   SEMANTIC_CHARACTER_ID,
 } from "./model-preview.js";
-function fixture() {
+function fixture(characterId = SEMANTIC_CHARACTER_ID) {
   const bvh = "HIERARCHY verified source",
     hash = createHash("sha256").update(bvh).digest("hex"),
     id = "preview_" + "b".repeat(64),
@@ -43,7 +44,7 @@ function fixture() {
     asset: {
       extras: {
         version: "posed-mesh-v1",
-        character_id: SEMANTIC_CHARACTER_ID,
+        character_id: characterId,
         character_sha256: identity.characterSha256,
         source_bvh_sha256: hash,
         revision: identity.modelRevision,
@@ -62,6 +63,28 @@ function fixture() {
   model.writeUInt32LE(0x4e4f534a, 16);
   json.copy(model, 20);
   const state = {
+    bodyEnabled: true,
+    shapeBlocked: false,
+    selection: {
+      schemaVersion: "body-selection.v1",
+      personIndex: 0,
+      intent: "manual",
+      manualCharacterId: characterId,
+      recommendation: { status: "disabled", body: null, reasonCodes: [] },
+      resolvedBody: {
+        bodyId: characterId,
+        characterId,
+        bodyVersion: "v1",
+        assetSha256: identity.characterSha256,
+        rigVersion: "v1",
+        measurementVersion: "v1",
+      },
+      resolvedSource: "manual",
+      resolutionStatus: "ready",
+      selectionRevision: 3,
+      renderingExecuted: false,
+      previewOnly: true,
+    } as BodySelection,
     owned: true,
     rate: true,
     changed: false,
@@ -81,6 +104,17 @@ function fixture() {
     createSemanticModelRoutes({
       getOwnedJob: async (_, owner) =>
         state.owned && owner === "owner" ? job : undefined,
+      bodyEnabled: () => state.bodyEnabled,
+      selection: async () => structuredClone(state.selection),
+      shapeRenderable: () => !state.shapeBlocked,
+      getPreviewRuntime: async () => ({
+        schemaVersion: "body-preview-runtime.v1",
+        previewRevision: "e".repeat(64),
+        modelVersion: "posed-mesh-v1",
+        modelRevision: identity.modelRevision,
+        solverVersion: "x",
+        framingVersion: "x",
+      }),
       checkCharacter: async () => "ok",
       modelPreviewIdentity: async () => identity,
       consume: async () => state.rate,
@@ -99,11 +133,13 @@ function fixture() {
       },
       convertFramed: async (input) => {
         state.converts++;
-        assert.equal(input.characterId, SEMANTIC_CHARACTER_ID);
+        assert.equal(input.characterId, characterId);
         assert.equal(input.scope, "full");
         assert.equal(input.previewFormat, "model");
         assert.equal(input.hands, undefined);
-        assert.equal(input.shape, undefined);
+        assert.deepEqual(input.shape ?? null, state.selection.shape ?? null);
+        if (input.shape)
+          assert.deepEqual(input.shapeSource, state.selection.shapeSource);
         state.after();
         return {
           preview: model,
@@ -177,4 +213,47 @@ test("image jobs cannot obtain semantic fixed-body model access", async () => {
   const { app, job, url } = fixture();
   job.result!.source = "image";
   assert.equal((await app.request(url)).status, 404);
+});
+
+test("selected female body uses persisted identity and revision, never a caller character override", async () => {
+  const { app, state, url } = fixture("female-test");
+  const r = await app.request(url + "?bodyRevision=3");
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get("X-Standin-Character-Id"), "female-test");
+  assert.equal(r.headers.get("X-Standin-Body-Revision"), "3");
+  assert.equal(r.headers.get("X-Standin-Body-Shape-SHA256"), "none");
+  assert.equal(state.converts, 0);
+});
+test("stale or disabled body choices do not return the old body", async () => {
+  const { app, state, url } = fixture();
+  assert.equal((await app.request(url + "?bodyRevision=2")).status, 409);
+  state.bodyEnabled = false;
+  assert.equal((await app.request(url + "?bodyRevision=3")).status, 503);
+  assert.equal(state.converts, 0);
+});
+test("body change during model read discards the old surface", async () => {
+  const { app, state, url } = fixture();
+  state.after = () => {
+    state.selection.selectionRevision++;
+  };
+  assert.equal((await app.request(url + "?bodyRevision=3")).status, 409);
+});
+test("shaped body forces an exact bake and unsupported shapes fail closed", async () => {
+  const { app, state, url } = fixture();
+  state.selection.shape = {
+    schemaVersion: "body-shape.v1",
+    controls: { height: 180 },
+    shapeSha256: "f".repeat(64),
+  };
+  state.selection.shapeSource = {
+    rules: "v1",
+    blendSha256: "1".repeat(64),
+    controllerSha256: "2".repeat(64),
+  };
+  state.shapeBlocked = true;
+  assert.equal((await app.request(url + "?bodyRevision=3")).status, 409);
+  assert.equal(state.converts, 0);
+  state.shapeBlocked = false;
+  assert.equal((await app.request(url + "?bodyRevision=3")).status, 200);
+  assert.equal(state.converts, 1);
 });
