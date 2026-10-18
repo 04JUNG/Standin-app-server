@@ -1,11 +1,20 @@
 /** Versioned, lookup-only presentation. Assets stay in the private per-person context. */
 import { createHash } from "node:crypto";
 import { Hono } from "hono";
+import type { AnalysisPerson, PoseCandidate } from "./types.js";
 import type { AppEnv } from "./env.js";
 import { queryOne } from "./db.js";
 import { getOwnedJob } from "./jobs/store.js";
 import { getPoseBvh } from "./inference.js";
 import { errorEnvelope } from "./mapping.js";
+import { config } from "./config.js";
+import { BodyError, bodyStore } from "./body-selection/store.js";
+import { shapeRenderable } from "./body-selection/shape.js";
+import { checkCharacter } from "./characters/service.js";
+import { converterEnabled, ConverterError } from "./converter/client.js";
+import { convertFramed } from "./converter/framing.js";
+import { getPreviewRuntime } from "./converter/previewRuntime.js";
+import { cameraArtifact } from "./candidate-camera/artifacts.js";
 
 export interface RenderCamera {
   version: "pose-preview-camera-v1";
@@ -69,6 +78,45 @@ export interface PosePresentation {
   auto_apply_allowed: false;
   refine_allowed: false;
   export_allowed: false;
+}
+/** Only an explicitly selectable, owned library row can use its stored presentation camera.
+ * This does not fabricate a fitted candidate-camera contract or promote references/generation.
+ */
+export function manualPresentationCamera(
+  person: AnalysisPerson | undefined,
+  candidate: PoseCandidate | undefined,
+) {
+  const p = person?.posePresentation;
+  if (
+    !candidate ||
+    candidate.source !== "library" ||
+    candidate.lookupAllowed !== true ||
+    candidate.releaseAllowed !== true ||
+    !candidate.bvhAvailable ||
+    !candidate.sourceBvhSha256 ||
+    p?.version !== "dynamic-pose-presentation-v1" ||
+    !["ready", "review_ready"].includes(p.status) ||
+    !["ok", "partial_error"].includes(p.search_status)
+  )
+    return null;
+  const row = p.library_candidates.find(
+    (c) =>
+      c.candidate_id === candidate.id &&
+      c.pose_id === candidate.poseId &&
+      c.source === "library" &&
+      c.kind === "library_match" &&
+      c.asset.transport === "library_bvh" &&
+      c.asset.bvh_sha256 === candidate.sourceBvhSha256,
+  );
+  if (!row) return null;
+  try {
+    return {
+      camera: validateRenderCamera(row.render_camera),
+      sourceBvhSha256: row.asset.bvh_sha256,
+    };
+  } catch {
+    return null;
+  }
 }
 export interface PrivatePreviewAsset {
   transport: "library_bvh" | "inline_bvh";
@@ -406,94 +454,231 @@ async function loadAssets(
     return {};
   }
 }
-const defaults = { getOwnedJob, loadAssets, getPoseBvh };
-export function createPresentationRoutes(
-  overrides: Partial<typeof defaults> = {},
+const defaults = {
+  getOwnedJob,
+  loadAssets,
+  getPoseBvh,
+  enabled: () => config.bodySelectionEnabled && converterEnabled(),
+  selection: bodyStore.selection,
+  checkCharacter,
+  getPreviewRuntime,
+  convertFramed,
+};
+type PreviewDeps = typeof defaults;
+/** Private source verification is shared by the skeleton and selected-body transports. */
+async function readPreview(
+  deps: PreviewDeps,
+  owner: string,
+  jobId: string,
+  index: number,
+  id: string,
+  hash: string,
 ) {
+  const job = await deps.getOwnedJob(jobId, owner);
+  const p = job?.result?.candidatesByPerson.find(
+    (p) => p.personIndex === index,
+  )?.posePresentation;
+  const candidate =
+    p && groups.flatMap((g) => p[g]).find((x) => x.candidate_id === id);
+  if (
+    job?.status !== "completed" ||
+    !candidate ||
+    candidate.asset.bvh_sha256 !== hash
+  )
+    throw new BodyError("PREVIEW_UNAVAILABLE", 404);
+  const a = (await deps.loadAssets(jobId, index))[id];
+  if (
+    !a ||
+    a.bvh_sha256 !== hash ||
+    a.transport !== candidate.asset.transport ||
+    a.pose_id !== candidate.pose_id
+  )
+    throw new BodyError("PREVIEW_SOURCE_CHANGED", 409);
+  let bytes: Uint8Array;
+  if (a.transport === "inline_bvh") bytes = Buffer.from(a.bvh ?? "", "utf8");
+  else {
+    if (!a.pose_id) throw new BodyError("PREVIEW_UNAVAILABLE", 409);
+    const response = await deps.getPoseBvh(a.pose_id);
+    if (
+      !response.ok ||
+      Number(response.headers.get("content-length")) > 2_000_000
+    ) {
+      await response.body?.cancel();
+      throw new BodyError("PREVIEW_UNAVAILABLE", 409);
+    }
+    const reader = response.body?.getReader();
+    if (!reader) throw new BodyError("PREVIEW_UNAVAILABLE", 409);
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      for (;;) {
+        const n = await reader.read();
+        if (n.done) break;
+        size += n.value.length;
+        if (size > 2_000_000) throw new BodyError("PREVIEW_UNAVAILABLE", 409);
+        chunks.push(n.value);
+      }
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
+    bytes = Buffer.concat(chunks);
+  }
+  if (!bytes.length || bytes.length > 2_000_000 || sha(bytes) !== hash)
+    throw new BodyError("PREVIEW_HASH_MISMATCH", 409);
+  return { candidate, scope: p!.output_scope, bytes };
+}
+export function createPresentationRoutes(overrides: Partial<PreviewDeps> = {}) {
   const deps = { ...defaults, ...overrides },
     routes = new Hono<AppEnv>();
-  routes.get(
-    "/:jobId/people/:personIndex/pose-previews/:candidateId/:hash",
-    async (c) => {
-      const fail = (status: 409 | 404 | 502, code: string) =>
-        c.json(
+  const prefix = "/:jobId/people/:personIndex/pose-previews/:candidateId/:hash";
+  routes.onError((error, c) =>
+    c.json(
+      errorEnvelope(
+        error instanceof BodyError || error instanceof ConverterError
+          ? error.code
+          : "PREVIEW_UNAVAILABLE",
+        "미리보기를 확인하지 못했습니다. 다시 시도해 주세요.",
+        c.get("requestId"),
+      ),
+      error instanceof BodyError
+        ? error.status
+        : error instanceof ConverterError &&
+            error.code === "CONVERTER_INTEGRITY"
+          ? 409
+          : 503,
+    ),
+  );
+  for (const path of [prefix, `${prefix}/body/:revision`])
+    routes.use(path, async (c, next) => {
+      c.header("Cache-Control", "private, no-store");
+      if (!c.get("installationId"))
+        return c.json(
           errorEnvelope(
-            code,
-            "3D 미리보기를 확인하지 못했습니다.",
+            "UNAUTHORIZED",
+            "설치 인증이 필요합니다.",
             c.get("requestId"),
           ),
-          status,
+          401,
         );
-      const index = Number(c.req.param("personIndex")),
-        id = c.req.param("candidateId"),
-        hash = c.req.param("hash"),
-        jobId = c.req.param("jobId");
       if (
-        !Number.isInteger(index) ||
-        index < 0 ||
-        !/^preview_[a-f0-9]{64}$/.test(id) ||
-        !/^[a-f0-9]{64}$/.test(hash)
+        !/^(0|[1-9]\d*)$/.test(c.req.param("personIndex")!) ||
+        !Number.isSafeInteger(Number(c.req.param("personIndex"))) ||
+        !/^preview_[a-f0-9]{64}$/.test(c.req.param("candidateId")!) ||
+        !/^[a-f0-9]{64}$/.test(c.req.param("hash")!) ||
+        Object.keys(c.req.query()).length
       )
-        return fail(409, "INVALID_SELECTION");
-      const job = await deps.getOwnedJob(jobId, c.get("installationId")!);
-      const p = job?.result?.candidatesByPerson.find(
-        (p) => p.personIndex === index,
-      )?.posePresentation;
-      const candidate =
-        p && groups.flatMap((g) => p[g]).find((x) => x.candidate_id === id);
-      if (
-        job?.status !== "completed" ||
-        !candidate ||
-        candidate.asset.bvh_sha256 !== hash
-      )
-        return fail(404, "PREVIEW_UNAVAILABLE");
-      const a = (await deps.loadAssets(jobId, index))[id];
-      if (
-        !a ||
-        a.bvh_sha256 !== hash ||
-        a.transport !== candidate.asset.transport ||
-        a.pose_id !== candidate.pose_id
-      )
-        return fail(409, "PREVIEW_SOURCE_CHANGED");
-      try {
-        let bytes: Uint8Array;
-        if (a.transport === "inline_bvh")
-          bytes = Buffer.from(a.bvh ?? "", "utf8");
-        else {
-          if (!a.pose_id) return fail(409, "PREVIEW_UNAVAILABLE");
-          const r = await deps.getPoseBvh(a.pose_id);
-          if (!r.ok) return fail(409, "PREVIEW_UNAVAILABLE");
-          if (Number(r.headers.get("content-length")) > 2_000_000)
-            return fail(409, "PREVIEW_UNAVAILABLE");
-          const reader = r.body?.getReader();
-          if (!reader) return fail(409, "PREVIEW_UNAVAILABLE");
-          const chunks: Uint8Array[] = [];
-          let size = 0;
-          while (true) {
-            const n = await reader.read();
-            if (n.done) break;
-            size += n.value.length;
-            if (size > 2_000_000) {
-              await reader.cancel();
-              return fail(409, "PREVIEW_UNAVAILABLE");
-            }
-            chunks.push(n.value);
-          }
-          bytes = Buffer.concat(chunks);
-        }
-        if (!bytes.length || bytes.length > 2_000_000 || sha(bytes) !== hash)
-          return fail(409, "PREVIEW_HASH_MISMATCH");
-        return new Response(bytes, {
-          headers: {
-            "Content-Type": "text/plain; charset=utf-8",
-            "Cache-Control": "private, no-store",
-            "X-Standin-BVH-SHA256": hash,
-          },
-        });
-      } catch {
-        return fail(502, "PREVIEW_UNAVAILABLE");
-      }
-    },
-  );
+        throw new BodyError("INVALID_SELECTION", 409);
+      await next();
+    });
+  routes.get(prefix, async (c) => {
+    const hash = c.req.param("hash");
+    const { bytes } = await readPreview(
+      deps,
+      c.get("installationId")!,
+      c.req.param("jobId"),
+      Number(c.req.param("personIndex")),
+      c.req.param("candidateId"),
+      hash,
+    );
+    return new Response(bytes, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "private, no-store",
+        "X-Standin-BVH-SHA256": hash,
+      },
+    });
+  });
+  // This PNG is reference-only. It never grants release/refine/export to presentation candidates.
+  routes.get(`${prefix}/body/:revision`, async (c) => {
+    if (!deps.enabled()) throw new BodyError("BODY_SELECTION_DISABLED", 503);
+    const owner = c.get("installationId")!,
+      job = c.req.param("jobId"),
+      index = Number(c.req.param("personIndex")),
+      id = c.req.param("candidateId"),
+      hash = c.req.param("hash"),
+      rev = c.req.param("revision");
+    if (!/^(0|[1-9]\d*)$/.test(rev) || !Number.isSafeInteger(Number(rev)))
+      throw new BodyError("INVALID_INPUT", 400);
+    const preview = await readPreview(deps, owner, job, index, id, hash);
+    const selection = await deps.selection(owner, job, index);
+    if (selection.selectionRevision !== Number(rev))
+      throw new BodyError("BODY_PREVIEW_STALE", 409);
+    if (
+      !selection.previewOnly ||
+      selection.resolutionStatus !== "ready" ||
+      !selection.resolvedBody ||
+      !shapeRenderable(selection)
+    )
+      throw new BodyError("BODY_PREVIEW_UNSUPPORTED", 409);
+    const body = selection.resolvedBody;
+    if ((await deps.checkCharacter(body.characterId)) !== "ok")
+      throw new BodyError("BODY_UNAVAILABLE", 409);
+    const scope = preview.scope === "shoulder_head" ? "bust" : preview.scope;
+    if (
+      scope !== "full" &&
+      scope !== "half" &&
+      scope !== "bust" &&
+      scope !== "head"
+    )
+      throw new BodyError("BODY_PREVIEW_UNSUPPORTED", 409);
+    const camera = validateRenderCamera(preview.candidate.render_camera),
+      runtime = await deps.getPreviewRuntime();
+    const binding = JSON.stringify([
+      selection,
+      preview.candidate,
+      scope,
+      runtime,
+    ]);
+    const artifact = await cameraArtifact(
+      ["presentation-body-v1", owner, job, index, id, binding],
+      {
+        bvhBytes: preview.bytes,
+        characterId: body.characterId,
+        shape: selection.shape,
+        shapeSource: selection.shapeSource,
+        scope,
+        cameraRotation: camera.rotation,
+        expectedCharacterSha256: body.assetSha256,
+        expectedPreviewRevision: runtime.previewRevision,
+      },
+      deps.convertFramed,
+    );
+    if (
+      artifact.characterSha256 !== body.assetSha256 ||
+      artifact.previewRevision !== runtime.previewRevision ||
+      artifact.sourceBvhSha256 !== hash
+    )
+      throw new ConverterError(
+        "CONVERTER_INTEGRITY",
+        "presentation body mismatch",
+      );
+    // A late cached/render response must not win after body, camera, source, scope or runtime changes.
+    const current = await readPreview(deps, owner, job, index, id, hash);
+    const currentScope =
+      current.scope === "shoulder_head" ? "bust" : current.scope;
+    if (
+      JSON.stringify([
+        await deps.selection(owner, job, index),
+        current.candidate,
+        currentScope,
+        await deps.getPreviewRuntime(),
+      ]) !== binding
+    )
+      throw new BodyError("BODY_PREVIEW_STALE", 409);
+    return new Response(artifact.preview, {
+      headers: {
+        "Content-Type": "image/png",
+        "Cache-Control": "private, no-store",
+        "X-Standin-Body-Revision": rev,
+        "X-Standin-Character-SHA256": body.assetSha256,
+        "X-Standin-Shape-SHA256": selection.shape?.shapeSha256 ?? "none",
+        "X-Standin-Source-BVH-SHA256": hash,
+        "X-Standin-Artifact-SHA256": sha(artifact.preview),
+        "X-Standin-Preview-Projection": "orthographic",
+        "X-Standin-Preview-Only": "true",
+      },
+    });
+  });
   return routes;
 }

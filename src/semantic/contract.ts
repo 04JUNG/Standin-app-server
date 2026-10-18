@@ -159,10 +159,11 @@ export function readSearchResponse(
 export function semanticCapabilities(
   capabilities: AnalysisResult["capabilities"],
 ): AnalysisResult["capabilities"] {
-  // No image-derived skeleton/camera: preserve canonical character/framing export only.
+  // Text body selection is preview-only; image-derived recommendation/refine stays disabled.
   return {
     ...capabilities,
     refine: false,
+    semanticBodySelection: capabilities.bodySelection === true && capabilities.bodyPreviews === true,
     bodySelection: false,
     bodyRecommendation: false,
     bodyPreviews: false,

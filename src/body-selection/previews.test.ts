@@ -15,7 +15,7 @@ import {
   type BodyPreviewManifest,
 } from "./previews.js";
 import { bodyRef, defaultPreferences, resolveBody, snapshot } from "./model.js";
-import { catalog, result } from "./fixtures.js";
+import { catalog, result, makeManualPresentation } from "./fixtures.js";
 
 function setup(count = 5) {
   const bodies = catalog(9),
@@ -127,6 +127,7 @@ function setup(count = 5) {
         assert.deepEqual(input.cameraRotation, rotation);
         assert.deepEqual(input.bvhBytes, new Uint8Array(bvh));
         assert.equal(input.scope, "full");
+        assert.deepEqual(input.shape, state.selections[0].shape ?? null);
         assert.equal(
           input.characterId,
           state.selections[0].resolvedBody!.characterId,
@@ -324,36 +325,111 @@ test("disabled, old camera and malformed parameters fail closed", async () => {
   );
 });
 
-function searchCamera(base: CandidateCamera, poseId: string): Extract<CandidateCamera, { version: "candidate-camera-v2" }> {
-  return { ...base, version: "candidate-camera-v2", reference: "search-fit",
-    projection: "perspective", distance_torso: 4, labels_swapped: true,
-    pose_id: poseId, query_sha256: "d".repeat(64), observed_joint_mask: Array(17).fill(true) };
+function searchCamera(
+  base: CandidateCamera,
+  poseId: string,
+): Extract<CandidateCamera, { version: "candidate-camera-v2" }> {
+  return {
+    ...base,
+    version: "candidate-camera-v2",
+    reference: "search-fit",
+    projection: "perspective",
+    distance_torso: 4,
+    labels_swapped: true,
+    pose_id: poseId,
+    query_sha256: "d".repeat(64),
+    observed_joint_mask: Array(17).fill(true),
+  };
 }
 test("v2 search cameras retain projection/binding metadata through manifest and both preview transports", async () => {
   const s = setup();
   for (const c of s.analysis.candidatesByPerson[0].candidates)
     c.camera = searchCamera(c.camera!, c.poseId);
   const m = await s.manifest();
-  assert.deepEqual(m.candidates[0].camera, s.analysis.candidatesByPerson[0].candidates[0].camera);
+  assert.deepEqual(
+    m.candidates[0].camera,
+    s.analysis.candidatesByPerson[0].candidates[0].camera,
+  );
   assert.equal((await s.app.request(m.candidates[0].thumbnailUrl)).status, 200);
-  assert.equal((await s.app.request(m.candidates[0].previewModel.url)).status, 200);
+  assert.equal(
+    (await s.app.request(m.candidates[0].previewModel.url)).status,
+    200,
+  );
   // Preview uses its rotation; projection/mask remain unchanged for inference refine.
   assert.equal(s.state.convertCalls, 1);
   const camera = s.analysis.candidatesByPerson[0].candidates[0].camera!;
   if (camera.version !== "candidate-camera-v2") throw new Error("v2 expected");
   camera.pose_id = "another-pose";
-  assert.equal((await s.app.request(bodyPreviewManifestUrl(s.jobId, 0))).status, 409);
+  assert.equal(
+    (await s.app.request(bodyPreviewManifestUrl(s.jobId, 0))).status,
+    409,
+  );
 });
 test("v2 camera validation rejects incomplete binding, bad projection and unsafe rotation", () => {
   const base = setup().analysis.candidatesByPerson[0].candidates[0].camera!;
   assert.equal(validCamera(base), true);
   const camera = searchCamera(base, "pose-0");
   assert.equal(validCamera(camera), true);
-  assert.equal(validCamera({ ...camera, projection: "orthographic", distance_torso: null }), true);
+  assert.equal(
+    validCamera({
+      ...camera,
+      projection: "orthographic",
+      distance_torso: null,
+    }),
+    true,
+  );
   for (const change of [
-    { reference: "pelvis-torso-yaw" }, { projection: "unknown" }, { distance_torso: 0.7 },
-    { distance_torso: Infinity }, { labels_swapped: undefined }, { query_sha256: "bad" },
-    { observed_joint_mask: Array(17).fill(false) }, { observed_joint_mask: Array(16).fill(true) },
-    { pose_id: "" }, { rotation: [[1,0,0],[0,1,0],[0,0,-1]] }, { fit_error: NaN },
-  ]) assert.equal(validCamera({ ...camera, ...change } as CandidateCamera), false);
+    { reference: "pelvis-torso-yaw" },
+    { projection: "unknown" },
+    { distance_torso: 0.7 },
+    { distance_torso: Infinity },
+    { labels_swapped: undefined },
+    { query_sha256: "bad" },
+    { observed_joint_mask: Array(17).fill(false) },
+    { observed_joint_mask: Array(16).fill(true) },
+    { pose_id: "" },
+    {
+      rotation: [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, -1],
+      ],
+    },
+    { fit_error: NaN },
+  ])
+    assert.equal(
+      validCamera({ ...camera, ...change } as CandidateCamera),
+      false,
+    );
+});
+
+test("owned manually selectable library Top-5 retain body/shape previews without a fabricated fitted camera", async (t) => {
+  const { config } = await import("../config.js");
+  const before = config.bodyShapeBakeEnabled;
+  Object.assign(config, { bodyShapeBakeEnabled: true });
+  t.after(() => Object.assign(config, { bodyShapeBakeEnabled: before }));
+  const s = setup();
+  makeManualPresentation(s.analysis.candidatesByPerson[0]);
+  s.state.selections[0].shape = {
+    schemaVersion: "body-shape.v1",
+    controls: { height: 186 },
+    shapeSha256: "d".repeat(64),
+  };
+  s.state.selections[0].shapeSource = {
+    rules: "test",
+    blendSha256: "e".repeat(64),
+    controllerSha256: "f".repeat(64),
+  };
+  const manifest = await s.manifest();
+  assert.equal(manifest.candidates.length, 5);
+  const response = await s.app.request(manifest.candidates[0].thumbnailUrl);
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal(s.state.convertCalls, 1);
+  assert.deepEqual(manifest.shape, s.state.selections[0].shape);
+  s.analysis.candidatesByPerson[0].posePresentation!.library_candidates[0].asset.bvh_sha256 =
+    "0".repeat(64);
+  assert.equal(
+    (await s.app.request(bodyPreviewManifestUrl(s.jobId, 0))).status,
+    409,
+  );
 });

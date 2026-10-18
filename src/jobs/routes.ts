@@ -9,10 +9,16 @@ import {
   bodyPreviewManifestUrl,
 } from "../body-selection/previews.js";
 import { createBodySelectionRoutes } from "../body-selection/routes.js";
-import { attachBodySelections } from "../body-selection/store.js";
+import {
+  attachBodySelections,
+  personBodyContext,
+} from "../body-selection/store.js";
 import { createOutputScopeRoutes } from "../output-scope/routes.js";
 import { resolveOutputScope } from "../output-scope/model.js";
-import { createPresentationRoutes } from "../pose-presentation.js";
+import {
+  createPresentationRoutes,
+  manualPresentationCamera,
+} from "../pose-presentation.js";
 import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
 import { errorEnvelope } from "../mapping.js";
@@ -310,10 +316,21 @@ jobsRoutes.get("/:id/result", async (c) => {
       })),
     })),
     capabilities: {
-      ...(result.source === "semantic" ? semanticCapabilities(await currentCapabilities()) : await currentCapabilities()),
+      presentationBodyPreviews:
+        (await currentCapabilities()).bodyPreviews === true &&
+        result.candidatesByPerson.some(
+          (p) => personBodyContext(p).previewOnly && !!p.bodySelection,
+        ),
+      ...(result.source === "semantic"
+        ? semanticCapabilities(await currentCapabilities())
+        : await currentCapabilities()),
       ...(result.candidatesByPerson.some(
-        (p) => p.routedSearch || p.posePresentation,
-      )
+        (p) =>
+          p.candidates.length > 0 &&
+          (p.routedSearch ||
+            (p.posePresentation &&
+              !p.candidates.every((c) => manualPresentationCamera(p, c)))),
+      ) || !result.candidatesByPerson.some((p) => p.candidates.length > 0)
         ? { bodyPreviews: false }
         : {}),
       ...(!result.candidatesByPerson

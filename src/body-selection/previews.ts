@@ -1,4 +1,5 @@
 /** Read-only Top-K previews bound to the persisted body choice. No search/refine mutation. */
+import { manualPresentationCamera } from "../pose-presentation.js";
 import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
 import type { CandidateCamera } from "../types.js";
@@ -62,15 +63,24 @@ export function validCamera(
       camera.reference !== "search-fit" ||
       !["orthographic", "perspective"].includes(camera.projection) ||
       (camera.projection === "perspective"
-        ? typeof camera.distance_torso !== "number" || !Number.isFinite(camera.distance_torso) || camera.distance_torso < 0.8
+        ? typeof camera.distance_torso !== "number" ||
+          !Number.isFinite(camera.distance_torso) ||
+          camera.distance_torso < 0.8
         : camera.distance_torso !== null) ||
       typeof camera.labels_swapped !== "boolean" ||
-      typeof camera.pose_id !== "string" || !camera.pose_id ||
-      typeof camera.query_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(camera.query_sha256) ||
-      !Number.isFinite(camera.fit_error) || camera.fit_error < 0 ||
-      !Array.isArray(mask) || mask.length !== 17 || mask.some((v) => typeof v !== "boolean") ||
-      ![5, 6, 11, 12].every((i) => mask[i]) || mask.slice(5).filter(Boolean).length < 6
-    ) return false;
+      typeof camera.pose_id !== "string" ||
+      !camera.pose_id ||
+      typeof camera.query_sha256 !== "string" ||
+      !/^[a-f0-9]{64}$/.test(camera.query_sha256) ||
+      !Number.isFinite(camera.fit_error) ||
+      camera.fit_error < 0 ||
+      !Array.isArray(mask) ||
+      mask.length !== 17 ||
+      mask.some((v) => typeof v !== "boolean") ||
+      ![5, 6, 11, 12].every((i) => mask[i]) ||
+      mask.slice(5).filter(Boolean).length < 6
+    )
+      return false;
   }
   const m = camera.rotation;
   if (
@@ -138,8 +148,14 @@ export async function bodyPreviewManifest(
     throw new BodyError("BODY_PREVIEW_UNAVAILABLE", 503);
   const ids = new Set<string>();
   const candidates = person.candidates.map((c) => {
-    if (!c.bvhAvailable || !validCamera(c.camera) ||
-        (c.camera.version === "candidate-camera-v2" && c.camera.pose_id !== c.poseId) || ids.has(c.id))
+    const manual = manualPresentationCamera(person, c);
+    if (
+      !c.bvhAvailable ||
+      (!validCamera(c.camera) && !manual) ||
+      (c.camera?.version === "candidate-camera-v2" &&
+        c.camera.pose_id !== c.poseId) ||
+      ids.has(c.id)
+    )
       throw new BodyError("BODY_PREVIEW_UNSUPPORTED", 409);
     ids.add(c.id);
     return {
@@ -147,8 +163,8 @@ export async function bodyPreviewManifest(
       poseId: c.poseId,
       rank: c.rank,
       view: c.view,
-      camera: structuredClone(c.camera),
-      sourceBvhSha256: c.camera.source_bvh_sha256,
+      camera: structuredClone(manual?.camera ?? c.camera!),
+      sourceBvhSha256: manual?.sourceBvhSha256 ?? c.camera!.source_bvh_sha256,
     };
   });
   const runtime = await deps.getPreviewRuntime();
@@ -312,7 +328,10 @@ export function createBodyPreviewRoutes(
       throw new BodyError("POSE_UNAVAILABLE", 409);
     let bytes: Uint8Array;
     if (format === "glb" && manifest.shape)
-      throw new ConverterError("PREVIEW_NOT_READY", "shaped Top-K uses verified PNG; static library GLB is not valid");
+      throw new ConverterError(
+        "PREVIEW_NOT_READY",
+        "shaped Top-K uses verified PNG; static library GLB is not valid",
+      );
     if (format === "glb")
       bytes = await deps.getModel(
         candidate.sourceBvhSha256,
