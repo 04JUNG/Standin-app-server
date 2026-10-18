@@ -1257,7 +1257,7 @@ PNG/304 응답의 `X-Standin-Hand-Library-SHA256`으로 카탈로그 일치를 �
 체형/수치를 적용하는 기능이다. 기존 `bodyPreviews`와 별개이며 저장·보정 권한을 부여하지 않는다.
 새 문장 검색 작업도 체형 설정을 시작 시점에 고정한다. 이전 이미지 작업의 `not_applicable`
 선택은 원래 작업의 설정 snapshot으로 조회 시 복원하며 GET은 저장 상태를 바꾸지 않는다.
-이전 작업에 snapshot이 없으면 기능을 광고하지 않는다.
+이전 문장 검색 작업은 아래 semantic 체형 선택 계약에 따라 소유권 잠금 아래 누락된 snapshot/선택만 초기화한다.
 
 `GET /v1/analysis/jobs/:job/people/:index/pose-previews/:candidate/:bvhSha/body/:selectionRevision`
 
@@ -1277,3 +1277,14 @@ false다. 정식 후보 배열에 합치지 않는다.
 캐시는 소유자/작업/인물/후보/체형/수치/원본/범위/카메라/런타임에 묶이고 렌더 후 다시 검증한다.
 선택이 바뀌면 409 `BODY_PREVIEW_STALE`, 미지원·원본 불일치면 409, 타 소유자면 404,
 변환기 비활성/실패면 503이다. 클라이언트는 구 체형이나 기본 체형으로 조용히 폴백하지 않는다.
+
+### 자연어 검색의 조회 전용 체형 선택
+
+`semanticBodySelection=true`일 때 자연어 결과도 기존 인물별 `body-options`, `body-selection` GET/PUT과 체형 카드·수치 조절을 사용한다.
+`bodySelection.previewOnly=true`이며, 검색 후보를 기존 내보내기용 포즈 허용 목록에 추가하지 않는다. 선택 가능한 체형은 승인된 체형 카탈로그의 정확한 asset/rig/measurement identity와 converter 가용 상태를 확인한다. 기존 이미지 결과의 포즈 허용 목록 검사는 그대로다.
+새 semantic Job은 body policy를 캡처하고 선택을 초기화한다. 이전 semantic 기록은 소유권 행 잠금 아래 누락 상태만 초기화하며 수동 선택을 덮어쓰지 않는다. 체형 추천/이미지 기반 카메라/refine은 제공하지 않는다.
+
+`GET {preview_bvh_url}/model?bodyRevision=N`은 저장된 체형 revision만 받는다. characterId/shape/format을 query로 주입할 수 없다.
+응답의 `X-Standin-Body-Revision`, `X-Standin-Body-Shape-SHA256`(`none` 또는 SHA-256), Character-Id/SHA, Model-Revision, 원본 BVH SHA 및 GLB digest를 검증한다.
+수치 조절 체형은 승인된 authoring source로 정확히 bake하며 미조절 모델로 대체하지 않는다. 변환 전후 선택 revision·body identity·shape/source·runtime 변경은 409로 응답을 폐기한다.
+query 없는 기존 dev.172는 기본 남성 미리보기를 유지한다. 신규 후보의 자동 적용·refine·export·release와 actual_mesh_validated 금지는 그대로다.

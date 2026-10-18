@@ -129,6 +129,7 @@ export interface AnalysisResult {
   capabilities: {
     handSelection?: boolean;
     bodySelection?: boolean;
+    semanticBodySelection?: boolean;
     bodyRecommendation?: boolean;
     bodyPreviews?: boolean;
     presentationBodyPreviews?: boolean;

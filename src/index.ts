@@ -150,6 +150,7 @@ app.use(
       "X-Standin-Review-Key",
       "X-Standin-Body-Render-Key",
       "X-Standin-Body-Revision",
+      "X-Standin-Body-Shape-SHA256",
       "X-Standin-Character-SHA256",
       "X-Standin-Source-BVH-SHA256",
       "X-Standin-Preview-Revision",

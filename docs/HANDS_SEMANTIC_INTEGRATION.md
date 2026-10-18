@@ -23,3 +23,10 @@
 손 카탈로그/추천 실패 여부와 무관하게 기본 모델을 표시한다. 체형 선택·손 적용·refine·release와 분리한다.
 기존 라이브러리 메쉬는 원본·캐릭터·revision을 검증하고, 미생성 표면만 convert-framed(model)로 준비한다.
 메쉬 조회는 신규 후보에 내보내기 권한을 부여하지 않는다.
+
+## 자연어 검색 체형 선택 후속
+
+고정 남성 미리보기에 `bodyRevision` 선택 계약을 추가한다. 기존 체형 저장·카드·수치 조절을 사용하며,
+`semanticBodySelection` capability를 별도로 제공해 legacy bodyPreviews/refine 경로는 열지 않는다.
+신규 포즈의 카탈로그 체형은 검수용 표면을 확인할 수 있지만, 기존 release pose allowlist가 확대되지는 않는다.
+손 적용 PNG는 별도의 기본 체형 참고 렌더를 유지한다. 체형 선택은 자연어 결과 카드와 확대 3D 모델에 반영된다.

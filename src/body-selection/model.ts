@@ -155,17 +155,35 @@ export function eligible(
   ref: BodyRef | null,
   catalog: BodyCatalog,
   poses: string[],
-  previewOnly = false,
 ): ref is BodyRef {
   return (
     !!ref &&
     catalog.assets.some(
       (a) =>
         sameBody(a, ref) &&
-        (previewOnly || poses.every((id) => a.supportedPoseIds.includes(id))),
+        poses.every((id) => a.supportedPoseIds.includes(id)),
     )
   );
 }
+/** Catalog identity is required for review surfaces; the pose allowlist remains strict for exports. */
+export function previewEligible(
+  ref: BodyRef | null,
+  catalog: BodyCatalog,
+  poses: string[],
+): ref is BodyRef {
+  return (
+    !!ref && poses.length > 0 && catalog.assets.some((a) => sameBody(a, ref))
+  );
+}
+export const bodyEligible = (
+  ref: BodyRef | null,
+  catalog: BodyCatalog,
+  poses: string[],
+  previewOnly: boolean,
+) =>
+  previewOnly
+    ? previewEligible(ref, catalog, poses)
+    : eligible(ref, catalog, poses);
 export function snapshot(
   preferences: BodyPreferences,
   catalog: BodyCatalog,
@@ -236,7 +254,7 @@ export function resolveBody(
     ...state,
     resolvedBody: ref,
     resolvedSource: source,
-    resolutionStatus: eligible(ref, catalog, poses, previewOnly)
+    resolutionStatus: bodyEligible(ref, catalog, poses, previewOnly)
       ? "ready"
       : "unavailable",
   });
@@ -249,19 +267,19 @@ export function resolveBody(
     intent === "inherit" &&
     policy.preferences.mode === "last_used" &&
     last &&
-    eligible(last.body, catalog, poses, previewOnly)
+    bodyEligible(last.body, catalog, poses, previewOnly)
   )
     return { ...use(last.body, "last_used"), shape: last.shape };
   if (
     recommendation.status === "available" &&
-    eligible(recommendation.body, catalog, poses, previewOnly)
+    bodyEligible(recommendation.body, catalog, poses, previewOnly)
   )
     return use(recommendation.body, "auto_recommendation");
   // An explicit auto action never silently becomes a default.
   if (intent === "auto") return { ...state, resolutionStatus: "unavailable" };
-  if (eligible(policy.userDefault, catalog, poses, previewOnly))
+  if (bodyEligible(policy.userDefault, catalog, poses, previewOnly))
     return use(policy.userDefault, "user_default_fallback");
-  if (eligible(policy.catalogDefault, catalog, poses, previewOnly))
+  if (bodyEligible(policy.catalogDefault, catalog, poses, previewOnly))
     return use(policy.catalogDefault, "catalog_default_fallback");
   return state;
 }
