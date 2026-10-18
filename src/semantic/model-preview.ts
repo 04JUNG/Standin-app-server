@@ -26,6 +26,7 @@ import { errorEnvelope } from "../mapping.js";
 import type { PrivatePreviewAsset } from "../pose-presentation.js";
 import { tryConsume } from "../limits/store.js";
 import { fixedWindow } from "../limits/policy.js";
+import { SEMANTIC_MAX_TOP_K } from "./contract.js";
 export const SEMANTIC_CHARACTER_ID = "standin-master-v2";
 const cache = new FramedArtifactCache(64 * 1024 * 1024, 300_000, 2);
 const defaults = {
@@ -44,7 +45,8 @@ const defaults = {
       "semantic_model_preview",
       owner,
       fixedWindow(Date.now(), 60),
-      20,
+      // Browse both 20-result groups and leave one group's worth for body changes/retries.
+      SEMANTIC_MAX_TOP_K * 3,
     ),
   loadAssets: async (
     job: string,
