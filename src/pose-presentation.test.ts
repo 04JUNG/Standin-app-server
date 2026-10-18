@@ -281,9 +281,8 @@ test("selected-body preview binds private library/generated sources, shape, scop
   Object.assign(config, { bodyShapeBakeEnabled: true });
   t.after(() => Object.assign(config, { bodyShapeBakeEnabled: before }));
   const { catalog } = await import("./body-selection/fixtures.js");
-  const { resolveBody, snapshot, defaultPreferences } = await import(
-    "./body-selection/model.js"
-  );
+  const { resolveBody, snapshot, defaultPreferences } =
+    await import("./body-selection/model.js");
   const { personBodyContext } = await import("./body-selection/store.js");
   const mapped = mapPosePresentation(raw(), 0, "body-job")!;
   const result = mapCutResult("body-job", cut(raw()));
@@ -444,37 +443,207 @@ test("selected-body preview binds private library/generated sources, shape, scop
 function mirrorFixture() {
   const original = candidate();
   const mirror = {
-    ...candidate(), candidate_id: "preview_" + "c".repeat(64), pose_id: "test mirror",
-    kind: "mirror_reference", rank_score: null, score_kind: null,
-    asset: { ...candidate().asset, bvh_url: "/pose/test%20mirror/bvh", bvh_sha256: "d".repeat(64) },
+    ...candidate(),
+    candidate_id: "preview_" + "c".repeat(64),
+    pose_id: "test mirror",
+    kind: "mirror_reference",
+    rank_score: null,
+    score_kind: null,
+    validation: { not_exact_match: true, constraints_satisfied: false },
+    asset: {
+      ...candidate().asset,
+      bvh_url: "/pose/test%20mirror/bvh",
+      bvh_sha256: "d".repeat(64),
+    },
     mirror_comparison: {
-      family_id: "family", original_pose_id: original.pose_id, original_bvh_sha256: original.asset.bvh_sha256, original_candidate_id: original.candidate_id,
-      is_mirror: true, observed_side: "left", reference_side: "right", reason: "opposite_hand_reference", matches_observed_side: false,
+      family_id: "family",
+      original_pose_id: original.pose_id,
+      original_bvh_sha256: original.asset.bvh_sha256,
+      original_candidate_id: original.candidate_id,
+      is_mirror: true,
+      observed_side: "left",
+      reference_side: "right",
+      reason: "opposite_hand_reference",
+      matches_observed_side: false,
     },
   };
-  return { ...raw(), generation_status: null, library_candidates: [original], review_candidates: [mirror],
-    generated_candidates: [], mirror_comparison: { status: "ready", reason: "opposite_hand_reference" } };
+  return {
+    ...raw(),
+    generation_status: null,
+    library_candidates: [original],
+    review_candidates: [mirror],
+    generated_candidates: [] as ReturnType<typeof candidate>[],
+    mirror_comparison: { status: "ready", reason: "opposite_hand_reference" },
+  };
 }
 test("opposite-hand reference preserves private BVH binding and is never a selectable match", () => {
   const value = mirrorFixture();
   const mapped = mapPosePresentation(value, 0, "job");
-  assert.equal(mapped!.presentation.review_candidates[0].mirror_comparison!.original_candidate_id, id);
+  assert.equal(
+    mapped!.presentation.review_candidates[0].mirror_comparison!
+      .original_candidate_id,
+    id,
+  );
   assert.equal(mapped!.presentation.review_candidates[0].rank_score, null);
-  assert.equal(mapped!.assets[value.review_candidates[0].candidate_id].pose_id, "test mirror");
+  assert.equal(
+    mapped!.assets[value.review_candidates[0].candidate_id].pose_id,
+    "test mirror",
+  );
   assert.equal(mapped!.presentation.review_candidates[0].export_allowed, false);
   assert.equal(mapped!.presentation.library_candidates.length, 1);
 });
-for (const failure of ["orphan", "same_side", "score", "hash", "release", "budget"])
+for (const failure of [
+  "orphan",
+  "original_pose",
+  "original_hash",
+  "same_side",
+  "score",
+  "accuracy_score",
+  "score_kind",
+  "hash",
+  "release",
+  "refine",
+  "export",
+  "auto_apply",
+  "mesh",
+  "budget",
+  "generated",
+  "generation_status",
+  "duplicate",
+  "status",
+  "not_exact",
+  "constraints",
+  "camera",
+  "projection",
+  "is_mirror",
+  "wrong_group",
+]) {
   test(`rejects invalid mirror ${failure} instead of promoting it`, () => {
     const v = mirrorFixture();
     const m = v.review_candidates[0];
-    if (failure === "orphan") m.mirror_comparison.original_candidate_id = "preview_" + "e".repeat(64);
+    if (failure === "orphan")
+      m.mirror_comparison.original_candidate_id = "preview_" + "e".repeat(64);
+    if (failure === "original_pose")
+      m.mirror_comparison.original_pose_id = "unrelated";
+    if (failure === "original_hash")
+      m.mirror_comparison.original_bvh_sha256 = "0".repeat(64);
     if (failure === "same_side") m.mirror_comparison.reference_side = "left";
-    if (failure === "score") (m as { rank_score: number | null }).rank_score = .9;
-    if (failure === "hash") m.asset.bvh_sha256 = v.library_candidates[0].asset.bvh_sha256;
+    if (failure === "score")
+      (m as { rank_score: number | null }).rank_score = 0.9;
+    if (failure === "accuracy_score") Object.assign(m, { score: 0.9 });
+    if (failure === "score_kind")
+      Object.assign(m, { score_kind: "weighted_rrf" });
+    if (failure === "hash")
+      m.asset.bvh_sha256 = v.library_candidates[0].asset.bvh_sha256;
     if (failure === "release") m.release_allowed = true;
-    if (failure === "budget") v.library_candidates = Array.from({length:5}, (_,i) => ({...v.library_candidates[0], candidate_id: i ? "preview_" + String(i).repeat(64) : id}));
-    const p = mapPosePresentation(v, 0, "job")!.presentation;
-    assert.equal(p.status, "error");
-    assert.equal(p.review_candidates.length, 0);
+    if (failure === "refine") m.refine_allowed = true;
+    if (failure === "export") m.export_allowed = true;
+    if (failure === "auto_apply") m.auto_apply_allowed = true;
+    if (failure === "mesh") m.actual_mesh_validated = true;
+    if (failure === "budget")
+      v.library_candidates = Array.from({ length: 5 }, (_, i) => ({
+        ...v.library_candidates[0],
+        candidate_id: i ? "preview_" + String(i).repeat(64) : id,
+      }));
+    if (failure === "generated") v.generated_candidates.push(candidate(true));
+    if (failure === "generation_status")
+      Object.assign(v, { generation_status: "preview_ready" });
+    if (failure === "duplicate")
+      v.review_candidates.push({
+        ...m,
+        candidate_id: "preview_" + "f".repeat(64),
+      });
+    if (failure === "status") v.mirror_comparison.status = "unavailable";
+    if (failure === "not_exact") m.validation.not_exact_match = false;
+    if (failure === "constraints") m.validation.constraints_satisfied = true;
+    if (failure === "camera")
+      m.render_camera = { ...m.render_camera, yaw_degrees: 10 };
+    if (failure === "projection")
+      m.render_camera = { ...m.render_camera, projection_matches_search: true };
+    if (failure === "is_mirror")
+      Object.assign(m.mirror_comparison, { is_mirror: "true" });
+    if (failure === "wrong_group") {
+      v.review_candidates = [];
+      v.library_candidates.push(m);
+    }
+    const mapped = mapPosePresentation(v, 0, "job")!;
+    assert.equal(mapped.presentation.status, "error");
+    assert.equal(mapped.presentation.review_candidates.length, 0);
+    assert.deepEqual(mapped.assets, {});
   });
+}
+
+test("ready 4+1 preserves original ranking, includes source, and exposes only originals as selectable", () => {
+  const v = mirrorFixture();
+  v.library_candidates = Array.from({ length: 4 }, (_, i) => ({
+    ...v.library_candidates[0],
+    rank: i + 1,
+    candidate_id: i ? "preview_" + String(i).repeat(64) : id,
+  }));
+  const person = mapCutResult("job", cut(v)).candidatesByPerson[0];
+  assert.deepEqual(
+    person.posePresentation!.library_candidates.map((c) => c.rank),
+    [1, 2, 3, 4],
+  );
+  assert.equal(person.posePresentation!.review_candidates.length, 1);
+  assert.equal(person.candidates.length, 4);
+  assert.ok(
+    person.candidates.every(
+      (c) => c.id !== v.review_candidates[0].candidate_id,
+    ),
+  );
+});
+
+for (const status of ["unavailable", "not_requested"])
+  test(`preserves optional mirror ${status} without invalidating originals`, () => {
+    const v = mirrorFixture();
+    v.review_candidates = [];
+    v.mirror_comparison.status = status;
+    const mapped = mapPosePresentation(v, 0, "job")!;
+    assert.equal(mapped.presentation.status, "ready");
+    assert.equal(mapped.presentation.library_candidates.length, 1);
+    assert.equal(mapped.presentation.mirror_comparison!.status, status);
+  });
+
+test("owned mirror preview fetches the counterpart BVH and rejects changed bytes", async () => {
+  const v = mirrorFixture();
+  const bytes = bvh + "\n# actual opposite-side source\n";
+  const mirror = v.review_candidates[0];
+  mirror.asset.bvh_sha256 = createHash("sha256").update(bytes).digest("hex");
+  const mapped = mapPosePresentation(v, 0, "job")!;
+  const result = mapCutResult("job", cut(v));
+  let changed = false;
+  const fetched: string[] = [];
+  const app = new Hono<AppEnv>();
+  app.use("*", async (c, next) => {
+    c.set("installationId", "owner");
+    c.set("requestId", "req");
+    await next();
+  });
+  app.route(
+    "/",
+    createPresentationRoutes({
+      getOwnedJob: async (job, owner) =>
+        job === "job" && owner === "owner"
+          ? ({ status: "completed", result } as Job)
+          : undefined,
+      loadAssets: async () => mapped.assets,
+      getPoseBvh: async (pid) => {
+        fetched.push(pid);
+        return new Response(changed ? bvh : bytes);
+      },
+    }),
+  );
+  const url = `/job/people/0/pose-previews/${mirror.candidate_id}/${mirror.asset.bvh_sha256}`;
+  const response = await app.request(url);
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), bytes);
+  assert.deepEqual(fetched, ["test mirror"]);
+  changed = true;
+  assert.equal((await app.request(url)).status, 409);
+  assert.equal(
+    (await app.request(url.replace("/job/", "/other/"))).status,
+    404,
+  );
+  assert.equal((await app.request(url + "?release=true")).status, 409);
+});
