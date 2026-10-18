@@ -3,6 +3,7 @@ import { config } from "../config.js";
 import type { BodyCatalog } from "./model.js";
 import { validShapeSource, validShapeSpec } from "./shape.js";
 import { validShapeRuntime } from "./shapeRuntime.js";
+import { isRetiredCharacter } from "../characters/catalog.js";
 export const emptyCatalog = (): BodyCatalog => ({
   version: "unavailable",
   defaultCharacterId: null,
@@ -77,7 +78,16 @@ export function parseCatalog(value: unknown): BodyCatalog {
   }
   if (c.defaultCharacterId !== null && !characters.has(c.defaultCharacterId))
     throw new Error("unknown body default");
-  return c;
+  // An old mounted manifest must not reintroduce retired fixed models into options,
+  // recommendations, saved defaults or manual selections. Keep the input untouched.
+  return {
+    ...c,
+    defaultCharacterId:
+      c.defaultCharacterId && isRetiredCharacter(c.defaultCharacterId)
+        ? null
+        : c.defaultCharacterId,
+    assets: c.assets.filter((a) => !isRetiredCharacter(a.characterId)),
+  };
 }
 /** Only an operator-approved manifest belongs here. Failure closes selection, never invents assets. */
 export function loadBodyCatalog(): BodyCatalog {

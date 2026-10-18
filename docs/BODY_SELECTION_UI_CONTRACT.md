@@ -3,6 +3,15 @@
 기반: 기존 푸시 `codex/body-preview-integration@5bdbe2f`. 클라이언트 `codex/body-selection-ui`와 연결한다.
 기존 1~2단계 계약은 BODY_PREVIEW_DESIGN.md를 따른다.
 
+## 성인 고정 모델 정리 — 2026-10-18
+
+`body-female-athletic/base/muscular`, `body-male-athletic/base/muscular` 6종은
+2026-10-10의 구형 고정 FBX다. 남녀 쉐이프키 모델로 대체하여 `/v1/models`와 승인 체형
+카탈로그에서 제외한다. 예전 manifest나 converter registry가 남아 있어도 새
+선택·추천·기본값에 재등장하지 않으며 직접 지정은 `unavailable`이다.
+남녀 쉐이프키 모델과 아동·청소년 체형은 유지한다. 제거한 모델이 manifest의
+기본값이었다면 기본값을 null로 두며 다른 체형으로 임의 대체하지 않는다.
+
 ## 활성화
 
 `BODY_SELECTION_ENABLED=true`, `BODY_UX_ENABLED=true`, converter 설정이 모두 있어야 전체 UX capability `bodyPreviews`를 켠다.

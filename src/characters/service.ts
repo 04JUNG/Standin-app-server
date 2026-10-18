@@ -14,6 +14,7 @@ import {
 } from "../converter/client.js";
 import {
   CHARACTER_PRESENTATION,
+  isRetiredCharacter,
   presentationFor,
   type CharacterGender,
 } from "./catalog.js";
@@ -120,11 +121,14 @@ export async function listCharacters(
   overrides: Partial<CharacterDeps> = {},
 ): Promise<ModelCatalog> {
   const deps = { ...defaultDeps(), ...overrides };
-  const upstream = await deps.listUpstream();
+  const upstream = (await deps.listUpstream()).filter((row) => !isRetiredCharacter(row.characterId));
   const byId = new Map(upstream.map((row) => [row.characterId, row]));
   const ids = new Set([...Object.keys(CHARACTER_PRESENTATION), ...byId.keys()]);
 
   const bodies = config.bodySelectionEnabled ? loadBodyCatalog().assets : [];
+  const defaultCharacterId = isRetiredCharacter(deps.defaultCharacterId)
+    ? (upstream[0]?.characterId ?? "")
+    : deps.defaultCharacterId;
   const characters = [...ids]
     .map((id) => {
       const a = bodies.find((asset) => asset.characterId === id);
@@ -132,7 +136,7 @@ export async function listCharacters(
         id,
         byId.has(id),
         byId.get(id),
-        deps.defaultCharacterId,
+        defaultCharacterId,
         a ? bodyRef(a) : null,
       );
     })
@@ -144,7 +148,7 @@ export async function listCharacters(
     });
 
   cache = { at: Date.now(), ids: new Set(byId.keys()) };
-  return { characters, defaultCharacterId: deps.defaultCharacterId };
+  return { characters, defaultCharacterId };
 }
 
 /** export가 `characterId`를 존중할 수 있는 상태인가. 이 값이 곧 capabilities.characterSelection이다. */
@@ -157,7 +161,7 @@ export async function characterSelectionEnabled(
     const ids = await availableIds(deps);
     // 기본 체형 하나뿐이면 "고를 수 있다"고 말하지 않는다. 앱이 선택 UI를 열어도
     // 고를 것이 없고, 헛되이 characterId를 실어 보내게 된다.
-    return [...ids].some((id) => id !== deps.defaultCharacterId);
+    return [...ids].some((id) => id !== deps.defaultCharacterId && !isRetiredCharacter(id));
   } catch (error) {
     // converter가 잠깐 안 될 때 기능이 있다고 주장하지 않는다. 앱은 false를 "기본 체형으로
     // 저장한다"로 읽고 그렇게 안내한다 — 안전한 쪽이다.
@@ -217,6 +221,7 @@ export async function checkCharacter(
   characterId: string,
   overrides: Partial<CharacterDeps> = {},
 ): Promise<CharacterCheck> {
+  if (isRetiredCharacter(characterId)) return "unavailable";
   const known = characterId in CHARACTER_PRESENTATION;
   const ids = await availableIds({ ...defaultDeps(), ...overrides });
   if (ids.has(characterId)) return "ok";

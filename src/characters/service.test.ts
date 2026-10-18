@@ -36,6 +36,24 @@ beforeEach(() => {
   __resetCharacterCache();
 });
 
+test("six retired fixed adult models cannot reappear from the converter; shape-key models remain selectable", async () => {
+  const retired = ["body-female-athletic", "body-female-base", "body-female-muscular", "body-male-athletic", "body-male-base", "body-male-muscular"];
+  const overrides = deps([...retired, "female-base-v0-3-4", "male-base-v0-7-2", "body-teen-female"]);
+  const catalog = await listCharacters({ ...overrides, defaultCharacterId: "body-female-base" });
+  assert.equal(catalog.defaultCharacterId, "female-base-v0-3-4");
+  for (const id of retired) {
+    assert.equal(catalog.characters.some((c) => c.characterId === id), false);
+    assert.equal(await checkCharacter(id, overrides), "unavailable");
+  }
+  assert.equal(await checkCharacter("female-base-v0-3-4", overrides), "ok");
+  assert.equal(await checkCharacter("male-base-v0-7-2", overrides), "ok");
+  assert.equal(catalog.characters.find((c) => c.characterId === "body-teen-female")?.availability, "available");
+});
+
+test("retired bodies alone do not enable character selection", async () => {
+  assert.equal(await characterSelectionEnabled(deps([DEFAULT_ID, "body-female-base"])), false);
+});
+
 test("converter가 못 만드는 체형도 목록에 남기고 coming_soon으로 표시한다", async () => {
   // 여성 artifact URI가 아직 없는 배포. 목록에서 빼면 앱에는 "모델 선택이라는 기능이
   // 없다"로 보인다 — 준비 중이라는 것이 드러나야 한다.

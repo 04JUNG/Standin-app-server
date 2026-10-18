@@ -26,6 +26,28 @@ import { BodyError, bodyStore } from "./store.js";
 import { catalog, fixture, result } from "./fixtures.js";
 const recommendation = () =>
   mapBodyRecommendations(fixture(), catalog()).get(0)!;
+
+test("catalog retires the six fixed adult FBXs while preserving shape-key bodies, children and teens", () => {
+  const ids = ["body-female-athletic", "body-female-base", "body-female-muscular",
+    "body-male-athletic", "body-male-base", "body-male-muscular",
+    "female-base-v0-3-4", "male-base-v0-7-2", "body-child", "body-teen-female"];
+  const input = catalog(ids.length);
+  input.assets.forEach((asset, i) => { asset.characterId = ids[i]; });
+  input.defaultCharacterId = "female-base-v0-3-4";
+  input.assets[6].shape = {
+    schemaVersion: "body-shape.v1",
+    controls: [{ key: "height", min: 150, max: 190, step: 1, default: 168 }],
+  };
+  const active = parseCatalog(input);
+  assert.deepEqual(active.assets.map((a) => a.characterId), ids.slice(6));
+  assert.equal(active.defaultCharacterId, "female-base-v0-3-4");
+  assert.deepEqual(active.assets[0].shape, input.assets[6].shape);
+  assert.equal(input.assets.length, ids.length);
+  const policy = snapshot(defaultPreferences(), active);
+  assert.equal(resolveBody(0, policy, recommendation(), active, ["pose-a"], "manual", input.assets[0]).resolutionStatus, "unavailable");
+  input.defaultCharacterId = "body-female-base";
+  assert.equal(parseCatalog(input).defaultCharacterId, null);
+});
 test("automatic default, manual priority, fixed default and per-person auto exception", () => {
   const c = catalog(),
     policy = snapshot(
