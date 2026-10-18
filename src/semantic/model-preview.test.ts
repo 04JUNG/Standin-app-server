@@ -157,7 +157,7 @@ test("semantic mesh denies other owners, changed BVH, unknown scope, extra body/
   assert.equal((await app.request(url + "?format=fbx")).status, 400);
   assert.equal((await app.request(url + "?characterId=female")).status, 400);
   state.changed = true;
-  assert.equal((await app.request(url)).status, 503);
+  assert.equal((await app.request(url)).status, 409);
   state.changed = false;
   state.rate = false;
   assert.equal((await app.request(url)).status, 429);

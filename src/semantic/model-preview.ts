@@ -5,6 +5,7 @@ import { getOwnedJob } from "../jobs/store.js";
 import { queryOne } from "../db.js";
 import { getPoseBvh } from "../inference.js";
 import { previewAssetBytes } from "../hands/preview.js";
+import { HandError } from "../hands/model.js";
 import { checkCharacter } from "../characters/service.js";
 import {
   convertFramed,
@@ -191,8 +192,8 @@ export function createSemanticModelRoutes(
             "X-Standin-Artifact-SHA256": sha256Hex(data),
           },
         });
-      } catch {
-        return fail(503, "PREVIEW_UNAVAILABLE");
+      } catch (e) {
+        return e instanceof HandError ? fail(e.status, e.code) : fail(503, "PREVIEW_UNAVAILABLE");
       }
     },
   );
