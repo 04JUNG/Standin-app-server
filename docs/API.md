@@ -1287,6 +1287,9 @@ false다. 정식 후보 배열에 합치지 않는다.
 응답은 `private, no-store`이며 `X-Standin-Body-Revision`, `Character-SHA256`, `Shape-SHA256`
 (고정 체형은 `none`), `Source-BVH-SHA256`, `Artifact-SHA256`, `Preview-Projection=orthographic`,
 `Preview-Only=true` 헤더를 보낸다(각 이름에 `X-Standin-` 접두사).
+`X-Standin-Output-Scope`도 최종 메시 범위를 담는다. 허용된 Tauri·개발 출처에서는
+이 무결성·범위 헤더가 `Access-Control-Expose-Headers`에 포함되어 웹뷰가 읽을 수 있어야 한다.
+특히 `Shape-SHA256`은 일반 체형 경로의 `Body-Shape-SHA256`과 별도 이름이다.
 캐시는 소유자/작업/인물/후보/체형/수치/원본/범위/카메라/런타임에 묶이고 렌더 후 다시 검증한다.
 선택이 바뀌면 409 `BODY_PREVIEW_STALE`, 미지원·원본 불일치면 409, 타 소유자면 404,
 변환기 비활성/실패면 503이다. 클라이언트는 구 체형이나 기본 체형으로 조용히 폴백하지 않는다.
