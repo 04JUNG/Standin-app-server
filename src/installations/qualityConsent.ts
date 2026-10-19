@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
+import { config } from "../config.js";
 import { deleteJobs } from "../retention.js";
 
 export const QUALITY_CONSENT_VERSION = "2026-10-19";
@@ -158,6 +159,60 @@ export async function lockQualityConsent(
   };
 }
 
+/**
+ * 관리자 열람 범위를 정하는 뷰. 관리자 SQL은 모두 이 뷰만 읽는다.
+ *
+ * withoutConsent(staging 전용, `config.reviewWithoutQualityConsent`)이면 동의 조건을 빼고
+ * 철회·삭제 요청만 거른다. 뷰는 배포마다 다시 만들어지므로 스위치를 끄고 재배포하면
+ * 원래 범위로 돌아간다.
+ */
+export function qualityReviewViews(withoutConsent: boolean): string {
+  if (withoutConsent) {
+    return `
+  CREATE OR REPLACE VIEW quality_review_installations AS
+    SELECT * FROM installations WHERE revoked_at IS NULL AND deletion_requested_at IS NULL;
+  CREATE OR REPLACE VIEW quality_review_jobs AS
+    SELECT j.* FROM jobs j JOIN quality_review_installations i ON i.id=j.installation_id
+    WHERE j.created_at::timestamptz > now() - interval '365 days';
+  CREATE OR REPLACE VIEW quality_review_analytics_events AS
+    SELECT e.* FROM analytics_events e JOIN quality_review_installations i ON i.id=e.installation_id
+    WHERE e.occurred_at::timestamptz > now() - interval '365 days'
+      AND (e.job_id IS NULL OR EXISTS (SELECT 1 FROM quality_review_jobs j WHERE j.id=e.job_id));
+  ${JOB_SCOPED_VIEWS}`;
+  }
+  return `
+  CREATE OR REPLACE VIEW quality_review_installations AS
+    SELECT * FROM installations WHERE quality_personal_data AND quality_content_license
+      AND quality_consent_id IS NOT NULL AND revoked_at IS NULL AND deletion_requested_at IS NULL;
+  CREATE OR REPLACE VIEW quality_review_jobs AS
+    SELECT j.* FROM jobs j JOIN quality_review_installations i ON i.id=j.installation_id
+    WHERE j.quality_consent_id=i.quality_consent_id
+      AND j.created_at::timestamptz > now() - interval '365 days';
+  CREATE OR REPLACE VIEW quality_review_analytics_events AS
+    SELECT e.* FROM analytics_events e JOIN quality_review_installations i ON i.id=e.installation_id
+    WHERE e.quality_consent_id=i.quality_consent_id
+      AND e.occurred_at::timestamptz > now() - interval '365 days'
+      AND (e.job_id IS NULL OR EXISTS (SELECT 1 FROM quality_review_jobs j WHERE j.id=e.job_id));
+  ${JOB_SCOPED_VIEWS}`;
+}
+
+/** Job에 딸린 표는 어느 범위든 quality_review_jobs를 따라간다. */
+const JOB_SCOPED_VIEWS = [
+  "analysis_people",
+  "analysis_candidates",
+  "confirmed_selections",
+  "job_feedback",
+  "export_events",
+  "refined_artifacts",
+]
+  .map(
+    (table) => `
+  CREATE OR REPLACE VIEW quality_review_${table} AS
+    SELECT t.* FROM ${table} t JOIN quality_review_jobs j ON j.id=t.job_id;
+  `,
+  )
+  .join("\n");
+
 export const QUALITY_CONSENT_SCHEMA = `
   ALTER TABLE installations ADD COLUMN IF NOT EXISTS quality_personal_data BOOLEAN NOT NULL DEFAULT FALSE;
   ALTER TABLE installations ADD COLUMN IF NOT EXISTS quality_content_license BOOLEAN NOT NULL DEFAULT FALSE;
@@ -184,31 +239,5 @@ export const QUALITY_CONSENT_SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS quality_receipts_subject ON quality_consent_receipts(subject_hash);
 
-  CREATE OR REPLACE VIEW quality_review_installations AS
-    SELECT * FROM installations WHERE quality_personal_data AND quality_content_license
-      AND quality_consent_id IS NOT NULL AND revoked_at IS NULL AND deletion_requested_at IS NULL;
-  CREATE OR REPLACE VIEW quality_review_jobs AS
-    SELECT j.* FROM jobs j JOIN quality_review_installations i ON i.id=j.installation_id
-    WHERE j.quality_consent_id=i.quality_consent_id
-      AND j.created_at::timestamptz > now() - interval '365 days';
-  CREATE OR REPLACE VIEW quality_review_analytics_events AS
-    SELECT e.* FROM analytics_events e JOIN quality_review_installations i ON i.id=e.installation_id
-    WHERE e.quality_consent_id=i.quality_consent_id
-      AND e.occurred_at::timestamptz > now() - interval '365 days'
-      AND (e.job_id IS NULL OR EXISTS (SELECT 1 FROM quality_review_jobs j WHERE j.id=e.job_id));
-  ${[
-    "analysis_people",
-    "analysis_candidates",
-    "confirmed_selections",
-    "job_feedback",
-    "export_events",
-    "refined_artifacts",
-  ]
-    .map(
-      (table) => `
-  CREATE OR REPLACE VIEW quality_review_${table} AS
-    SELECT t.* FROM ${table} t JOIN quality_review_jobs j ON j.id=t.job_id;
-  `,
-    )
-    .join("\n")}
+  ${qualityReviewViews(config.reviewWithoutQualityConsent)}
 `;

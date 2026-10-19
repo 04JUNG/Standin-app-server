@@ -5,6 +5,9 @@ function env(key: string, def = ""): string {
   return process.env[key] ?? def;
 }
 
+/** 프로덕션 BFF 주소. staging 전용 스위치가 여기서 켜지지 않게 막는 데 쓴다. */
+const PRODUCTION_PUBLIC_URL = "https://api.standinpose.com";
+
 export const config = {
   handSelectionEnabled: env("HAND_SELECTION_ENABLED", "false") === "true",
   semanticSearchEnabled: env("SEMANTIC_SEARCH_ENABLED", "false") === "true",
@@ -23,6 +26,20 @@ export const config = {
   port: Number(process.env.PORT ?? 8080),
   // BFF 공개 URL(OAuth 콜백·이메일 인증 링크 구성용)
   publicUrl: env("PUBLIC_URL", "http://localhost:8080"),
+
+  /**
+   * 관리자 열람을 품질 검토 동의와 떼어 놓는 스위치. **staging 전용.**
+   *
+   * staging은 팀원만 쓴다. 동의 화면을 거치지 않은 설치도 원본·설치별 상세·결과를
+   * 대시보드에서 볼 수 있게 한다(2026-10-19 사용자 결정, 품질 개선에는 쓰지 않음).
+   * 철회·삭제 요청한 설치는 여전히 뺀다. 수집 쪽(이벤트·피드백)은 바꾸지 않는다 —
+   * 동의 없는 설치에서는 애초에 그 기록이 오지 않는다.
+   *
+   * 프로덕션 주소에서는 값과 상관없이 꺼진다. 배포 워크플로도 main에서는 false로 고정한다.
+   */
+  reviewWithoutQualityConsent:
+    env("REVIEW_WITHOUT_QUALITY_CONSENT", "false") === "true" &&
+    env("PUBLIC_URL", "http://localhost:8080") !== PRODUCTION_PUBLIC_URL,
 
   /**
    * CORS 허용 출처. 콤마로 구분해 CORS_ORIGINS로 덮어쓴다.
