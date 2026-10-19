@@ -39,7 +39,11 @@ BVH는 기존 `/v1/analysis/jobs/:id/people/0/pose-previews/:candidate/:sha`의 
 
 모든 신규 문장 후보는 source=semantic, lookupAllowed=true, refineAllowed=false,
 releaseAllowed=false, actualMeshValidated=false다. 표시 계약도 auto_apply/refine/export/release=false다.
-기존 내보내기·최종 framed FBX·직접 refine 요청은 서버에서 거절한다. 손 선택이나 선택 확정으로 이 정책이 바뀌지 않는다.
+자동 적용·직접 refine은 계속 거절한다. 2026-10-19부터 실제 BVH 해시가 바인딩된 후보에만
+별도 `manualExportAllowed=true`를 부여하여 작가의 선택 확정과 최종 framed 검수 뒤 BVH/FBX 저장을 지원한다.
+release/actual_mesh_validated=false는 검증 통과를 의미하지 않으므로 그대로 보존한다.
+기존 작업도 비공개 자산 바인딩을 잠금 아래 검증하여 재분석 없이 보강한다.
+상세 검수 키·해시·설정 변경 거절 계약은 [MANUAL_POSE_EXPORT.md](MANUAL_POSE_EXPORT.md)를 따른다.
 구형 자연어 작업을 다시 열어도 refine/body camera 권한을 켜지 않는다.
 라이브러리 검색 결과·근접 참고·생성 결과를 정상 후보로 서로 대체하지 않는다.
 

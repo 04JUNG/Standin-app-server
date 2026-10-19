@@ -462,6 +462,9 @@ jobsRoutes.put("/:id/selections", async (c) => {
       candidateId: item.candidateId,
     });
   }
+  const owned = await getOwnedJob(c.req.param("id"), c.get("installationId")!); // Lazily register old inspect-only rows before confirmation.
+  if (owned?.status !== "completed")
+    return c.json(errorEnvelope("INVALID_SELECTION", "완료된 작업을 찾을 수 없습니다.", c.get("requestId")), 409);
   const saved = await confirmSelections(
     c.get("installationId")!,
     c.req.param("id"),

@@ -56,6 +56,8 @@ export function attachSemanticPresentation(
           ]),
         )
         .digest("hex");
+    c.id = id;
+    c.posterUrl = `/v1/pose-candidates/${encodeURIComponent(c.poseId)}/poster?${new URLSearchParams({ jobId: result.jobId, personIndex: "0", candidateId: id })}`;
     assets[id] = {
       transport: "library_bvh",
       pose_id: c.poseId,

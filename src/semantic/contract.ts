@@ -168,7 +168,7 @@ export function semanticCapabilities(
     semanticBodySelection: capabilities.bodySelection === true && capabilities.bodyPreviews === true,
     bodySelection: false,
     bodyRecommendation: false,
-    bodyPreviews: false,
+    bodyPreviews: capabilities.bodyPreviews === true,
     bodyPreviewAssets: false,
   };
 }
@@ -181,6 +181,7 @@ export function semanticResult(
 ): AnalysisResult {
   return {
     jobId,
+    manualExportVersion: 1,
     source: "semantic",
     semantic: { query, index },
     image: null,

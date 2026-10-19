@@ -1,5 +1,5 @@
 import { manualPresentationCamera } from "../pose-presentation.js";
-import { restrictedCandidate } from "../routed-search.js";
+import { exportCandidateAllowed, manualExportCandidate } from "../routed-search.js";
 import { shapeRenderable } from "../body-selection/shape.js";
 import { handBakeFor } from "../hands/service.js";
 import { HandError } from "../hands/model.js";
@@ -13,7 +13,7 @@ import { cameraArtifact } from "../candidate-camera/artifacts.js";
 import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
 import { getOwnedJob } from "../jobs/store.js";
-import { recordExport, validateExportCandidate } from "../analytics/store.js";
+import { recordExport, validateExportCandidate, validateConfirmedSelection } from "../analytics/store.js";
 import { resolveExportArtifact } from "../refine/service.js";
 import { getPoseBvh } from "../inference.js";
 import { checkCharacter } from "../characters/service.js";
@@ -40,6 +40,7 @@ const cache = new FramedArtifactCache();
 const defaults = {
   getOwnedJob,
   validateExportCandidate,
+  validateConfirmedSelection,
   resolveExportArtifact,
   getPoseBvh,
   checkCharacter,
@@ -118,7 +119,7 @@ export function createFramingRoutes(
       return fail(409, "INVALID_EXPORT", "작업에서 선택된 후보가 아닙니다.");
     if (
       format === "fbx" &&
-      (job.result?.source === "semantic" || restrictedCandidate(candidate))
+      (!exportCandidateAllowed(candidate) || (job.result?.source === "semantic" && !manualExportCandidate(candidate)))
     )
       return fail(
         409,
@@ -166,9 +167,12 @@ export function createFramingRoutes(
         );
       const revision = c.req.query("bodySelectionRevision");
       const bodyMode = revision !== undefined;
-      const manual = bodyMode
-        ? manualPresentationCamera(person, candidate)
-        : null;
+      const manual = manualPresentationCamera(person, candidate);
+      const authorReview = manualExportCandidate(candidate);
+      if (format === "fbx" && authorReview && !(await deps.validateConfirmedSelection(installationId, jobId, personIndex, candidateId)))
+        return fail(409, "MANUAL_SELECTION_REQUIRED", "저장할 포즈를 직접 선택하고 확정해 주세요.");
+      if (authorReview && !manual)
+        return fail(409, "MANUAL_REVIEW_UNAVAILABLE", "선택한 포즈의 검수 정보를 확인하지 못했습니다.");
       const cameraRotation =
         manual?.camera.rotation ?? candidate.camera?.rotation;
       if (
@@ -221,16 +225,19 @@ export function createFramingRoutes(
             "체형이 변경되었습니다. 다시 확인해 주세요.",
           );
       }
-      const runtime = bodyMode ? await bodyDeps.runtime() : null;
+      const runtime = (bodyMode || authorReview) ? await bodyDeps.runtime() : null;
+      const authorIdentity = authorReview ? await deps.modelPreviewIdentity(characterId) : null;
+      if (authorReview && !authorIdentity)
+        return fail(503, "PREVIEW_UNAVAILABLE", "최종 모델 버전을 확인하지 못했습니다. 다시 시도해 주세요.");
       const expectedReview = c.req.query("reviewKey");
       if (
-        (bodyMode || hands !== null) &&
+        (bodyMode || hands !== null || authorReview) &&
         format === "fbx" &&
         (!expectedReview || !/^[a-f0-9]{64}$/.test(expectedReview))
       )
         return fail(
           409,
-          bodyMode ? "BODY_REVIEW_REQUIRED" : "HAND_REVIEW_REQUIRED",
+          authorReview ? "MANUAL_REVIEW_REQUIRED" : bodyMode ? "BODY_REVIEW_REQUIRED" : "HAND_REVIEW_REQUIRED",
           "저장 전 결과를 확인해 주세요.",
         );
       if ((await deps.checkCharacter(characterId)) !== "ok")
@@ -309,6 +316,7 @@ export function createFramingRoutes(
         manual,
         body,
         runtime,
+        authorIdentity,
         hands,
       ]);
       const expected =
@@ -319,13 +327,16 @@ export function createFramingRoutes(
               shapeSource: body.shapeSource,
               expectedPreviewRevision: runtime.previewRevision,
             }
-          : {};
+          : authorReview ? {
+              expectedCharacterSha256: authorIdentity!.characterSha256,
+              expectedPreviewRevision: runtime!.previewRevision,
+            } : {};
       const useModel =
         format === "model" ||
         (format === "fbx" && c.req.query("previewType") === "model");
       const identity = useModel
-        ? await deps.modelPreviewIdentity(characterId)
-        : null;
+        ? authorIdentity ?? await deps.modelPreviewIdentity(characterId)
+        : authorIdentity;
       if (useModel && !identity)
         return fail(
           503,
@@ -335,8 +346,8 @@ export function createFramingRoutes(
       const sourceSha = sha256Hex(bvhBytes);
       if (
         (expectedSource && expectedSource !== sourceSha) ||
-        (expectedCharacter &&
-          expectedCharacter !== identity?.characterSha256) ||
+        (expectedCharacter && identity &&
+          expectedCharacter !== identity.characterSha256) ||
         (expectedRevision && expectedRevision !== identity?.modelRevision)
       ) {
         await exportEvent("failed", "PREVIEW_CHANGED");
@@ -354,7 +365,7 @@ export function createFramingRoutes(
                 jobId,
                 personIndex,
                 candidateId,
-                ...(bodyMode || hands ? [key] : []),
+                ...(bodyMode || hands || authorReview ? [key] : []),
               ],
               {
                 bvhBytes,
@@ -376,7 +387,7 @@ export function createFramingRoutes(
                   jobId,
                   personIndex,
                   candidateId,
-                  ...(bodyMode || hands ? [key] : []),
+                  ...(bodyMode || hands || authorReview ? [key] : []),
                 ],
                 {
                   bvhBytes,
@@ -427,13 +438,21 @@ export function createFramingRoutes(
         }
       }
       const result = libraryModel ? undefined : await prepare();
+      if (authorReview && (!result || !/^[a-f0-9]{64}$/.test(result.characterSha256 ?? "") ||
+        (expectedCharacter && expectedCharacter !== result.characterSha256) ||
+        result.previewRevision !== runtime!.previewRevision || result.characterSha256 !== authorIdentity!.characterSha256))
+        return fail(409, "PREVIEW_CHANGED", "모델이 바뀌었습니다. 최종 미리보기를 다시 확인해 주세요.");
       // A preference or confirmation may change while Blender is working.
       const current = await deps.getOwnedJob(jobId, installationId);
       const currentPerson = current?.result?.candidatesByPerson.find(
         (p) => p.personIndex === personIndex,
       );
       if (
+        current?.status !== "completed" ||
         !currentPerson ||
+        !exportCandidateAllowed(currentPerson.candidates.find((c) => c.id === candidateId && c.poseId === poseId)) ||
+        JSON.stringify(currentPerson.candidates.find((c) => c.id === candidateId)) !== JSON.stringify(candidate) ||
+        JSON.stringify(manualPresentationCamera(currentPerson, currentPerson.candidates.find((c) => c.id === candidateId))) !== JSON.stringify(manual) ||
         resolvePersonOutputScope(currentPerson).resolved !== scope ||
         !(await deps.validateExportCandidate(
           installationId,
@@ -458,14 +477,23 @@ export function createFramingRoutes(
           "HANDS_CHANGED",
           "손 선택이 바뀌었습니다. 다시 확인해 주세요.",
         );
+      if (authorReview) {
+        if ((format === "fbx" && !(await deps.validateConfirmedSelection(installationId, jobId, personIndex, candidateId))) ||
+          JSON.stringify(await bodyDeps.runtime()) !== JSON.stringify(runtime) ||
+          JSON.stringify(await deps.modelPreviewIdentity(characterId)) !== JSON.stringify(authorIdentity))
+          return fail(409, "MANUAL_REVIEW_REQUIRED", "선택 또는 렌더 버전이 변경되었습니다. 다시 확인해 주세요.");
+        const fresh = await deps.getPoseBvh(poseId);
+        if (!fresh.ok || sha256Hex(new Uint8Array(await fresh.arrayBuffer())) !== candidate.sourceBvhSha256)
+          return fail(409, "POSE_UNAVAILABLE", "포즈가 변경되었거나 더 이상 제공되지 않습니다.");
+      }
       const reviewKey = sha256Hex(
         new TextEncoder().encode(JSON.stringify([key, result?.artifactSha256])),
       );
-      if (hands && format === "fbx" && expectedReview !== reviewKey)
+      if ((hands || authorReview) && format === "fbx" && expectedReview !== reviewKey)
         return fail(
           409,
-          "HAND_REVIEW_REQUIRED",
-          "변경된 손의 미리보기를 다시 확인해 주세요.",
+          authorReview ? "MANUAL_REVIEW_REQUIRED" : "HAND_REVIEW_REQUIRED",
+          "최종 미리보기를 다시 확인해 주세요.",
         );
       if (bodyMode) {
         const nowBody = await bodyDeps.selection(
@@ -533,9 +561,14 @@ export function createFramingRoutes(
           "Content-Length": String(bytes.byteLength),
           "Cache-Control": "private, no-store",
           "X-Standin-Output-Scope": scope,
+          ...((hands || authorReview) ? { "X-Standin-Review-Key": reviewKey } : {}),
+          ...(authorReview ? {
+            "X-Standin-Character-SHA256": result!.characterSha256!,
+            "X-Standin-Source-BVH-SHA256": sha256Hex(bvhBytes),
+            "X-Standin-Preview-Artifact-SHA256": sha256Hex(result!.preview),
+          } : {}),
           ...(hands
             ? {
-                "X-Standin-Review-Key": reviewKey,
                 "X-Standin-Hand-Revision": String(hands.revision),
                 "X-Standin-Hand-Library-SHA256": hands.library_sha256,
               }

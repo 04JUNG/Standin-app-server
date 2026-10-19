@@ -167,6 +167,7 @@ export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
     : undefined;
   return {
     jobId,
+    manualExportVersion: 1,
     image: cut.image,
     inferenceMetadata: {
       deploymentVersion: cut.inference_metadata.deployment_version,
@@ -250,30 +251,28 @@ export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
         person.posePresentation = presentation.presentation;
         person.outputScope = resolvePersonOutputScope(person);
         person.posePresentation.output_scope = person.outputScope.resolved;
-        // A known library BVH can be chosen by the author through the existing
-        // confirmation/review/export flow. Reference and generated rows stay preview-only.
-        const library =
-          ["ready", "review_ready"].includes(
-            presentation.presentation.status,
-          ) &&
-          ["ok", "partial_error"].includes(
-            presentation.presentation.search_status,
-          )
-            ? presentation.presentation.library_candidates
-            : [];
-        person.candidates = library.map((candidate) => ({
+        // Author choice is separate from automatic search/skin-screen acceptance.
+        // Only validated library bindings enter the existing confirm/review/export flow.
+        const library = [
+          ...presentation.presentation.library_candidates,
+          ...presentation.presentation.review_candidates,
+        ];
+        person.candidates = library.map((candidate, i) => ({
           id: candidate.candidate_id,
           poseId: candidate.pose_id!,
-          rank: candidate.rank,
+          rank: i + 1,
           view: "front",
-          tags: ["검색 후보"],
-          matchLevel: "medium",
+          tags: [candidate.kind === "library_match" ? "검색 후보" : "참고 후보"],
+          matchLevel: "low",
           source: "library",
           lookupAllowed: true,
           refineAllowed: false,
-          releaseAllowed: true,
+          releaseAllowed: false,
+          manualExportAllowed: true,
+          presentationKind: candidate.kind,
           reviewRequired: true,
           actualMeshValidated: false,
+          notExactMatch: candidate.kind !== "library_match",
           sourceBvhSha256: candidate.asset.bvh_sha256,
           rankScore: candidate.rank_score ?? undefined,
           bvhAvailable: true,

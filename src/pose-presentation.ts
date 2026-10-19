@@ -1,3 +1,4 @@
+import { manualExportCandidate } from "./routed-search.js";
 import { verifiedPoster } from "./pose-posters.js";
 import { getPosePoster } from "./inference.js";
 import { isBodyScope, resolvePersonOutputScope } from "./output-scope/model.js";
@@ -108,22 +109,19 @@ export function manualPresentationCamera(
   const p = person?.posePresentation;
   if (
     !candidate ||
-    candidate.source !== "library" ||
+    !["library", "semantic"].includes(candidate.source ?? "") ||
     candidate.lookupAllowed !== true ||
-    candidate.releaseAllowed !== true ||
+    !(candidate.releaseAllowed === true || manualExportCandidate(candidate)) ||
     !candidate.bvhAvailable ||
     !candidate.sourceBvhSha256 ||
-    p?.version !== "dynamic-pose-presentation-v1" ||
-    !["ready", "review_ready"].includes(p.status) ||
-    !["ok", "partial_error"].includes(p.search_status)
+    !p || !["dynamic-pose-presentation-v1", "semantic-pose-presentation-v1"].includes(p.version)
   )
     return null;
-  const row = p.library_candidates.find(
+  const row = [...p.library_candidates, ...p.review_candidates].find(
     (c) =>
       c.candidate_id === candidate.id &&
       c.pose_id === candidate.poseId &&
       c.source === "library" &&
-      c.kind === "library_match" &&
       c.asset.transport === "library_bvh" &&
       c.asset.bvh_sha256 === candidate.sourceBvhSha256,
   );
