@@ -74,6 +74,9 @@ export interface PoseCandidate {
   lookupAllowed?: boolean;
   refineAllowed?: boolean;
   releaseAllowed?: boolean;
+  /** Explicit author selection + final review only; never an automatic search approval. */
+  manualExportAllowed?: boolean;
+  presentationKind?: string;
   actualMeshValidated?: boolean;
   reviewRequired?: boolean;
   notExactMatch?: boolean;
@@ -103,6 +106,7 @@ export interface PoseCandidate {
 }
 
 export interface AnalysisResult {
+  manualExportVersion?: 1;
   jobId: string;
   source?: "image" | "semantic";
   semantic?: { query: string; index: Record<string, string> };

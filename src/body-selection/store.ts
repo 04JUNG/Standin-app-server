@@ -410,7 +410,7 @@ export function personBodyContext(person: AnalysisPerson, semantic = false) {
     ["dynamic-pose-presentation-v1", "semantic-pose-presentation-v1"].includes(
       p.version,
     ) &&
-    ["full", "half", "shoulder_head", "head"].includes(p.output_scope ?? "") &&
+    ["full", "half", "bust", "shoulder_head", "head"].includes(p.output_scope ?? "") &&
     [p.library_candidates, p.review_candidates, p.generated_candidates].some(
       (g) => g.length > 0,
     );

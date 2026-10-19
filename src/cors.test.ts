@@ -12,6 +12,8 @@ for (const origin of ["tauri://localhost", "http://tauri.localhost", "http://loc
       "X-Standin-Character-SHA256": "a".repeat(64),
       "X-Standin-Shape-SHA256": "b".repeat(64),
       "X-Standin-Source-BVH-SHA256": "c".repeat(64),
+      "X-Standin-Review-Key": "f".repeat(64),
+      "X-Standin-Preview-Artifact-SHA256": "e".repeat(64),
       "X-Standin-Artifact-SHA256": "d".repeat(64),
       "X-Standin-Output-Scope": "half",
       "X-Standin-Preview-Projection": "orthographic",

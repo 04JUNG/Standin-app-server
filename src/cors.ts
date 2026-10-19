@@ -37,6 +37,7 @@ export function appCors(origins: string[]) {
       "X-Standin-Preview-Revision",
       "X-Standin-Model-Revision",
       "X-Standin-Artifact-SHA256",
+      "X-Standin-Preview-Artifact-SHA256",
     ],
     credentials: true,
     maxAge: 600,

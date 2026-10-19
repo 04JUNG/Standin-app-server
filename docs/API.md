@@ -1,15 +1,30 @@
 # API 계약 — BFF가 클라(Tauri)에 노출하는 `/v1`
 
-## Top-5 라이브러리 직접 선택 (2026-10-18)
+## 작가 수동 선택·검수·저장 (2026-10-19)
 
-검색 완료(`ok/partial_error`)·표시 준비(`ready/review_ready`)인 검증된
-`posePresentation.library_candidates`는 일반 `candidates`에도 노출합니다.
-`source=library`, `lookupAllowed=true`, `releaseAllowed=true`, `sourceBvhSha256`로
-식별하며 사용자 선택·확정·최종 확인 후 기존 BVH/FBX 저장을 사용합니다. 서버가 원본
-해시와 소유권·확정 선택을 다시 검증합니다. refine/자동 적용은 허용하지 않습니다.
-정면 라이브러리 썸네일을 사용하며 검색 원근 카메라를 출력 카메라로 간주하지 않습니다.
-생성·근접·구도 참고와 `dynamic/semantic` 조회 전용 후보는 기존 저장 금지를 유지합니다.
-이전 검수 전용 Job은 재검색해야 이 선택 목록을 받습니다.
+검색 품질 판정과 작가의 수동 저장 권한은 별개입니다. 공개·비공개 자산의 pose ID와 SHA가
+일치하는 라이브러리 원본·실제 미러·근접·기하·구도 참고 및 직접 자연어 검색 후보는
+`candidates`에 `manualExportAllowed=true`, `presentationKind`, `sourceBvhSha256`로 노출합니다.
+`releaseAllowed=false`, `actualMeshValidated=false`, `refineAllowed=false`와 기존 검색/생성 오류는
+그대로 유지합니다. 검색 실패를 통과로 기록하거나 자동 적용·보정 권한을 늘리지 않습니다.
+
+작가는 후보를 선택하고 기존 `PUT /analysis/jobs/:id/selections`로 확정한 뒤,
+`/:pose/framed?format=preview|model`에서 실제 체형·수치·손·출력 범위를 확인합니다.
+확인 응답의 `X-Standin-Review-Key`를 같은 설정의 `format=fbx` 요청에 보내야 저장됩니다.
+`X-Standin-Artifact-SHA256`는 쌍으로 만든 최종 FBX 해시이고,
+`X-Standin-Preview-Artifact-SHA256`는 PNG/GLB 바이트 해시입니다. 원본 BVH 및 체형 SHA도
+응답에 제공합니다. 기본 카드 이미지는 최종 파일 검수의 대체물이 아닙니다.
+
+수동 후보의 원본 BVH 저장도 확정 선택이 필요하며, `/export?format=fbx`는
+`MANUAL_REVIEW_REQUIRED`로 최종 framed 검수를 요구합니다. `MANUAL_SELECTION_REQUIRED`는
+확정 선택이 없는 경우입니다. 원본/체형/손/scope/revision/runtime/카메라/소유권/격리 상태가
+바뀌면 이전 검수 키를 거절합니다. 원본과 미러는 각각 실제 등록 BVH 바이트를 사용합니다.
+
+기존 검수 전용 작업은 소유자가 다시 열 때 job 행 잠금 아래 비공개 자산과 공개 행을 검증하고
+후보 행·JSON을 함께 보강합니다. 재분석·VLM 호출이 필요하지 않습니다. 구형 semantic 후보 ID가
+presentation ID로 정리되면 직접 다시 선택·확정해야 하며 원래 검색·손·범위 설정은 보존합니다.
+등록 BVH/해시 바인딩이 없는 구형 dynamic 결과와 inline 생성 실패 후보는 이 권한을 받지 않습니다.
+자세한 경계와 검증은 [MANUAL_POSE_EXPORT.md](MANUAL_POSE_EXPORT.md)를 따릅니다.
 
 ## 동적 검색 조회 전용 후보 (2026-10-17)
 
@@ -22,7 +37,7 @@
 `GET /v1/pose-candidates/:id/lookup-thumbnail?jobId=...&personIndex=...&candidateId=...`는
 소유권·후보 ID·포즈를 검증한 정면 참고 이미지를 제공합니다. 검색 시점의 정렬 렌더라고 표시하지 않습니다.
 해당 후보의 refine은 409 `CANDIDATE_REFINE_FORBIDDEN`, BVH/FBX/framed FBX 저장은
-409 `CANDIDATE_RELEASE_FORBIDDEN`으로 거부합니다. 생성·근접·구도·기본 인체 결과는 정식 후보로 합치지 않습니다.
+409 `CANDIDATE_RELEASE_FORBIDDEN`으로 거부합니다. 구형 무해시 dynamic 결과에는 이 차단을 유지합니다. 버전이 확인된 presentation과 직접 자연어 검색의 수동 저장 계약은 위 절을 따릅니다.
 상세는 [동적 검색 연결](ROUTED_SEARCH_INTEGRATION.md)을 참조합니다.
 
 ## 빠른 후보 카드 (2026-10-08)
@@ -1245,7 +1260,7 @@ PNG/304 응답의 `X-Standin-Hand-Library-SHA256`으로 카탈로그 일치를 �
 미준비는 404 `HAND_THUMBNAIL_UNAVAILABLE`, 라이브러리 변경은 409 `HAND_LIBRARY_CHANGED`다.
 ## 직접 자연어 포즈 검색
 
-`GET /v1/semantic-search/capabilities`, `POST /v1/semantic-search`는 설치 인증을 사용한다. `query`와 `topK`(정수 1–20, 생략 시 5)로 검색하고 정식 또는 근접 후보가 있으면 조회 전용 `jobId`를 반환한다. 신규 후보의 refine·release는 금지한다. 이미지 없는 `source=semantic` 결과의 `image`는 null이다. 자연어 작업은 refine/body camera 기능을 허용하지 않는다. 입력 제한, 별도 검색 rate limit, 오류, 기록·해시 계약은 [SEMANTIC_SEARCH_INTEGRATION.md](SEMANTIC_SEARCH_INTEGRATION.md)를 따른다.
+`GET /v1/semantic-search/capabilities`, `POST /v1/semantic-search`는 설치 인증을 사용한다. `query`와 `topK`(정수 1–20, 생략 시 5)로 검색하고 정식 또는 근접 후보가 있으면 `jobId`를 반환한다. 자동 refine·release는 금지하며 원본 해시에 바인딩된 후보의 수동 저장은 위 계약을 따른다. 이미지 없는 `source=semantic` 결과의 `image`는 null이다. 자연어 작업은 이미지 기반 refine/search-fit camera를 허용하지 않으며 정면 참고 카메라의 체형 검수는 지원한다. 입력 제한, 별도 검색 rate limit, 오류, 기록·해시 계약은 [SEMANTIC_SEARCH_INTEGRATION.md](SEMANTIC_SEARCH_INTEGRATION.md)를 따른다.
 
 두 기능의 공통 흐름·통합 검증·PR 제출 범위는 [HANDS_SEMANTIC_INTEGRATION.md](HANDS_SEMANTIC_INTEGRATION.md)를 따른다. 자연어 결과도 준비된 handSelection capability를 유지해 수동 손 선택을 사용할 수 있다.
 
@@ -1315,8 +1330,9 @@ shape source를 기존 변환기에 전달하며 PNG/GLB 확인과 FBX 다운로
 reviewKey를 사용한다. 렌더 중 원본·카메라·체형·수치/source 변경은 409로 폐기한다.
 
 새 수동 후보의 이 예외는 원본 해시가 확인된 라이브러리와 작가의 선택·확인에 한정된다.
-기존 포즈 커버리지 검사와 참고/생성/semantic 후보의 저장 금지, actual_mesh_validated=false,
-auto/refine 금지는 유지한다. 후보가 없는 참고 인물은 저장 가능한 다른 인물의 체형 기능을
+기존 자동 포즈 커버리지 검사와 actual_mesh_validated=false, auto/refine 금지는 유지한다.
+2026-10-19부터 hash-bound 참고/semantic은 별도 manualExportAllowed 계약으로 작가 검수 후 저장한다.
+inline 생성 후보는 여전히 수동 저장 대상이 아니다. 후보가 없는 참고 인물은 저장 가능한 다른 인물의 체형 기능을
 비활성화하지 않으며, 별도의 조회 전용 체형 미리보기를 유지한다.
 
 

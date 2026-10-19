@@ -462,6 +462,7 @@ jobsRoutes.put("/:id/selections", async (c) => {
       candidateId: item.candidateId,
     });
   }
+  await getOwnedJob(c.req.param("id"), c.get("installationId")!); // Lazily register old inspect-only rows before confirmation.
   const saved = await confirmSelections(
     c.get("installationId")!,
     c.req.param("id"),

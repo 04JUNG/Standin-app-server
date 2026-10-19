@@ -5,7 +5,9 @@
 기존 체형 수치 굽기·동적 표시 계약·구버전 서버 동작을 보존한다.
 
 문장 입력→정식/근접 후보 표시→실제 BVH 관절 미리보기→인물 기준 손 선택→조회 전용 손 렌더가 새 흐름이다.
-신규 후보의 자동 적용·refine·export·release 금지는 유지한다. 손 선택은 이 권한을 승격하지 않는다.
+자동 적용·refine·자동 release 금지는 유지한다. 손 선택은 이 권한을 승격하지 않는다.
+2026-10-19부터 실제 등록 BVH에 묶인 문장/참고 후보는 별도 `manualExportAllowed`를 통해
+작가의 선택 확정·최종 검수 뒤 파일로 저장한다. [MANUAL_POSE_EXPORT.md](MANUAL_POSE_EXPORT.md)를 따른다.
 기존 안전한 구형 후보의 최종 FBX 손 선택 흐름은 기존 정책 아래에서 유지한다.
 
 - 손 카탈로그·좌우 PNG·선택 저장은 기존 hands 모듈을 재사용한다.
@@ -27,6 +29,7 @@
 ## 자연어 검색 체형 선택 후속
 
 고정 남성 미리보기에 `bodyRevision` 선택 계약을 추가한다. 기존 체형 저장·카드·수치 조절을 사용하며,
-`semanticBodySelection` capability를 별도로 제공해 legacy bodyPreviews/refine 경로는 열지 않는다.
+`semanticBodySelection` capability를 별도로 제공한다. 수동 저장 지원 서버는 bodyPreviews도 열어
+기존 최종 체형 검수/FBX 흐름을 사용하지만 자동 refine은 계속 금지한다.
 신규 포즈의 카탈로그 체형은 검수용 표면을 확인할 수 있지만, 기존 release pose allowlist가 확대되지는 않는다.
 손 적용 PNG는 별도의 기본 체형 참고 렌더를 유지한다. 체형 선택은 자연어 결과 카드와 확대 3D 모델에 반영된다.

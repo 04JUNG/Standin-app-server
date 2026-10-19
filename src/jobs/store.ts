@@ -4,6 +4,7 @@ import {
   captureBodyPolicy,
   initializeBodySelections,
 } from "../body-selection/store.js";
+import { upgradeOwnedManualResult } from "../manual-export.js";
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { config } from "../config.js";
@@ -318,7 +319,15 @@ export async function getOwnedJob(
     "SELECT * FROM jobs WHERE id = $1 AND installation_id = $2",
     [id, installationId],
   );
-  return row ? toJob(row) : undefined;
+  if (!row) return undefined;
+  const job = toJob(row);
+  if (job.status === "completed" && job.result && job.result.manualExportVersion !== 1 &&
+    job.result.candidatesByPerson.some((p) => !!p.posePresentation)) {
+    const result = await transaction((db) => upgradeOwnedManualResult(db, id, installationId));
+    if (!result) return undefined; // Deleted/changed while acquiring the ownership lock.
+    job.result = result;
+  }
+  return job;
 }
 
 /**
