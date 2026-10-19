@@ -19,10 +19,10 @@ function keyExpr(group: GalleryGroup): string {
 }
 
 const BASE = `
-  FROM jobs j
-  JOIN installations i ON i.id = j.installation_id
-  LEFT JOIN LATERAL (SELECT count(*)::int AS n FROM analysis_people ap WHERE ap.job_id = j.id) p ON TRUE
-  LEFT JOIN LATERAL (SELECT count(*)::int AS n FROM confirmed_selections cs WHERE cs.job_id = j.id) s ON TRUE
+  FROM quality_review_jobs j
+  JOIN quality_review_installations i ON i.id = j.installation_id
+  LEFT JOIN LATERAL (SELECT count(*)::int AS n FROM quality_review_analysis_people ap WHERE ap.job_id = j.id) p ON TRUE
+  LEFT JOIN LATERAL (SELECT count(*)::int AS n FROM quality_review_confirmed_selections cs WHERE cs.job_id = j.id) s ON TRUE
   WHERE j.created_at >= $1
     AND i.revoked_at IS NULL
     AND i.deletion_requested_at IS NULL`;
@@ -73,8 +73,8 @@ export async function galleryItems(params: GalleryQuery): Promise<GalleryRow[]> 
             coalesce(p.n, 0)::int AS person_count,
             coalesce(s.n, 0)::int AS selection_count,
             ${OUTCOME_CASE} AS outcome,
-            EXISTS (SELECT 1 FROM export_events e WHERE e.job_id = j.id AND e.status = 'completed') AS exported,
-            EXISTS (SELECT 1 FROM refined_artifacts r WHERE r.job_id = j.id AND r.refined) AS refined
+            EXISTS (SELECT 1 FROM quality_review_export_events e WHERE e.job_id = j.id AND e.status = 'completed') AS exported,
+            EXISTS (SELECT 1 FROM quality_review_refined_artifacts r WHERE r.job_id = j.id AND r.refined) AS refined
      ${BASE}
        AND ${keyExpr(params.group)} = $2
        AND ($3::text IS NULL OR (j.created_at, j.id) < ($3, $4))

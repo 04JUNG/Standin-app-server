@@ -55,6 +55,8 @@ export async function transaction<T>(fn: (client: PoolClient) => Promise<T>): Pr
   }
 }
 
+import { QUALITY_CONSENT_SCHEMA } from "./installations/qualityConsent.js";
+
 export const SCHEMA = `
   CREATE TABLE IF NOT EXISTS installations (
     id                    TEXT PRIMARY KEY,
@@ -374,6 +376,8 @@ export const SCHEMA = `
   CREATE INDEX IF NOT EXISTS candidates_job_rank ON analysis_candidates (job_id, person_index, rank);
   CREATE INDEX IF NOT EXISTS ops_metrics_bucket ON ops_metrics (bucket_at);
 
+  ${QUALITY_CONSENT_SCHEMA}
+
   CREATE OR REPLACE VIEW analytics_job_funnel AS
   SELECT
     j.id AS job_id,
@@ -394,7 +398,7 @@ export const SCHEMA = `
     (SELECT count(*) FROM analytics_events ae
       WHERE ae.job_id = j.id AND ae.event_name = 'candidate_selected'
         AND ae.properties_json::jsonb->>'previousCandidateId' IS NOT NULL)::integer AS candidate_change_count
-  FROM jobs j
+  FROM quality_review_jobs j
   WHERE j.installation_id IS NOT NULL;
 
   CREATE OR REPLACE VIEW analytics_candidate_quality AS
@@ -426,7 +430,7 @@ export const SCHEMA = `
         AND cs.candidate_id = ac.candidate_id
     ) AS selected,
     jf.reason AS feedback_reason
-  FROM jobs j
+  FROM quality_review_jobs j
   JOIN analysis_people ap ON ap.job_id = j.id
   LEFT JOIN analysis_candidates ac
     ON ac.job_id = ap.job_id AND ac.person_index = ap.person_index
@@ -478,7 +482,7 @@ export const SCHEMA = `
         AND ra.candidate_id = cs.candidate_id) AS selected_refined,
     jf.reason AS job_feedback
   FROM analysis_people ap
-  JOIN jobs j ON j.id = ap.job_id
+  JOIN quality_review_jobs j ON j.id = ap.job_id
   JOIN installations i ON i.id = j.installation_id
   LEFT JOIN confirmed_selections cs
     ON cs.job_id = ap.job_id AND cs.person_index = ap.person_index
@@ -518,7 +522,7 @@ export const SCHEMA = `
     (cs.job_id IS NOT NULL) AS selected,
     COALESCE(jf.reason = 'candidates_irrelevant', false) AS irrelevant_feedback
   FROM analysis_people ap
-  JOIN jobs j ON j.id = ap.job_id
+  JOIN quality_review_jobs j ON j.id = ap.job_id
   LEFT JOIN LATERAL (
     SELECT ac.distance, ac.pose_library_version
     FROM analysis_candidates ac
@@ -596,7 +600,7 @@ async function refreshAggregatesAndRetention(client: PoolClient): Promise<void> 
         (SELECT sum(1.0 / cs.rank) FROM confirmed_selections cs WHERE cs.job_id = j.id AND cs.rank > 0) AS reciprocal_rank_sum,
         (SELECT count(*) FROM export_events ee WHERE ee.job_id = j.id AND ee.status = 'completed') AS completed_export_count,
         (SELECT jf.reason FROM job_feedback jf WHERE jf.job_id = j.id) AS feedback_reason
-      FROM jobs j
+      FROM quality_review_jobs j
       WHERE j.installation_id IS NOT NULL AND left(j.created_at, 10) < current_date::text
     )
     SELECT

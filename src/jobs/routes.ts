@@ -492,6 +492,7 @@ const FEEDBACK_REASONS = new Set([
 jobsRoutes.post("/:id/feedback", async (c) => {
   const body = (await c.req.json().catch(() => null)) as {
     reason?: unknown;
+    qualityConsentId?: unknown;
   } | null;
   if (typeof body?.reason !== "string" || !FEEDBACK_REASONS.has(body.reason)) {
     return c.json(
@@ -508,6 +509,7 @@ jobsRoutes.post("/:id/feedback", async (c) => {
       c.get("installationId")!,
       c.req.param("id"),
       body.reason,
+      typeof body.qualityConsentId === "string" ? body.qualityConsentId : null,
     ))
   ) {
     return c.json(

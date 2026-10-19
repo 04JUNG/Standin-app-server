@@ -27,20 +27,20 @@ export async function funnelCounts(days: number): Promise<FunnelRow> {
   const row = await queryOne<FunnelRow>(
     `WITH window_jobs AS (
        SELECT j.id, j.installation_id, j.status
-       FROM jobs j
+       FROM quality_review_jobs j
        WHERE j.created_at >= $1 AND j.installation_id IS NOT NULL
      ),
      selected AS (
-       SELECT DISTINCT cs.job_id FROM confirmed_selections cs
+       SELECT DISTINCT cs.job_id FROM quality_review_confirmed_selections cs
        JOIN window_jobs w ON w.id = cs.job_id
      ),
      exported AS (
-       SELECT DISTINCT e.job_id FROM export_events e
+       SELECT DISTINCT e.job_id FROM quality_review_export_events e
        JOIN window_jobs w ON w.id = e.job_id
        WHERE e.status = 'completed'
      )
      SELECT
-       (SELECT count(*)::int FROM installations WHERE last_seen_at >= $1) AS active_installations,
+       (SELECT count(*)::int FROM quality_review_installations WHERE last_seen_at >= $1) AS active_installations,
        (SELECT count(*)::int FROM window_jobs) AS jobs_started,
        (SELECT count(DISTINCT installation_id)::int FROM window_jobs) AS installations_started,
        (SELECT count(*)::int FROM window_jobs WHERE status = 'completed') AS jobs_completed,
@@ -70,7 +70,7 @@ export async function clientStageCounts(days: number): Promise<
 > {
   return query(
     `SELECT event_name, count(*)::int AS events, count(DISTINCT installation_id)::int AS installations
-     FROM analytics_events
+     FROM quality_review_analytics_events
      WHERE occurred_at >= $1
      GROUP BY event_name
      ORDER BY count(*) DESC`,
@@ -105,16 +105,16 @@ export async function cohortCounts(days: number): Promise<{
        count(*) FILTER (WHERE a.selected > 0 AND a.exported = 0)::int AS selected_no_export,
        count(*) FILTER (WHERE a.exported > 0)::int AS exported,
        count(*)::int AS total
-     FROM installations i
+     FROM quality_review_installations i
      LEFT JOIN LATERAL (
        SELECT
          count(DISTINCT j.id)::int AS jobs,
          count(DISTINCT j.id) FILTER (WHERE j.status = 'completed')::int AS completed,
          count(DISTINCT cs.job_id)::int AS selected,
          count(DISTINCT ee.job_id)::int AS exported
-       FROM jobs j
-       LEFT JOIN confirmed_selections cs ON cs.job_id = j.id
-       LEFT JOIN export_events ee ON ee.job_id = j.id AND ee.status = 'completed'
+       FROM quality_review_jobs j
+       LEFT JOIN quality_review_confirmed_selections cs ON cs.job_id = j.id
+       LEFT JOIN quality_review_export_events ee ON ee.job_id = j.id AND ee.status = 'completed'
        WHERE j.installation_id = i.id AND j.created_at >= $1
      ) a ON TRUE
      WHERE i.last_seen_at >= $1 OR a.jobs > 0`,
@@ -136,8 +136,8 @@ export async function dropoffSignals(days: number): Promise<SignalRow[]> {
   return query<SignalRow>(
     `WITH scoped AS (
        SELECT j.id, (cs.job_id IS NOT NULL) AS selected
-       FROM jobs j
-       LEFT JOIN (SELECT DISTINCT job_id FROM confirmed_selections) cs ON cs.job_id = j.id
+       FROM quality_review_jobs j
+       LEFT JOIN (SELECT DISTINCT job_id FROM quality_review_confirmed_selections) cs ON cs.job_id = j.id
        WHERE j.created_at >= $1 AND j.status = 'completed' AND j.installation_id IS NOT NULL
      )
      SELECT
@@ -151,13 +151,13 @@ export async function dropoffSignals(days: number): Promise<SignalRow[]> {
      LEFT JOIN LATERAL (
        SELECT count(*)::int AS person_count,
               count(*) FILTER (WHERE ap.candidate_shortfall_reason IS NOT NULL)::int AS shortfall
-       FROM analysis_people ap WHERE ap.job_id = s.id
+       FROM quality_review_analysis_people ap WHERE ap.job_id = s.id
      ) p ON TRUE
      LEFT JOIN LATERAL (
        -- 점수가 아니라 거리다. 프로덕션 파이프라인은 knn_geometric을 직접 불러
        -- rerank_score를 채우지 않는다(rerank는 쓰이지 않는 선택 경로다).
        SELECT min(ac.distance) AS best_distance
-       FROM analysis_candidates ac WHERE ac.job_id = s.id
+       FROM quality_review_analysis_candidates ac WHERE ac.job_id = s.id
      ) c ON TRUE
      GROUP BY s.selected`,
     [since(days)],
@@ -169,13 +169,13 @@ export async function matchLevelSplit(days: number): Promise<MatchLevelRow[]> {
   return query<MatchLevelRow>(
     `WITH scoped AS (
        SELECT j.id, (cs.job_id IS NOT NULL) AS selected
-       FROM jobs j
-       LEFT JOIN (SELECT DISTINCT job_id FROM confirmed_selections) cs ON cs.job_id = j.id
+       FROM quality_review_jobs j
+       LEFT JOIN (SELECT DISTINCT job_id FROM quality_review_confirmed_selections) cs ON cs.job_id = j.id
        WHERE j.created_at >= $1 AND j.status = 'completed' AND j.installation_id IS NOT NULL
      )
      SELECT s.selected, ac.match_level, count(*)::int AS count
      FROM scoped s
-     JOIN analysis_candidates ac ON ac.job_id = s.id AND ac.rank = 1
+     JOIN quality_review_analysis_candidates ac ON ac.job_id = s.id AND ac.rank = 1
      GROUP BY s.selected, ac.match_level`,
     [since(days)],
   );
@@ -187,9 +187,9 @@ export async function noSelectionFeedback(
 ): Promise<Array<{ reason: string; count: number }>> {
   return query(
     `SELECT f.reason, count(*)::int AS count
-     FROM job_feedback f
-     JOIN jobs j ON j.id = f.job_id
-     LEFT JOIN (SELECT DISTINCT job_id FROM confirmed_selections) cs ON cs.job_id = j.id
+     FROM quality_review_job_feedback f
+     JOIN quality_review_jobs j ON j.id = f.job_id
+     LEFT JOIN (SELECT DISTINCT job_id FROM quality_review_confirmed_selections) cs ON cs.job_id = j.id
      WHERE j.created_at >= $1 AND cs.job_id IS NULL
      GROUP BY f.reason
      ORDER BY count(*) DESC
@@ -211,7 +211,7 @@ export async function columnHealth(days: number): Promise<ColumnHealthRow[]> {
       `SELECT count(*)::int AS rows,
               count(*) FILTER (WHERE ac.rerank_score IS NULL)::int AS rerank_nulls,
               count(*) FILTER (WHERE ac.distance IS NULL)::int AS distance_nulls
-       FROM analysis_candidates ac JOIN jobs j ON j.id = ac.job_id
+       FROM quality_review_analysis_candidates ac JOIN quality_review_jobs j ON j.id = ac.job_id
        WHERE j.created_at >= $1`,
       [from],
     ),
@@ -219,7 +219,7 @@ export async function columnHealth(days: number): Promise<ColumnHealthRow[]> {
       `SELECT count(*)::int AS rows,
               count(*) FILTER (WHERE ap.confidence IS NULL)::int AS confidence_nulls,
               count(*) FILTER (WHERE ap.skeleton_json IS NULL)::int AS skeleton_nulls
-       FROM analysis_people ap JOIN jobs j ON j.id = ap.job_id
+       FROM quality_review_analysis_people ap JOIN quality_review_jobs j ON j.id = ap.job_id
        WHERE j.created_at >= $1`,
       [from],
     ),
@@ -227,14 +227,14 @@ export async function columnHealth(days: number): Promise<ColumnHealthRow[]> {
       `SELECT count(*)::int AS rows,
               count(*) FILTER (WHERE input_width IS NULL)::int AS size_nulls,
               count(*) FILTER (WHERE status = 'completed' AND completed_at IS NULL)::int AS completed_nulls
-       FROM jobs WHERE created_at >= $1`,
+       FROM quality_review_jobs WHERE created_at >= $1`,
       [from],
     ),
     queryOne<{ rows: number; format_nulls: number; variant_nulls: number }>(
       `SELECT count(*)::int AS rows,
               count(*) FILTER (WHERE format IS NULL)::int AS format_nulls,
               count(*) FILTER (WHERE variant IS NULL)::int AS variant_nulls
-       FROM export_events WHERE status = 'completed' AND occurred_at >= $1`,
+       FROM quality_review_export_events WHERE status = 'completed' AND occurred_at >= $1`,
       [from],
     ),
   ]);
@@ -256,11 +256,11 @@ export async function serverStageCounts(days: number): Promise<Record<string, nu
   const from = since(days);
   const row = await queryOne<{ jobs: number; failed: number; selections: number; exports: number }>(
     `SELECT
-       (SELECT count(*)::int FROM jobs WHERE created_at >= $1) AS jobs,
-       (SELECT count(*)::int FROM jobs WHERE created_at >= $1 AND status = 'failed') AS failed,
-       (SELECT count(DISTINCT cs.job_id)::int FROM confirmed_selections cs
-         JOIN jobs j ON j.id = cs.job_id WHERE j.created_at >= $1) AS selections,
-       (SELECT count(DISTINCT e.job_id)::int FROM export_events e
+       (SELECT count(*)::int FROM quality_review_jobs WHERE created_at >= $1) AS jobs,
+       (SELECT count(*)::int FROM quality_review_jobs WHERE created_at >= $1 AND status = 'failed') AS failed,
+       (SELECT count(DISTINCT cs.job_id)::int FROM quality_review_confirmed_selections cs
+         JOIN quality_review_jobs j ON j.id = cs.job_id WHERE j.created_at >= $1) AS selections,
+       (SELECT count(DISTINCT e.job_id)::int FROM quality_review_export_events e
          WHERE e.status = 'completed' AND e.occurred_at >= $1) AS exports`,
     [from],
   );
@@ -277,12 +277,12 @@ export async function distanceBuckets(days: number): Promise<DistanceBucketRow[]
   return query<DistanceBucketRow>(
     `WITH scoped AS (
        SELECT j.id, (cs.job_id IS NOT NULL) AS selected
-       FROM jobs j
-       LEFT JOIN (SELECT DISTINCT job_id FROM confirmed_selections) cs ON cs.job_id = j.id
+       FROM quality_review_jobs j
+       LEFT JOIN (SELECT DISTINCT job_id FROM quality_review_confirmed_selections) cs ON cs.job_id = j.id
        WHERE j.created_at >= $1 AND j.status = 'completed' AND j.installation_id IS NOT NULL
      ),
      best AS (
-       SELECT s.id, s.selected, (SELECT min(ac.distance) FROM analysis_candidates ac
+       SELECT s.id, s.selected, (SELECT min(ac.distance) FROM quality_review_analysis_candidates ac
                                   WHERE ac.job_id = s.id) AS best
        FROM scoped s
      )
@@ -317,8 +317,8 @@ export async function firstRunFunnel(days: number): Promise<FirstRunRow> {
   const row = await queryOne<FirstRunRow>(
     `WITH cohort AS (
        SELECT i.id, i.created_at, i.last_seen_at,
-              (SELECT min(j.created_at) FROM jobs j WHERE j.installation_id = i.id) AS first_job_at
-       FROM installations i
+              (SELECT min(j.created_at) FROM quality_review_jobs j WHERE j.installation_id = i.id) AS first_job_at
+       FROM quality_review_installations i
        WHERE i.created_at >= $1
      ),
      gapped AS (
@@ -358,7 +358,7 @@ export async function captureFailures(days: number): Promise<CaptureFailureRow[]
     `SELECT properties_json::jsonb ->> 'code' AS code,
             count(*)::int AS events,
             count(DISTINCT installation_id)::int AS installations
-     FROM analytics_events
+     FROM quality_review_analytics_events
      WHERE event_name = 'capture_failed' AND occurred_at >= $1
      GROUP BY 1
      ORDER BY count(*) DESC
@@ -376,7 +376,7 @@ export async function captureFailures(days: number): Promise<CaptureFailureRow[]
 export async function topCaptureFailures(days: number): Promise<TopFailingInstallRow[]> {
   return query<TopFailingInstallRow>(
     `SELECT installation_id, count(*)::int AS events
-     FROM analytics_events
+     FROM quality_review_analytics_events
      WHERE event_name = 'capture_failed' AND occurred_at >= $1
      GROUP BY installation_id
      ORDER BY count(*) DESC
@@ -397,8 +397,8 @@ export async function attemptCurve(days: number): Promise<AttemptRow[]> {
        SELECT j.id, j.installation_id,
               row_number() OVER (PARTITION BY j.installation_id ORDER BY j.created_at, j.id) AS attempt,
               (cs.job_id IS NOT NULL) AS selected
-       FROM jobs j
-       LEFT JOIN (SELECT DISTINCT job_id FROM confirmed_selections) cs ON cs.job_id = j.id
+       FROM quality_review_jobs j
+       LEFT JOIN (SELECT DISTINCT job_id FROM quality_review_confirmed_selections) cs ON cs.job_id = j.id
        WHERE j.created_at >= $1 AND j.installation_id IS NOT NULL
      )
      SELECT least(attempt, 6)::int AS attempt,
@@ -418,8 +418,8 @@ export async function firstSelectionAttempt(days: number): Promise<FirstSelectio
        SELECT j.installation_id,
               row_number() OVER (PARTITION BY j.installation_id ORDER BY j.created_at, j.id) AS attempt,
               (cs.job_id IS NOT NULL) AS selected
-       FROM jobs j
-       LEFT JOIN (SELECT DISTINCT job_id FROM confirmed_selections) cs ON cs.job_id = j.id
+       FROM quality_review_jobs j
+       LEFT JOIN (SELECT DISTINCT job_id FROM quality_review_confirmed_selections) cs ON cs.job_id = j.id
        WHERE j.created_at >= $1 AND j.installation_id IS NOT NULL
      )
      SELECT least(min(attempt), 6)::int AS attempt_at_first,
@@ -439,7 +439,7 @@ export async function rerunRatio(days: number): Promise<{ reruns: number; jobs: 
   const row = await queryOne<{ reruns: number; jobs: number }>(
     `SELECT count(*) FILTER (WHERE rerun_of IS NOT NULL)::int AS reruns,
             count(*)::int AS jobs
-     FROM jobs WHERE created_at >= $1`,
+     FROM quality_review_jobs WHERE created_at >= $1`,
     [since(days)],
   );
   return row ?? { reruns: 0, jobs: 0 };
@@ -449,7 +449,7 @@ export async function rerunRatio(days: number): Promise<{ reruns: number; jobs: 
 export async function rerunJobCount(days: number): Promise<number> {
   const row = await queryOne<{ count: number }>(
     `SELECT count(DISTINCT job_id)::int AS count
-     FROM analytics_events
+     FROM quality_review_analytics_events
      WHERE event_name = 'rerun_requested' AND occurred_at >= $1`,
     [since(days)],
   );
