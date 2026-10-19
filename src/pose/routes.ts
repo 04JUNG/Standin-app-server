@@ -1,3 +1,4 @@
+import { createHumanReferenceRoutes } from "../human-reference.js";
 import { exportCandidateAllowed, manualExportCandidate } from "../routed-search.js";
 import { createDefaultPosterRoutes } from "../pose-posters.js";
 import { createRoutedPreviewRoutes } from "../routed-preview.js";
@@ -12,7 +13,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
 import { config } from "../config.js";
 import { log } from "../log.js";
-import { getPoseBvh, getPoseThumbnail } from "../inference.js";
+import { getPoseBvh, getPoseThumbnail, getPosePoster, getDefaultBodyTemplate } from "../inference.js";
 import { errorEnvelope } from "../mapping.js";
 import { recordExport, validateExportCandidate, validateConfirmedSelection } from "../analytics/store.js";
 import { resolveExportArtifact } from "../refine/service.js";
@@ -27,13 +28,14 @@ import {
 } from "../converter/client.js";
 
 const defaults = {
-  getOwnedJob, getPoseBvh, getPoseThumbnail, validateExportCandidate, validateConfirmedSelection,
+  getOwnedJob, getPoseBvh, getPoseThumbnail, getPosePoster, getDefaultBodyTemplate, validateExportCandidate, validateConfirmedSelection,
   recordExport, resolveExportArtifact, checkCharacter, converterEnabled, convertBvhToFbx,
 };
 export function createPoseRoutes(overrides: Partial<typeof defaults> = {}) {
 const deps = { ...defaults, ...overrides };
 const poseRoutes = new Hono<AppEnv>();
-poseRoutes.route("/", createDefaultPosterRoutes());
+poseRoutes.route("/", createDefaultPosterRoutes(deps));
+poseRoutes.route("/", createHumanReferenceRoutes(deps));
 poseRoutes.use("/:id/export", createReleaseGuard(deps.getOwnedJob, deps.validateConfirmedSelection));
 poseRoutes.route("/", createRoutedPreviewRoutes());
 poseRoutes.route("/", createFramingRoutes());

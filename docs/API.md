@@ -1391,3 +1391,13 @@ full GLB는 posed-mesh-v1, 부분 GLB는 scope·camera rotation이 적용된 fra
 #92의 framed exporter revision과 PNG fallback 계약을 유지한다. 최종 범위 resolver를 카드·선택 체형·손·최종 확인에 공통 적용한다. source는 vlm_person/vlm_description/legacy_shot/observed_legs/unknown을 보존하고 meshScope를 결과에 저장한다. 자동 범위는 meshScope를 사용하며 수동 범위가 우선이다. shoulder_head와 수동 bust는 구분한다. 검색 순위/원본 BVH/검수 권한은 변경하지 않는다.
 
 body manifest의 선택적 hands는 revision/library_sha256을 포함하며 renderKey와 PNG 손 identity에 결합한다. 손 선택이 있으면 GLB는 PREVIEW_NOT_READY이고 같은 manifest의 검증된 PNG를 사용한다. PNG/GLB 및 presentation body·손 PNG는 X-Standin-Output-Scope를 반환한다. 변경 중 늦은 범위·손·카메라 응답은 폐기한다.
+
+### Actual default-human reference assets
+
+`GET /v1/pose-candidates/default-body-template/:scope` requires installation context and reads one approved static template from inference. It verifies compressed asset hash, character, preview-only, method and scope. HTTP returns native gzip JSON; `X-Standin-Artifact-SHA256` and `X-Standin-Template-JSON-SHA256` describe decoded JSON, while `X-Standin-Template-SHA256` identifies the stored gzip. The matching client checks decoded bytes and the pinned default body before rendering. All five scopes are supported; no Converter runs.
+
+`GET /v1/pose-candidates/:id/poster-source?jobId=...&personIndex=...&candidateId=...&scope=...` is an owned, completed-job reference source endpoint. It checks candidate/pose identity, current manual-priority scope, explicit lookup denial, registered/quarantine-safe source bytes and expected hash, then rechecks the immutable candidate snapshot/scope after reading. It returns bounded BVH bytes with source SHA, scope and preview-only headers. It grants no export/refine/actual-mesh permission. Inline presentation sources continue to use their existing owned hash-bound BVH reference route.
+
+Poster responses may identify `X-Standin-Preview-Method=reference-skinning-v1` and `X-Standin-Template-SHA256`. This is actual default-human geometry with approximate reference retarget, not the frozen final Converter solver. It must be labeled as approximate reference. CORS exposes method/template/source provenance for desktop webviews. Unknown methods, wrong body/digests and lookup/source/scope changes fail closed. Selected-body detail/final export paths are unchanged.
+
+Deployment prerequisites: matching inference reader/template endpoint and full verified five-scope asset snapshot; matching client loader and approximate-reference captions. Local staging and production snapshots were prepared separately; no remote write/deployment was performed by this change. See `Standin-server/docs/HUMAN_REFERENCE_POSTERS.md` and client counterpart for complete workflow and validation limits.
