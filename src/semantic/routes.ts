@@ -77,6 +77,7 @@ export function createSemanticRoutes(overrides: Partial<typeof defaults> = {}) {
         available: deps.enabled() && (await deps.readiness()),
         maxQueryLength: 500,
         maxTopK: SEMANTIC_MAX_TOP_K,
+        supportsAllResults: true,
       },
       200,
       { "Cache-Control": "private, no-store" },
