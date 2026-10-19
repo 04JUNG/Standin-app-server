@@ -501,7 +501,7 @@ export async function getHandThumbnail(
 /** Direct user text only; never run VLM or refine on this path. Do not log the query/body. */
 export async function searchSemantic(
   query: string,
-  topK: number,
+  topK: number | null,
   signal?: AbortSignal,
 ): Promise<unknown> {
   const response = await fetch(`${config.inferenceBaseUrl}/semantic-search`, {

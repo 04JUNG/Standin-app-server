@@ -1,6 +1,8 @@
 import type { AnalysisResult, PoseCandidate } from "../types.js";
 
+// Keep the legacy capability for installed clients; all-results support is additive.
 export const SEMANTIC_MAX_TOP_K = 20;
+export type SemanticTopK = number | null;
 
 export class SemanticError extends Error {
   constructor(
@@ -42,7 +44,7 @@ function score(value: unknown): void {
 }
 export function readSearchInput(value: unknown): {
   query: string;
-  topK: number;
+  topK: SemanticTopK;
 } {
   const body = object(value);
   if (
@@ -51,16 +53,15 @@ export function readSearchInput(value: unknown): {
   )
     throw new SemanticError("INVALID_INPUT", 400);
   const query = body.query.trim();
-  const topK = body.topK ?? 5;
+  const topK = body.topK === undefined ? 5 : body.topK;
   if (
     !query ||
     query.length > 500 ||
-    !Number.isInteger(topK) ||
-    Number(topK) < 1 ||
-    Number(topK) > SEMANTIC_MAX_TOP_K
+    (topK !== null &&
+      (typeof topK !== "number" || !Number.isSafeInteger(topK) || topK < 1))
   )
     throw new SemanticError("INVALID_INPUT", 400);
-  return { query, topK: Number(topK) };
+  return { query, topK: topK as SemanticTopK };
 }
 export interface SearchGroup {
   rank: number;
@@ -72,7 +73,7 @@ export interface SearchGroup {
 }
 export function readSearchResponse(
   value: unknown,
-  topK: number,
+  topK: SemanticTopK,
   expectedQuery?: string,
 ): {
   status: "ok" | "no_result";
@@ -95,8 +96,8 @@ export function readSearchResponse(
     body.generation_requested !== false ||
     !Array.isArray(body.candidates) ||
     !Array.isArray(body.near_candidates) ||
-    body.candidates.length > topK ||
-    body.near_candidates.length > topK ||
+    (topK !== null &&
+      (body.candidates.length > topK || body.near_candidates.length > topK)) ||
     (body.status === "no_result") !== (body.candidates.length === 0)
   )
     throw new SemanticError("SEMANTIC_CONTRACT", 502);
