@@ -559,3 +559,10 @@ export function getPosePoster(poseId: string, sourceSha256: string, scope = "ful
     headers: authHeaders(), signal: AbortSignal.timeout(5_000),
   });
 }
+
+/** Shared immutable default mesh; no selected-body conversion. */
+export function getDefaultBodyTemplate(scope: string): Promise<Response> {
+  return fetch(`${config.inferenceBaseUrl}/pose-poster-template/${encodeURIComponent(scope)}`, {
+    headers: authHeaders(), signal: AbortSignal.timeout(5_000),
+  });
+}

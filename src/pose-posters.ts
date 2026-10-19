@@ -44,6 +44,25 @@ export async function verifiedPoster(
     await response.body?.cancel();
     throw fail();
   }
+  const method = response.headers.get("X-Standin-Preview-Method");
+  if (
+    (method &&
+      !["frozen-retarget-v1", "pose-only", "reference-skinning-v1"].includes(
+        method,
+      )) ||
+    (method === "pose-only" && kind !== "pose-only") ||
+    (method === "frozen-retarget-v1" && kind !== "default-body") ||
+    (method === "reference-skinning-v1" &&
+      (kind !== "default-body" ||
+        sha !==
+          "7c648b97a24a3bb4914b6e5d515708c33727979881d92ef916d5726e22301f3d" ||
+        !/^[a-f0-9]{64}$/.test(
+          response.headers.get("X-Standin-Template-SHA256") ?? "",
+        )))
+  ) {
+    await response.body?.cancel();
+    throw fail();
+  }
   const reader = response.body?.getReader();
   if (!reader) throw fail();
   const chunks: Uint8Array[] = [];
@@ -118,7 +137,9 @@ export function createDefaultPosterRoutes(
       (p) => p.personIndex === Number(raw),
     );
     const candidate = find(job);
-    if (!person || !candidate) return fail();
+    if (!person || !candidate || candidate.lookupAllowed === false)
+      return fail();
+    const candidateSnapshot = JSON.stringify(candidate);
     const scope = previewScope(person);
     if (c.req.query("scope") && c.req.query("scope") !== scope)
       return fail("PREVIEW_SOURCE_CHANGED", 409);
@@ -163,7 +184,7 @@ export function createDefaultPosterRoutes(
       if (!currentPerson || previewScope(currentPerson) !== scope)
         return fail("PREVIEW_SOURCE_CHANGED", 409);
       const current = find(currentJob);
-      if (!current || JSON.stringify(current) !== JSON.stringify(candidate))
+      if (!current || JSON.stringify(current) !== candidateSnapshot)
         return fail("PREVIEW_SOURCE_CHANGED", 409);
       return response;
     } catch {

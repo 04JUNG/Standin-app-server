@@ -1,3 +1,4 @@
+import { createHumanReferenceRoutes } from "../human-reference.js";
 import { createDefaultPosterRoutes } from "../pose-posters.js";
 import { createRoutedPreviewRoutes } from "../routed-preview.js";
 import { createReleaseGuard } from "../release-policy.js";
@@ -27,6 +28,7 @@ import {
 
 export const poseRoutes = new Hono<AppEnv>();
 poseRoutes.route("/", createDefaultPosterRoutes());
+poseRoutes.route("/", createHumanReferenceRoutes());
 poseRoutes.use("/:id/export", createReleaseGuard());
 poseRoutes.route("/", createRoutedPreviewRoutes());
 poseRoutes.route("/", createFramingRoutes());
