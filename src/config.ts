@@ -6,6 +6,7 @@ function env(key: string, def = ""): string {
 }
 
 export const config = {
+  poseThumbnailRevision: env("POSE_THUMBNAIL_REVISION"),
   handSelectionEnabled: env("HAND_SELECTION_ENABLED", "false") === "true",
   semanticSearchEnabled: env("SEMANTIC_SEARCH_ENABLED", "false") === "true",
   semanticSearchPerMinute: Math.max(1, Number(env("SEMANTIC_SEARCH_PER_MINUTE", "10")) || 10),
