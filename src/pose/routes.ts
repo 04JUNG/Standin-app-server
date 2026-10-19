@@ -1,3 +1,4 @@
+import { createDefaultPosterRoutes } from "../pose-posters.js";
 import { createRoutedPreviewRoutes } from "../routed-preview.js";
 import { createReleaseGuard } from "../release-policy.js";
 import { createAlignedRoutes } from "../candidate-camera/routes.js";
@@ -25,6 +26,7 @@ import {
 } from "../converter/client.js";
 
 export const poseRoutes = new Hono<AppEnv>();
+poseRoutes.route("/", createDefaultPosterRoutes());
 poseRoutes.use("/:id/export", createReleaseGuard());
 poseRoutes.route("/", createRoutedPreviewRoutes());
 poseRoutes.route("/", createFramingRoutes());

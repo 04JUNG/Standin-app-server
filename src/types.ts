@@ -94,6 +94,7 @@ export interface PoseCandidate {
   matchLevel: MatchLevel;
   bvhAvailable: boolean;
   thumbnailUrl?: string;
+  posterUrl?: string;
   /** Existing library JPEG for a fast, approximate candidate card. */
   quickThumbnailUrl?: string;
   // 개발자 모드 전용 원시 점수(UI 기본 노출 X)

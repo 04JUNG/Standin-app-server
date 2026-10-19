@@ -1,0 +1,174 @@
+import { previewScope } from "./output-scope/preview.js";
+/** Canonical, read-only references. No converter calls or selection writes. */
+import { Hono } from "hono";
+import type { AppEnv } from "./env.js";
+import { getOwnedJob } from "./jobs/store.js";
+import { getPoseBvh, getPosePoster } from "./inference.js";
+import { sha256Hex } from "./converter/client.js";
+import { BodyError } from "./body-selection/store.js";
+import { errorEnvelope } from "./mapping.js";
+
+export async function verifiedPoster(
+  poseId: string,
+  source: string,
+  get = getPosePoster,
+  scope = "full",
+): Promise<Response> {
+  const response = await get(poseId, source, scope);
+  const fail = () => new BodyError("PREVIEW_UNAVAILABLE", 404);
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw fail();
+  }
+  const kind = response.headers.get("X-Standin-Poster-Kind");
+  const character = response.headers.get("X-Standin-Character-Id");
+  const sha = response.headers.get("X-Standin-Character-SHA256");
+  if (
+    response.headers.get("Content-Type") !== "image/png" ||
+    response.headers.get("X-Standin-Poster-Version") !==
+      "default-body-poster-v1" ||
+    response.headers.get("X-Standin-Source-BVH-SHA256") !== source ||
+    response.headers.get("X-Standin-Output-Scope") !== scope ||
+    response.headers.get("X-Standin-Preview-Projection") !== "orthographic" ||
+    response.headers.get("X-Standin-Preview-Only") !== "true" ||
+    !/^[a-f0-9]{64}$/.test(
+      response.headers.get("X-Standin-Preview-Revision") ?? "",
+    ) ||
+    !(
+      (kind === "default-body" &&
+        character === "standin-master-v2" &&
+        /^[a-f0-9]{64}$/.test(sha ?? "")) ||
+      (kind === "pose-only" && character === "none" && sha === "none")
+    )
+  ) {
+    await response.body?.cancel();
+    throw fail();
+  }
+  const reader = response.body?.getReader();
+  if (!reader) throw fail();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const p = await reader.read();
+      if (p.done) break;
+      size += p.value.length;
+      if (size > 2 * 1024 * 1024) throw fail();
+      chunks.push(p.value);
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+  const image = Buffer.concat(chunks);
+  if (
+    !image
+      .subarray(0, 8)
+      .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ||
+    sha256Hex(image) !== response.headers.get("X-Standin-Artifact-SHA256")
+  )
+    throw fail();
+  const headers = new Headers({
+    "Content-Type": "image/png",
+    "Cache-Control": "private, no-store",
+  });
+  for (const [name, value] of response.headers)
+    if (name.startsWith("x-standin-")) headers.set(name, value);
+  return new Response(image, { headers });
+}
+
+const defaults = { getOwnedJob, getPoseBvh, getPosePoster };
+export function createDefaultPosterRoutes(
+  overrides: Partial<typeof defaults> = {},
+) {
+  const deps = { ...defaults, ...overrides };
+  const routes = new Hono<AppEnv>();
+  routes.get("/:id/poster", async (c) => {
+    const fail = (code = "PREVIEW_UNAVAILABLE", status: 404 | 409 = 404) =>
+      c.json(
+        errorEnvelope(
+          code,
+          "참고 이미지를 불러오지 못했습니다.",
+          c.get("requestId"),
+        ),
+        status,
+      );
+    const owner = c.get("installationId");
+    const jobId = c.req.query("jobId") ?? "";
+    const raw = c.req.query("personIndex") ?? "";
+    if (
+      !owner ||
+      !/^(0|[1-9]\d*)$/.test(raw) ||
+      !Number.isSafeInteger(Number(raw))
+    )
+      return fail();
+    const read = () => deps.getOwnedJob(jobId, owner);
+    const find = (job: Awaited<ReturnType<typeof read>>) =>
+      job?.status === "completed"
+        ? job.result?.candidatesByPerson
+            .find((p) => p.personIndex === Number(raw))
+            ?.candidates.find(
+              (candidate) =>
+                candidate.id === c.req.query("candidateId") &&
+                candidate.poseId === c.req.param("id"),
+            )
+        : undefined;
+    const job = await read();
+    const person = job?.result?.candidatesByPerson.find(
+      (p) => p.personIndex === Number(raw),
+    );
+    const candidate = find(job);
+    if (!person || !candidate) return fail();
+    const scope = previewScope(person);
+    if (c.req.query("scope") && c.req.query("scope") !== scope)
+      return fail("PREVIEW_SOURCE_CHANGED", 409);
+    const sourceResponse = await deps.getPoseBvh(candidate.poseId);
+    if (!sourceResponse.ok) {
+      await sourceResponse.body?.cancel();
+      return fail();
+    }
+    const reader = sourceResponse.body?.getReader();
+    if (!reader) return fail();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      for (;;) {
+        const part = await reader.read();
+        if (part.done) break;
+        size += part.value.length;
+        if (size > 2_000_000) return fail();
+        chunks.push(part.value);
+      }
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
+    const source = Buffer.concat(chunks);
+    const hash = sha256Hex(source);
+    const expected =
+      candidate.sourceBvhSha256 ?? candidate.camera?.source_bvh_sha256;
+    if (expected && expected !== hash)
+      return fail("PREVIEW_SOURCE_CHANGED", 409);
+    try {
+      const response = await verifiedPoster(
+        candidate.poseId,
+        hash,
+        deps.getPosePoster,
+        scope,
+      );
+      const currentJob = await read();
+      const currentPerson = currentJob?.result?.candidatesByPerson.find(
+        (p) => p.personIndex === Number(raw),
+      );
+      if (!currentPerson || previewScope(currentPerson) !== scope)
+        return fail("PREVIEW_SOURCE_CHANGED", 409);
+      const current = find(currentJob);
+      if (!current || JSON.stringify(current) !== JSON.stringify(candidate))
+        return fail("PREVIEW_SOURCE_CHANGED", 409);
+      return response;
+    } catch {
+      return fail();
+    }
+  });
+  return routes;
+}

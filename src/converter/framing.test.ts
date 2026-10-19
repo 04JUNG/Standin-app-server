@@ -6,7 +6,7 @@ import {
   FramedArtifactCache,
   FRAMING_VERSION,
 } from "./framing.js";
-import { EXPECTED_SOLVER_VERSION, sha256Hex } from "./client.js";
+import { ConverterError, EXPECTED_SOLVER_VERSION, sha256Hex } from "./client.js";
 
 const bvhBytes = Buffer.from("HIERARCHY MOTION"),
   fbx = Buffer.from("Kaydara FBX Binary fixture");
@@ -274,4 +274,15 @@ test("requested hands are transmitted and mismatched bake receipts cannot be exp
   await convertFramed({ ...input, hands }, overrides);
   for (const bad of [null, { ...receipt, left: "relaxed" }, { ...receipt, library_version: "old" }, { ...receipt, version: "unknown" }])
     await assert.rejects(convertFramed({ ...input, hands }, deps({ ...payload(), hands: bad })), { code: "CONVERTER_INTEGRITY" });
+});
+
+test("protected export purpose selects the normal converter endpoint; missing support never falls back", async () => {
+  const paths: string[] = [];
+  const fetcher = (async (url: string | URL | Request) => {
+    paths.push(String(url));
+    return new Response("missing",{status:404});
+  }) as typeof fetch;
+  await assert.rejects(convertFramed({...input,purpose:"export"},{baseUrl:"http://converter",fetch:fetcher}),
+    (error:unknown)=>error instanceof ConverterError && error.code === "CONVERTER_UNAVAILABLE");
+  assert.deepEqual(paths,["http://converter/convert-framed-export"]);
 });
