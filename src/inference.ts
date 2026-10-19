@@ -551,3 +551,11 @@ export async function semanticReadiness(): Promise<boolean> {
     return false;
   }
 }
+
+/** Offline poster or cheap pose-only reference; the inference endpoint never calls Blender. */
+export function getPosePoster(poseId: string, sourceSha256: string, scope = "full"): Promise<Response> {
+  const params = new URLSearchParams({ source_sha256: sourceSha256, scope });
+  return fetch(`${config.inferenceBaseUrl}/pose/${encodeURIComponent(poseId)}/poster?${params}`, {
+    headers: authHeaders(), signal: AbortSignal.timeout(5_000),
+  });
+}

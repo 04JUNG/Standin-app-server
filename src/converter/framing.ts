@@ -23,6 +23,8 @@ export interface FramedArtifact {
   previewRevision?: string;
 }
 export interface FramedInput {
+  /** Internal scheduling purpose, never a client-supplied authority flag. */
+  purpose?: "preview" | "export";
   shape?: BodyShape | null;
   /** Required with `shape`: the converter must bake from exactly this authoring source. */
   shapeSource?: ShapeSource | null;
@@ -121,7 +123,7 @@ export async function convertFramed(
   if (input.expectedPreviewRevision) body.set("expected_preview_revision", input.expectedPreviewRevision);
   let response: Response;
   try {
-    response = await deps.fetch(`${deps.baseUrl}/convert-framed`, {
+    response = await deps.fetch(`${deps.baseUrl}/${input.purpose === "export" ? "convert-framed-export" : "convert-framed"}`, {
       method: "POST",
       body,
       signal: AbortSignal.timeout(
@@ -146,7 +148,7 @@ export async function convertFramed(
     const code =
       response.status === 504
         ? "CONVERTER_TIMEOUT"
-        : response.status === 503
+        : (response.status === 503 || (response.status === 404 && input.purpose === "export"))
           ? "CONVERTER_UNAVAILABLE"
           : [400, 409, 413, 422].includes(response.status)
             ? "CONVERTER_REJECTED"

@@ -294,6 +294,10 @@ export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
         person.candidateShortfallReason = routed.candidates.length
           ? "ROUTED_REVIEW_ONLY"
           : `ROUTED_${routed.summary.status.toUpperCase()}`;
+      for (const c of person.candidates) {
+        const params = new URLSearchParams({ jobId, personIndex: String(p.index), candidateId: c.id });
+        c.posterUrl = `/v1/pose-candidates/${encodeURIComponent(c.poseId)}/poster?${params}`;
+      }
       return person;
     }),
   };

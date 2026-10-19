@@ -358,6 +358,7 @@ export function createFramingRoutes(
               ],
               {
                 bvhBytes,
+                purpose: format === "fbx" ? "export" : "preview",
                 ...(hands ? { hands } : {}),
                 characterId,
                 scope,
@@ -379,6 +380,7 @@ export function createFramingRoutes(
                 ],
                 {
                   bvhBytes,
+                  purpose: format === "fbx" ? "export" : "preview",
                   ...(hands ? { hands } : {}),
                   characterId,
                   scope,
@@ -390,6 +392,7 @@ export function createFramingRoutes(
             : cache.get(key, () =>
                 deps.convertFramed({
                   bvhBytes,
+                  purpose: format === "fbx" ? "export" : "preview",
                   characterId,
                   scope,
                   ...expected,

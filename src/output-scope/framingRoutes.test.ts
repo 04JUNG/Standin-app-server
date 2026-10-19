@@ -37,6 +37,8 @@ function setup() {
     hands: null as HandBake | null,
     changeHandDuringConversion: false,
     sentHands: null as HandBake | null,
+    sentPurpose: undefined as string | undefined,
+    sentPreviewFormat: undefined as string | undefined,
     pinnedSemanticSource: undefined as string | undefined,
     owner: true,
     confirmed: true,
@@ -126,7 +128,14 @@ function setup() {
       }),
       convertFramed: async (input) => {
         state.sentHands = input.hands ?? null;
-        if (state.changeHandDuringConversion && state.hands) state.hands = { ...state.hands, left: "open", revision: state.hands.revision + 1 };
+        state.sentPurpose = input.purpose;
+        state.sentPreviewFormat = input.previewFormat;
+        if (state.changeHandDuringConversion && state.hands)
+          state.hands = {
+            ...state.hands,
+            left: "open",
+            revision: state.hands.revision + 1,
+          };
         state.calls++;
         await state.pending;
         if (state.changeDuringConversion) state.scope = "head";
@@ -312,7 +321,13 @@ test("a refinement stored after review invalidates the pinned original source", 
   assert.equal(state.calls, 0);
 });
 
-const handFixture: HandBake = { left: "fist", right: "relaxed", library_sha256: "a".repeat(64), library_version: "hand-library-v1", revision: 1 };
+const handFixture: HandBake = {
+  left: "fist",
+  right: "relaxed",
+  library_sha256: "a".repeat(64),
+  library_version: "hand-library-v1",
+  revision: 1,
+};
 test("hand preview and download reuse the exact baked pair and require the reviewed revision", async () => {
   const { state, request } = setup();
   state.hands = { ...handFixture };
@@ -322,20 +337,42 @@ test("hand preview and download reuse the exact baked pair and require the revie
   assert.equal(preview.status, 200);
   assert.deepEqual(state.sentHands, handFixture);
   assert.equal(preview.headers.get("X-Standin-Hand-Revision"), "1");
-  assert.equal(preview.headers.get("X-Standin-Hand-Library-SHA256"), handFixture.library_sha256);
+  assert.equal(
+    preview.headers.get("X-Standin-Hand-Library-SHA256"),
+    handFixture.library_sha256,
+  );
   const reviewKey = preview.headers.get("X-Standin-Review-Key")!;
   const unreviewed = await request({ ...query, format: "fbx" });
   assert.equal(unreviewed.status, 409);
-  assert.equal((await unreviewed.json() as { error: { code: string } }).error.code, "HAND_REVIEW_REQUIRED");
+  assert.equal(
+    ((await unreviewed.json()) as { error: { code: string } }).error.code,
+    "HAND_REVIEW_REQUIRED",
+  );
   const download = await request({ ...query, format: "fbx", reviewKey });
   assert.equal(download.status, 200);
   assert.equal(await download.text(), "fbx");
   assert.equal(state.calls, 1);
   state.hands = { ...handFixture, left: "open", revision: 2 };
-  assert.equal((await request({ ...query, format: "fbx", reviewKey })).status, 409);
-  assert.equal((await request({ ...query, handSelectionRevision: "2" })).status, 200);
+  assert.equal(
+    (await request({ ...query, format: "fbx", reviewKey })).status,
+    409,
+  );
+  assert.equal(
+    (await request({ ...query, handSelectionRevision: "2" })).status,
+    200,
+  );
   assert.equal(state.calls, 2);
-  assert.equal((await request({ ...query, handSelectionRevision: "2", format: "fbx", reviewKey })).status, 409);
+  assert.equal(
+    (
+      await request({
+        ...query,
+        handSelectionRevision: "2",
+        format: "fbx",
+        reviewKey,
+      })
+    ).status,
+    409,
+  );
 });
 test("hand changes during conversion discard the old output", async () => {
   const { state, request } = setup();
@@ -343,13 +380,21 @@ test("hand changes during conversion discard the old output", async () => {
   state.changeHandDuringConversion = true;
   const response = await request({ handSelectionRevision: "1" });
   assert.equal(response.status, 409);
-  assert.equal((await response.json() as { error: { code: string } }).error.code, "HANDS_CHANGED");
+  assert.equal(
+    ((await response.json()) as { error: { code: string } }).error.code,
+    "HANDS_CHANGED",
+  );
 });
 test("a selected hand disables the unmodified precomputed model shortcut", async () => {
   const { state, request } = setup();
   state.scope = "full";
   state.hands = { ...handFixture };
-  const response = await request({ outputScope: "full", handSelectionRevision: "1", format: "model", useLibraryModel: "true" });
+  const response = await request({
+    outputScope: "full",
+    handSelectionRevision: "1",
+    format: "model",
+    useLibraryModel: "true",
+  });
   assert.equal(response.status, 200);
   assert.equal(state.libraryReads, 0);
   assert.deepEqual(state.sentHands, handFixture);
@@ -359,7 +404,10 @@ test("semantic source identity survives preview/download cache and rejects chang
   state.pinnedSemanticSource = sourceSha;
   const query = { jobId: "semantic-paired" };
   assert.equal(await (await request(query)).text(), "png");
-  assert.equal(await (await request({ ...query, format: "fbx" })).text(), "fbx");
+  assert.equal(
+    await (await request({ ...query, format: "fbx" })).text(),
+    "fbx",
+  );
   assert.equal(state.calls, 1);
   state.pinnedSemanticSource = "f".repeat(64);
   assert.equal((await request(query)).status, 409);
@@ -371,4 +419,27 @@ test("semantic candidate never exports a stale refined artifact", async () => {
   state.refined = true;
   assert.equal((await request()).status, 409);
   assert.equal(state.calls, 0);
+});
+
+test("cold final FBX with model review uses protected export and preserves paired preview", async () => {
+  const { state, request } = setup();
+  const jobId = "cold-protected-model-pair";
+  const exported = await request({
+    jobId,
+    format: "fbx",
+    previewType: "model",
+  });
+  assert.equal(exported.status, 200);
+  assert.equal(await exported.text(), "fbx");
+  assert.equal(state.calls, 1);
+  assert.equal(state.sentPurpose, "export");
+  assert.equal(state.sentPreviewFormat, "model");
+  assert.equal(await (await request({ jobId, format: "model" })).text(), "glb");
+  assert.equal(state.calls, 1);
+  state.owner = false;
+  assert.equal(
+    (await request({ jobId, format: "fbx", previewType: "model" })).status,
+    409,
+  );
+  assert.equal(state.calls, 1);
 });
