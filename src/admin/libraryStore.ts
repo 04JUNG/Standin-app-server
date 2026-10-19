@@ -43,7 +43,7 @@ export async function vlmPrompts(days: number): Promise<VlmPromptRow[]> {
               COALESCE(j.inference_metadata_json::jsonb ->> 'vlmPromptVersion', 'unrecorded')
                 AS prompt_version,
               j.cut_summary_json::jsonb AS summary
-       FROM jobs j
+       FROM quality_review_jobs j
        WHERE j.created_at >= $1 AND j.status = 'completed' AND j.installation_id IS NOT NULL
          AND NOT (j.installation_id = ANY($2::text[]))
      ),
@@ -57,7 +57,7 @@ export async function vlmPrompts(days: number): Promise<VlmPromptRow[]> {
               count(*) FILTER (WHERE ap.person_tags_json::jsonb ->> 'source' = 'legacy_cut')::int
                 AS legacy_cut
        FROM scoped s
-       JOIN analysis_people ap ON ap.job_id = s.id
+       JOIN quality_review_analysis_people ap ON ap.job_id = s.id
        GROUP BY 1
      )
      SELECT s.prompt_version,

@@ -1,9 +1,20 @@
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import {
+  writeQualityConsent,
+  QUALITY_CONSENT_VERSION,
+  type QualityConsentInput,
+} from "./qualityConsent.js";
+import {
+  createHash,
+  randomBytes,
+  randomUUID,
+  timingSafeEqual,
+} from "node:crypto";
 import { execute, query, queryOne, transaction } from "../db.js";
 import { deleteInstallationData } from "../retention.js";
 import type { RosterQuery, RosterRow } from "../admin/installationList.js";
 
 export interface InstallationMetadata {
+  qualityConsent?: QualityConsentInput;
   consentVersion: string;
   consentedAt: string;
   appVersion: string;
@@ -24,31 +35,41 @@ function tokenHash(token: string): string {
   return createHash("sha256").update(token, "utf8").digest("hex");
 }
 
-export async function createInstallation(metadata: InstallationMetadata): Promise<{
+export async function createInstallation(
+  metadata: InstallationMetadata,
+): Promise<{
   installationId: string;
   deviceToken: string;
 }> {
   const installationId = `inst_${randomUUID()}`;
   const deviceToken = randomBytes(32).toString("base64url");
   const now = new Date().toISOString();
-  await execute(
-    `INSERT INTO installations
+  await transaction(async (client) => {
+    await client.query(
+      `INSERT INTO installations
       (id, token_hash, consent_version, consented_at, created_at, last_seen_at,
        app_version, os_name, os_version, architecture, locale)
      VALUES ($1,$2,$3,$4,$5,$5,$6,$7,$8,$9,$10)`,
-    [
-      installationId,
-      tokenHash(deviceToken),
-      metadata.consentVersion,
-      metadata.consentedAt,
-      now,
-      metadata.appVersion,
-      metadata.osName,
-      metadata.osVersion,
-      metadata.architecture,
-      metadata.locale,
-    ],
-  );
+      [
+        installationId,
+        tokenHash(deviceToken),
+        metadata.consentVersion,
+        metadata.consentedAt,
+        now,
+        metadata.appVersion,
+        metadata.osName,
+        metadata.osVersion,
+        metadata.architecture,
+        metadata.locale,
+      ],
+    );
+    if (metadata.qualityConsent)
+      await writeQualityConsent(
+        client,
+        installationId,
+        metadata.qualityConsent,
+      );
+  });
   return { installationId, deviceToken };
 }
 
@@ -63,7 +84,8 @@ export async function authenticateInstallation(
   if (!row || row.revoked_at) return null;
   const expected = Buffer.from(row.token_hash, "hex");
   const actual = Buffer.from(tokenHash(deviceToken), "hex");
-  if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return null;
+  if (expected.length !== actual.length || !timingSafeEqual(expected, actual))
+    return null;
   await execute("UPDATE installations SET last_seen_at = $2 WHERE id = $1", [
     installationId,
     new Date().toISOString(),
@@ -76,8 +98,7 @@ export async function authenticateInstallation(
  *
  * 토큰 해시는 뽑지 않는다 — 검토자에게 필요한 것은 "어떤 클라이언트가, 언제까지
  * 살아 있었나"뿐이고, 해시는 있어 봐야 재현에 쓸 수 없으면서 유출 표면만 넓힌다.
- * 탈퇴·철회한 설치도 돌려준다. `revoked_at`이 찍힌 설치의 남은 Job이야말로
- * 삭제 스윕이 제대로 돌았는지 확인하는 자리이기 때문이다.
+ * 두 가지 품질 검토 동의가 현재 모두 유효한 설치만 돌려준다.
  */
 export interface InstallationSummary {
   installationId: string;
@@ -98,8 +119,7 @@ export interface InstallationSummary {
  * Job 집계는 **페이지에 실제로 실린 행에 대해서만** LATERAL로 센다. 전체를 GROUP BY로
  * 말아 두고 자르면 설치가 늘수록 한 페이지를 여는 비용이 전체 Job 수에 비례한다.
  *
- * 철회·삭제 요청 설치도 기본으로 포함한다 — 그 설치의 남은 기록이야말로 삭제 스윕이
- * 제대로 돌았는지 확인하는 자리다. 가릴 때는 `activeOnly=true`를 쓴다.
+ * 검토 화면에서는 선택 동의가 없는 설치와 작업을 포함하지 않는다.
  */
 export async function listInstallations({
   limit,
@@ -110,12 +130,12 @@ export async function listInstallations({
     `SELECT i.id, i.created_at, i.last_seen_at, i.app_version, i.os_name, i.os_version,
             i.locale, i.consent_version, i.revoked_at, i.deletion_requested_at,
             j.job_count, j.failed_count, j.last_job_at
-     FROM installations i
+     FROM quality_review_installations i
      LEFT JOIN LATERAL (
        SELECT count(*)::int AS job_count,
               count(*) FILTER (WHERE status = 'failed')::int AS failed_count,
               max(created_at) AS last_job_at
-       FROM jobs WHERE jobs.installation_id = i.id
+       FROM quality_review_jobs WHERE quality_review_jobs.installation_id = i.id
      ) j ON TRUE
      WHERE ($1::boolean IS NOT TRUE
             OR (i.revoked_at IS NULL AND i.deletion_requested_at IS NULL))
@@ -143,7 +163,7 @@ export async function getInstallationSummary(
   }>(
     `SELECT id, created_at, last_seen_at, app_version, os_name, os_version,
             locale, consent_version, revoked_at, deletion_requested_at
-     FROM installations WHERE id = $1`,
+     FROM quality_review_installations WHERE id = $1`,
     [installationId],
   );
   if (!row) return null;
@@ -161,10 +181,19 @@ export async function getInstallationSummary(
   };
 }
 
-export async function revokeAndDeleteInstallationData(installationId: string): Promise<void> {
+export async function revokeAndDeleteInstallationData(
+  installationId: string,
+): Promise<void> {
   await transaction(async (client) => {
+    await writeQualityConsent(client, installationId, {
+      version: QUALITY_CONSENT_VERSION,
+      personalData: false,
+      contentLicense: false,
+    });
     await deleteInstallationData(client, installationId);
     // Removing the installation row invalidates the token and erases the final link.
-    await client.query("DELETE FROM installations WHERE id = $1", [installationId]);
+    await client.query("DELETE FROM installations WHERE id = $1", [
+      installationId,
+    ]);
   });
 }

@@ -10,7 +10,7 @@ import {
 export const analyticsRoutes = new Hono<AppEnv>();
 
 analyticsRoutes.post("/batch", async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { events?: unknown[] } | null;
+  const body = (await c.req.json().catch(() => null)) as { events?: unknown[]; qualityConsentId?: unknown } | null;
   if (!body?.events || !Array.isArray(body.events) || body.events.length > 100) {
     return c.json(errorEnvelope("INVALID_INPUT", "events 배열이 필요합니다.", c.get("requestId")), 400);
   }
@@ -41,6 +41,7 @@ analyticsRoutes.post("/batch", async (c) => {
     }
     if (
       await insertClientEvent({
+        qualityConsentId: typeof body.qualityConsentId === "string" ? body.qualityConsentId : null,
         eventId,
         installationId,
         sequence,

@@ -590,7 +590,7 @@ function refineCard(row) {
   // 저장된 미리보기가 있으면 바로, 조정본인데 없으면 관리자 경로가 그 자리에서 그린다.
   // refine은 이제 미리보기 없이 끝나므로(5초 상한) 처음 한 번은 여기서 그려진다.
   const preview = row.thumbnailUrl
-    ? '<img src="' + esc(row.thumbnailUrl) + '" alt="">'
+    ? '<img data-review-image="' + esc(row.thumbnailUrl) + '" alt="">'
     : row.refined
       ? '<img data-refined="' + esc(refinedQuery(row).replace("{kind}", "thumbnail")) + '" alt="">' +
         '<div class="sub refined-wait">미리보기 만드는 중…</div>'
@@ -601,12 +601,24 @@ function refineCard(row) {
     '<div class="sub">' + esc(row.reason || "—") + "</div>" +
     (row.limbs && row.limbs.length ? '<div class="sub">' + esc(row.limbs.join(", ")) + "</div>" : "") +
     '<div class="sub" style="margin-top:4px;display:flex;gap:8px;align-items:center">' +
-      (row.bvhUrl ? '<a href="' + esc(row.bvhUrl) + '" target="_blank" rel="noopener">BVH</a>' : "") +
+      (row.bvhUrl ? '<button class="ghost" data-fbx="' + esc(row.bvhUrl) + '">BVH</button>' : "") +
       '<button class="ghost" data-fbx="' + esc(refinedQuery(row).replace("{kind}", "fbx")) + '">FBX</button>' +
     "</div></div>";
 }
 
 /** 관리자 토큰이 헤더로 가야 해서 img src로 못 부른다. blob으로 받아 붙인다. */
+async function fillReviewImage(img, urls) {
+  const path = img.dataset.reviewImage;
+  delete img.dataset.reviewImage;
+  try {
+    const res = await fetch(path, { headers: { "X-Beta-Admin-Token": token }, cache: "no-store" });
+    if (!res.ok) throw new Error("접근할 수 없습니다");
+    const url = URL.createObjectURL(await res.blob());
+    urls.push(url);
+    img.src = url;
+  } catch { img.alt = "동의 철회 또는 보관기간 만료"; }
+}
+
 async function fillRefinedThumb(img) {
   const wait = img.nextElementSibling;
   try {
@@ -905,8 +917,8 @@ function detailRender(detail) {
   }).join("");
 
   const shot = detail.inputUrl
-    ? '<div class="shotWrap"><img class="shot" src="' + esc(detail.inputUrl) + '" alt="">' + overlay.svg + "</div>" +
-      '<p class="sub">서명 URL은 ' + (detail.inputUrlExpiresInSeconds || 300) + "초 뒤 만료된다.</p>"
+    ? '<div class="shotWrap"><img class="shot" data-review-image="' + esc(detail.inputUrl) + '" alt="">' + overlay.svg + "</div>" +
+      '<p class="sub">원본을 열 때마다 품질 검토 동의를 확인합니다.</p>'
     : overlay.svg
       ? '<div class="shotWrap solo">' + overlay.svg + "</div>" +
         '<p class="sub">원본은 지워졌고(90일 lifecycle) 뼈대만 남아 있다' +
@@ -938,6 +950,7 @@ function detailRender(detail) {
   $("detailOut").querySelectorAll("button[data-fbx]").forEach((button) => {
     button.addEventListener("click", () => downloadFbx(button));
   });
+  $("detailOut").querySelectorAll("img[data-review-image]").forEach(img => fillReviewImage(img, detailBlobUrls));
   bindOverlay();
   $("detailClose").addEventListener("click", closeDrawer);
   showDrawer("detail");
@@ -1970,6 +1983,7 @@ async function galleryLoad() {
     gallery.cursor = data.nextCursor || data.next_cursor || null;
     $("galMoreWrap").innerHTML = gallery.cursor ? '<button class="ghost" id="galMore">더 보기</button>' : "";
     if ($("galMore")) $("galMore").addEventListener("click", galleryLoad);
+    $("galTiles").querySelectorAll("img[data-review-image]").forEach(img => fillReviewImage(img, gallery.blobs));
     bindTiles();
   } catch (error) {
     $("galMoreWrap").innerHTML = '<span class="err">' + esc(error.message) + "</span>";
@@ -1979,7 +1993,7 @@ async function galleryLoad() {
 function roughTile(item) {
   return '<button class="tile" data-job="' + esc(item.jobId) + '">' +
     '<div class="bar o-' + esc(item.outcome) + '"></div>' +
-    '<div class="img">' + (item.inputUrl ? '<img loading="lazy" src="' + esc(item.inputUrl) + '" alt="">' : '<span class="sub">원본 만료</span>') + "</div>" +
+    '<div class="img">' + (item.inputUrl ? '<img loading="lazy" data-review-image="' + esc(item.inputUrl) + '" alt="">' : '<span class="sub">원본 만료</span>') + "</div>" +
     '<div class="cap"><div>' + pill(esc(item.outcomeLabel), OUTCOME_PILL[item.outcome] || "warn") + "</div>" +
     '<div class="sub">' + esc(kst(item.createdAt).md + " " + kst(item.createdAt).hm) + " · 인물 " + item.personCount + "명</div>" +
     '<div class="sub">' + (item.exported ? "내보냄" : "내보내기 없음") + (item.refined ? " · 조정됨" : "") + "</div></div></button>";

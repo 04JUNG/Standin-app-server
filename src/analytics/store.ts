@@ -1,5 +1,6 @@
+import { lockQualityConsent } from "../installations/qualityConsent.js";
 import { randomUUID } from "node:crypto";
-import { execute, queryOne, transaction } from "../db.js";
+import { queryOne, transaction } from "../db.js";
 import type { ExportFormat } from "../types.js";
 
 /**
@@ -11,7 +12,15 @@ import type { ExportFormat } from "../types.js";
  */
 export const CLIENT_EVENT_PROPERTIES: Record<string, readonly string[]> = {
   app_started: ["appVersion", "osName", "osVersion", "architecture", "locale"],
-  input_confirmed: ["source", "width", "height", "size", "mime", "surface", "characterId"],
+  input_confirmed: [
+    "source",
+    "width",
+    "height",
+    "size",
+    "mime",
+    "surface",
+    "characterId",
+  ],
   results_viewed: ["surface", "peopleCount", "candidateCount"],
   candidate_selected: [
     "personIndex",
@@ -47,7 +56,13 @@ export function sanitizeEventProperties(
   input: unknown,
 ): Record<string, string | number | boolean | null> | null {
   const allowed = CLIENT_EVENT_PROPERTIES[eventName];
-  if (!allowed || typeof input !== "object" || input === null || Array.isArray(input)) return null;
+  if (
+    !allowed ||
+    typeof input !== "object" ||
+    input === null ||
+    Array.isArray(input)
+  )
+    return null;
   const source = input as Record<string, unknown>;
   const output: Record<string, string | number | boolean | null> = {};
   for (const key of allowed) {
@@ -65,6 +80,7 @@ export function sanitizeEventProperties(
 }
 
 export async function insertClientEvent(event: {
+  qualityConsentId: string | null;
   eventId: string;
   installationId: string;
   sequence: number;
@@ -73,24 +89,39 @@ export async function insertClientEvent(event: {
   jobId: string | null;
   properties: Record<string, unknown>;
 }): Promise<boolean> {
-  const count = await execute(
-    `INSERT INTO analytics_events
-      (event_id, installation_id, sequence_number, event_name, occurred_at, received_at,
-       job_id, properties_json)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-     ON CONFLICT (event_id) DO NOTHING`,
-    [
-      event.eventId,
+  return transaction(async (client) => {
+    const consent = await lockQualityConsent(
+      client,
       event.installationId,
-      event.sequence,
-      event.name,
-      event.occurredAt,
-      new Date().toISOString(),
+      event.qualityConsentId,
       event.jobId,
-      JSON.stringify(event.properties),
-    ],
-  );
-  return count === 1;
+    );
+    if (
+      !consent ||
+      Date.parse(event.occurredAt) < Date.parse(consent.grantedAt) ||
+      Date.parse(event.occurredAt) > Date.now() + 60_000
+    )
+      return false;
+    const result = await client.query(
+      `INSERT INTO analytics_events
+      (event_id, installation_id, sequence_number, event_name, occurred_at, received_at,
+       job_id, properties_json, quality_consent_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+     ON CONFLICT (event_id) DO NOTHING`,
+      [
+        event.eventId,
+        event.installationId,
+        event.sequence,
+        event.name,
+        event.occurredAt,
+        new Date().toISOString(),
+        event.jobId,
+        JSON.stringify(event.properties),
+        consent.consentId,
+      ],
+    );
+    return result.rowCount === 1;
+  });
 }
 
 export async function eventJobBelongsToInstallation(
@@ -121,7 +152,11 @@ export async function confirmSelections(
     );
     if (owner.rowCount !== 1) return false;
     const confirmedAt = new Date().toISOString();
-    const validated: Array<{ personIndex: number; candidateId: string; rank: number }> = [];
+    const validated: Array<{
+      personIndex: number;
+      candidateId: string;
+      rank: number;
+    }> = [];
     for (const selection of selections) {
       const candidate = await client.query<CandidateRow>(
         `SELECT candidate_id, rank FROM analysis_candidates
@@ -169,21 +204,28 @@ export async function saveFeedback(
   installationId: string,
   jobId: string,
   reason: string,
+  qualityConsentId: string | null = null,
 ): Promise<boolean> {
-  const job = await queryOne<{ id: string }>(
-    "SELECT id FROM jobs WHERE id = $1 AND installation_id = $2",
-    [jobId, installationId],
-  );
-  if (!job) return false;
-  await execute(
-    `INSERT INTO job_feedback (job_id, installation_id, reason, submitted_at)
+  return transaction(async (client) => {
+    if (
+      !(await lockQualityConsent(
+        client,
+        installationId,
+        qualityConsentId,
+        jobId,
+      ))
+    )
+      return false;
+    await client.query(
+      `INSERT INTO job_feedback (job_id, installation_id, reason, submitted_at)
      VALUES ($1,$2,$3,$4)
      ON CONFLICT (job_id) DO UPDATE
      SET installation_id = EXCLUDED.installation_id, reason = EXCLUDED.reason,
          submitted_at = EXCLUDED.submitted_at`,
-    [jobId, installationId, reason, new Date().toISOString()],
-  );
-  return true;
+      [jobId, installationId, reason, new Date().toISOString()],
+    );
+    return true;
+  });
 }
 
 export async function recordExport(event: {
@@ -200,25 +242,37 @@ export async function recordExport(event: {
   /** 사용자가 고른 저장 포맷. FBX 변환 실패를 BVH 저장과 섞어 세지 않기 위한 값이다. */
   format?: ExportFormat;
 }): Promise<void> {
-  await execute(
-    `INSERT INTO export_events
+  await transaction(async (client) => {
+    if (
+      !event.jobId ||
+      !(await lockQualityConsent(
+        client,
+        event.installationId,
+        undefined,
+        event.jobId,
+      ))
+    )
+      return;
+    await client.query(
+      `INSERT INTO export_events
       (event_id, installation_id, job_id, person_index, candidate_id, status, occurred_at,
        error_code, variant, fallback_reason, format)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-    [
-      `export_${randomUUID()}`,
-      event.installationId,
-      event.jobId,
-      event.personIndex,
-      event.candidateId,
-      event.status,
-      new Date().toISOString(),
-      event.errorCode ?? null,
-      event.variant ?? null,
-      event.fallbackReason ?? null,
-      event.format ?? null,
-    ],
-  );
+      [
+        `export_${randomUUID()}`,
+        event.installationId,
+        event.jobId,
+        event.personIndex,
+        event.candidateId,
+        event.status,
+        new Date().toISOString(),
+        event.errorCode ?? null,
+        event.variant ?? null,
+        event.fallbackReason ?? null,
+        event.format ?? null,
+      ],
+    );
+  });
 }
 
 export async function validateExportCandidate(
@@ -243,7 +297,8 @@ export async function validateConfirmedSelection(owner: string, jobId: string, i
   return !!await queryOne(
     `SELECT s.candidate_id FROM confirmed_selections s JOIN jobs j ON j.id=s.job_id
      WHERE s.job_id=$1 AND s.person_index=$2 AND s.candidate_id=$3
-       AND s.installation_id=$4 AND j.installation_id=$4 AND j.status='completed'`,
+       AND s.installation_id=$4 AND j.installation_id=$4 AND j.status='completed'
+       AND j.created_at::timestamptz > now() - interval '90 days'`,
     [jobId, index, candidateId, owner],
   );
 }

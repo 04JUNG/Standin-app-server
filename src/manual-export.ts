@@ -55,7 +55,7 @@ export async function upgradeOwnedManualResult(
   db: Pick<PoolClient, "query">, jobId: string, owner: string,
 ): Promise<AnalysisResult | null> {
   const { rows } = await db.query<{ status: string; result_json: string | null }>(
-    "SELECT status,result_json FROM jobs WHERE id=$1 AND installation_id=$2 FOR UPDATE", [jobId, owner],
+    "SELECT status,result_json FROM jobs WHERE id=$1 AND installation_id=$2 AND created_at::timestamptz > now() - interval '90 days' FOR UPDATE", [jobId, owner],
   );
   const row = rows[0];
   if (!row || row.status !== "completed" || !row.result_json) return null;

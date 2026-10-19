@@ -236,3 +236,59 @@ test("raw BVH allows explicitly confirmed manual asset; direct FBX requires pair
   assert.equal(((await fbx.json()) as { error: { code: string } }).error.code, "MANUAL_REVIEW_REQUIRED");
   assert.equal(fetched, 1);
 });
+
+test("actual PostgreSQL schema: old near/semantic jobs gain owned manual rows and confirmations without quality consent or reanalysis", async (t) => {
+  const { PGlite } = await import("@electric-sql/pglite");
+  const { pool, SCHEMA, transaction } = await import("./db.js");
+  const { getOwnedJob } = await import("./jobs/store.js");
+  const { confirmSelections, validateConfirmedSelection } = await import("./analytics/store.js");
+  const db = new PGlite(); t.after(() => db.close()); await db.exec(SCHEMA);
+  const query = async (sql: string, values?: unknown[]) => {
+    const r = await db.query(sql, values);
+    return { rows: r.rows, rowCount: r.rows.length || r.affectedRows || 0, fields: [], command: "", oid: 0 };
+  };
+  t.mock.method(pool, "query", query as typeof pool.query);
+  t.mock.method(pool, "connect", (async () => ({ query, release() {} })) as unknown as typeof pool.connect);
+  const now = new Date().toISOString();
+  await db.query(`INSERT INTO installations
+    (id,token_hash,consent_version,consented_at,created_at,last_seen_at,app_version,os_name,os_version,architecture,locale)
+    VALUES ('owner','hash','test',$1,$1,$1,'test','test','test','test','ko')`, [now]);
+  async function insertOld(semantic: boolean, createdAt = now) {
+    const f = oldJob(semantic);
+    f.p.handSelection = { revision: 7, left: "fist", right: "relaxed" } as NonNullable<AnalysisPerson["handSelection"]>;
+    if (semantic) f.c.id = "registered::front"; // The previous text contract used this ID.
+    await db.query(`INSERT INTO jobs (id,status,created_at,updated_at,result_json,installation_id)
+      VALUES ($1,'completed',$2,$2,$3,'owner')`, [f.result.jobId, createdAt, JSON.stringify(f.result)]);
+    await db.query(`INSERT INTO analysis_people (job_id,person_index,tags_json,refine_context_json)
+      VALUES ($1,0,'{}',$2)`, [f.result.jobId, JSON.stringify({ posePresentationAssets: f.assets.get(0) })]);
+    return f;
+  }
+  for (const semantic of [false, true]) {
+    const f = await insertOld(semantic);
+    assert.equal(await getOwnedJob(f.result.jobId, "other"), undefined);
+    const job = (await getOwnedJob(f.result.jobId, "owner"))!;
+    const p = job.result!.candidatesByPerson[0], c = p.candidates[0];
+    assert.equal(c.manualExportAllowed, true); assert.equal(c.id, f.row.candidate_id);
+    assert.equal(c.releaseAllowed, false); assert.equal(c.refineAllowed, false);
+    assert.equal(p.posePresentation!.search_reason, "hand_skin_screen_unavailable_no_generation");
+    assert.equal(p.handSelection!.revision, 7); assert.equal(p.outputScope!.selection, "half");
+    const saved = await db.query<{ candidate_id: string; pose_id: string }>("SELECT candidate_id,pose_id FROM analysis_candidates WHERE job_id=$1", [f.result.jobId]);
+    assert.deepEqual(saved.rows, [{ candidate_id: c.id, pose_id: "registered" }]);
+    assert.equal(await validateConfirmedSelection("owner", f.result.jobId, 0, c.id), false);
+    assert.equal(await confirmSelections("owner", f.result.jobId, [{ personIndex: 0, candidateId: c.id }]), true);
+    assert.equal(await validateConfirmedSelection("owner", f.result.jobId, 0, c.id), true);
+    assert.equal(await validateConfirmedSelection("other", f.result.jobId, 0, c.id), false);
+    const second = await getOwnedJob(f.result.jobId, "owner");
+    assert.deepEqual(second!.result, job.result, "second read preserves body/hands and result without another migration");
+    const rowCount = await db.query<{ n: number }>("SELECT count(*)::int AS n FROM analysis_candidates WHERE job_id=$1", [f.result.jobId]);
+    assert.equal(rowCount.rows[0].n, 1);
+  }
+  const review = await db.query<{ n: number }>("SELECT count(*)::int AS n FROM quality_review_jobs");
+  assert.equal(review.rows[0].n, 0, "manual file use does not opt the user into quality review");
+  const expired = await insertOld(false, new Date(Date.now() - 91 * 86_400_000).toISOString());
+  assert.equal(await getOwnedJob(expired.result.jobId, "owner"), undefined);
+  assert.equal(await transaction((client) => upgradeOwnedManualResult(client, expired.result.jobId, "owner")), null);
+  assert.equal((await db.query<{ n: number }>("SELECT count(*)::int AS n FROM analysis_candidates WHERE job_id=$1", [expired.result.jobId])).rows[0].n, 0);
+  const stored = (await db.query<{ result_json: string }>("SELECT result_json FROM jobs WHERE id=$1", [expired.result.jobId])).rows[0];
+  assert.equal(JSON.parse(stored.result_json).manualExportVersion, undefined, "expired work is not migrated or revived");
+});

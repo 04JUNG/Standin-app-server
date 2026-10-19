@@ -52,14 +52,17 @@ presentation ID로 통일되므로 이전 확정 선택은 사용자가 다시 �
 
 ## 검증
 
-`npm test`: 기존 회귀 + manual-export 28개 케이스. library/near/geometry/framing/mirror,
+`npm test`: 기존 회귀 + manual-export 29개 케이스. library/near/geometry/framing/mirror,
 semantic PNG/GLB→FBX, 기본/선택 체형, 손 변경, 검색 실패 보존, 명시 확정과 잘못된 reviewKey,
 렌더 중 권한·원본·격리·revision 변경, 직접 refine 차단, 요청 권한 주입 차단,
 구형 near-only/semantic의 비공개 자산 기반 보강과 소유권/삭제/미완료 거절을 확인한다.
 no-body warm cache에서 runtime/캐릭터/model revision 변경 시 재렌더와 이전 검수 키 거절,
 원본 BVH를 읽는 중 확정 취소·권한/후보/소유권 철회 시 파일을 버리는 실제 route도 검증한다.
-DB transaction 동작은 query double로 검증하며 기존 실제 Postgres 통합 테스트는
-테스트 DB를 설정했을 때 실행된다. 로컬 route/fixture 검증은 staging/설치 앱 E2E와 구분한다.
+DB transaction query double과 PGlite 실제 PostgreSQL 엔진/전체 스키마를 함께 검증한다.
+PGlite에서는 기존 near-only/semantic 작업의 비공개 바인딩→후보 행 등록→확정 선택→저장 권한
+검사를 실행하며, 품질 검토에 미동의해도 기본 수동 선택을 사용할 수 있고 quality_review_jobs에
+편입되지 않음을 확인한다. 원래 손·범위·검색 오류 보존, 소유권, 멱등성, 90일 만료 거절도
+검사한다. 다중 연결의 실제 동시 경합과 staging/설치 앱 E2E는 이 로컬 검증에 포함하지 않는다.
 
 
 실제 Converter/Blender와 변경 BFF의 Hono route를 연결한 로컬 HTTP 검증에서도

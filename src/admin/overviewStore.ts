@@ -12,12 +12,12 @@ export async function overviewExtras(days: number): Promise<OverviewExtraRow> {
   const dayAgo = since(1);
   const row = await queryOne<OverviewExtraRow>(
     `SELECT
-       (SELECT count(*)::int FROM installations WHERE last_seen_at >= $2) AS active_today,
-       (SELECT count(*)::int FROM installations WHERE revoked_at IS NULL) AS total_installations,
-       (SELECT count(*)::int FROM export_events
+       (SELECT count(*)::int FROM quality_review_installations WHERE last_seen_at >= $2) AS active_today,
+       (SELECT count(*)::int FROM quality_review_installations WHERE revoked_at IS NULL) AS total_installations,
+       (SELECT count(*)::int FROM quality_review_export_events
          WHERE status = 'completed' AND occurred_at >= $1) AS downloads,
-       (SELECT count(*)::int FROM job_feedback WHERE submitted_at >= $1) AS feedback_count,
-       (SELECT count(*)::int FROM job_feedback
+       (SELECT count(*)::int FROM quality_review_job_feedback WHERE submitted_at >= $1) AS feedback_count,
+       (SELECT count(*)::int FROM quality_review_job_feedback
          WHERE submitted_at >= $1 AND reason = 'candidates_irrelevant') AS irrelevant_count`,
     [from, dayAgo],
   );

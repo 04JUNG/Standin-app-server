@@ -128,6 +128,12 @@ export async function deleteExpiredRows(client: SqlClient, now = new Date()): Pr
       " AND created_at::timestamptz < $1::timestamptz",
     params: [cutoff],
   });
+  const basicCutoff = new Date(now.getTime() - 90 * 86_400_000).toISOString();
+  await deleteJobs(client, {
+    ids: "SELECT id FROM jobs WHERE installation_id IS NOT NULL AND quality_consent_id IS NULL AND created_at::timestamptz < $1::timestamptz",
+    params: [basicCutoff],
+  });
+  await client.query("DELETE FROM quality_consent_receipts WHERE ended_at::timestamptz < $1::timestamptz", [cutoff]);
   for (const [table, column] of Object.entries(EVENT_LOG_TABLES)) {
     await client.query(
       `DELETE FROM ${table} WHERE ${column}::timestamptz < $1::timestamptz`,

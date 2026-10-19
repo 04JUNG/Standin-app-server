@@ -134,7 +134,7 @@ export async function deleteJobObjects(installationId: string, jobId: string): P
  * 입력 원본의 presigned GET URL. 기본 300초.
  *
  * 작업 기록 상세는 사용자가 후보를 비교하는 동안 300초보다 오래 열려 있으므로 그
- * 경로만 더 긴 TTL을 넘긴다. 관리자 리뷰 화면은 인자 없이 호출해 기존 값을 유지한다.
+ * 경로만 더 긴 TTL을 넘긴다. 관리자 리뷰 화면은 철회 시 접근을 차단할 수 있도록 인증 프록시를 사용한다.
  */
 export async function signedInputUrl(key: string, expiresIn = 300): Promise<string | null> {
   if (!config.betaDataBucket) return null;

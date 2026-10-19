@@ -5,6 +5,7 @@ import {
   initializeBodySelections,
 } from "../body-selection/store.js";
 import { upgradeOwnedManualResult } from "../manual-export.js";
+import { lockQualityConsent } from "../installations/qualityConsent.js";
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { config } from "../config.js";
@@ -108,11 +109,12 @@ async function insertJob(
     inputS3Key: null,
     inputMime: input?.mime ?? null,
   };
+  const quality = input ? await lockQualityConsent(executor, input.installationId) : null;
   await executor.query(
     `INSERT INTO jobs
       (id, user_id, status, created_at, updated_at, result_json, error_code, rerun_of,
-       installation_id, source, input_mime, input_size, input_width, input_height)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+       installation_id, source, input_mime, input_size, input_width, input_height, quality_consent_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
     [
       job.id,
       userId,
@@ -128,6 +130,7 @@ async function insertJob(
       input?.size ?? null,
       input?.width ?? null,
       input?.height ?? null,
+      quality?.consentId ?? null,
     ],
   );
   if (config.bodySelectionEnabled && input?.installationId)
@@ -316,7 +319,7 @@ export async function getOwnedJob(
   installationId: string,
 ): Promise<Job | undefined> {
   const row = await queryOne<JobRow>(
-    "SELECT * FROM jobs WHERE id = $1 AND installation_id = $2",
+    "SELECT * FROM jobs WHERE id = $1 AND installation_id = $2 AND created_at::timestamptz > now() - interval '90 days'",
     [id, installationId],
   );
   if (!row) return undefined;
@@ -343,12 +346,13 @@ export async function getOwnedJob(
 export async function listJobHistory(
   installationId: string,
   { limit, cursor, status }: HistoryQuery,
+  reviewOnly = false,
 ): Promise<JobHistoryRow[]> {
   return query<JobHistoryRow>(
     `SELECT j.id, j.status, j.created_at, j.completed_at, j.error_code, j.source,
             j.input_width, j.input_height, (j.input_s3_key IS NOT NULL) AS has_input,
             p.person_count, s.selection_count, t.thumb_pose_id, t.thumb_view
-     FROM jobs j
+     FROM ${reviewOnly ? "quality_review_jobs" : "jobs"} j
      LEFT JOIN LATERAL (
        SELECT count(*)::int AS person_count
        FROM analysis_people ap WHERE ap.job_id = j.id
@@ -369,6 +373,7 @@ export async function listJobHistory(
        LIMIT 1
      ) t ON TRUE
      WHERE j.installation_id = $1
+       ${reviewOnly ? "" : "AND j.created_at::timestamptz > now() - interval '90 days'"}
        AND ($2::text IS NULL OR j.status = $2)
        AND ($3::text IS NULL OR (j.created_at, j.id) < ($3, $4))
      ORDER BY j.created_at DESC, j.id DESC
@@ -569,7 +574,7 @@ export async function listRecentJobs(
     `SELECT j.id, j.installation_id, j.status, j.created_at, j.completed_at, j.error_code,
             j.source, j.input_width, j.input_height, (j.input_s3_key IS NOT NULL) AS has_input,
             p.person_count, s.selection_count, t.thumb_pose_id, t.thumb_view
-       FROM jobs j
+       FROM quality_review_jobs j
        LEFT JOIN LATERAL (
          SELECT count(*)::int AS person_count FROM analysis_people ap WHERE ap.job_id = j.id
        ) p ON TRUE
@@ -619,10 +624,11 @@ export async function persistAnalysisRecords(
     // 존재하지 않는 job_id의 관절 행이 남고, 어떤 삭제 경로도 그 행을 다시 찾지 못한다.
     // 삭제 쪽(retention.ts::deleteJobs)도 같은 행을 먼저 잠그므로 둘은 차례로만 지나간다.
     const job = await client.query(
-      "SELECT 1 FROM jobs WHERE id = $1 FOR UPDATE",
+      "SELECT quality_consent_id FROM jobs WHERE id = $1 FOR UPDATE",
       [jobId],
     );
     if (job.rowCount === 0) return;
+    const qualityAllowed = Boolean(job.rows[0].quality_consent_id);
     await client.query("DELETE FROM analysis_candidates WHERE job_id = $1", [
       jobId,
     ]);
@@ -631,7 +637,7 @@ export async function persistAnalysisRecords(
     ]);
     for (const person of result.candidatesByPerson) {
       const ctx = contextByPerson.get(person.personIndex);
-      const signal = signalsByPerson.get(person.personIndex);
+      const signal = qualityAllowed ? signalsByPerson.get(person.personIndex) : undefined;
       await client.query(
         `INSERT INTO analysis_people
           (job_id, person_index, bbox_json, tags_json, skeleton_json, confidence,
@@ -671,7 +677,7 @@ export async function persistAnalysisRecords(
                 posePresentationAssets: ctx.posePresentationAssets,
               })
             : null,
-          ctx?.rawScores ? JSON.stringify(ctx.rawScores) : null,
+          qualityAllowed && ctx?.rawScores ? JSON.stringify(ctx.rawScores) : null,
           // 공백 분석용 신호(mapping.ts::extractPersonSignals). 공개 응답에는 없다.
           signal ? JSON.stringify(signal.personTags) : null,
           signal ? JSON.stringify(signal.outputScope) : null,
@@ -719,7 +725,7 @@ export async function persistAnalysisRecords(
         JSON.stringify(result.inferenceMetadata),
         result.image?.width ?? null,
         result.image?.height ?? null,
-        cutSummary ? JSON.stringify(cutSummary) : null,
+        qualityAllowed && cutSummary ? JSON.stringify(cutSummary) : null,
       ],
     );
   });
