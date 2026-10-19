@@ -40,6 +40,33 @@ Job의 동의 ID가 일치하는 행만 읽는다. Job 상세·원본·조정본
 
 배포 순서와 검증 범위는 [선택 동의 배포 점검](OPTIONAL_QUALITY_CONSENT.md)을 따른다.
 
+## 러프 장면 FBX 저장 (로컬 검증, 기본 꺼짐)
+
+`SCENE_EXPORT_ENABLED=true`이고 FBX Converter가 설정되어 있으면 이미지 작업 결과에
+`capabilities.sceneExport=true`를 노출합니다. 구 서버·문장 검색은 기존 저장 흐름을 유지합니다.
+
+`POST /v1/analysis/jobs/:jobId/scene`에는 설치 인증과 아래 JSON을 보냅니다.
+
+```json
+{"persons":[{"personIndex":0,"candidateId":"pick","exportPath":"/v1/pose-candidates/pose/framed?jobId=job&personIndex=0&candidateId=pick&format=fbx&reviewKey=...","sha256":"<확인한 최종 FBX SHA256>"}]}
+```
+
+1~8명을 한 FBX로 합칩니다. 인물 위치·크기 관측은 소유 작업의 box/COCO17만 사용하고,
+클라이언트 좌표를 받지 않습니다. exportPath는 해당 후보의 로컬 framed/export 경로만
+허용하며 외부 URL을 요청하지 않습니다. 기존 저장 핸들러를 인증 헤더로 내부 호출해
+소유권·확정·현재 체형·손·범위·검수 키를 합성 전후에 다시 검증합니다. FBX SHA가 바뀌면
+409 `SCENE_SOURCE_CHANGED`, 러프 관측이 없으면 409 `SCENE_OBSERVATION_MISSING`입니다.
+내부 Converter의 `rough-layout-v1` 입력·출력 SHA와 인원 수가 일치해야 응답합니다.
+응답은 binary FBX이며 `X-Standin-Artifact-SHA256`, `X-Standin-Person-Count`,
+`X-Standin-Scene-Version`을 웹뷰에 노출합니다. 장면 합성 실패를 개별 저장으로 바꾸지 않습니다.
+
+**CSP에서 원본 화면 구도를 그대로 유지하는 기능은 아직 완료되지 않았습니다.**
+T001·p0718 실제 import에서 CSP가 FBX 카메라를 따르지 않고 장면을 다시 중앙·크기 맞춤했습니다.
+상대 world 배치는 파일에 남지만 CSP 화면의 절대 위치·크기를 보장하지 않습니다.
+따라서 flag 기본값은 false이며, 배포·기본 활성화 및 CSP 구도 완료 판정은 보류합니다.
+로컬 검증은 실제 BFF 합성 핸들러→HTTP Converter→Blender→FBX 재import 및 CSP import를
+사용했고, 소유 작업·검수 다운로드 인증은 fixture였습니다. 운영 DB·설치 앱 E2E는 별도입니다.
+
 ## 작가 수동 선택·검수·저장 (2026-10-19)
 
 검색 품질 판정과 작가의 수동 저장 권한은 별개입니다. 공개·비공개 자산의 pose ID와 SHA가
