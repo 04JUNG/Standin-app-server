@@ -18,9 +18,9 @@ export async function activityTimeseries(params: TimeseriesQuery, nowMs = Date.n
     `to_timestamp(floor((extract(epoch FROM ${column}::timestamptz) + ${KST_OFFSET_SECONDS}) / $2) * $2 - ${KST_OFFSET_SECONDS})`;
   return query<TimeseriesRow>(
     `WITH seen AS (
-       SELECT installation_id, occurred_at AS at FROM analytics_events WHERE occurred_at >= $1
+       SELECT installation_id, occurred_at AS at FROM quality_review_analytics_events WHERE occurred_at >= $1
        UNION ALL
-       SELECT installation_id, created_at FROM jobs
+       SELECT installation_id, created_at FROM quality_review_jobs
         WHERE created_at >= $1 AND installation_id IS NOT NULL
      ),
      active AS (
@@ -32,11 +32,11 @@ export async function activityTimeseries(params: TimeseriesQuery, nowMs = Date.n
               count(*)::int AS jobs_started,
               count(*) FILTER (WHERE status = 'completed')::int AS jobs_completed,
               count(*) FILTER (WHERE status = 'failed')::int AS jobs_failed
-         FROM jobs WHERE created_at >= $1 AND installation_id IS NOT NULL GROUP BY 1
+         FROM quality_review_jobs WHERE created_at >= $1 AND installation_id IS NOT NULL GROUP BY 1
      ),
      download_counts AS (
        SELECT ${bucketExpr("occurred_at")} AS bucket, count(*)::int AS downloads
-         FROM export_events WHERE status = 'completed' AND occurred_at >= $1 GROUP BY 1
+         FROM quality_review_export_events WHERE status = 'completed' AND occurred_at >= $1 GROUP BY 1
      ),
      buckets AS (
        SELECT bucket FROM active UNION SELECT bucket FROM job_counts UNION SELECT bucket FROM download_counts

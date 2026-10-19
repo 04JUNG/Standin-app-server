@@ -3,7 +3,8 @@ import { Hono, type Context } from "hono";
 import { config } from "../config.js";
 import { execute, query, queryOne } from "../db.js";
 import type { AppEnv } from "../env.js";
-import { signedInputUrl } from "../inputStorage.js";
+import { qualityReviewGuard } from "./qualityAccess.js";
+import { loadInput } from "../inputStorage.js";
 import { getAnalysisFlag, setAnalysisEnabled } from "../limits/flags.js";
 import { dailyWindow } from "../limits/policy.js";
 import { currentUsage } from "../limits/store.js";
@@ -107,6 +108,8 @@ adminRoutes.use("*", async (c, next) => {
   c.set("reviewer", reviewer);
   await next();
 });
+
+adminRoutes.use("*", qualityReviewGuard());
 
 /**
  * 관리자 접근을 남긴다.
@@ -429,7 +432,7 @@ adminRoutes.get("/review/installations", async (c) => {
  *
  * - `thumbnailUrl`은 설치 토큰이 필요한 경로다. 관리자 토큰으로는 열리지 않는다.
  * - 원본 러프는 목록에 싣지 않는다. `inputAvailable`이 true인 Job을 아래 상세로 열면
- *   5분짜리 서명 URL이 나온다. 20건에 서명 URL을 달면 한 번의 조회가 그 설치의 사진
+ *   동의를 다시 확인하는 인증 경로가 나온다. 목록에 원본을 달면 한 번의 조회가 그 설치의 사진
  *   전부를 한꺼번에 꺼내는 열쇠가 된다.
  */
 adminRoutes.get("/review/installations/:id/jobs", async (c) => {
@@ -456,7 +459,7 @@ adminRoutes.get("/review/installations/:id/jobs", async (c) => {
     return c.json(errorEnvelope("NOT_FOUND", "unknown installationId", c.get("requestId")), 404);
   }
 
-  const rows = await listJobHistory(installationId, parsed.query);
+  const rows = await listJobHistory(installationId, parsed.query, true);
   await audit(c, "review_installation_jobs", { installationId });
   return c.json({ installation, ...toHistoryPage(rows, parsed.query.limit) });
 });
@@ -634,7 +637,7 @@ adminRoutes.get("/gallery/folders", async (c) => {
  * GET /v1/admin/gallery/roughs?group=&key=&cursor= — 한 폴더의 러프 24장.
  *
  * 사용자 사진을 여러 장 여는 유일한 경로다. 그래서 페이지를 열 때마다 **그 페이지의 Job을
- * 하나하나** 열람 기록에 남기고, 서명 URL은 5분짜리다. 일괄 다운로드는 없다.
+ * 하나하나** 열람 기록에 남기고, 원본 열람 때마다 동의를 다시 확인한다. 일괄 다운로드는 없다.
  */
 adminRoutes.get("/gallery/roughs", async (c) => {
   const parsed = parseGalleryQuery({ group: c.req.query("group"), key: c.req.query("key"), cursor: c.req.query("cursor") });
@@ -653,13 +656,13 @@ adminRoutes.get("/gallery/roughs", async (c) => {
     outcomeLabel: OUTCOME_LABELS[row.outcome as OutcomeKey] ?? row.outcome,
     exported: row.exported,
     refined: row.refined,
-    inputUrl: row.input_s3_key ? await signedInputUrl(row.input_s3_key) : null,
+    inputUrl: row.input_s3_key ? `/v1/admin/review/jobs/${encodeURIComponent(row.id)}/input` : null,
   })));
   for (const row of page) await audit(c, "review_gallery", { jobId: row.id, installationId: row.installation_id });
   const last = page[page.length - 1];
   return c.json({
     items,
-    inputUrlExpiresInSeconds: 300,
+    inputUrlExpiresInSeconds: null,
     nextCursor: rows.length > GALLERY_PAGE && last ? encodeHistoryCursor({ createdAt: last.created_at, id: last.id }) : null,
   });
 });
@@ -705,22 +708,22 @@ adminRoutes.get("/review/jobs/:id", async (c) => {
   }>(
     `SELECT id, status, created_at, input_s3_key, input_width, input_height,
             inference_metadata_json, result_json, cut_summary_json
-     FROM jobs WHERE id = $1 AND installation_id IS NOT NULL`,
+     FROM quality_review_jobs WHERE id = $1 AND installation_id IS NOT NULL`,
     [jobId],
   );
   if (!job) return c.json(errorEnvelope("NOT_FOUND", "unknown jobId", c.get("requestId")), 404);
 
   const [peopleRows, candidates, selections, feedback, refinedRows] = await Promise.all([
     query<AnalysisPersonRow>(
-      "SELECT * FROM analysis_people WHERE job_id = $1 ORDER BY person_index",
+      "SELECT * FROM quality_review_analysis_people WHERE job_id = $1 ORDER BY person_index",
       [jobId],
     ),
     query(
-      "SELECT * FROM analysis_candidates WHERE job_id = $1 ORDER BY person_index, rank",
+      "SELECT * FROM quality_review_analysis_candidates WHERE job_id = $1 ORDER BY person_index, rank",
       [jobId],
     ),
-    query("SELECT * FROM confirmed_selections WHERE job_id = $1 ORDER BY person_index", [jobId]),
-    queryOne<{ reason: string }>("SELECT reason FROM job_feedback WHERE job_id = $1", [jobId]),
+    query("SELECT * FROM quality_review_confirmed_selections WHERE job_id = $1 ORDER BY person_index", [jobId]),
+    queryOne<{ reason: string }>("SELECT reason FROM quality_review_job_feedback WHERE job_id = $1", [jobId]),
     query<{
       person_index: number;
       candidate_id: string;
@@ -734,14 +737,14 @@ adminRoutes.get("/review/jobs/:id", async (c) => {
     }>(
       `SELECT person_index, candidate_id, pose_id, refined, reason, object_key,
               thumbnail_key, limbs_json, created_at
-       FROM refined_artifacts WHERE job_id = $1 ORDER BY person_index, candidate_id`,
+       FROM quality_review_refined_artifacts WHERE job_id = $1 ORDER BY person_index, candidate_id`,
       [jobId],
     ),
   ]);
 
   /**
    * refine 산출물은 키만 DB에 있고 본체는 betaData 버킷에 있다. 검토 화면이 바로
-   * 볼 수 있게 서명해 내려보낸다.
+   * 볼 수 있게 동의를 재확인하는 인증 경로를 내려보낸다.
    *
    * `refined=false`인 행도 뺴지 않는다 — 왜 조정하지 않았는지(`reason`)가 조정 결과
    * 만큼이나 중요하다. 그 경우 키가 비어 URL은 null이 된다.
@@ -755,8 +758,8 @@ adminRoutes.get("/review/jobs/:id", async (c) => {
       reason: row.reason,
       limbs: JSON.parse(row.limbs_json || "[]"),
       createdAt: row.created_at,
-      bvhUrl: row.object_key ? await signedInputUrl(row.object_key) : null,
-      thumbnailUrl: row.thumbnail_key ? await signedInputUrl(row.thumbnail_key) : null,
+      bvhUrl: row.object_key ? `/v1/admin/review/jobs/${encodeURIComponent(jobId)}/refined/${row.person_index}/bvh?candidateId=${encodeURIComponent(row.candidate_id)}` : null,
+      thumbnailUrl: row.thumbnail_key ? `/v1/admin/review/jobs/${encodeURIComponent(jobId)}/refined/${row.person_index}/thumbnail?candidateId=${encodeURIComponent(row.candidate_id)}` : null,
     })),
   );
 
@@ -765,8 +768,8 @@ adminRoutes.get("/review/jobs/:id", async (c) => {
     jobId: job.id,
     status: job.status,
     createdAt: job.created_at,
-    inputUrl: job.input_s3_key ? await signedInputUrl(job.input_s3_key) : null,
-    inputUrlExpiresInSeconds: job.input_s3_key ? 300 : null,
+    inputUrl: job.input_s3_key ? `/v1/admin/review/jobs/${encodeURIComponent(jobId)}/input` : null,
+    inputUrlExpiresInSeconds: null,
     // 관절은 원본 픽셀 좌표다. 화면이 겹쳐 그리려면 그 좌표계의 크기를 알아야 한다.
     image:
       job.input_width && job.input_height
@@ -915,4 +918,25 @@ adminRoutes.get("/gaps/observations", async (c) => {
     });
   }
   return c.json(page);
+});
+
+// Authenticated proxies: never hand out S3 bearer URLs that outlive withdrawal.
+adminRoutes.get("/review/jobs/:id/input", async c => {
+  const jobId = c.req.param("id");
+  const job = await queryOne<{ input_s3_key: string | null }>("SELECT input_s3_key FROM quality_review_jobs WHERE id=$1", [jobId]);
+  if (!job?.input_s3_key) return c.json(errorEnvelope("NOT_FOUND", "not found", c.get("requestId")), 404);
+  const blob = await loadInput(job.input_s3_key);
+  await audit(c, "review_input", { jobId });
+  return new Response(await blob.arrayBuffer(), { headers: { "Content-Type": blob.type, "Cache-Control": "private, no-store" } });
+});
+adminRoutes.get("/review/jobs/:id/refined/:personIndex/bvh", async c => {
+  const target = refinedTarget(c);
+  if (!target) return c.json(errorEnvelope("INVALID_INPUT", "invalid target", c.get("requestId")), 400);
+  const row = await queryOne<{ object_key: string | null }>(
+    "SELECT object_key FROM quality_review_refined_artifacts WHERE job_id=$1 AND person_index=$2 AND candidate_id=$3",
+    [target.jobId, target.personIndex, target.candidateId]);
+  if (!row?.object_key) return c.json(errorEnvelope("NOT_FOUND", "not found", c.get("requestId")), 404);
+  const blob = await loadInput(row.object_key);
+  await audit(c, "review_refined_bvh", { jobId: target.jobId });
+  return new Response(await blob.arrayBuffer(), { headers: { "Content-Type": "application/octet-stream", "Content-Disposition": 'attachment; filename="refined.bvh"', "Cache-Control": "private, no-store" } });
 });

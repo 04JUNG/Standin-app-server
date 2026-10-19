@@ -1,5 +1,45 @@
 # API 계약 — BFF가 클라(Tauri)에 노출하는 `/v1`
 
+## 선택 품질 검토 동의 (2026-10-19)
+
+기본 설치 인증과 품질 검토 참여를 분리한다. 기본 동의 버전(`BETA_CONSENT_VERSION`)과
+설치 자격증명은 유지하고, 선택 동의는 별도 버전 `2026-10-19`로 관리한다.
+
+- `POST /v1/installations`의 선택 필드 `qualityConsent`와
+  `PUT /v1/installations/current/quality-consent` 요청은 아래 형식이다.
+  설치 등록에서 필드를 생략한 구 앱과 기존 설치는 **미동의**로 처리한다.
+- `GET /v1/installations/current/quality-consent`는 현재 상태를 반환한다.
+  GET/PUT에는 설치 인증 헤더가 필요하며 응답은 `Cache-Control: no-store`다.
+
+```json
+{ "version": "2026-10-19", "personalData": true, "contentLicense": true }
+```
+
+등록 응답의 `qualityConsent`와 GET/PUT 응답에는 위 필드에 `consentId`, `grantedAt`이
+추가된다. 두 허용값이 모두 true일 때만 서버가 동의 ID와 시각을 발급한다. 하나라도
+false이면 두 값은 null이다. 동일한 값의 재시도는 기존 동의 ID를 유지한다.
+지원하지 않는 버전이나 boolean이 아닌 값은 `400 INVALID_INPUT`이다.
+
+- 동의 후 생성한 Job에 그 시점의 동의 ID를 기록한다. 이전 Job은 소급 편입하지 않는다.
+- `POST /v1/events/batch` 최상위와 피드백 요청에 `qualityConsentId`를 보낸다.
+  현재 동의 ID 및 Job의 동의 ID가 일치해야 저장한다. 구 앱·누락·철회·과거 동의의
+  오프라인 이벤트는 저장하지 않는다. 배치 응답의 기존 `duplicates` 수에는 이 제외 건도 포함된다.
+- 품질 동의가 없어도 분석, 후보 확정, 내보내기와 기본 작업 이력은 이용할 수 있다.
+  내보내기에 필요한 `confirmed_selections`는 기본 처리이며 품질 이벤트와 별개다.
+- 철회는 설치 인증을 유지하고, 품질 전용 이벤트·피드백·평가 필드와 모든 이전 Job의
+  검토 권한을 제거한다. 90일이 지난 Job도 이 트랜잭션에서 삭제한다. 남은 기본 작업은
+  최초 90일 범위에서만 유지한다. 재동의하면 새 동의 ID로 이후 Job만 검토한다.
+- 최소 동의 증빙은 문서 버전·두 허용값·시각·설치 ID의 해시만 별도 보관하고,
+  동의 종료 후 365일에 정리한다. 이미지·원문·장치 토큰을 포함하지 않는다.
+
+관리자 목록·갤러리·통계·공백 관측은 `quality_review_*` 뷰를 통해 현재 동의와
+Job의 동의 ID가 일치하는 행만 읽는다. Job 상세·원본·조정본·변환 다운로드는
+처리 전후에 권한을 다시 확인한다. 원본·파생 파일은 90일, 연결 평가정보는 최대
+365일이며 철회 시 더 일찍 제외한다. 관리자 파일 URL은 매번 관리자 인증을 요구하는
+프록시 경로이고 독립적으로 유효한 S3 서명 URL을 발급하지 않는다.
+
+배포 순서와 검증 범위는 [선택 동의 배포 점검](OPTIONAL_QUALITY_CONSENT.md)을 따른다.
+
 ## Top-5 라이브러리 직접 선택 (2026-10-18)
 
 검색 완료(`ok/partial_error`)·표시 준비(`ready/review_ready`)인 검증된
@@ -79,7 +119,7 @@ X-Device-Token: ...
 
 발급은 공개 엔드포인트라 **IP 단위 속도 제한**이 걸린다(기본 1시간 5회). 초과하면 `429 RATE_LIMITED`가 나가므로, 클라는 발급을 재시도 루프로 돌리지 말고 받은 자격증명을 안전 저장소에 보관해 재사용한다.
 
-`DELETE /v1/installations/current/data`는 전용 S3 prefix, 작업·파생 데이터(조정본 대장 포함)·이벤트·선택·피드백, 이 설치를 연 관리자 열람 기록, 주간 쿼터 카운터와 설치 레코드를 삭제한다. 진행 중인 작업도 지운다. 워커가 결과를 쓰는 중이면 그 쓰기가 끝난 뒤 지우고, 이미 지운 작업에는 결과를 쓰지 않는다. 지우는 테이블 목록은 `src/retention.ts` 하나이며 작업 삭제·365일 보관 만료도 같은 목록을 쓴다. 응답은 `{ "deleted": true, "backupExpiryDays": 7 }`이다.
+`DELETE /v1/installations/current/data`는 전용 S3 prefix, 작업·파생 데이터(조정본 대장 포함)·이벤트·선택·피드백, 이 설치를 연 관리자 열람 기록, 주간 쿼터 카운터와 설치 레코드를 삭제한다. 진행 중인 작업도 지운다. 워커가 결과를 쓰는 중이면 그 쓰기가 끝난 뒤 지우고, 이미 지운 작업에는 결과를 쓰지 않는다. 지우는 테이블 목록은 `src/retention.ts` 하나이며 작업 삭제·90/365일 보관 만료도 같은 목록을 쓴다. 최소 선택 동의 증빙은 위 별도 보관기간을 따른다. 응답은 `{ "deleted": true, "backupExpiryDays": 7 }`이다.
 
 ---
 
@@ -246,8 +286,8 @@ Retry-After: 41230
 > 원본을 20건 내려보내면 수십 MB가 되지만 후보 썸네일은 이미 하루 캐시되는 작은 PNG다.
 > 인증 헤더가 필요하므로 절대 URL이 아닌 상대 경로를 준다.
 
-> ⚠ `inputAvailable`은 입력 원본이 S3에 남아 있는지다. **DB의 Job은 365일, S3 객체는
-> lifecycle 90일**이라 그 사이 구간의 Job은 목록에 나오지만 원본은 제공되지 않는다.
+> `inputAvailable`은 입력 원본이 S3에 남아 있는지다. **기본 작업 이력과 S3 원본은 최대 90일**이다.
+> 별도 선택 동의를 받은 평가정보의 최대 365일 보관은 사용자 이력의 만료일을 연장하지 않는다.
 
 > ⚠ 이 경로에는 IP 속도 제한이 없다(제한은 `POST /v1/analysis/jobs`에만 붙는다).
 > 부하 상한은 `limit` 최대 50으로만 강제된다.
@@ -734,7 +774,7 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 
 `GET /v1/admin/review/installations`
 
-어떤 설치가 있는지 최근 접속 순으로 준다. 쿼리는 `limit`(1~50, 기본 20) · `cursor` · `activeOnly`(`true`면 철회·삭제 요청 설치를 뺀다. 기본은 `false` — 그 설치에 기록이 남아 있는지 확인하는 자리이기도 하다).
+현재 두 선택 동의가 유효한 설치만 최근 접속 순으로 준다. 쿼리는 `limit`(1~50, 기본 20) · `cursor` · `activeOnly`다. `activeOnly`는 호환을 위해 받지만 그 값과 무관하게 미동의·철회·삭제 요청 설치를 제외한다.
 
 ```json
 {
@@ -807,7 +847,7 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 `items`는 사용자 화면과 같은 모양이다. 검토자가 사용자와 다른 것을 보면 "지금 사용자에게 뭐가 보이나"를 판단할 수 없기 때문이다. 두 가지만 다르게 읽는다.
 
 - `thumbnailUrl`은 **설치 토큰이 필요한 경로**다. 관리자 토큰으로는 열리지 않는다.
-- 원본 러프는 목록에 없다. `inputAvailable: true`인 Job을 아래 상세로 열면 서명 URL이 나온다. 목록에 20건치 서명 URL을 달면 한 번의 조회가 그 설치의 사진 전부를 꺼내는 열쇠가 된다.
+- 원본 러프는 목록에 없다. `inputAvailable: true`인 Job의 상세에서 관리자 인증이 필요한 원본 프록시 경로를 받는다.
 
 | 상태                | 언제                                                                |
 | ------------------- | ------------------------------------------------------------------- |
@@ -824,15 +864,15 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 
 **서명 URL은 없다.** 목록 한 번이 사진 여러 장을 한꺼번에 여는 열쇠가 되지 않게 하는 방침은 설치별 목록과 같다. 원본은 상세에서 한 건씩 연다. 열람은 `review_recent_jobs`로 기록된다.
 
-`GET /v1/admin/review/jobs/{jobId}`는 한 건을 끝까지 보여 준다 — 5분짜리 원본 서명 URL, 인물·스켈레톤, 후보, 확정 선택, refine 산출물, 사용자 피드백, 추론 메타.
+`GET /v1/admin/review/jobs/{jobId}`는 현재 선택 동의가 있는 한 건의 관리자 인증 원본 경로, 인물·스켈레톤, 후보, 확정 선택, refine 산출물, 사용자 피드백, 추론 메타를 보여 준다. 미동의·철회·만료된 Job은 `404 NOT_FOUND`다.
 
 ```json
 {
   "jobId": "job_...",
   "status": "completed",
   "createdAt": "2026-09-04T...",
-  "inputUrl": "https://...",
-  "inputUrlExpiresInSeconds": 300,
+  "inputUrl": "/v1/admin/review/jobs/job_.../input",
+  "inputUrlExpiresInSeconds": null,
   "image": { "width": 900, "height": 1200 },
   "cutSummary": {
     "route": "core",
@@ -925,10 +965,10 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 
 - `accuracy`: `selectionRate`(완료 Job 중 고른 비율), `top1Rate`(고른 것 중 1순위), `meanReciprocalRank`, `exportRate`, 사유별 `feedback[]`와 `feedbackRate`, 날짜별 `trend`
 - `usage`: `jobsStarted/Completed/Failed`, `failureRate`, `jobsPerDay`, `jobsPerActiveInstallation`, 날짜별 `trend`
-- 둘 다 원본이 `daily_analytics_aggregates`라 **오늘은 들어 있지 않다**(하루가 끝나야 집계한다). `days`가 0이면 아직 마감된 날이 없다는 뜻이고, 비율이 `null`이면 분모가 0이라 "아직 모른다"는 뜻이다 — 0%와 구분한다.
+- 현재 선택 동의가 유효한 Job을 조회 시점에 집계하며 **오늘은 들어 있지 않다**. `days`가 0이면 아직 마감된 날이 없다는 뜻이고, 비율이 `null`이면 분모가 0이라 "아직 모른다"는 뜻이다 — 0%와 구분한다. 철회된 데이터를 포함할 수 있는 과거 캐시 집계는 이 응답에 쓰지 않는다.
 - `meanReciprocalRank`는 날짜별 평균을 다시 평균 내지 않는다. 그날의 선택 수로 가중해 합산한다.
 
-`refined`는 `refined_artifacts`를 그대로 싣되 `object_key`·`thumbnail_key`를 서명해 URL로 바꾼 것이다. **`refined: false`인 행도 뺴지 않는다** — 왜 조정하지 않았는지(`reason`)가 조정 결과만큼 중요하다. 그 경우 두 URL은 `null`이다.
+`refined`는 검토 가능한 조정본만 싣고 파일 URL을 `/v1/admin/review/jobs/{jobId}/refined/{personIndex}/bvh?candidateId=...` 및 `thumbnail?candidateId=...` 프록시 경로로 바꾼다. 매번 관리자 인증과 현재 동의를 검사한다. **`refined: false`인 행도 빼지 않는다**. 그 경우 두 URL은 `null`이다.
 
 ### 관리자용 후보 썸네일
 
@@ -968,7 +1008,7 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 
 **대상 행**
 
-- 뷰 `gap_observations_v1`에서 읽는다. 완료된 작업 중 철회·삭제 요청이 없는 설치의 행만 담고, 쿼터 면제 설치(개발 단말)는 뺀다.
+- 뷰 `gap_observations_v1`에서 읽는다. 완료된 작업 중 현재 선택 동의 ID와 일치하는 이후 작업만 담고, 쿼터 면제 설치(개발 단말)는 뺀다.
 - 원본 테이블 위의 뷰라서 작업 삭제·동의 철회·365일 정리 때 함께 사라진다.
 - 관절이 없는 인물은 담지 않는다.
 

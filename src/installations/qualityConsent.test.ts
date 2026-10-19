@@ -1,0 +1,357 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { PGlite } from "@electric-sql/pglite";
+import { Hono } from "hono";
+import type { AppEnv } from "../env.js";
+import type { QualityConsent } from "./qualityConsent.js";
+
+process.env.BETA_REVIEW_ADMIN_TOKEN = "quality-test-admin";
+const { config } = await import("../config.js");
+const { qualityReviewGuard } = await import("../admin/qualityAccess.js");
+const { pool, SCHEMA } = await import("../db.js");
+const { installationRoutes } = await import("./routes.js");
+const { adminRoutes } = await import("../admin/routes.js");
+const { analyticsRoutes } = await import("../analytics/routes.js");
+const { requireInstallation } = await import("./middleware.js");
+const { createJob, getOwnedJob, listJobHistory } =
+  await import("../jobs/store.js");
+const { confirmSelections, recordExport, saveFeedback } =
+  await import("../analytics/store.js");
+const { deleteExpiredRows } = await import("../retention.js");
+
+test("actual PostgreSQL schema/routes: optional consent, future jobs only, withdrawal and regrant", async (t) => {
+  const db = new PGlite();
+  t.after(() => db.close());
+  await db.exec(SCHEMA);
+  await db.exec(SCHEMA); // repeated deployment is safe
+  const query = async (sql: string, values?: unknown[]) => {
+    const r = await db.query(sql, values);
+    return {
+      rows: r.rows,
+      rowCount: r.rows.length || r.affectedRows || 0,
+      fields: [],
+      command: "",
+      oid: 0,
+    };
+  };
+  t.mock.method(pool, "query", query as typeof pool.query);
+  t.mock.method(pool, "connect", (async () => ({
+    query,
+    release() {},
+  })) as unknown as typeof pool.connect);
+  const app = new Hono<AppEnv>();
+  app.use("*", async (c, next) => {
+    c.set("requestId", "consent-test");
+    await next();
+  });
+  app.route("/v1/installations", installationRoutes);
+  app.use("/v1/events/*", requireInstallation);
+  app.route("/v1/events", analyticsRoutes);
+  app.route("/v1/admin", adminRoutes);
+  const optional = {
+    version: "2026-10-19",
+    personalData: false,
+    contentLicense: false,
+  };
+  const registration = await app.request("/v1/installations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      consentVersion: config.consentVersion,
+      consentedAt: new Date().toISOString(),
+      appVersion: "test",
+      osName: "windows",
+      osVersion: "test",
+      architecture: "x64",
+      locale: "ko",
+    }),
+  });
+  assert.equal(registration.status, 201);
+  const registered = (await registration.json()) as {
+    installationId: string;
+    deviceToken: string;
+    qualityConsent: QualityConsent;
+  };
+  assert.equal(
+    registered.qualityConsent.consentId,
+    null,
+    "old clients/defaults never opt in",
+  );
+  const installationId = registered.installationId as string;
+  const headers = {
+    "Content-Type": "application/json",
+    "X-Installation-Id": installationId,
+    "X-Device-Token": registered.deviceToken as string,
+  };
+  const adminHeaders = { "X-Beta-Admin-Token": "quality-test-admin" };
+  const consentUrl = "/v1/installations/current/quality-consent";
+  const setConsent = async (personalData: boolean, contentLicense: boolean) => {
+    const res = await app.request(consentUrl, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ ...optional, personalData, contentLicense }),
+    });
+    assert.equal(res.status, 200);
+    return res.json() as Promise<QualityConsent>;
+  };
+  const job = () =>
+    createJob(null, null, {
+      installationId,
+      source: "file",
+      mime: "image/png",
+      size: 100,
+      width: 10,
+      height: 10,
+    });
+  const count = async (table: string) =>
+    (await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM ${table}`))
+      .rows[0].n;
+  const before = await job();
+  assert.ok(
+    await getOwnedJob(before.id, installationId),
+    "basic analysis is available without quality consent",
+  );
+  assert.equal(await count("quality_review_jobs"), 0);
+  await db.query(
+    `INSERT INTO analytics_events (event_id,installation_id,sequence_number,event_name,occurred_at,received_at,properties_json)
+     VALUES ('legacy-event',$1,1,'app_started',$2,$2,'{}')`,
+    [installationId, new Date().toISOString()],
+  );
+  await db.exec(SCHEMA);
+  assert.equal(
+    await count("analytics_events"),
+    0,
+    "migration removes telemetry without optional consent evidence",
+  );
+  assert.ok(
+    await getOwnedJob(before.id, installationId),
+    "migration retains basic jobs",
+  );
+  assert.equal((await setConsent(true, false)).consentId, null);
+  await job();
+  assert.equal(
+    await count("quality_review_jobs"),
+    0,
+    "partial permission is insufficient",
+  );
+  const granted = await setConsent(true, true);
+  assert.ok(granted.consentId);
+  assert.equal(
+    await count("quality_review_jobs"),
+    0,
+    "regrant never includes historical uploads",
+  );
+  const eligible = await job();
+  assert.equal(await count("quality_review_jobs"), 1);
+  const sameGrant = await setConsent(true, true);
+  assert.equal(
+    sameGrant.consentId,
+    granted.consentId,
+    "idempotent retry preserves the grant",
+  );
+  await db.query(
+    `INSERT INTO analysis_candidates (job_id,person_index,candidate_id,pose_id,rank,view,match_level,tags_json,pose_library_version)
+    VALUES ($1,0,'candidate','pose',1,'front','high','{}','test')`,
+    [eligible.id],
+  );
+  assert.equal(
+    await confirmSelections(installationId, eligible.id, [
+      { personIndex: 0, candidateId: "candidate" },
+    ]),
+    true,
+  );
+  await recordExport({
+    installationId,
+    jobId: eligible.id,
+    personIndex: 0,
+    candidateId: "candidate",
+    status: "completed",
+  });
+  assert.equal(
+    await saveFeedback(installationId, eligible.id, "good", null),
+    false,
+  );
+  assert.equal(
+    await saveFeedback(installationId, before.id, "good", granted.consentId),
+    false,
+  );
+  assert.equal(
+    await saveFeedback(installationId, eligible.id, "good", granted.consentId),
+    true,
+  );
+  const sendEvent = async (
+    epoch: string | null,
+    jobId = eligible.id,
+    occurredAt = new Date().toISOString(),
+  ) => {
+    const res = await app.request("/v1/events/batch", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        qualityConsentId: epoch,
+        events: [
+          {
+            eventId: `evt_${crypto.randomUUID()}`,
+            name: "results_viewed",
+            sequence: 1,
+            occurredAt,
+            jobId,
+            properties: {},
+          },
+        ],
+      }),
+    });
+    assert.equal(res.status, 200);
+    return ((await res.json()) as { accepted: number }).accepted;
+  };
+  assert.equal(
+    await sendEvent(null),
+    0,
+    "legacy clients cannot submit optional telemetry",
+  );
+  assert.equal(await sendEvent(granted.consentId, before.id), 0);
+  assert.equal(
+    await sendEvent(granted.consentId, eligible.id, "2020-01-01T00:00:00Z"),
+    0,
+  );
+  assert.equal(await sendEvent(granted.consentId), 1);
+  for (const path of [
+    "/overview",
+    "/product",
+    "/timeseries",
+    "/review/jobs",
+    "/review/installations",
+    "/gallery/folders?group=date",
+    "/review/jobs/" + eligible.id,
+  ]) {
+    const res = await app.request("/v1/admin" + path, {
+      headers: adminHeaders,
+    });
+    assert.equal(res.status, 200, path + ": " + (await res.text()));
+  }
+  assert.equal(
+    (
+      await app.request("/v1/admin/review/jobs/" + before.id, {
+        headers: adminHeaders,
+      })
+    ).status,
+    404,
+  );
+  const detail = await app.request("/v1/admin/review/jobs/" + eligible.id, {
+    headers: adminHeaders,
+  });
+  assert.match(detail.headers.get("cache-control") ?? "", /no-store/);
+  const expiredBasic = await job();
+  await db.query("UPDATE jobs SET created_at=$2 WHERE id=$1", [
+    expiredBasic.id,
+    new Date(Date.now() - 91 * 86_400_000).toISOString(),
+  ]);
+  assert.equal(await getOwnedJob(expiredBasic.id, installationId), undefined);
+  assert.equal(
+    (
+      await app.request("/v1/admin/review/jobs/" + expiredBasic.id + "/input", {
+        headers: adminHeaders,
+      })
+    ).status,
+    404,
+  );
+  await setConsent(false, true);
+  assert.equal(
+    (await db.query("SELECT id FROM jobs WHERE id=$1", [expiredBasic.id])).rows
+      .length,
+    0,
+    "withdrawal immediately removes review jobs whose basic retention already expired",
+  );
+  for (const table of [
+    "quality_review_jobs",
+    "quality_review_confirmed_selections",
+    "analytics_events",
+    "export_events",
+    "job_feedback",
+  ])
+    assert.equal(await count(table), 0, table);
+  assert.ok(await getOwnedJob(eligible.id, installationId));
+  assert.equal(
+    await count("confirmed_selections"),
+    1,
+    "the owner's saved export selection survives",
+  );
+  assert.ok(
+    (
+      await listJobHistory(installationId, {
+        limit: 20,
+        cursor: null,
+        status: null,
+      })
+    ).length,
+  );
+  for (const suffix of [
+    "",
+    "/input",
+    "/refined/0/bvh?candidateId=candidate",
+    "/refined/0/thumbnail?candidateId=candidate",
+    "/refined/0/fbx?candidateId=candidate",
+  ]) {
+    assert.equal(
+      (
+        await app.request("/v1/admin/review/jobs/" + eligible.id + suffix, {
+          headers: adminHeaders,
+        })
+      ).status,
+      404,
+      suffix,
+    );
+  }
+  assert.equal(await sendEvent(granted.consentId), 0);
+  const again = await setConsent(true, true);
+  assert.notEqual(again.consentId, granted.consentId);
+  assert.equal(await sendEvent(granted.consentId), 0);
+  assert.equal(
+    await sendEvent(again.consentId),
+    0,
+    "old jobs remain excluded after regrant",
+  );
+  assert.equal(await count("quality_review_jobs"), 0);
+  assert.ok(await job());
+  assert.equal(await count("quality_review_jobs"), 1);
+  assert.ok(await count("quality_consent_receipts"));
+  await setConsent(false, false);
+  await db.query("UPDATE jobs SET created_at = $1", [
+    new Date(Date.now() - 91 * 86_400_000).toISOString(),
+  ]);
+  await db.transaction(async (tx) => {
+    await deleteExpiredRows({ query: (sql, values) => tx.query(sql, values) });
+  });
+  assert.equal(
+    await count("jobs"),
+    0,
+    "withdrawn/basic data does not inherit the 365-day review retention",
+  );
+});
+
+test("review guard denies every direct file route and rechecks after slow work", async () => {
+  let active = true;
+  let visited = false;
+  const app = new Hono<AppEnv>();
+  app.use(
+    "*",
+    qualityReviewGuard(async () => active),
+  );
+  app.get("/v1/admin/review/jobs/:id/refined/:index/fbx", async (c) => {
+    visited = true;
+    active = false; // withdrawal commits while Converter is running
+    return c.text("private file");
+  });
+  const response = await app.request(
+    "/v1/admin/review/jobs/job_test/refined/0/fbx",
+  );
+  assert.equal(visited, true);
+  assert.equal(response.status, 404);
+  assert.doesNotMatch(await response.text(), /private file/);
+  visited = false;
+  assert.equal(
+    (await app.request("/v1/admin/review/jobs/job_test/refined/0/fbx")).status,
+    404,
+  );
+  assert.equal(visited, false);
+});
