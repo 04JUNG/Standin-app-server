@@ -4,7 +4,7 @@ import { createSemanticRoutes } from "./semantic/routes.js";
 import { createHandRoutes } from "./hands/routes.js";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
-import { cors } from "hono/cors";
+import { appCors } from "./cors.js";
 import { bodyLimit } from "hono/body-limit";
 import { randomUUID } from "node:crypto";
 import { config } from "./config.js";
@@ -125,42 +125,7 @@ app.onError((error, c) => {
 // 로그인 요청 자체가 나가지 못한다(브라우저 dev는 http://localhost:1420, 패키지된 앱은
 // Windows가 http://tauri.localhost, macOS가 tauri://localhost).
 // 허용 목록은 CORS_ORIGINS로 덮어쓴다 — 배포에서 아무 출처나 열지 않기 위해 * 는 쓰지 않는다.
-app.use(
-  "*",
-  cors({
-    origin: config.corsOrigins,
-    allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowHeaders: [
-      "Content-Type",
-      "If-None-Match",
-      "Authorization",
-      "X-Installation-Id",
-      "X-Device-Token",
-      "X-Beta-Admin-Token",
-    ],
-    // 429 응답의 Retry-After를 웹뷰가 읽으려면 노출 목록에 있어야 한다(사용량 제한 안내).
-    exposeHeaders: [
-      "Retry-After",
-      "ETag",
-      "X-Standin-Hand-Revision",
-      "X-Standin-Preview-Only",
-      "X-Standin-Character-Id",
-      "X-Standin-Model-Version",
-      "X-Standin-Hand-Library-SHA256",
-      "X-Standin-Review-Key",
-      "X-Standin-Body-Render-Key",
-      "X-Standin-Body-Revision",
-      "X-Standin-Body-Shape-SHA256",
-      "X-Standin-Character-SHA256",
-      "X-Standin-Source-BVH-SHA256",
-      "X-Standin-Preview-Revision",
-      "X-Standin-Model-Revision",
-      "X-Standin-Artifact-SHA256",
-    ],
-    credentials: true,
-    maxAge: 600,
-  }),
-);
+app.use("*", appCors(config.corsOrigins));
 
 // 공개 엣지 헬스체크(+ 추론 서버 연결 상태)
 app.get("/healthz", async (c) => {
