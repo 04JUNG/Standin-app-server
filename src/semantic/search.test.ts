@@ -181,7 +181,7 @@ test("owned job pins original and actual mirror ids, publishes no skeleton/refin
   assert.equal(result.image, null);
   assert.equal(result.capabilities.refine, false);
   assert.equal(result.capabilities.handSelection, true);
-  assert.equal(result.capabilities.bodyPreviews, false);
+  assert.equal(result.capabilities.bodyPreviews, true);
   assert.equal(result.capabilities.fbxExport, true);
   const p = result.candidatesByPerson[0]!;
   assert.equal(p.skeleton, null);

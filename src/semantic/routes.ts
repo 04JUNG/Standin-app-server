@@ -159,6 +159,8 @@ export function createSemanticRoutes(overrides: Partial<typeof defaults> = {}) {
               lookupAllowed: true,
               refineAllowed: false,
               releaseAllowed: false,
+              manualExportAllowed: true,
+              presentationKind: group.near ? "near_match" : "library_match",
               actualMeshValidated: false,
               reviewRequired: true,
               rankScore: group.score,

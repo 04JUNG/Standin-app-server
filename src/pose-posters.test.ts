@@ -252,3 +252,60 @@ test("shared template verifies exact character/scope/compressed digest and uses 
     404,
   );
 });
+
+test("actual pose route composition keeps template/source/poster transport and confirmed manual release together", async () => {
+  const { createPoseRoutes } = await import("./pose/routes.js");
+  const { appCors } = await import("./cors.js");
+  const template = Buffer.from('{"preview_only":true,"scope":"half"}');
+  const packed = gzipSync(template);
+  const candidate = {
+    id: "candidate", poseId: "pose_mirror", source: "library", sourceBvhSha256: hash,
+    lookupAllowed: true, bvhAvailable: true, manualExportAllowed: true, reviewRequired: true,
+    releaseAllowed: false, refineAllowed: false, actualMeshValidated: false,
+  };
+  const person = { personIndex: 0, outputScope: { selection: "half", resolved: "half" }, candidates: [candidate] };
+  const job = { status: "completed", result: { candidatesByPerson: [person] } } as unknown as Job;
+  let confirmed = false;
+  const app = new Hono<AppEnv>();
+  app.use("*", appCors(["tauri://localhost"]));
+  app.use("*", async (c, next) => { c.set("installationId", c.req.header("owner") ?? "owner"); await next(); });
+  app.route("/v1/pose-candidates", createPoseRoutes({
+    getOwnedJob: async (_, owner) => owner === "owner" ? job : undefined,
+    getPoseBvh: async () => new Response(source),
+    getPosePoster: async (_, digest, scope) => { assert.equal(digest, hash); return response(scope); },
+    getDefaultBodyTemplate: async (scope) => new Response(packed, { headers: {
+      "Content-Type": "application/gzip", "X-Standin-Template-Version": "default-body-template-v1",
+      "X-Standin-Preview-Only": "true", "X-Standin-Character-Id": "standin-master-v2",
+      "X-Standin-Character-SHA256": "7c648b97a24a3bb4914b6e5d515708c33727979881d92ef916d5726e22301f3d",
+      "X-Standin-Output-Scope": scope, "X-Standin-Preview-Method": "reference-skinning-v1",
+      "X-Standin-Template-JSON-SHA256": sha256Hex(template), "X-Standin-Artifact-SHA256": sha256Hex(packed),
+    } }),
+    validateExportCandidate: async () => true,
+    validateConfirmedSelection: async () => confirmed,
+    resolveExportArtifact: async () => ({ variant: "base", fallbackReason: null }),
+    recordExport: async () => {},
+  }));
+  const headers = { Origin: "tauri://localhost" };
+  const prefix = "/v1/pose-candidates";
+  const query = new URLSearchParams({ jobId: "job", personIndex: "0", candidateId: candidate.id, scope: "half" });
+  const ref = await app.request(`${prefix}/pose_mirror/poster-source?${query}`, { headers });
+  assert.equal(ref.status, 200); assert.deepEqual(Buffer.from(await ref.arrayBuffer()), source);
+  const poster = await app.request(`${prefix}/pose_mirror/poster?${query}`, { headers });
+  assert.equal(poster.status, 200); assert.deepEqual(Buffer.from(await poster.arrayBuffer()), image);
+  const human = await app.request(`${prefix}/default-body-template/half`, { headers });
+  assert.equal(human.status, 200); assert.equal(human.headers.get("Content-Encoding"), "gzip");
+  assert.deepEqual(gunzipSync(Buffer.from(await human.arrayBuffer())), template);
+  const exposed = new Set((human.headers.get("Access-Control-Expose-Headers") ?? "").toLowerCase().split(",").map((x) => x.trim()));
+  for (const name of ["X-Standin-Template-Version", "X-Standin-Template-SHA256", "X-Standin-Template-JSON-SHA256", "X-Standin-Preview-Method", "X-Standin-Review-Key", "X-Standin-Preview-Artifact-SHA256"])
+    assert.ok(exposed.has(name.toLowerCase()), name);
+  assert.equal(candidate.releaseAllowed, false); assert.equal(candidate.actualMeshValidated, false);
+  assert.equal((await app.request(`${prefix}/pose_mirror/export?${query}&format=bvh`)).status, 409);
+  confirmed = true;
+  const bvh = await app.request(`${prefix}/pose_mirror/export?${query}&format=bvh`);
+  assert.equal(bvh.status, 200); assert.deepEqual(Buffer.from(await bvh.arrayBuffer()), source);
+  const fbx = await app.request(`${prefix}/pose_mirror/export?${query}&format=fbx`);
+  assert.equal(fbx.status, 409);
+  assert.equal(((await fbx.json()) as { error: { code: string } }).error.code, "MANUAL_REVIEW_REQUIRED");
+  const denied = await app.request(`${prefix}/pose_mirror/poster-source?${query}`, { headers: { owner: "other" } });
+  assert.equal(denied.status, 404);
+});

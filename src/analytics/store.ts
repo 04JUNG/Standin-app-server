@@ -147,7 +147,7 @@ export async function confirmSelections(
 ): Promise<boolean> {
   return transaction(async (client) => {
     const owner = await client.query<{ id: string }>(
-      "SELECT id FROM jobs WHERE id = $1 AND installation_id = $2",
+      "SELECT id FROM jobs WHERE id = $1 AND installation_id = $2 FOR UPDATE",
       [jobId, installationId],
     );
     if (owner.rowCount !== 1) return false;
@@ -290,4 +290,15 @@ export async function validateExportCandidate(
     [jobId, personIndex, candidateId, installationId],
   );
   return Boolean(row);
+}
+
+/** Explicit author choice, distinct from merely exposed analysis_candidates membership. */
+export async function validateConfirmedSelection(owner: string, jobId: string, index: number, candidateId: string): Promise<boolean> {
+  return !!await queryOne(
+    `SELECT s.candidate_id FROM confirmed_selections s JOIN jobs j ON j.id=s.job_id
+     WHERE s.job_id=$1 AND s.person_index=$2 AND s.candidate_id=$3
+       AND s.installation_id=$4 AND j.installation_id=$4 AND j.status='completed'
+       AND j.created_at::timestamptz > now() - interval '90 days'`,
+    [jobId, index, candidateId, owner],
+  );
 }

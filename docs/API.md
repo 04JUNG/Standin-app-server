@@ -40,16 +40,31 @@ Job의 동의 ID가 일치하는 행만 읽는다. Job 상세·원본·조정본
 
 배포 순서와 검증 범위는 [선택 동의 배포 점검](OPTIONAL_QUALITY_CONSENT.md)을 따른다.
 
-## Top-5 라이브러리 직접 선택 (2026-10-18)
+## 작가 수동 선택·검수·저장 (2026-10-19)
 
-검색 완료(`ok/partial_error`)·표시 준비(`ready/review_ready`)인 검증된
-`posePresentation.library_candidates`는 일반 `candidates`에도 노출합니다.
-`source=library`, `lookupAllowed=true`, `releaseAllowed=true`, `sourceBvhSha256`로
-식별하며 사용자 선택·확정·최종 확인 후 기존 BVH/FBX 저장을 사용합니다. 서버가 원본
-해시와 소유권·확정 선택을 다시 검증합니다. refine/자동 적용은 허용하지 않습니다.
-정면 라이브러리 썸네일을 사용하며 검색 원근 카메라를 출력 카메라로 간주하지 않습니다.
-생성·근접·구도 참고와 `dynamic/semantic` 조회 전용 후보는 기존 저장 금지를 유지합니다.
-이전 검수 전용 Job은 재검색해야 이 선택 목록을 받습니다.
+검색 품질 판정과 작가의 수동 저장 권한은 별개입니다. 공개·비공개 자산의 pose ID와 SHA가
+일치하는 라이브러리 원본·실제 미러·근접·기하·구도 참고 및 직접 자연어 검색 후보는
+`candidates`에 `manualExportAllowed=true`, `presentationKind`, `sourceBvhSha256`로 노출합니다.
+`releaseAllowed=false`, `actualMeshValidated=false`, `refineAllowed=false`와 기존 검색/생성 오류는
+그대로 유지합니다. 검색 실패를 통과로 기록하거나 자동 적용·보정 권한을 늘리지 않습니다.
+
+작가는 후보를 선택하고 기존 `PUT /analysis/jobs/:id/selections`로 확정한 뒤,
+`/:pose/framed?format=preview|model`에서 실제 체형·수치·손·출력 범위를 확인합니다.
+확인 응답의 `X-Standin-Review-Key`를 같은 설정의 `format=fbx` 요청에 보내야 저장됩니다.
+`X-Standin-Artifact-SHA256`는 쌍으로 만든 최종 FBX 해시이고,
+`X-Standin-Preview-Artifact-SHA256`는 PNG/GLB 바이트 해시입니다. 원본 BVH 및 체형 SHA도
+응답에 제공합니다. 기본 카드 이미지는 최종 파일 검수의 대체물이 아닙니다.
+
+수동 후보의 원본 BVH 저장도 확정 선택이 필요하며, `/export?format=fbx`는
+`MANUAL_REVIEW_REQUIRED`로 최종 framed 검수를 요구합니다. `MANUAL_SELECTION_REQUIRED`는
+확정 선택이 없는 경우입니다. 원본/체형/손/scope/revision/runtime/카메라/소유권/격리 상태가
+바뀌면 이전 검수 키를 거절합니다. 원본과 미러는 각각 실제 등록 BVH 바이트를 사용합니다.
+
+기존 검수 전용 작업은 소유자가 다시 열 때 job 행 잠금 아래 비공개 자산과 공개 행을 검증하고
+후보 행·JSON을 함께 보강합니다. 재분석·VLM 호출이 필요하지 않습니다. 구형 semantic 후보 ID가
+presentation ID로 정리되면 직접 다시 선택·확정해야 하며 원래 검색·손·범위 설정은 보존합니다.
+등록 BVH/해시 바인딩이 없는 구형 dynamic 결과와 inline 생성 실패 후보는 이 권한을 받지 않습니다.
+자세한 경계와 검증은 [MANUAL_POSE_EXPORT.md](MANUAL_POSE_EXPORT.md)를 따릅니다.
 
 ## 동적 검색 조회 전용 후보 (2026-10-17)
 
@@ -62,7 +77,7 @@ Job의 동의 ID가 일치하는 행만 읽는다. Job 상세·원본·조정본
 `GET /v1/pose-candidates/:id/lookup-thumbnail?jobId=...&personIndex=...&candidateId=...`는
 소유권·후보 ID·포즈를 검증한 정면 참고 이미지를 제공합니다. 검색 시점의 정렬 렌더라고 표시하지 않습니다.
 해당 후보의 refine은 409 `CANDIDATE_REFINE_FORBIDDEN`, BVH/FBX/framed FBX 저장은
-409 `CANDIDATE_RELEASE_FORBIDDEN`으로 거부합니다. 생성·근접·구도·기본 인체 결과는 정식 후보로 합치지 않습니다.
+409 `CANDIDATE_RELEASE_FORBIDDEN`으로 거부합니다. 구형 무해시 dynamic 결과에는 이 차단을 유지합니다. 버전이 확인된 presentation과 직접 자연어 검색의 수동 저장 계약은 위 절을 따릅니다.
 상세는 [동적 검색 연결](ROUTED_SEARCH_INTEGRATION.md)을 참조합니다.
 
 ## 빠른 후보 카드 (2026-10-08)
@@ -119,7 +134,7 @@ X-Device-Token: ...
 
 발급은 공개 엔드포인트라 **IP 단위 속도 제한**이 걸린다(기본 1시간 5회). 초과하면 `429 RATE_LIMITED`가 나가므로, 클라는 발급을 재시도 루프로 돌리지 말고 받은 자격증명을 안전 저장소에 보관해 재사용한다.
 
-`DELETE /v1/installations/current/data`는 전용 S3 prefix, 작업·파생 데이터(조정본 대장 포함)·이벤트·선택·피드백, 이 설치를 연 관리자 열람 기록, 주간 쿼터 카운터와 설치 레코드를 삭제한다. 진행 중인 작업도 지운다. 워커가 결과를 쓰는 중이면 그 쓰기가 끝난 뒤 지우고, 이미 지운 작업에는 결과를 쓰지 않는다. 지우는 테이블 목록은 `src/retention.ts` 하나이며 작업 삭제·90/365일 보관 만료도 같은 목록을 쓴다. 최소 선택 동의 증빙은 위 별도 보관기간을 따른다. 응답은 `{ "deleted": true, "backupExpiryDays": 7 }`이다.
+`DELETE /v1/installations/current/data`는 전용 S3 prefix, 작업·파생 데이터(조정본 대장 포함)·이벤트·선택·피드백, 이 설치를 연 관리자 열람 기록, 주간 쿼터 카운터와 설치 레코드를 삭제한다. 진행 중인 작업도 지운다. 워커가 결과를 쓰는 중이면 그 쓰기가 끝난 뒤 지우고, 이미 지운 작업에는 결과를 쓰지 않는다. 지우는 테이블 목록은 `src/retention.ts` 하나이며 작업 삭제·365일 보관 만료도 같은 목록을 쓴다. 응답은 `{ "deleted": true, "backupExpiryDays": 7 }`이다.
 
 ---
 
@@ -286,8 +301,8 @@ Retry-After: 41230
 > 원본을 20건 내려보내면 수십 MB가 되지만 후보 썸네일은 이미 하루 캐시되는 작은 PNG다.
 > 인증 헤더가 필요하므로 절대 URL이 아닌 상대 경로를 준다.
 
-> `inputAvailable`은 입력 원본이 S3에 남아 있는지다. **기본 작업 이력과 S3 원본은 최대 90일**이다.
-> 별도 선택 동의를 받은 평가정보의 최대 365일 보관은 사용자 이력의 만료일을 연장하지 않는다.
+> ⚠ `inputAvailable`은 입력 원본이 S3에 남아 있는지다. **DB의 Job은 365일, S3 객체는
+> lifecycle 90일**이라 그 사이 구간의 Job은 목록에 나오지만 원본은 제공되지 않는다.
 
 > ⚠ 이 경로에는 IP 속도 제한이 없다(제한은 `POST /v1/analysis/jobs`에만 붙는다).
 > 부하 상한은 `limit` 최대 50으로만 강제된다.
@@ -774,7 +789,7 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 
 `GET /v1/admin/review/installations`
 
-현재 두 선택 동의가 유효한 설치만 최근 접속 순으로 준다. 쿼리는 `limit`(1~50, 기본 20) · `cursor` · `activeOnly`다. `activeOnly`는 호환을 위해 받지만 그 값과 무관하게 미동의·철회·삭제 요청 설치를 제외한다.
+어떤 설치가 있는지 최근 접속 순으로 준다. 쿼리는 `limit`(1~50, 기본 20) · `cursor` · `activeOnly`(`true`면 철회·삭제 요청 설치를 뺀다. 기본은 `false` — 그 설치에 기록이 남아 있는지 확인하는 자리이기도 하다).
 
 ```json
 {
@@ -847,7 +862,7 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 `items`는 사용자 화면과 같은 모양이다. 검토자가 사용자와 다른 것을 보면 "지금 사용자에게 뭐가 보이나"를 판단할 수 없기 때문이다. 두 가지만 다르게 읽는다.
 
 - `thumbnailUrl`은 **설치 토큰이 필요한 경로**다. 관리자 토큰으로는 열리지 않는다.
-- 원본 러프는 목록에 없다. `inputAvailable: true`인 Job의 상세에서 관리자 인증이 필요한 원본 프록시 경로를 받는다.
+- 원본 러프는 목록에 없다. `inputAvailable: true`인 Job을 아래 상세로 열면 서명 URL이 나온다. 목록에 20건치 서명 URL을 달면 한 번의 조회가 그 설치의 사진 전부를 꺼내는 열쇠가 된다.
 
 | 상태                | 언제                                                                |
 | ------------------- | ------------------------------------------------------------------- |
@@ -864,15 +879,15 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 
 **서명 URL은 없다.** 목록 한 번이 사진 여러 장을 한꺼번에 여는 열쇠가 되지 않게 하는 방침은 설치별 목록과 같다. 원본은 상세에서 한 건씩 연다. 열람은 `review_recent_jobs`로 기록된다.
 
-`GET /v1/admin/review/jobs/{jobId}`는 현재 선택 동의가 있는 한 건의 관리자 인증 원본 경로, 인물·스켈레톤, 후보, 확정 선택, refine 산출물, 사용자 피드백, 추론 메타를 보여 준다. 미동의·철회·만료된 Job은 `404 NOT_FOUND`다.
+`GET /v1/admin/review/jobs/{jobId}`는 한 건을 끝까지 보여 준다 — 5분짜리 원본 서명 URL, 인물·스켈레톤, 후보, 확정 선택, refine 산출물, 사용자 피드백, 추론 메타.
 
 ```json
 {
   "jobId": "job_...",
   "status": "completed",
   "createdAt": "2026-09-04T...",
-  "inputUrl": "/v1/admin/review/jobs/job_.../input",
-  "inputUrlExpiresInSeconds": null,
+  "inputUrl": "https://...",
+  "inputUrlExpiresInSeconds": 300,
   "image": { "width": 900, "height": 1200 },
   "cutSummary": {
     "route": "core",
@@ -965,10 +980,10 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 
 - `accuracy`: `selectionRate`(완료 Job 중 고른 비율), `top1Rate`(고른 것 중 1순위), `meanReciprocalRank`, `exportRate`, 사유별 `feedback[]`와 `feedbackRate`, 날짜별 `trend`
 - `usage`: `jobsStarted/Completed/Failed`, `failureRate`, `jobsPerDay`, `jobsPerActiveInstallation`, 날짜별 `trend`
-- 현재 선택 동의가 유효한 Job을 조회 시점에 집계하며 **오늘은 들어 있지 않다**. `days`가 0이면 아직 마감된 날이 없다는 뜻이고, 비율이 `null`이면 분모가 0이라 "아직 모른다"는 뜻이다 — 0%와 구분한다. 철회된 데이터를 포함할 수 있는 과거 캐시 집계는 이 응답에 쓰지 않는다.
+- 둘 다 원본이 `daily_analytics_aggregates`라 **오늘은 들어 있지 않다**(하루가 끝나야 집계한다). `days`가 0이면 아직 마감된 날이 없다는 뜻이고, 비율이 `null`이면 분모가 0이라 "아직 모른다"는 뜻이다 — 0%와 구분한다.
 - `meanReciprocalRank`는 날짜별 평균을 다시 평균 내지 않는다. 그날의 선택 수로 가중해 합산한다.
 
-`refined`는 검토 가능한 조정본만 싣고 파일 URL을 `/v1/admin/review/jobs/{jobId}/refined/{personIndex}/bvh?candidateId=...` 및 `thumbnail?candidateId=...` 프록시 경로로 바꾼다. 매번 관리자 인증과 현재 동의를 검사한다. **`refined: false`인 행도 빼지 않는다**. 그 경우 두 URL은 `null`이다.
+`refined`는 `refined_artifacts`를 그대로 싣되 `object_key`·`thumbnail_key`를 서명해 URL로 바꾼 것이다. **`refined: false`인 행도 뺴지 않는다** — 왜 조정하지 않았는지(`reason`)가 조정 결과만큼 중요하다. 그 경우 두 URL은 `null`이다.
 
 ### 관리자용 후보 썸네일
 
@@ -1008,7 +1023,7 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 
 **대상 행**
 
-- 뷰 `gap_observations_v1`에서 읽는다. 완료된 작업 중 현재 선택 동의 ID와 일치하는 이후 작업만 담고, 쿼터 면제 설치(개발 단말)는 뺀다.
+- 뷰 `gap_observations_v1`에서 읽는다. 완료된 작업 중 철회·삭제 요청이 없는 설치의 행만 담고, 쿼터 면제 설치(개발 단말)는 뺀다.
 - 원본 테이블 위의 뷰라서 작업 삭제·동의 철회·365일 정리 때 함께 사라진다.
 - 관절이 없는 인물은 담지 않는다.
 
@@ -1285,7 +1300,7 @@ PNG/304 응답의 `X-Standin-Hand-Library-SHA256`으로 카탈로그 일치를 �
 미준비는 404 `HAND_THUMBNAIL_UNAVAILABLE`, 라이브러리 변경은 409 `HAND_LIBRARY_CHANGED`다.
 ## 직접 자연어 포즈 검색
 
-`GET /v1/semantic-search/capabilities`, `POST /v1/semantic-search`는 설치 인증을 사용한다. `query`와 `topK`(정수 1–20, 생략 시 5)로 검색하고 정식 또는 근접 후보가 있으면 조회 전용 `jobId`를 반환한다. 신규 후보의 refine·release는 금지한다. 이미지 없는 `source=semantic` 결과의 `image`는 null이다. 자연어 작업은 refine/body camera 기능을 허용하지 않는다. 입력 제한, 별도 검색 rate limit, 오류, 기록·해시 계약은 [SEMANTIC_SEARCH_INTEGRATION.md](SEMANTIC_SEARCH_INTEGRATION.md)를 따른다.
+`GET /v1/semantic-search/capabilities`, `POST /v1/semantic-search`는 설치 인증을 사용한다. `query`와 `topK`(정수 1–20, 생략 시 5)로 검색하고 정식 또는 근접 후보가 있으면 `jobId`를 반환한다. 자동 refine·release는 금지하며 원본 해시에 바인딩된 후보의 수동 저장은 위 계약을 따른다. 이미지 없는 `source=semantic` 결과의 `image`는 null이다. 자연어 작업은 이미지 기반 refine/search-fit camera를 허용하지 않으며 정면 참고 카메라의 체형 검수는 지원한다. 입력 제한, 별도 검색 rate limit, 오류, 기록·해시 계약은 [SEMANTIC_SEARCH_INTEGRATION.md](SEMANTIC_SEARCH_INTEGRATION.md)를 따른다.
 
 두 기능의 공통 흐름·통합 검증·PR 제출 범위는 [HANDS_SEMANTIC_INTEGRATION.md](HANDS_SEMANTIC_INTEGRATION.md)를 따른다. 자연어 결과도 준비된 handSelection capability를 유지해 수동 손 선택을 사용할 수 있다.
 
@@ -1355,8 +1370,9 @@ shape source를 기존 변환기에 전달하며 PNG/GLB 확인과 FBX 다운로
 reviewKey를 사용한다. 렌더 중 원본·카메라·체형·수치/source 변경은 409로 폐기한다.
 
 새 수동 후보의 이 예외는 원본 해시가 확인된 라이브러리와 작가의 선택·확인에 한정된다.
-기존 포즈 커버리지 검사와 참고/생성/semantic 후보의 저장 금지, actual_mesh_validated=false,
-auto/refine 금지는 유지한다. 후보가 없는 참고 인물은 저장 가능한 다른 인물의 체형 기능을
+기존 자동 포즈 커버리지 검사와 actual_mesh_validated=false, auto/refine 금지는 유지한다.
+2026-10-19부터 hash-bound 참고/semantic은 별도 manualExportAllowed 계약으로 작가 검수 후 저장한다.
+inline 생성 후보는 여전히 수동 저장 대상이 아니다. 후보가 없는 참고 인물은 저장 가능한 다른 인물의 체형 기능을
 비활성화하지 않으며, 별도의 조회 전용 체형 미리보기를 유지한다.
 
 

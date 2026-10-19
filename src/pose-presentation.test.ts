@@ -136,7 +136,8 @@ test("authoritative presentation preserves groups/counts while private assets ne
   assert.equal(p.candidates.length, 1);
   assert.equal(p.candidates[0].id, id);
   assert.equal(p.candidates[0].source, "library");
-  assert.equal(p.candidates[0].releaseAllowed, true);
+  assert.equal(p.candidates[0].releaseAllowed, false);
+  assert.equal(p.candidates[0].manualExportAllowed, true);
   assert.equal(p.candidates[0].sourceBvhSha256, hash);
   assert.equal(p.candidates[0].camera, undefined);
   assert.equal(p.candidates[0].distance, undefined);
@@ -265,13 +266,15 @@ test("owned preview endpoint binds person/candidate/hash and never library-looks
 });
 
 for (const status of ["blocked", "error", "not_run", "no_result"]) {
-  test(`manual selection never promotes a ${status} presentation`, () => {
+  test(`manual library choice preserves ${status} search failure without claiming validation`, () => {
     const value = raw();
     value.search_status = status;
-    assert.equal(
-      mapCutResult("job", cut(value)).candidatesByPerson[0].candidates.length,
-      0,
-    );
+    const person = mapCutResult("job", cut(value)).candidatesByPerson[0];
+    assert.equal(person.candidates.length, 1);
+    assert.equal(person.posePresentation!.search_status, status);
+    assert.equal(person.candidates[0].manualExportAllowed, true);
+    assert.equal(person.candidates[0].releaseAllowed, false);
+    assert.equal(person.candidates[0].actualMeshValidated, false);
   });
 }
 
@@ -435,7 +438,8 @@ test("selected-body preview binds private library/generated sources, shape, scop
   const library = result.candidatesByPerson[0].candidates;
   assert.equal(library.length, 1);
   assert.equal(library[0].source, "library");
-  assert.equal(library[0].releaseAllowed, true);
+  assert.equal(library[0].releaseAllowed, false);
+  assert.equal(library[0].manualExportAllowed, true);
   assert.equal(library[0].refineAllowed, false);
   assert.equal(library[0].sourceBvhSha256, hash);
 });
@@ -573,7 +577,7 @@ for (const failure of [
   });
 }
 
-test("ready 4+1 preserves original ranking, includes source, and exposes only originals as selectable", () => {
+test("ready 4+1 preserves original ranking, includes source, and allows original and actual mirror manual selection", () => {
   const v = mirrorFixture();
   v.library_candidates = Array.from({ length: 4 }, (_, i) => ({
     ...v.library_candidates[0],
@@ -586,10 +590,10 @@ test("ready 4+1 preserves original ranking, includes source, and exposes only or
     [1, 2, 3, 4],
   );
   assert.equal(person.posePresentation!.review_candidates.length, 1);
-  assert.equal(person.candidates.length, 4);
+  assert.equal(person.candidates.length, 5);
   assert.ok(
-    person.candidates.every(
-      (c) => c.id !== v.review_candidates[0].candidate_id,
+    person.candidates.some(
+      (c) => c.id === v.review_candidates[0].candidate_id && c.manualExportAllowed === true,
     ),
   );
 });
