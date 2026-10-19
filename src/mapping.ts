@@ -1,3 +1,4 @@
+import { poseThumbnailUrl } from "./pose-thumbnail.js";
 // 계약 번역 = BFF가 소유하는 책임.
 //  - 추론의 원시 distance → 클라 UI 라벨(matchLevel)
 //  - 추론의 {detail} → 클라 오류봉투 {error:{code,...}}
@@ -237,11 +238,11 @@ export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
           thumbnailUrl: c.camera
             ? `/v1/pose-candidates/${encodeURIComponent(c.pose_id)}/aligned?jobId=${encodeURIComponent(jobId)}&personIndex=${p.index}&candidateId=${encodeURIComponent(`${c.pose_id}::${c.view}`)}`
             : c.thumbnail_url
-              ? `/v1/pose-candidates/${encodeURIComponent(c.pose_id)}/thumbnail?view=${encodeURIComponent(c.view)}`
+              ? poseThumbnailUrl(c.pose_id, c.view)
               : undefined,
           ...(c.camera && c.thumbnail_url
             ? {
-                quickThumbnailUrl: `/v1/pose-candidates/${encodeURIComponent(c.pose_id)}/thumbnail?view=${encodeURIComponent(c.view)}`,
+                quickThumbnailUrl: poseThumbnailUrl(c.pose_id, c.view),
               }
             : {}),
           distance: c.distance,
@@ -276,7 +277,7 @@ export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
           sourceBvhSha256: candidate.asset.bvh_sha256,
           rankScore: candidate.rank_score ?? undefined,
           bvhAvailable: true,
-          thumbnailUrl: `/v1/pose-candidates/${encodeURIComponent(candidate.pose_id!)}/thumbnail?view=front`,
+          thumbnailUrl: poseThumbnailUrl(candidate.pose_id!, "front"),
         }));
         const count =
           presentation.presentation.library_candidates.length +

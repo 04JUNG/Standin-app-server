@@ -1,3 +1,4 @@
+import { poseThumbnailUrl } from "./pose-thumbnail.js";
 /** Server-owned migration from inspect-only results to explicit author review.
  * No VLM, converter, ranking or validation status changes occur here. Source availability
  * and quarantine are checked again against inference before review/export bytes are used.
@@ -39,7 +40,7 @@ export function upgradeManualResult(
         actualMeshValidated: false, reviewRequired: true, manualExportAllowed: true,
         presentationKind: row.kind, notExactMatch: row.kind !== "library_match",
         sourceBvhSha256: row.asset.bvh_sha256,
-        thumbnailUrl: `/v1/pose-candidates/${encodeURIComponent(row.pose_id)}/thumbnail?view=front`,
+        thumbnailUrl: poseThumbnailUrl(row.pose_id, "front"),
         posterUrl: `/v1/pose-candidates/${encodeURIComponent(row.pose_id)}/poster?${new URLSearchParams({ jobId: result.jobId, personIndex: String(person.personIndex), candidateId: row.candidate_id })}`,
       });
     }
