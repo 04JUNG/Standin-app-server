@@ -1,0 +1,509 @@
+import { candidateSourceBytes } from "./candidate-source.js";
+import { resolveOutputScope, scopeIncludesHands, type BodyScope } from "./output-scope/model.js";
+import assert from "node:assert/strict";
+import test from "node:test";
+import { Hono } from "hono";
+import type { AppEnv } from "./env.js";
+import type { Job } from "./jobs/store.js";
+import type { AnalysisPerson, AnalysisResult, CandidateCamera } from "./types.js";
+import type { BodySelection } from "./body-selection/model.js";
+import type { HandBake } from "./hands/model.js";
+import { makeManualPresentation } from "./body-selection/fixtures.js";
+import { createFramingRoutes } from "./output-scope/framingRoutes.js";
+import { createReleaseGuard } from "./release-policy.js";
+import { createRefineRoutes } from "./refine/routes.js";
+import { sha256Hex } from "./converter/client.js";
+import { manualExportCandidate } from "./routed-search.js";
+import { upgradeManualResult, upgradeOwnedManualResult } from "./manual-export.js";
+
+test("refined dynamic library bytes reach final preview and reviewed FBX; stale base stays blocked", async () => {
+  const f = setup("library_match", false, true, true);
+  f.state.refined = true; f.state.confirmed = true;
+  enableLibraryRefine(f);
+  const preview = await f.request(); assert.equal(preview.status, 200, await preview.clone().text());
+  const download = await f.request({ format: "fbx", reviewKey: preview.headers.get("X-Standin-Review-Key")! });
+  assert.equal(download.status, 200, await download.clone().text());
+  assert.equal(await download.text(), "FBX exact registered asset half");
+  assert.equal(f.state.calls, 1, "the reviewed refined conversion is reused");
+  f.state.changed = true;
+  assert.equal((await f.request()).status, 409);
+});
+
+for (const bodyMode of [false, true]) test(`refined library verified receipt preserves the reviewed artifact, body=${bodyMode}`, async () => {
+  const f = setup("library_match", false, bodyMode, true);
+  f.state.refined = true; f.state.confirmed = true;
+  enableLibraryRefine(f);
+  const ready = await f.request({ format: "ready" });
+  assert.equal(ready.status, 200, await ready.clone().text());
+  const key = ready.headers.get("X-Standin-Review-Key")!;
+  assert.equal(ready.headers.get("X-Standin-Source-BVH-SHA256"), sha256Hex(Buffer.from("REFINED BVH")));
+  const preview = await f.request({ format: "preview", artifactReceipt: key });
+  assert.equal(preview.status, 200, await preview.clone().text());
+  assert.equal(await preview.text(), "PNG from final FBX");
+  const download = await f.request({ format: "fbx", artifactReceipt: key, reviewKey: key });
+  assert.equal(download.status, 200, await download.clone().text());
+  assert.equal(await download.text(), "FBX exact registered asset half");
+  assert.equal(download.headers.get("X-Standin-Artifact-SHA256"), ready.headers.get("X-Standin-Artifact-SHA256"));
+  assert.equal(f.state.calls, 1, "receipt preview and download share one refined conversion");
+  f.state.changed = true;
+  assert.equal((await f.request({ format: "fbx", artifactReceipt: key, reviewKey: key })).status, 409);
+});
+
+function enableLibraryRefine(f: ReturnType<typeof setup>) {
+  f.p.refineAllowed = true;
+  f.c.refineAllowed = true; f.c.notExactMatch = false;
+  f.c.camera = { version: "candidate-camera-v2", reference: "search-fit",
+    source_bvh_sha256: f.c.sourceBvhSha256!, rotation: f.row.render_camera.rotation,
+    canonical_yaw: 0, display_view: "front", status: "fitted", fit_error: .1,
+    facing_source: "geometry_only", depth_ambiguous: true, projection: "orthographic", distance_torso: null,
+    labels_swapped: false, pose_id: f.c.poseId!, query_sha256: "a".repeat(64), observed_joint_mask: Array(17).fill(true) };
+}
+
+function fixture(kind = "near_match", semantic = false) {
+  const source = Buffer.from("HIERARCHY\nROOT Hips\nMOTION\nFrames: 1\nFrame Time: 0.033\n0\n");
+  const p = { personIndex: 0, candidates: [{ id: "old-pick", poseId: "registered", rank: 1,
+    camera: { source_bvh_sha256: sha256Hex(source), rotation: [[1,0,0],[0,1,0],[0,0,1]] } as CandidateCamera,
+  }] } as unknown as AnalysisPerson;
+  makeManualPresentation(p);
+  const c = p.candidates[0]!;
+  c.manualExportAllowed = true; c.reviewRequired = true; c.releaseAllowed = false;
+  c.actualMeshValidated = false; c.presentationKind = kind;
+  const presentation = p.posePresentation!;
+  const row = presentation.library_candidates[0]!;
+  row.kind = kind;
+  presentation.search_status = "partial_error";
+  presentation.search_reason = "hand_skin_screen_unavailable_no_generation";
+  if (kind !== "library_match") {
+    presentation.review_candidates = [row]; presentation.library_candidates = [];
+  }
+  if (kind === "generated_review") {
+    c.source = "generation"; c.poseId = null; row.source = "generation"; row.pose_id = null;
+    row.asset.transport = "inline_bvh";
+    presentation.review_candidates = []; presentation.generated_candidates = [row];
+    presentation.generation_status = "preview_ready"; presentation.search_status = "no_result";
+    presentation.status = "review_ready"; presentation.preview_status = "ready";
+  }
+  p.outputScope = { selection: "half" } as AnalysisPerson["outputScope"];
+  if (semantic) {
+    c.source = "semantic";
+    c.semantic = { familyId: c.poseId!, alternate: false, description: "참고", near: true };
+    presentation.version = "semantic-pose-presentation-v1";
+  }
+  const result = { jobId: "job-" + Math.random(), source: semantic ? "semantic" : "image",
+    candidatesByPerson: [p], inferenceMetadata: { poseLibraryVersion: "library" },
+  } as AnalysisResult;
+  return { source, p, c, row, result };
+}
+function setup(kind: string, semantic: boolean, bodyMode: boolean, handsMode: boolean) {
+  const f = fixture(kind, semantic);
+  const state = { refined: false, shape: null as BodySelection["shape"], scope: "half" as BodyScope, handCalls: 0, owner: true, confirmed: false, available: true, changed: false, calls: 0, late: "", revision: 1, runtime: "c".repeat(64), character: "b".repeat(64), modelRevision: "e".repeat(64), badLineage: false };
+  const body = (): BodySelection => ({ schemaVersion: "body-selection.v1", personIndex: 0,
+    intent: "manual", manualCharacterId: "chosen", recommendation: { status: "unavailable", body: null, reasonCodes: [] },
+    resolvedBody: { bodyId: "body", bodyVersion: "1", assetSha256: state.character, characterId: "chosen", measurementVersion: "1", rigVersion: "1" },
+    resolvedSource: "manual", resolutionStatus: "ready", selectionRevision: state.revision, renderingExecuted: false,
+    shape: state.shape, shapeSource: state.shape ? { rules: "test-shape", blendSha256: "1".repeat(64), controllerSha256: "2".repeat(64) } : null,
+  });
+  const hands: HandBake | null = handsMode ? { left: "fist", right: "relaxed", library_sha256: "d".repeat(64), library_version: "1", revision: 2 } : null;
+  const app = new Hono<AppEnv>();
+  app.use("*", async (c, next) => { c.set("installationId", "owner"); await next(); });
+  app.route("/", createFramingRoutes({
+    getOwnedJob: async () => state.owner ? { status: "completed", result: structuredClone(f.result) } as Job : undefined,
+    loadAssets: async () => ({ [f.row.candidate_id]: { transport: "inline_bvh", pose_id: null,
+      bvh_sha256: f.row.asset.bvh_sha256, bvh: state.changed ? "changed" : f.source.toString("utf8") } }),
+    validateExportCandidate: async () => true,
+    validateConfirmedSelection: async () => state.confirmed,
+    resolveExportArtifact: async () => state.refined ? { variant: "refined", bytes: Buffer.from("REFINED BVH") } : { variant: "base", fallbackReason: null },
+    getPoseBvh: async () => {
+      assert.notEqual(kind, "generated_review", "generated bytes never use a library lookup");
+      return new Response(state.changed ? "changed" : f.source, { status: state.available ? 200 : 409 });
+    },
+    renderFinalPreview: async (artifact) => {
+      assert.equal(artifact.artifactSha256, sha256Hex(artifact.fbx));
+      assert.equal(artifact.fbx.toString(), "FBX exact registered asset " + state.scope);
+      return Buffer.from("PNG from final FBX");
+    },
+    checkCharacter: async () => "ok", converterEnabled: () => true, recordExport: async () => {},
+    handBakeFor: async () => { state.handCalls++; return structuredClone(hands); },
+    modelPreviewIdentity: async () => ({ characterSha256: state.character, modelRevision: state.modelRevision }),
+    convertFramed: async (input) => {
+      state.calls++;
+      assert.equal(input.scope, state.scope); assert.deepEqual(Buffer.from(input.bvhBytes), state.refined ? Buffer.from("REFINED BVH") : f.source);
+      assert.deepEqual(input.cameraRotation, f.row.render_camera.rotation);
+      assert.deepEqual(input.hands ?? null, scopeIncludesHands(state.scope) ? hands : null);
+      if (bodyMode) { assert.equal(input.characterId, "chosen"); assert.deepEqual(input.shape, state.shape); }
+      const bytes = Buffer.from("FBX exact registered asset " + input.scope);
+      const artifact = { ...(input.previewFormat === "none" ? { artifactContract: "verified-fbx-v1" as const } : {}), fbx: bytes, preview: Buffer.from(input.previewFormat === "model" ? "GLB" : "PNG"),
+        conversionId: "test", sourceBvhSha256: sha256Hex(input.bvhBytes), artifactSha256: sha256Hex(bytes),
+        characterSha256: state.character, previewRevision: state.badLineage ? "0".repeat(64) : state.runtime };
+      if (state.late === "shape" && state.shape) state.shape = { ...state.shape, shapeSha256: "8".repeat(64) };
+      if (state.late === "hands" && hands) hands.revision++;
+      if (state.late === "scope") f.p.outputScope = resolveOutputScope({ selection: "full", detected: "full" });
+      if (state.late === "candidate") f.c.id = "different-candidate";
+      if (state.late === "permission") f.c.manualExportAllowed = false;
+      if (state.late === "source") state.changed = true;
+      if (state.late === "quarantine") state.available = false;
+      if (state.late === "revision") state.revision++;
+      if (state.late === "runtime") state.runtime = "f".repeat(64);
+      if (state.late === "character") state.character = "a".repeat(64);
+      return artifact;
+    },
+  }, { selection: async () => body(), runtime: async () => ({ schemaVersion: "body-preview-runtime.v1", previewRevision: state.runtime,
+    modelVersion: "posed-mesh-v1", modelRevision: state.modelRevision, solverVersion: "solver", framingVersion: "framing" }), enabled: () => true }));
+  const request = (extra: Record<string, string> = {}) => app.request(`/${f.c.poseId ?? f.c.id}/framed?` + new URLSearchParams({
+    jobId: f.result.jobId, personIndex: "0", candidateId: f.c.id, outputScope: state.scope, format: "preview",
+    ...(bodyMode ? { bodySelectionRevision: "1" } : {}), ...(hands && scopeIncludesHands(state.scope) ? { handSelectionRevision: "2" } : {}), ...extra,
+  }));
+  return { ...f, state, request };
+}
+for (const kind of ["library_match", "near_match", "geometry_review", "framing_reference", "mirror_reference", "generated_review"])
+  test(`manual ${kind} reviews and exports without changing failed screen status`, async () => {
+    const f = setup(kind, false, true, true);
+    const preview = await f.request(); assert.equal(preview.status, 200);
+    assert.equal((await f.request({ format: "fbx" })).status, 409);
+    f.state.confirmed = true;
+    assert.equal((await f.request({ format: "fbx", reviewKey: "a".repeat(64) })).status, 409);
+    const download = await f.request({ format: "fbx", reviewKey: preview.headers.get("X-Standin-Review-Key")! });
+    assert.equal(download.status, 200);
+    assert.equal(await download.text(), "FBX exact registered asset half");
+    assert.equal(f.state.calls, 1);
+    assert.equal(f.p.posePresentation!.search_reason, "hand_skin_screen_unavailable_no_generation");
+    if (kind === "generated_review") assert.equal(f.c.poseId, null);
+    assert.equal(f.c.releaseAllowed, false); assert.equal(f.c.actualMeshValidated, false);
+  });
+for (const body of [false, true]) for (const format of ["preview", "model"])
+  test(`semantic manual ${format} review -> FBX, body=${body}`, async () => {
+    const f = setup("near_match", true, body, false);
+    const preview = await f.request({ format }); assert.equal(preview.status, 200);
+    assert.equal(preview.headers.get("X-Standin-Character-SHA256"), "b".repeat(64));
+    assert.equal(preview.headers.get("X-Standin-Preview-Artifact-SHA256"), sha256Hex(new Uint8Array(await preview.arrayBuffer())));
+    f.state.confirmed = true;
+    const output = await f.request({ format: "fbx", ...(format === "model" ? { previewType: "model" } : {}),
+      reviewKey: preview.headers.get("X-Standin-Review-Key")!, expectedBvhSha256: f.c.sourceBvhSha256!, expectedCharacterSha256: "b".repeat(64) });
+    assert.equal(output.status, 200); assert.equal(f.state.calls, 1);
+  });
+for (const late of ["permission", "source", "quarantine", "revision", "runtime", "character"])
+  test(`manual review rejects ${late} changed during conversion`, async () => {
+    const f = setup("near_match", false, true, false); f.state.late = late;
+    assert.equal((await f.request()).status, 409);
+  });
+for (const change of ["runtime", "character", "modelRevision"] as const)
+  test(`warm no-body manual preview separates changed ${change} and rejects old receipt`, async () => {
+    const f = setup("near_match", true, false, false);
+    const first = await f.request(); assert.equal(first.status, 200); assert.equal(f.state.calls, 1);
+    const old = first.headers.get("X-Standin-Review-Key")!;
+    f.state[change] = "f".repeat(64); f.state.confirmed = true;
+    const next = await f.request(); assert.equal(next.status, 200); assert.equal(f.state.calls, 2);
+    assert.notEqual(next.headers.get("X-Standin-Review-Key"), old);
+    assert.equal((await f.request({ format: "fbx", reviewKey: old })).status, 409);
+    assert.equal((await f.request({ format: "fbx", reviewKey: next.headers.get("X-Standin-Review-Key")! })).status, 200);
+    assert.equal(f.state.calls, 2);
+  });
+test("manual preview requires converter runtime lineage, including no-body PNG", async () => {
+  const f = setup("near_match", true, false, false); f.state.badLineage = true;
+  assert.equal((await f.request()).status, 409);
+});
+test("manual capability cannot enable refine or be supplied by request flags", async () => {
+  const f = fixture(); const app = new Hono<AppEnv>();
+  app.use("*", async (c, next) => { c.set("installationId", "owner"); await next(); });
+  const load = async () => ({ status: "completed", result: f.result } as Job);
+  app.route("/", createRefineRoutes({ getOwnedJob: load, validateExportCandidate: async () => true, runRefine: async () => { throw Error("must not run"); } }));
+  app.use("/:id/export", createReleaseGuard(load, async () => true)); app.get("/:id/export", (c) => c.text("allowed"));
+  const response = await app.request(`/${f.result.jobId}/people/0/refine`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ candidateId: f.c.id }) });
+  assert.equal(response.status, 409);
+  const query = new URLSearchParams({ jobId: f.result.jobId, personIndex: "0", candidateId: f.c.id, manualExportAllowed: "true" });
+  assert.equal((await app.request(`/registered/export?${query}`)).status, 200);
+  for (const mutate of [() => { f.c.manualExportAllowed = false; }, () => { f.c.manualExportAllowed = true; f.c.sourceBvhSha256 = "bad"; }, () => { f.c.sourceBvhSha256 = "a".repeat(64); f.c.source = "dynamic"; }]) {
+    mutate(); assert.equal(manualExportCandidate(f.c), false);
+    assert.equal((await app.request(`/registered/export?${query}`)).status, 409);
+  }
+});
+
+function oldJob(semantic = false) {
+  const f = fixture("near_match", semantic); delete f.c.manualExportAllowed;
+  const assets: Map<number, Record<string, import("./pose-presentation.js").PrivatePreviewAsset>> = new Map([[0, { [f.c.id]: { transport: "library_bvh" as const, pose_id: f.c.poseId, bvh_sha256: f.c.sourceBvhSha256! } }]]);
+  if (!semantic) f.p.candidates = []; // The old near-only screenshot has no analysis_candidates rows.
+  return { ...f, assets };
+}
+for (const semantic of [false, true]) test(`old ${semantic ? "semantic" : "near-only"} job gains manual choice from private binding without reanalysis`, () => {
+  const f = oldJob(semantic), upgraded = upgradeManualResult(f.result, f.assets);
+  const pick = upgraded.candidatesByPerson[0].candidates[0];
+  assert.equal(pick.id, f.row.candidate_id); assert.equal(pick.manualExportAllowed, true);
+  assert.equal(upgraded.candidatesByPerson[0].posePresentation!.search_status, "partial_error");
+  assert.equal(pick.releaseAllowed, false); assert.equal(pick.refineAllowed, false);
+  assert.equal(f.result.manualExportVersion, undefined);
+  f.assets.get(0)![f.row.candidate_id].bvh_sha256 = "a".repeat(64);
+  assert.equal(upgradeManualResult(f.result, f.assets).candidatesByPerson[0].candidates.length, 0);
+});
+test("lazy migration locks owned completed row and commits candidate registration before result JSON", async () => {
+  const f = oldJob(), calls: string[] = [];
+  const db = { query: async (sql: string, values: unknown[]) => {
+    calls.push(sql);
+    if (sql.startsWith("SELECT status")) { assert.deepEqual(values, [f.result.jobId, "owner"]); assert.match(sql, /FOR UPDATE/); return { rows: [{ status: "completed", result_json: JSON.stringify(f.result) }] }; }
+    if (sql.startsWith("SELECT person")) return { rows: [{ person_index: 0, refine_context_json: JSON.stringify({ posePresentationAssets: f.assets.get(0) }) }] };
+    if (sql.startsWith("INSERT")) { assert.equal(values[2], f.row.candidate_id); assert.match(sql, /ON CONFLICT/); }
+    if (sql.startsWith("UPDATE")) assert.equal(JSON.parse(values[1] as string).manualExportVersion, 2);
+    return { rows: [] };
+  } } as unknown as Parameters<typeof upgradeOwnedManualResult>[0];
+  const upgraded = await upgradeOwnedManualResult(db, f.result.jobId, "owner");
+  assert.equal(upgraded!.candidatesByPerson[0].candidates.length, 1);
+  assert.match(calls.at(-1)!, /^UPDATE/); assert.match(calls.at(-2)!, /^INSERT/);
+});
+for (const status of ["running", "failed", "deleted"])
+  test(`lazy migration cannot resurrect ${status} or unowned jobs`, async () => {
+    let calls = 0;
+    const db = { query: async () => { calls++; return { rows: status === "deleted" ? [] : [{ status, result_json: "{}" }] }; } } as unknown as Parameters<typeof upgradeOwnedManualResult>[0];
+    assert.equal(await upgradeOwnedManualResult(db, "job", "other"), null); assert.equal(calls, 1);
+  });
+
+test("raw BVH route discards bytes after confirmed choice or manual authority is revoked during fetch", async () => {
+  const { createPoseRoutes } = await import("./pose/routes.js");
+  for (const change of ["confirmation", "permission", "candidate", "ownership"]) {
+    const f = fixture(); let confirmed = true, owned = true, fetched = 0;
+    const app = new Hono<AppEnv>();
+    app.use("*", async (c, next) => { c.set("installationId", "owner"); await next(); });
+    app.route("/", createPoseRoutes({
+      getOwnedJob: async () => owned ? { status: "completed", result: structuredClone(f.result) } as Job : undefined,
+      validateConfirmedSelection: async () => confirmed,
+      validateExportCandidate: async () => true,
+      recordExport: async () => {},
+      resolveExportArtifact: async () => ({ variant: "base", fallbackReason: null }),
+      getPoseBvh: async () => {
+        fetched++;
+        if (change === "confirmation") confirmed = false;
+        if (change === "permission") f.c.manualExportAllowed = false;
+        if (change === "candidate") f.p.candidates = [];
+        if (change === "ownership") owned = false;
+        return new Response(f.source);
+      },
+    }));
+    const response = await app.request(`/registered/export?${new URLSearchParams({ jobId: f.result.jobId, personIndex: "0", candidateId: f.c.id, format: "bvh" })}`);
+    assert.equal(response.status, 409, change); assert.equal(fetched, 1);
+    assert.equal(response.headers.get("Content-Disposition"), null);
+  }
+});
+
+test("raw BVH allows explicitly confirmed manual asset; direct FBX requires paired review", async () => {
+  const { createPoseRoutes } = await import("./pose/routes.js");
+  const f = fixture(); let confirmed = false, fetched = 0;
+  const app = new Hono<AppEnv>();
+  app.use("*", async (c, next) => { c.set("installationId", "owner"); await next(); });
+  app.route("/", createPoseRoutes({
+    getOwnedJob: async () => ({ status: "completed", result: structuredClone(f.result) } as Job),
+    validateConfirmedSelection: async () => confirmed,
+    validateExportCandidate: async () => true, recordExport: async () => {},
+    resolveExportArtifact: async () => ({ variant: "base", fallbackReason: null }),
+    getPoseBvh: async () => { fetched++; return new Response(f.source); },
+  }));
+  const request = (format: string) => app.request(`/registered/export?${new URLSearchParams({ jobId: f.result.jobId, personIndex: "0", candidateId: f.c.id, format })}`);
+  assert.equal((await request("bvh")).status, 409); assert.equal(fetched, 0);
+  confirmed = true;
+  const bvh = await request("bvh"); assert.equal(bvh.status, 200);
+  assert.deepEqual(Buffer.from(await bvh.arrayBuffer()), f.source);
+  const fbx = await request("fbx"); assert.equal(fbx.status, 409);
+  assert.equal(((await fbx.json()) as { error: { code: string } }).error.code, "MANUAL_REVIEW_REQUIRED");
+  assert.equal(fetched, 1);
+});
+
+test("actual PostgreSQL schema: old near/semantic jobs gain owned manual rows and confirmations without quality consent or reanalysis", async (t) => {
+  const { PGlite } = await import("@electric-sql/pglite");
+  const { pool, SCHEMA, transaction } = await import("./db.js");
+  const { getOwnedJob } = await import("./jobs/store.js");
+  const { confirmSelections, validateConfirmedSelection } = await import("./analytics/store.js");
+  const db = new PGlite(); t.after(() => db.close()); await db.exec(SCHEMA);
+  // Exercise migration from the previously deployed NOT NULL schema, including repeat startup.
+  await db.exec("ALTER TABLE analysis_candidates ALTER COLUMN pose_id SET NOT NULL");
+  await db.exec(SCHEMA); await db.exec(SCHEMA);
+  const query = async (sql: string, values?: unknown[]) => {
+    const r = await db.query(sql, values);
+    return { rows: r.rows, rowCount: r.rows.length || r.affectedRows || 0, fields: [], command: "", oid: 0 };
+  };
+  t.mock.method(pool, "query", query as typeof pool.query);
+  t.mock.method(pool, "connect", (async () => ({ query, release() {} })) as unknown as typeof pool.connect);
+  const now = new Date().toISOString();
+  await db.query(`INSERT INTO installations
+    (id,token_hash,consent_version,consented_at,created_at,last_seen_at,app_version,os_name,os_version,architecture,locale)
+    VALUES ('owner','hash','test',$1,$1,$1,'test','test','test','test','ko')`, [now]);
+  async function insertOld(semantic: boolean, createdAt = now, generated = false) {
+    const f = generated ? generatedFixture() : oldJob(semantic);
+    f.result.manualExportVersion = 1;
+    f.p.handSelection = { revision: 7, left: "fist", right: "relaxed" } as NonNullable<AnalysisPerson["handSelection"]>;
+    if (semantic) f.c.id = "registered::front"; // The previous text contract used this ID.
+    await db.query(`INSERT INTO jobs (id,status,created_at,updated_at,result_json,installation_id)
+      VALUES ($1,'completed',$2,$2,$3,'owner')`, [f.result.jobId, createdAt, JSON.stringify(f.result)]);
+    await db.query(`INSERT INTO analysis_people (job_id,person_index,tags_json,refine_context_json)
+      VALUES ($1,0,'{}',$2)`, [f.result.jobId, JSON.stringify({ posePresentationAssets: f.assets.get(0) })]);
+    return f;
+  }
+  for (const flavor of ["library", "semantic", "generation"]) {
+    const semantic = flavor === "semantic", generated = flavor === "generation";
+    const f = await insertOld(semantic, now, generated);
+    assert.equal(await getOwnedJob(f.result.jobId, "other"), undefined);
+    const job = (await getOwnedJob(f.result.jobId, "owner"))!;
+    const p = job.result!.candidatesByPerson[0], c = p.candidates[0];
+    assert.equal(c.manualExportAllowed, true); assert.equal(c.id, f.row.candidate_id);
+    assert.equal(c.releaseAllowed, false); assert.equal(c.refineAllowed, false);
+    assert.equal(p.posePresentation!.search_reason, "hand_skin_screen_unavailable_no_generation");
+    assert.equal(p.handSelection!.revision, 7); assert.equal(p.outputScope!.selection, "half");
+    const saved = await db.query<{ candidate_id: string; pose_id: string }>("SELECT candidate_id,pose_id FROM analysis_candidates WHERE job_id=$1", [f.result.jobId]);
+    assert.deepEqual(saved.rows, [{ candidate_id: c.id, pose_id: generated ? null : "registered" }]);
+    assert.equal(await validateConfirmedSelection("owner", f.result.jobId, 0, c.id), false);
+    assert.equal(await confirmSelections("owner", f.result.jobId, [{ personIndex: 0, candidateId: c.id }]), true);
+    assert.equal(await validateConfirmedSelection("owner", f.result.jobId, 0, c.id), true);
+    assert.equal(await validateConfirmedSelection("other", f.result.jobId, 0, c.id), false);
+    const second = await getOwnedJob(f.result.jobId, "owner");
+    assert.deepEqual(second!.result, job.result, "second read preserves body/hands and result without another migration");
+    const rowCount = await db.query<{ n: number }>("SELECT count(*)::int AS n FROM analysis_candidates WHERE job_id=$1", [f.result.jobId]);
+    assert.equal(rowCount.rows[0].n, 1);
+  }
+  const review = await db.query<{ n: number }>("SELECT count(*)::int AS n FROM quality_review_jobs");
+  assert.equal(review.rows[0].n, 0, "manual file use does not opt the user into quality review");
+  const expired = await insertOld(false, new Date(Date.now() - 91 * 86_400_000).toISOString());
+  assert.equal(await getOwnedJob(expired.result.jobId, "owner"), undefined);
+  assert.equal(await transaction((client) => upgradeOwnedManualResult(client, expired.result.jobId, "owner")), null);
+  assert.equal((await db.query<{ n: number }>("SELECT count(*)::int AS n FROM analysis_candidates WHERE job_id=$1", [expired.result.jobId])).rows[0].n, 0);
+  const stored = (await db.query<{ result_json: string }>("SELECT result_json FROM jobs WHERE id=$1", [expired.result.jobId])).rows[0];
+  assert.equal(JSON.parse(stored.result_json).manualExportVersion, 1, "expired work is not migrated or revived");
+});
+
+for (const bodyMode of [false, true]) {
+  test(`head mirror manual export still requires confirmation and exact review, body=${bodyMode}, without hand work`, async () => {
+    const f = setup("mirror_reference", false, bodyMode, true);
+    f.state.scope = "head";
+    f.p.outputScope = resolveOutputScope({ selection: "head", detected: "full" });
+    const unconfirmed = await f.request({ format: "fbx" });
+    assert.equal(unconfirmed.status, 409);
+    assert.equal((await unconfirmed.json() as { error: { code: string } }).error.code, "MANUAL_SELECTION_REQUIRED");
+    f.state.confirmed = true;
+    const unchecked = await f.request({ format: "fbx" });
+    assert.equal(unchecked.status, 409);
+    assert.equal((await unchecked.json() as { error: { code: string } }).error.code, "MANUAL_REVIEW_REQUIRED");
+    const preview = await f.request();
+    assert.equal(preview.status, 200);
+    assert.equal(preview.headers.get("X-Standin-Hand-Revision"), null);
+    const reviewKey = preview.headers.get("X-Standin-Review-Key")!;
+    assert.match(reviewKey, /^[a-f0-9]{64}$/);
+    const download = await f.request({ format: "fbx", reviewKey });
+    assert.equal(download.status, 200);
+    assert.equal(download.headers.get("X-Standin-Artifact-SHA256"), preview.headers.get("X-Standin-Artifact-SHA256"));
+    assert.equal(f.state.handCalls, 0);
+    assert.equal(f.c.manualExportAllowed, true);
+    assert.equal(f.c.releaseAllowed, false);
+  });
+}
+
+function generatedFixture() {
+  const f = oldJob();
+  f.row.kind = "generated_review"; f.row.source = "generation"; f.row.pose_id = null;
+  f.row.asset.transport = "inline_bvh";
+  const p = f.p.posePresentation!;
+  p.library_candidates = []; p.review_candidates = []; p.generated_candidates = [f.row];
+  p.generation_status = "preview_ready"; p.search_status = "no_result"; p.status = "review_ready"; p.preview_status = "ready";
+  f.assets.get(0)![f.row.candidate_id] = { transport: "inline_bvh", pose_id: null,
+    bvh_sha256: sha256Hex(f.source), bvh: f.source.toString("utf8") };
+  return f;
+}
+test("generated-only migration retains candidate identity/null library ID and exact private hash", () => {
+  const f = generatedFixture();
+  const result = upgradeManualResult(f.result, f.assets);
+  const c = result.candidatesByPerson[0].candidates[0];
+  assert.equal(c.id, f.row.candidate_id); assert.equal(c.poseId, null);
+  assert.equal(c.source, "generation"); assert.equal(c.manualExportAllowed, true);
+  assert.equal(c.sourceBvhSha256, sha256Hex(f.source));
+  assert.equal(c.releaseAllowed, false); assert.equal(c.refineAllowed, false);
+  assert.equal(c.actualMeshValidated, false);
+  assert.ok(!JSON.stringify(result).includes("HIERARCHY"));
+});
+for (const reason of ["failed", "rejected", "timeout", "missing", "hash", "search_error", "foreign", "checks"])
+  test(`generated manual authority rejects ${reason}`, () => {
+    const f = generatedFixture();
+    if (["failed", "rejected", "timeout"].includes(reason)) f.p.posePresentation!.generation_status = reason;
+    if (reason === "search_error") f.p.posePresentation!.search_status = "error";
+    if (reason === "checks") f.assets.get(0)![f.row.candidate_id].validation = { diagnostics: { kinematic_probe_pass: false } };
+    if (reason === "missing") delete f.assets.get(0)![f.row.candidate_id];
+    if (reason === "hash") f.assets.get(0)![f.row.candidate_id].bvh = "changed";
+    if (reason === "foreign") f.assets.set(0, { different_candidate: f.assets.get(0)![f.row.candidate_id] });
+    assert.equal(upgradeManualResult(f.result, f.assets).candidatesByPerson[0].candidates.length, 0);
+  });
+
+for (const late of ["permission", "source", "revision", "runtime", "character", "hands", "scope", "candidate"])
+  test(`generated final preview rejects ${late} changed during conversion`, async () => {
+    const f = setup("generated_review", false, true, true); f.state.late = late;
+    assert.equal((await f.request()).status, 409);
+  });
+
+for (const body of [false, true]) for (const format of ["preview", "model"])
+  test(`generated ${format} final review saves the identical FBX, body=${body}`, async () => {
+    const f = setup("generated_review", false, body, true);
+    const preview = await f.request({ format }); assert.equal(preview.status, 200);
+    f.state.confirmed = true;
+    const output = await f.request({ format: "fbx", ...(format === "model" ? { previewType: "model" } : {}),
+      reviewKey: preview.headers.get("X-Standin-Review-Key")!, expectedBvhSha256: f.c.sourceBvhSha256!,
+      expectedCharacterSha256: "b".repeat(64) });
+    assert.equal(output.status, 200); assert.equal(f.state.calls, 1);
+    assert.equal(output.headers.get("X-Standin-Artifact-SHA256"), preview.headers.get("X-Standin-Artifact-SHA256"));
+    assert.equal(sha256Hex(new Uint8Array(await output.arrayBuffer())), preview.headers.get("X-Standin-Artifact-SHA256"));
+  });
+
+test("generated raw export cannot bypass final framed FBX confirmation", async () => {
+  const f = generatedFixture(), result = upgradeManualResult(f.result, f.assets);
+  const c = result.candidatesByPerson[0].candidates[0];
+  const app = new Hono<AppEnv>();
+  app.use("*", async (c, next) => { c.set("installationId", "owner"); await next(); });
+  app.use("/:id/export", createReleaseGuard(async () => ({ status: "completed", result } as Job), async () => true));
+  app.get("/:id/export", c => c.text("must not expose raw file"));
+  const response = await app.request(`/${c.id}/export?${new URLSearchParams({ jobId: result.jobId, personIndex: "0", candidateId: c.id, format: "bvh" })}`);
+  assert.equal(response.status, 409);
+  assert.equal((await response.json() as { error: { code: string } }).error.code, "MANUAL_REVIEW_REQUIRED");
+});
+
+test("generated FBX forwards the approved numeric body/hand/scope input and rejects changes during the bake", async t => {
+  const { config } = await import("./config.js");
+  const previous = config.bodyShapeBakeEnabled;
+  Reflect.set(config, "bodyShapeBakeEnabled", true); t.after(() => { Reflect.set(config, "bodyShapeBakeEnabled", previous); });
+  for (const late of ["", "shape"]) {
+    const f = setup("generated_review", false, true, true);
+    f.state.shape = { schemaVersion: "body-shape.v1", controls: { height: 0.5 }, shapeSha256: "9".repeat(64) };
+    f.state.late = late;
+    const preview = await f.request();
+    assert.equal(preview.status, late ? 409 : 200);
+    if (late) continue;
+    f.state.confirmed = true;
+    const result = await f.request({ format: "fbx", reviewKey: preview.headers.get("X-Standin-Review-Key")! });
+    assert.equal(result.status, 200); assert.equal(f.state.calls, 1);
+    assert.equal(result.headers.get("X-Standin-Artifact-SHA256"), preview.headers.get("X-Standin-Artifact-SHA256"));
+  }
+});
+
+for (const failure of ["missing", "changed", "checks"])
+  test(`generated source recovery code distinguishes ${failure} without substitution`, async () => {
+    const f = generatedFixture();
+    const result = upgradeManualResult(f.result, f.assets);
+    const person = result.candidatesByPerson[0], candidate = person.candidates[0];
+    const asset = f.assets.get(0)![candidate.id];
+    if (failure === "missing") delete f.assets.get(0)![candidate.id];
+    if (failure === "changed") asset.bvh_sha256 = "b".repeat(64);
+    if (failure === "checks") asset.validation = { diagnostics: { kinematic_probe_pass: false } };
+    let libraryCalls = 0;
+    await assert.rejects(candidateSourceBytes("job", person, candidate,
+      async () => { libraryCalls++; throw new Error("must not fetch library"); },
+      async () => f.assets.get(0)!),
+      (e: unknown) => (e as { code: string }).code === ({ missing: "GENERATED_SOURCE_UNAVAILABLE", changed: "PREVIEW_SOURCE_CHANGED", checks: "GENERATED_CHECKS_FAILED" }[failure]));
+    assert.equal(libraryCalls, 0);
+  });
+
+for (const [kind, semantic] of [["near_match", true], ["generated_review", false], ["library_match", false]] as const)
+for (const bodyMode of [false, true]) test(`verified ${kind} receipt preserves manual authority, body=${bodyMode}`, async () => {
+  const f = setup(kind, semantic, bodyMode, true);
+  assert.equal((await f.request({ format: "ready" })).status, 409);
+  f.state.confirmed = true;
+  const ready = await f.request({ format: "ready" });
+  assert.equal(ready.status, 200, await ready.clone().text());
+  const key = ready.headers.get("X-Standin-Review-Key")!;
+  const download = await f.request({ format: "fbx", artifactReceipt: key, reviewKey: key });
+  assert.equal(download.status, 200, await download.clone().text());
+  assert.equal(f.state.calls, 1);
+  assert.equal(f.c.actualMeshValidated, false);
+  assert.equal(f.c.releaseAllowed, false);
+  f.state.confirmed = false;
+  assert.equal((await f.request({ format: "fbx", artifactReceipt: key, reviewKey: key })).status, 409);
+});

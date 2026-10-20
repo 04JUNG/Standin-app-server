@@ -37,3 +37,34 @@ test("추론이 실제로 돌다 실패한 경우는 환불하지 않는다", ()
   assert.equal(shouldRefundQuota("ANALYSIS_TIMEOUT"), false);
   assert.equal(shouldRefundQuota("INFERENCE_FAILED"), false);
 });
+
+test("VLM 503 원인을 분리하고 기존 503 환급 정책은 보존한다", () => {
+  const cases = {
+    rate_limited: "ANALYSIS_RATE_LIMITED",
+    daily_quota_exhausted: "ANALYSIS_DAILY_QUOTA_EXHAUSTED",
+    timeout: "ANALYSIS_UPSTREAM_TIMEOUT",
+    upstream_error: "ANALYSIS_UPSTREAM_ERROR",
+    upstream_unavailable: "ANALYSIS_UNAVAILABLE",
+  } as const;
+  for (const [reason, expected] of Object.entries(cases)) {
+    const detail = JSON.stringify({ detail: { code: "VLM_UNAVAILABLE", reason, message: "do not forward" } });
+    const code = analysisFailureCode(new InferenceError(503, detail));
+    assert.equal(code, expected);
+    assert.equal(shouldRefundQuota(code), true);
+    // 다른 HTTP 상태를 VLM 제한으로 잘못 분류하지 않는다.
+    assert.equal(analysisFailureCode(new InferenceError(500, detail)), "INFERENCE_FAILED");
+  }
+});
+
+test("구 서버/손상/미지원 503 본문은 안전하게 기존 사유로 유지한다", () => {
+  for (const detail of [
+    "not json", "null", "[]", "42", "{}",
+    JSON.stringify({ detail: null }),
+    JSON.stringify({ detail: "daily_quota_exhausted" }),
+    JSON.stringify({ detail: { code: "OTHER", reason: "daily_quota_exhausted" } }),
+    JSON.stringify({ detail: { code: "VLM_UNAVAILABLE", reason: "new_reason" } }),
+    JSON.stringify({ detail: { code: "VLM_UNAVAILABLE", reason: { bad: true } } }),
+  ]) {
+    assert.equal(analysisFailureCode(new InferenceError(503, detail)), "ANALYSIS_UNAVAILABLE");
+  }
+});

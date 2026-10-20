@@ -1,5 +1,11 @@
 // Job 저장소(PostgreSQL). result는 JSON 문자열로 저장.
 // 인터페이스(createJob/getJob/updateJob)는 유지하되 Promise를 돌려준다.
+import {
+  captureBodyPolicy,
+  initializeBodySelections,
+} from "../body-selection/store.js";
+import { upgradeOwnedManualResult } from "../manual-export.js";
+import { lockQualityConsent } from "../installations/qualityConsent.js";
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { config } from "../config.js";
@@ -16,7 +22,8 @@ import {
 } from "../limits/policy.js";
 import { refund, tryConsume } from "../limits/store.js";
 import { log } from "../log.js";
-import type { RefineContext } from "../mapping.js";
+import type { CutSummary, PersonSignals, RefineContext } from "../mapping.js";
+import { deleteJobs } from "../retention.js";
 import type { AnalysisResult } from "../types.js";
 
 export type JobStatus = "queued" | "running" | "completed" | "failed";
@@ -56,7 +63,9 @@ function toJob(r: JobRow): Job {
     status: r.status,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
-    result: r.result_json ? (JSON.parse(r.result_json) as AnalysisResult) : null,
+    result: r.result_json
+      ? (JSON.parse(r.result_json) as AnalysisResult)
+      : null,
     errorCode: r.error_code,
     rerunOf: r.rerun_of,
     installationId: r.installation_id,
@@ -70,7 +79,7 @@ const CONCURRENCY_RETRY_SECONDS = 10;
 
 export interface JobInput {
   installationId: string;
-  source: "capture" | "file" | "clipboard";
+  source: "capture" | "file" | "clipboard" | "semantic";
   mime: string;
   size: number;
   width: number | null;
@@ -90,7 +99,7 @@ async function insertJob(
     // 형식을 바꾸면 앱의 작업 기록 재진입이 조용히 라이브 분석 경로로 떨어진다.
     id: `job_${randomUUID()}`,
     userId,
-    status: "queued",
+    status: input?.source === "semantic" ? "running" : "queued",
     createdAt: now,
     updatedAt: now,
     result: null,
@@ -100,11 +109,12 @@ async function insertJob(
     inputS3Key: null,
     inputMime: input?.mime ?? null,
   };
+  const quality = input ? await lockQualityConsent(executor, input.installationId) : null;
   await executor.query(
     `INSERT INTO jobs
       (id, user_id, status, created_at, updated_at, result_json, error_code, rerun_of,
-       installation_id, source, input_mime, input_size, input_width, input_height)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+       installation_id, source, input_mime, input_size, input_width, input_height, quality_consent_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
     [
       job.id,
       userId,
@@ -120,8 +130,11 @@ async function insertJob(
       input?.size ?? null,
       input?.width ?? null,
       input?.height ?? null,
+      quality?.consentId ?? null,
     ],
   );
+  if (config.bodySelectionEnabled && input?.installationId)
+    await captureBodyPolicy(executor, job.id, input.installationId);
   return job;
 }
 
@@ -130,7 +143,7 @@ export async function createJob(
   rerunOf: string | null = null,
   input?: JobInput,
 ): Promise<Job> {
-  return insertJob(pool, userId, rerunOf, input);
+  return transaction((client) => insertJob(client, userId, rerunOf, input));
 }
 
 /**
@@ -154,27 +167,39 @@ export async function createJobWithLimits(
   const week = weeklyWindow(nowMs);
   // 개발자 단말은 세지 않는다. 자기 한도에 막히면 정작 한도를 확인해야 할 때 확인하지 못한다.
   // 인증(requireInstallation)을 통과한 뒤에만 여기 오므로 ID를 흉내 내 우회할 수 없다.
-  const exempt = isQuotaExempt(input.installationId, config.quotaExemptInstallations);
+  const exempt = isQuotaExempt(
+    input.installationId,
+    config.quotaExemptInstallations,
+  );
   if (exempt) {
     // 우회는 조용히 일어나면 안 된다 — 지표에서 "한도가 안 걸리네"의 원인을 찾을 수 있어야 한다.
     log.info({ type: "quota_exempt", installationId: input.installationId });
   }
   return transaction(async (client) => {
-    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [input.installationId]);
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+      input.installationId,
+    ]);
 
     if (!exempt && !isDisabled(config.quotaInstallationConcurrent)) {
       // 오래된 Job은 세지 않는다 — 배포로 유실된 running Job이 설치를 영구히 막는다.
-      const cutoff = new Date(nowMs - config.analysisStaleAfterSeconds * 1000).toISOString();
+      const cutoff = new Date(
+        nowMs - config.analysisStaleAfterSeconds * 1000,
+      ).toISOString();
       const res = await client.query(
         `SELECT count(*)::int AS running FROM jobs
-         WHERE installation_id = $1 AND status IN ('queued','running') AND created_at > $2`,
+         WHERE installation_id = $1 AND status IN ('queued','running') AND created_at > $2
+           AND (source IS NULL OR source <> 'semantic')`,
         [input.installationId, cutoff],
       );
       const running = (res.rows[0] as { running: number }).running;
       if (running >= config.quotaInstallationConcurrent) {
-        throw new LimitExceededError("CONCURRENCY_LIMIT", CONCURRENCY_RETRY_SECONDS, {
-          limit: config.quotaInstallationConcurrent,
-        });
+        throw new LimitExceededError(
+          "CONCURRENCY_LIMIT",
+          CONCURRENCY_RETRY_SECONDS,
+          {
+            limit: config.quotaInstallationConcurrent,
+          },
+        );
       }
     }
 
@@ -190,13 +215,22 @@ export async function createJobWithLimits(
         throw new LimitExceededError(
           "WEEKLY_QUOTA_EXCEEDED",
           secondsUntil(week.resetAtMs, nowMs),
-          { limit: config.quotaInstallationWeekly, retryAt: kstIsoString(week.resetAtMs) },
+          {
+            limit: config.quotaInstallationWeekly,
+            retryAt: kstIsoString(week.resetAtMs),
+          },
         );
       }
     }
 
     if (!exempt && !isDisabled(config.quotaGlobalDaily)) {
-      const ok = await tryConsume("global_day", "all", day, config.quotaGlobalDaily, client);
+      const ok = await tryConsume(
+        "global_day",
+        "all",
+        day,
+        config.quotaGlobalDaily,
+        client,
+      );
       if (!ok) {
         throw new LimitExceededError(
           "GLOBAL_QUOTA_EXCEEDED",
@@ -214,7 +248,9 @@ export async function createJobWithLimits(
  * 커밋 뒤에 요청이 실패했을 때 소비한 쿼터를 돌려준다(예: 입력 저장 실패, 상류 혼잡).
  * best-effort — 실패해도 요청 처리를 막지 않는다.
  */
-export async function refundAnalysisQuota(installationId: string): Promise<void> {
+export async function refundAnalysisQuota(
+  installationId: string,
+): Promise<void> {
   // 애초에 세지 않은 설치에는 돌려줄 것도 없다.
   if (isQuotaExempt(installationId, config.quotaExemptInstallations)) return;
   const nowMs = Date.now();
@@ -267,7 +303,9 @@ export async function failJob(
  */
 export async function failStaleJobs(): Promise<number> {
   const now = new Date();
-  const cutoff = new Date(now.getTime() - config.analysisStaleAfterSeconds * 1000).toISOString();
+  const cutoff = new Date(
+    now.getTime() - config.analysisStaleAfterSeconds * 1000,
+  ).toISOString();
   return execute(
     `UPDATE jobs SET status = 'failed', error_code = 'ABANDONED',
        updated_at = $1, completed_at = $1
@@ -276,12 +314,23 @@ export async function failStaleJobs(): Promise<number> {
   );
 }
 
-export async function getOwnedJob(id: string, installationId: string): Promise<Job | undefined> {
+export async function getOwnedJob(
+  id: string,
+  installationId: string,
+): Promise<Job | undefined> {
   const row = await queryOne<JobRow>(
-    "SELECT * FROM jobs WHERE id = $1 AND installation_id = $2",
+    "SELECT * FROM jobs WHERE id = $1 AND installation_id = $2 AND created_at::timestamptz > now() - interval '90 days'",
     [id, installationId],
   );
-  return row ? toJob(row) : undefined;
+  if (!row) return undefined;
+  const job = toJob(row);
+  if (job.status === "completed" && job.result && job.result.manualExportVersion !== 2 &&
+    job.result.candidatesByPerson.some((p) => !!p.posePresentation)) {
+    const result = await transaction((db) => upgradeOwnedManualResult(db, id, installationId));
+    if (!result) return undefined; // Deleted/changed while acquiring the ownership lock.
+    job.result = result;
+  }
+  return job;
 }
 
 /**
@@ -297,12 +346,13 @@ export async function getOwnedJob(id: string, installationId: string): Promise<J
 export async function listJobHistory(
   installationId: string,
   { limit, cursor, status }: HistoryQuery,
+  reviewOnly = false,
 ): Promise<JobHistoryRow[]> {
   return query<JobHistoryRow>(
     `SELECT j.id, j.status, j.created_at, j.completed_at, j.error_code, j.source,
             j.input_width, j.input_height, (j.input_s3_key IS NOT NULL) AS has_input,
             p.person_count, s.selection_count, t.thumb_pose_id, t.thumb_view
-     FROM jobs j
+     FROM ${reviewOnly ? "quality_review_jobs" : "jobs"} j
      LEFT JOIN LATERAL (
        SELECT count(*)::int AS person_count
        FROM analysis_people ap WHERE ap.job_id = j.id
@@ -323,11 +373,18 @@ export async function listJobHistory(
        LIMIT 1
      ) t ON TRUE
      WHERE j.installation_id = $1
+       ${reviewOnly ? "" : "AND j.created_at::timestamptz > now() - interval '90 days'"}
        AND ($2::text IS NULL OR j.status = $2)
        AND ($3::text IS NULL OR (j.created_at, j.id) < ($3, $4))
      ORDER BY j.created_at DESC, j.id DESC
      LIMIT $5`,
-    [installationId, status, cursor?.createdAt ?? null, cursor?.id ?? null, limit + 1],
+    [
+      installationId,
+      status,
+      cursor?.createdAt ?? null,
+      cursor?.id ?? null,
+      limit + 1,
+    ],
   );
 }
 
@@ -338,17 +395,14 @@ export type DeleteJobOutcome =
 /**
  * 작업 기록에서 Job 하나를 지운다. S3 객체는 호출부가 이어서 지운다.
  *
- * **진행 중(queued/running)이면 거절한다.** 두 가지가 실제로 깨지기 때문이다.
- *
- * 1. persistAnalysisRecords는 analysis_people·analysis_candidates를 FK 없이 INSERT한다.
- *    지운 뒤 워커가 완료하면 존재하지 않는 job_id의 행이 남고, 보존 정리 쿼리는
- *    `job_id IN (SELECT id FROM jobs ...)` 형태라 그 행은 영구히 회수되지 않는다.
- * 2. createJobWithLimits의 동시 분석 카운트가 status IN ('queued','running') 행 수다.
- *    삭제로 슬롯이 즉시 비면 워커가 도는 중에 새 분석이 시작돼 한도가 무의미해진다.
+ * **진행 중(queued/running)이면 거절한다.** createJobWithLimits의 동시 분석 카운트가
+ * status IN ('queued','running') 행 수라서, 삭제로 슬롯이 즉시 비면 워커가 도는 중에 새 분석이
+ * 시작돼 한도가 무의미해진다. 워커가 지워진 작업에 결과를 쓰는 일은 persistAnalysisRecords가
+ * 작업 행을 잠그고 확인해서 막는다. 동의 철회는 진행 중인 작업도 지우기 때문에 그 확인이 따로 있다.
  *
  * 유실된 Job은 failStaleJobs()가 failed로 닫으므로 사용자가 영구히 막히지는 않는다.
  *
- * 삭제 순서는 installations/store.ts의 deleteRows 규약을 그대로 따른다.
+ * 지울 테이블 목록은 retention.ts가 정한다. 동의 철회·보관 만료와 같은 목록이다.
  */
 export async function deleteOwnedJob(
   id: string,
@@ -356,7 +410,10 @@ export async function deleteOwnedJob(
 ): Promise<DeleteJobOutcome> {
   return transaction(async (client) => {
     // 소유·상태 판정과 삭제 사이에 워커가 상태를 바꾸지 못하게 잠근다.
-    const owned = await client.query<{ status: JobStatus; input_s3_key: string | null }>(
+    const owned = await client.query<{
+      status: JobStatus;
+      input_s3_key: string | null;
+    }>(
       "SELECT status, input_s3_key FROM jobs WHERE id = $1 AND installation_id = $2 FOR UPDATE",
       [id, installationId],
     );
@@ -366,25 +423,20 @@ export async function deleteOwnedJob(
       return { ok: false, reason: "in_progress" };
     }
 
-    await client.query("DELETE FROM export_events WHERE job_id = $1", [id]);
-    await client.query("DELETE FROM job_feedback WHERE job_id = $1", [id]);
-    await client.query("DELETE FROM confirmed_selections WHERE job_id = $1", [id]);
-    await client.query("DELETE FROM analytics_events WHERE job_id = $1", [id]);
-    await client.query("DELETE FROM admin_access_audit WHERE job_id = $1", [id]);
-    await client.query("DELETE FROM refined_artifacts WHERE job_id = $1", [id]);
-    await client.query("DELETE FROM analysis_candidates WHERE job_id = $1", [id]);
-    await client.query("DELETE FROM analysis_people WHERE job_id = $1", [id]);
-    // job_outbox는 jobs(id) ON DELETE CASCADE로 함께 지워진다.
-    await client.query("DELETE FROM jobs WHERE id = $1", [id]);
-
+    await deleteJobs(client, { ids: "$1", params: [id] });
     return { ok: true, inputS3Key: job.input_s3_key };
   });
 }
 
 /** 확정 선택 목록. 작업 기록 상세가 이전 선택을 화면에 되살릴 때 쓴다. */
-export async function listConfirmedSelections(
-  jobId: string,
-): Promise<Array<{ personIndex: number; candidateId: string; rank: number; confirmedAt: string }>> {
+export async function listConfirmedSelections(jobId: string): Promise<
+  Array<{
+    personIndex: number;
+    candidateId: string;
+    rank: number;
+    confirmedAt: string;
+  }>
+> {
   const rows = await query<{
     person_index: number;
     candidate_id: string;
@@ -471,7 +523,10 @@ export async function getJob(id: string): Promise<Job | undefined> {
  * 이전 구현은 "읽어서 병합 후 통째로 쓰기"였는데, 태스크가 여러 개면 두 갱신이
  * 서로를 덮어쓸 수 있다. 넘어온 필드만 COALESCE 없이 직접 지정해 그 창을 없앤다.
  */
-export async function updateJob(id: string, patch: Partial<Job>): Promise<void> {
+export async function updateJob(
+  id: string,
+  patch: Partial<Job>,
+): Promise<void> {
   const sets: string[] = ["updated_at = $2"];
   const params: unknown[] = [id, new Date().toISOString()];
 
@@ -499,25 +554,101 @@ export async function updateJob(id: string, patch: Partial<Job>): Promise<void> 
   await execute(`UPDATE jobs SET ${sets.join(", ")} WHERE id = $1`, params);
 }
 
+/**
+ * 설치를 가리지 않은 최근 Job 목록. 운영자가 설치 id를 먼저 알아내야 하는 단계를 없앤다.
+ *
+ * `listJobHistory`와 같은 컬럼을 돌려주되 설치 필터가 없고 `installation_id`가 한 칸 더
+ * 붙는다 — 어느 설치의 작업인지 보이지 않으면 거기서 더 들어갈 수가 없다.
+ *
+ * 정렬·커서는 설치별 목록과 같은 `(created_at, id)`다. 인덱스는 `jobs_created_at`을 쓴다.
+ * `installation_id IS NOT NULL`은 설치에 속하지 않는 행(옛 사용자 경로)을 빼기 위한 것이고,
+ * 상세 조회(`/review/jobs/:id`)가 거는 조건과 같다.
+ *
+ * ⚠ 서명 URL은 여기서 만들지 않는다. 목록 한 번이 그 많은 사진을 한꺼번에 여는 열쇠가
+ *   되면 안 된다(설치별 목록과 같은 이유).
+ */
+export async function listRecentJobs(
+  params: HistoryQuery,
+): Promise<Array<JobHistoryRow & { installation_id: string }>> {
+  return query<JobHistoryRow & { installation_id: string }>(
+    `SELECT j.id, j.installation_id, j.status, j.created_at, j.completed_at, j.error_code,
+            j.source, j.input_width, j.input_height, (j.input_s3_key IS NOT NULL) AS has_input,
+            p.person_count, s.selection_count, t.thumb_pose_id, t.thumb_view
+       FROM quality_review_jobs j
+       LEFT JOIN LATERAL (
+         SELECT count(*)::int AS person_count FROM analysis_people ap WHERE ap.job_id = j.id
+       ) p ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT count(*)::int AS selection_count FROM confirmed_selections cs WHERE cs.job_id = j.id
+       ) s ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT ac.pose_id AS thumb_pose_id, ac.view AS thumb_view
+           FROM analysis_candidates ac
+           LEFT JOIN confirmed_selections cs
+             ON cs.job_id = ac.job_id AND cs.person_index = ac.person_index
+            AND cs.candidate_id = ac.candidate_id
+          WHERE ac.job_id = j.id
+          ORDER BY (cs.candidate_id IS NULL), ac.person_index, ac.rank
+          LIMIT 1
+       ) t ON TRUE
+      WHERE j.installation_id IS NOT NULL
+        AND ($1::text IS NULL OR j.status = $1)
+        AND ($2::text IS NULL OR (j.created_at, j.id) < ($2, $3))
+      ORDER BY j.created_at DESC, j.id DESC
+      LIMIT $4`,
+    [
+      params.status,
+      params.cursor?.createdAt ?? null,
+      params.cursor?.id ?? null,
+      params.limit + 1,
+    ],
+  );
+}
+
 export async function persistAnalysisRecords(
   jobId: string,
   result: AnalysisResult,
   refineContexts: RefineContext[] = [],
+  signals: PersonSignals[] = [],
+  cutSummary: CutSummary | null = null,
+  complete = false,
 ): Promise<void> {
-  const contextByPerson = new Map(refineContexts.map((ctx) => [ctx.personIndex, ctx]));
+  const contextByPerson = new Map(
+    refineContexts.map((ctx) => [ctx.personIndex, ctx]),
+  );
+  const signalsByPerson = new Map(
+    signals.map((signal) => [signal.personIndex, signal]),
+  );
   await transaction(async (client) => {
-    await client.query("DELETE FROM analysis_candidates WHERE job_id = $1", [jobId]);
-    await client.query("DELETE FROM analysis_people WHERE job_id = $1", [jobId]);
+    // 분석 중에 동의 철회로 작업이 지워졌으면 결과를 쓰지 않는다. FK가 없어 그대로 INSERT하면
+    // 존재하지 않는 job_id의 관절 행이 남고, 어떤 삭제 경로도 그 행을 다시 찾지 못한다.
+    // 삭제 쪽(retention.ts::deleteJobs)도 같은 행을 먼저 잠그므로 둘은 차례로만 지나간다.
+    const job = await client.query(
+      "SELECT quality_consent_id FROM jobs WHERE id = $1 FOR UPDATE",
+      [jobId],
+    );
+    if (job.rowCount === 0) return;
+    const qualityAllowed = Boolean(job.rows[0].quality_consent_id);
+    await client.query("DELETE FROM analysis_candidates WHERE job_id = $1", [
+      jobId,
+    ]);
+    await client.query("DELETE FROM analysis_people WHERE job_id = $1", [
+      jobId,
+    ]);
     for (const person of result.candidatesByPerson) {
       const ctx = contextByPerson.get(person.personIndex);
+      const signal = qualityAllowed ? signalsByPerson.get(person.personIndex) : undefined;
       await client.query(
         `INSERT INTO analysis_people
           (job_id, person_index, bbox_json, tags_json, skeleton_json, confidence,
            candidate_count, candidate_shortfall_reason,
            skeleton_state, skeleton_source, coverage_class, fallback_mode,
            slot_origin, lower_body_observed,
-           refine_allowed, refinable_limbs_json, refine_context_json, raw_scores_json)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+           refine_allowed, refinable_limbs_json, refine_context_json, raw_scores_json,
+           person_tags_json, output_scope_json, rank_distance, distance_metric,
+           search_stability, confidence_threshold)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
+                 $19,$20,$21,$22,$23,$24)`,
         [
           jobId,
           person.personIndex,
@@ -543,9 +674,17 @@ export async function persistAnalysisRecords(
                 scores: ctx.scores,
                 qualityReasons: ctx.qualityReasons,
                 qualityTrace: ctx.qualityTrace,
+                posePresentationAssets: ctx.posePresentationAssets,
               })
             : null,
-          ctx?.rawScores ? JSON.stringify(ctx.rawScores) : null,
+          qualityAllowed && ctx?.rawScores ? JSON.stringify(ctx.rawScores) : null,
+          // 공백 분석용 신호(mapping.ts::extractPersonSignals). 공개 응답에는 없다.
+          signal ? JSON.stringify(signal.personTags) : null,
+          signal ? JSON.stringify(signal.outputScope) : null,
+          signal?.rankDistance ?? null,
+          signal?.distanceMetric ?? null,
+          signal?.searchStability ?? null,
+          signal?.confidenceThreshold ?? null,
         ],
       );
       for (const candidate of person.candidates) {
@@ -570,17 +709,39 @@ export async function persistAnalysisRecords(
         );
       }
     }
+    await initializeBodySelections(client, jobId, result);
+    if (complete)
+      await client.query(
+        "UPDATE jobs SET status='completed', result_json=$2, updated_at=$3, completed_at=$3 WHERE id=$1",
+        [jobId, JSON.stringify(result), new Date().toISOString()],
+      );
     await client.query(
       `UPDATE jobs
        SET inference_metadata_json = $2, input_width = COALESCE(input_width, $3),
-           input_height = COALESCE(input_height, $4)
+           input_height = COALESCE(input_height, $4), cut_summary_json = $5
        WHERE id = $1`,
       [
         jobId,
         JSON.stringify(result.inferenceMetadata),
-        result.image.width,
-        result.image.height,
+        result.image?.width ?? null,
+        result.image?.height ?? null,
+        qualityAllowed && cutSummary ? JSON.stringify(cutSummary) : null,
       ],
     );
+  });
+}
+
+/** Text search has its own rate counter and never enters the image worker/quotas. */
+export async function createSemanticJob(
+  installationId: string,
+  userId: string | null,
+): Promise<Job> {
+  return createJob(userId, null, {
+    installationId,
+    source: "semantic",
+    mime: "application/json",
+    size: 0,
+    width: null,
+    height: null,
   });
 }

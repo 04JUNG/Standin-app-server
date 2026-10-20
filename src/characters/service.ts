@@ -1,3 +1,8 @@
+import { handSelectionAvailable } from "../hands/service.js";
+import { bodyUxAvailable } from "../body-selection/availability.js";
+import { loadBodyCatalog } from "../body-selection/catalog.js";
+import { bodyRef, type BodyRef } from "../body-selection/model.js";
+import { framingAvailable, modelPreviewIdentity } from "../converter/framing.js";
 // /v1/models 의 본체. converter의 "지금 만들 수 있는 것"과 BFF의 "어떻게 보여줄 것인가"를
 // 합쳐 클라이언트 계약(Standin-client docs/08 §8-1)으로 만든다.
 import { config } from "../config.js";
@@ -9,6 +14,7 @@ import {
 } from "../converter/client.js";
 import {
   CHARACTER_PRESENTATION,
+  isRetiredCharacter,
   presentationFor,
   type CharacterGender,
 } from "./catalog.js";
@@ -17,6 +23,7 @@ import {
 export type CharacterAvailability = "available" | "coming_soon";
 
 export interface ModelCharacter {
+  bodyRef?: BodyRef | null;
   characterId: string;
   displayName: string;
   gender: CharacterGender;
@@ -78,10 +85,15 @@ function toModel(
   available: boolean,
   upstream: ConverterCharacter | undefined,
   defaultCharacterId: string,
+  selectedBody: BodyRef | null = null,
 ): ModelCharacter {
-  const presentation = presentationFor(characterId, upstream?.displayName ?? "");
+  const presentation = presentationFor(
+    characterId,
+    upstream?.displayName ?? "",
+  );
   return {
     characterId,
+    ...(config.bodySelectionEnabled ? { bodyRef: selectedBody } : {}),
     displayName: presentation.displayName,
     gender: presentation.gender,
     availability: available ? "available" : "coming_soon",
@@ -109,20 +121,34 @@ export async function listCharacters(
   overrides: Partial<CharacterDeps> = {},
 ): Promise<ModelCatalog> {
   const deps = { ...defaultDeps(), ...overrides };
-  const upstream = await deps.listUpstream();
+  const upstream = (await deps.listUpstream()).filter((row) => !isRetiredCharacter(row.characterId));
   const byId = new Map(upstream.map((row) => [row.characterId, row]));
   const ids = new Set([...Object.keys(CHARACTER_PRESENTATION), ...byId.keys()]);
 
+  const bodies = config.bodySelectionEnabled ? loadBodyCatalog().assets : [];
+  const defaultCharacterId = isRetiredCharacter(deps.defaultCharacterId)
+    ? (upstream[0]?.characterId ?? "")
+    : deps.defaultCharacterId;
   const characters = [...ids]
-    .map((id) => toModel(id, byId.has(id), byId.get(id), deps.defaultCharacterId))
+    .map((id) => {
+      const a = bodies.find((asset) => asset.characterId === id);
+      return toModel(
+        id,
+        byId.has(id),
+        byId.get(id),
+        defaultCharacterId,
+        a ? bodyRef(a) : null,
+      );
+    })
     .sort((a, b) => {
       const order =
-        presentationFor(a.characterId, "").order - presentationFor(b.characterId, "").order;
+        presentationFor(a.characterId, "").order -
+        presentationFor(b.characterId, "").order;
       return order !== 0 ? order : a.characterId.localeCompare(b.characterId);
     });
 
   cache = { at: Date.now(), ids: new Set(byId.keys()) };
-  return { characters, defaultCharacterId: deps.defaultCharacterId };
+  return { characters, defaultCharacterId };
 }
 
 /** export가 `characterId`를 존중할 수 있는 상태인가. 이 값이 곧 capabilities.characterSelection이다. */
@@ -135,7 +161,7 @@ export async function characterSelectionEnabled(
     const ids = await availableIds(deps);
     // 기본 체형 하나뿐이면 "고를 수 있다"고 말하지 않는다. 앱이 선택 UI를 열어도
     // 고를 것이 없고, 헛되이 characterId를 실어 보내게 된다.
-    return [...ids].some((id) => id !== deps.defaultCharacterId);
+    return [...ids].some((id) => id !== deps.defaultCharacterId && !isRetiredCharacter(id));
   } catch (error) {
     // converter가 잠깐 안 될 때 기능이 있다고 주장하지 않는다. 앱은 false를 "기본 체형으로
     // 저장한다"로 읽고 그렇게 안내한다 — 안전한 쪽이다.
@@ -151,14 +177,30 @@ export async function characterSelectionEnabled(
 export async function currentCapabilities(
   overrides: Partial<CharacterDeps> = {},
 ): Promise<{
+  handSelection: boolean;
+  bodySelection: boolean;
+  bodyRecommendation: boolean;
+  bodyPreviews: boolean;
+  bodyPreviewAssets: boolean;
   refine: boolean;
   fbxExport: boolean;
   characterSelection: boolean;
+  outputScopeSelection: boolean;
+  outputScopeCropping: boolean;
+  modelPreview: boolean;
 }> {
   return {
+    handSelection: await handSelectionAvailable(),
+    bodySelection: config.bodySelectionEnabled,
+    bodyRecommendation: config.bodySelectionEnabled,
+    bodyPreviews: bodyUxAvailable(),
+    bodyPreviewAssets: config.bodySelectionEnabled && converterEnabled(),
     refine: config.refineFeatureEnabled,
     fbxExport: converterEnabled(),
     characterSelection: await characterSelectionEnabled(overrides),
+    outputScopeSelection: true,
+    outputScopeCropping: await framingAvailable(),
+    modelPreview: !!(await modelPreviewIdentity()),
   };
 }
 
@@ -179,6 +221,7 @@ export async function checkCharacter(
   characterId: string,
   overrides: Partial<CharacterDeps> = {},
 ): Promise<CharacterCheck> {
+  if (isRetiredCharacter(characterId)) return "unavailable";
   const known = characterId in CHARACTER_PRESENTATION;
   const ids = await availableIds({ ...defaultDeps(), ...overrides });
   if (ids.has(characterId)) return "ok";

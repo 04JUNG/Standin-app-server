@@ -1,0 +1,715 @@
+import { bodyUxAvailable } from "./availability.js";
+import test from "node:test";
+import assert from "node:assert/strict";
+import { Hono } from "hono";
+import type { AppEnv } from "../env.js";
+import type { CutResult } from "../inference.js";
+import type { AnalysisResult } from "../types.js";
+import { mapCutResult } from "../mapping.js";
+import { config } from "../config.js";
+import { parseCatalog } from "./catalog.js";
+import { mapBodyRecommendations } from "./recommendation.js";
+import {
+  bodyRef,
+  defaultPreferences,
+  resolveBody,
+  snapshot,
+  type BodyCatalog,
+} from "./model.js";
+import {
+  createBodySelectionRoutes,
+  createBodyPreferenceRoutes,
+  parsePreferenceChange,
+  parseSelectionChange,
+} from "./routes.js";
+import { BodyError, bodyStore, readSelection, type BodyDb } from "./store.js";
+import { catalog, fixture, result } from "./fixtures.js";
+const recommendation = () =>
+  mapBodyRecommendations(fixture(), catalog()).get(0)!;
+
+test("catalog retires fixed adult and teen FBXs while preserving shape-key bodies and children", () => {
+  const ids = [
+    "body-female-athletic",
+    "body-female-base",
+    "body-female-muscular",
+    "body-male-athletic",
+    "body-male-base",
+    "body-male-muscular",
+    "female-base-v0-3-4",
+    "male-base-v0-7-2",
+    "body-child",
+    "body-teen-female",
+    "body-teen-male",
+  ];
+  const input = catalog(ids.length);
+  input.assets.forEach((asset, i) => {
+    asset.characterId = ids[i];
+  });
+  input.defaultCharacterId = "female-base-v0-3-4";
+  input.assets[6].shape = {
+    schemaVersion: "body-shape.v1",
+    controls: [{ key: "height", min: 150, max: 190, step: 1, default: 168 }],
+  };
+  const active = parseCatalog(input);
+  assert.deepEqual(
+    active.assets.map((a) => a.characterId),
+    ids.slice(6, 9),
+  );
+  assert.equal(active.defaultCharacterId, "female-base-v0-3-4");
+  assert.deepEqual(active.assets[0].shape, input.assets[6].shape);
+  assert.equal(input.assets.length, ids.length);
+  const policy = snapshot(defaultPreferences(), active);
+  assert.equal(
+    resolveBody(
+      0,
+      policy,
+      recommendation(),
+      active,
+      ["pose-a"],
+      "manual",
+      input.assets[0],
+    ).resolutionStatus,
+    "unavailable",
+  );
+  for (const teen of input.assets.slice(9)) {
+    assert.equal(
+      resolveBody(
+        0,
+        policy,
+        recommendation(),
+        active,
+        ["pose-a"],
+        "manual",
+        teen,
+      ).resolutionStatus,
+      "unavailable",
+    );
+  }
+  input.defaultCharacterId = "body-teen-male";
+  assert.equal(parseCatalog(input).defaultCharacterId, null);
+  input.defaultCharacterId = "body-female-base";
+  assert.equal(parseCatalog(input).defaultCharacterId, null);
+});
+test("automatic recommendations and explicit manual choices take priority", () => {
+  const c = catalog(), policy = snapshot({ ...defaultPreferences(), mode: "auto" }, c);
+  const rec = recommendation();
+  assert.equal(resolveBody(0, policy, rec, c, ["pose-a"]).resolvedBody?.characterId, "character-1");
+  assert.equal(resolveBody(0, policy, rec, c, ["pose-a"], "auto").resolvedSource, "auto_recommendation");
+  assert.equal(resolveBody(0, policy, rec, c, ["pose-a"], "manual", bodyRef(c.assets[2])).resolvedBody?.characterId, "character-2");
+});
+test("male fallback retains the captured identity and rejects changed or unsupported assets", () => {
+  const c = catalog();
+  c.assets[0].characterId = "male-base-v0-7-2";
+  const policy = snapshot(defaultPreferences(), c), chosen = bodyRef(c.assets[0]);
+  c.assets[0].assetSha256 = "f".repeat(64);
+  const value = resolveBody(0, policy, recommendation(), c, ["pose-a"]);
+  assert.equal(value.resolutionStatus, "unavailable");
+  assert.deepEqual(value.resolvedBody, chosen);
+  assert.equal(resolveBody(0, policy, recommendation(), c, ["not-supported"], "manual", chosen).resolutionStatus, "unavailable");
+});
+test("catalog supports arbitrary 1/9/12 model counts and IDs; rejects duplicate/malformed references", () => {
+  for (const count of [1, 9, 12])
+    assert.equal(parseCatalog(catalog(count)).assets.length, count);
+  const c = catalog();
+  c.assets.push(c.assets[0]);
+  assert.throws(() => parseCatalog(c));
+  assert.throws(() =>
+    parseCatalog({ version: "bad", defaultCharacterId: null, assets: [{}] }),
+  );
+});
+test("sidecar accepts valid joins; legacy, shadow, wrong person/order/hash are isolated", () => {
+  assert.equal(recommendation().body?.bodyId, "shape-1");
+  const c = fixture();
+  delete c.body_matching;
+  assert.equal(mapBodyRecommendations(c, catalog()).get(0)?.status, "disabled");
+  for (const mutate of [
+    (r: Record<string, unknown>) => {
+      r.mode = "shadow";
+    },
+    (r: Record<string, unknown>) => {
+      r.input_sha256 = "wrong";
+    },
+    (r: Record<string, unknown>) => {
+      r.people = [];
+    },
+  ]) {
+    const x = fixture();
+    mutate(x.body_matching as Record<string, unknown>);
+    assert.notEqual(
+      mapBodyRecommendations(x, catalog()).get(0)?.status,
+      "available",
+    );
+  }
+  const changed = catalog();
+  changed.assets[1].assetSha256 = "f".repeat(64);
+  assert.equal(
+    mapBodyRecommendations(fixture(), changed).get(0)?.status,
+    "unavailable",
+  );
+});
+test("partial bad person does not lose good person's recommendation; auto_default is not a recommendation", () => {
+  const c = fixture(),
+    raw = c.body_matching as { people: Array<Record<string, unknown>> };
+  raw.people[0].selection_source = "auto_default";
+  assert.equal(
+    mapBodyRecommendations(c, catalog()).get(0)?.status,
+    "unavailable",
+  );
+  assert.equal(
+    mapBodyRecommendations(c, catalog()).get(1)?.status,
+    "available",
+  );
+  raw.people[0].person_id = "wrong";
+  assert.equal(
+    mapBodyRecommendations(c, catalog()).get(0)?.reasonCodes[0],
+    "body_contract_invalid",
+  );
+});
+test("recommendation mapping leaves every pose and quality field intact", () => {
+  const old = config.bodySelectionEnabled;
+  try {
+    Reflect.set(config, "bodySelectionEnabled", false);
+    const off = result();
+    Reflect.set(config, "bodySelectionEnabled", true);
+    const on = result();
+    const strip = (r: AnalysisResult) => ({
+      ...r,
+      candidatesByPerson: r.candidatesByPerson.map(
+        ({ bodyRecommendation, ...p }) => p,
+      ),
+    });
+    assert.deepEqual(strip(on), off);
+    assert.ok(on.candidatesByPerson[0].bodyRecommendation);
+  } finally {
+    Reflect.set(config, "bodySelectionEnabled", old);
+  }
+});
+test("mutations reject ambiguous modes, unknown fields and missing revision/idempotency keys", () => {
+  const common = { expectedRevision: 0, mutationId: "mutation-123" };
+  assert.equal(
+    parseSelectionChange({ ...common, intent: "auto" }).intent,
+    "auto",
+  );
+  for (const value of [
+    { ...common, intent: "auto", characterId: "x" },
+    { ...common, intent: "manual" },
+    { ...common, intent: "manual", characterId: "x", resolvedBody: {} },
+    { intent: "inherit" },
+  ])
+    assert.throws(() => parseSelectionChange(value));
+  assert.throws(() =>
+    parsePreferenceChange({
+      ...common,
+      mode: "fixed_default",
+      defaultCharacterId: null,
+    }),
+  );
+});
+test("HTTP routes forward authenticated owner, wrap conflicts and do not gate unrelated job routes", async () => {
+  const fake = {
+    ...bodyStore,
+    selection: async (owner: string) => {
+      assert.equal(owner, "inst_owner");
+      throw new BodyError("BODY_SELECTION_CONFLICT", 409, {
+        currentRevision: 3,
+      });
+    },
+    preferences: async () => defaultPreferences(),
+  };
+  const app = new Hono<AppEnv>();
+  app.use("*", async (c, n) => {
+    c.set("installationId", "inst_owner");
+    c.set("requestId", "req_test");
+    await n();
+  });
+  app.route(
+    "/jobs",
+    createBodySelectionRoutes(fake, () => true),
+  );
+  app.route(
+    "/preferences",
+    createBodyPreferenceRoutes(fake, () => true),
+  );
+  assert.equal(
+    (await app.request("/jobs/job_test/people/0/body-selection")).status,
+    409,
+  );
+  assert.equal(
+    (await app.request("/jobs/job_test/people/NaN/body-selection")).status,
+    400,
+  );
+  const off = new Hono<AppEnv>();
+  off.route(
+    "/jobs",
+    createBodySelectionRoutes(fake, () => false),
+  );
+  off.get("/jobs/legacy", (c) => c.json({ ok: true }));
+  assert.equal((await off.request("/jobs/legacy")).status, 200);
+  assert.equal(
+    (await off.request("/jobs/job_test/people/0/body-selection")).status,
+    503,
+  );
+  assert.equal((await app.request("/preferences")).status, 200);
+});
+
+function presentationFixture(style = "feminine") {
+  const c = fixture();
+  const raw = c.body_matching as Record<string, unknown> & {
+    people: Array<Record<string, unknown>>;
+  };
+  raw.is_mock = false;
+  const row = raw.people[0];
+  row.selection_source = "auto_presentation_default";
+  row.presentation_selection = {
+    mode: "compatible_candidates",
+    visibility: "visible",
+    observed: style,
+  };
+  row.observations = {
+    ownership_ambiguous: false,
+    provider_error: null,
+    presentation: {
+      value: style,
+      visibility: "visible",
+      cues: ["face_design"],
+      evidence: "owned design cue",
+    },
+  };
+  return { c, raw, row };
+}
+test("presentation-only female/male default survives BFF fallback while explicit user choices win", () => {
+  for (const style of ["feminine", "masculine"]) {
+    const { c } = presentationFixture(style);
+    const lib = catalog(),
+      rec = mapBodyRecommendations(c, lib).get(0)!;
+    assert.equal(rec.status, "available");
+    const policy = snapshot(
+      { ...defaultPreferences(), mode: "auto" },
+      lib,
+    );
+    const selected = resolveBody(0, policy, rec, lib, ["pose-a"]);
+    assert.equal(selected.resolvedBody?.characterId, "character-1");
+    assert.deepEqual(rec.reasonCodes, ["presentation_supported_shape_default"]);
+    assert.equal(
+      resolveBody(
+        0,
+        policy,
+        rec,
+        lib,
+        ["pose-a"],
+        "manual",
+        bodyRef(lib.assets[2]),
+      ).resolvedBody?.characterId,
+      "character-2",
+    );
+    policy.preferences.lastUsed = { characterId: "character-0", controls: null, usedAt: "now" };
+    policy.preferences.mode = "last_used";
+    policy.lastUsed = { body: bodyRef(lib.assets[0]), shape: null };
+    assert.equal(
+      resolveBody(0, policy, rec, lib, ["pose-a"]).resolvedBody?.characterId,
+      "character-0",
+    );
+    assert.equal(
+      resolveBody(0, policy, rec, lib, ["pose-a"], "auto").resolvedBody
+        ?.characterId,
+      "character-1",
+    );
+  }
+});
+test("unowned, weak, mock, unsupported or missing presentation cannot promote a default", () => {
+  const changes = [
+    (f: ReturnType<typeof presentationFixture>) => {
+      f.raw.is_mock = true;
+    },
+    (f: ReturnType<typeof presentationFixture>) => {
+      f.row.observations = null;
+    },
+    (f: ReturnType<typeof presentationFixture>) => {
+      f.row.presentation_selection = { mode: "matching_style_unavailable" };
+    },
+    ...[
+      { ownership_ambiguous: true },
+      { provider_error: "timeout" },
+      {
+        presentation: {
+          value: "feminine",
+          visibility: "uncertain",
+          cues: ["face_design"],
+          evidence: "weak",
+        },
+      },
+      {
+        presentation: {
+          value: "feminine",
+          visibility: "visible",
+          cues: ["hair_design"],
+          evidence: "hair only",
+        },
+      },
+      {
+        presentation: {
+          value: "masculine",
+          visibility: "visible",
+          cues: ["face_design"],
+          evidence: "mismatch",
+        },
+      },
+    ].map((patch) => (f: ReturnType<typeof presentationFixture>) => {
+      f.row.observations = { ...(f.row.observations as object), ...patch };
+    }),
+  ];
+  for (const change of changes) {
+    const f = presentationFixture();
+    change(f);
+    assert.equal(
+      mapBodyRecommendations(f.c, catalog()).get(0)?.status,
+      "unavailable",
+    );
+  }
+  const f = presentationFixture(),
+    lib = catalog();
+  lib.assets[1].supportedPoseIds = [];
+  assert.equal(mapBodyRecommendations(f.c, lib).get(0)?.status, "unavailable");
+});
+test("preference reads and writes use the same UX gate for every flag combination", async () => {
+  const previous = {
+    bodySelectionEnabled: config.bodySelectionEnabled,
+    bodyUxEnabled: config.bodyUxEnabled,
+    fbxExportEnabled: config.fbxExportEnabled,
+    converterBaseUrl: config.converterBaseUrl,
+  };
+  let reads = 0,
+    writes = 0;
+  const fake = {
+    ...bodyStore,
+    preferences: async () => {
+      reads++;
+      return defaultPreferences();
+    },
+    savePreferences: async () => {
+      writes++;
+      return defaultPreferences();
+    },
+  };
+  const app = new Hono<AppEnv>();
+  app.use("*", async (c, next) => {
+    c.set("installationId", "owner");
+    await next();
+  });
+  app.route("/preferences", createBodyPreferenceRoutes(fake));
+  try {
+    for (const selection of [false, true])
+      for (const ux of [false, true])
+        for (const fbx of [false, true])
+          for (const url of ["", "http://fixture.invalid"]) {
+            Object.assign(config, {
+              bodySelectionEnabled: selection,
+              bodyUxEnabled: ux,
+              fbxExportEnabled: fbx,
+              converterBaseUrl: url,
+            });
+            const enabled = selection && ux && fbx && !!url;
+            assert.equal(bodyUxAvailable(), enabled);
+            for (const method of ["GET", "PUT"]) {
+              const response = await app.request("/preferences", {
+                method,
+                ...(method === "PUT"
+                  ? {
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        mode: "auto",
+                        expectedRevision: 0,
+                        mutationId: "test-mutation",
+                      }),
+                    }
+                  : {}),
+              });
+              assert.equal(response.status, enabled ? 200 : 503);
+              if (!enabled)
+                assert.equal(
+                  ((await response.json()) as { error: { code: string } }).error
+                    .code,
+                  "BODY_SELECTION_DISABLED",
+                );
+            }
+          }
+    assert.equal(reads, 1);
+    assert.equal(writes, 1);
+  } finally {
+    Object.assign(config, previous);
+  }
+});
+
+test("semantic preview eligibility does not loosen legacy pose-release allowlists", async () => {
+  const { bodyEligible, previewEligible } = await import("./model.js");
+  const c = catalog();
+  const ref = bodyRef(c.assets[0]);
+  assert.equal(bodyEligible(ref, c, ["new-semantic-pose"], false), false);
+  assert.equal(previewEligible(ref, c, ["new-semantic-pose"]), true);
+  assert.equal(
+    previewEligible({ ...ref, assetSha256: "f".repeat(64) }, c, [
+      "new-semantic-pose",
+    ]),
+    false,
+  );
+  const policy = snapshot(defaultPreferences(), c),
+    rec = { status: "disabled" as const, body: null, reasonCodes: [] };
+  const v = resolveBody(
+    0,
+    policy,
+    rec,
+    c,
+    ["new-semantic-pose"],
+    "manual",
+    ref,
+    0,
+    null,
+    true,
+  );
+  assert.equal(v.previewOnly, true);
+  assert.equal(v.resolutionStatus, "ready");
+  assert.notEqual(
+    resolveBody(0, policy, rec, c, ["new-semantic-pose"], "manual", ref)
+      .resolutionStatus,
+    "ready",
+  );
+});
+
+test("older semantic history initializes preview choices once without overwriting a manual revision", async () => {
+  const { ensureSemanticBodySelection, readSelection } =
+    await import("./store.js");
+  const { result } = await import("./fixtures.js");
+  const analysis = result();
+  analysis.source = "semantic";
+  analysis.image = null;
+  for (const p of analysis.candidatesByPerson)
+    for (const c of p.candidates) {
+      c.poseId = "new-semantic-pose";
+      c.refineAllowed = false;
+      c.releaseAllowed = false;
+    }
+  let policy: unknown = null;
+  const values = new Map<number, unknown>();
+  let writes = 0;
+  const db = {
+    query: async (sql: string, args: unknown[]) => {
+      if (sql.includes("SELECT status,result_json,body_policy_json"))
+        return {
+          rows:
+            args[1] === "owner"
+              ? [
+                  {
+                    status: "completed",
+                    result_json: JSON.stringify(analysis),
+                    body_policy_json: policy,
+                  },
+                ]
+              : [],
+        };
+      if (sql.includes("SELECT value FROM body_preferences"))
+        return { rows: [] };
+      if (sql.startsWith("UPDATE jobs SET body_policy_json")) {
+        if (!policy) {
+          policy = JSON.parse(args[1] as string);
+          writes++;
+        }
+        return { rows: [] };
+      }
+      if (sql.includes("SELECT body_policy_json FROM jobs"))
+        return { rows: [{ body_policy_json: policy }] };
+      if (sql.includes("INSERT INTO body_selections")) {
+        if (!values.has(args[1] as number))
+          values.set(args[1] as number, JSON.parse(args[2] as string));
+        return { rows: [] };
+      }
+      if (sql.includes("SELECT value FROM body_selections"))
+        return {
+          rows: values.has(args[1] as number)
+            ? [{ value: values.get(args[1] as number) }]
+            : [],
+        };
+      throw Error("unexpected test query");
+    },
+  } as unknown as import("./store.js").BodyDb;
+  const c = catalog();
+  c.assets[0].characterId = "male-base-v0-7-2";
+  await assert.rejects(
+    ensureSemanticBodySelection(db, "other", analysis.jobId, c),
+  );
+  await ensureSemanticBodySelection(db, "owner", analysis.jobId, c);
+  const first = await readSelection(db, "owner", analysis.jobId, 0, c);
+  assert.equal(first.previewOnly, true);
+  assert.equal(first.resolutionStatus, "ready");
+  values.set(0, { ...first, intent: "manual", selectionRevision: 4 });
+  await ensureSemanticBodySelection(db, "owner", analysis.jobId, c);
+  assert.equal(
+    (await readSelection(db, "owner", analysis.jobId, 0, c)).selectionRevision,
+    4,
+  );
+  assert.equal(writes, 1);
+});
+
+test("first use in last-used mode starts with the cataloged male base, independent of recommendations", () => {
+  const c = catalog();
+  c.assets[0].characterId = "male-base-v0-7-2";
+  c.defaultCharacterId = c.assets[2].characterId;
+  const policy = snapshot(defaultPreferences(), c);
+  for (const rec of [recommendation(), { status: "disabled" as const, body: null, reasonCodes: [] }]) {
+    const value = resolveBody(0, policy, rec, c, ["pose-a"]);
+    assert.equal(value.resolvedBody?.characterId, "male-base-v0-7-2");
+    assert.equal(value.resolvedSource, "catalog_default_fallback");
+    assert.equal(value.resolutionStatus, "ready");
+    assert.deepEqual(value.recommendation, rec);
+    assert.equal(value.shape, null);
+  }
+  assert.equal(resolveBody(0, policy, recommendation(), c, ["pose-a"], "auto").resolvedSource, "auto_recommendation");
+  const auto = snapshot({ ...defaultPreferences(), mode: "auto" }, c);
+  assert.equal(resolveBody(0, auto, recommendation(), c, ["pose-a"]).resolvedSource, "auto_recommendation");
+  const used = snapshot({ ...defaultPreferences(), lastUsed: { characterId: "character-2", controls: null, usedAt: "now" } }, c);
+  assert.equal(resolveBody(0, used, recommendation(), c, ["pose-a"]).resolvedBody?.characterId, "character-2");
+});
+
+test("the first-use default respects frozen identity and pose coverage, including old policy snapshots", () => {
+  const c = catalog();
+  c.assets[0].characterId = "male-base-v0-7-2";
+  c.defaultCharacterId = c.assets[2].characterId;
+  const policy = snapshot(defaultPreferences(), c);
+  const old = { ...policy };
+  delete old.firstUseDefault;
+  assert.equal(resolveBody(0, old, recommendation(), c, ["pose-a"]).resolvedBody?.characterId, "male-base-v0-7-2");
+  assert.equal(resolveBody(0, policy, recommendation(), c, []).resolutionStatus, "not_applicable");
+  c.assets[0].supportedPoseIds = [];
+  assert.equal(resolveBody(0, policy, recommendation(), c, ["pose-a"]).resolutionStatus, "unavailable");
+  assert.equal(resolveBody(0, policy, recommendation(), c, ["pose-a"], "inherit", null, 0, null, true).resolvedBody?.characterId, "male-base-v0-7-2");
+  c.assets[0].supportedPoseIds = ["pose-a"];
+  c.assets[0].assetSha256 = "f".repeat(64);
+  assert.equal(resolveBody(0, policy, recommendation(), c, ["pose-a"]).resolutionStatus, "unavailable");
+});
+
+test("an unresolved first-use history row gets the male base without writes or changing manual intent", async () => {
+  const c = catalog();
+  c.assets[0].characterId = "male-base-v0-7-2";
+  c.defaultCharacterId = c.assets[0].characterId;
+  const policy = snapshot(defaultPreferences(), c);
+  delete policy.firstUseDefault;
+  const rec = { status: "disabled" as const, body: null, reasonCodes: [] };
+  const stored = resolveBody(0, { ...policy, firstUseDefault: null }, rec, c, ["pose-a"]);
+  stored.selectionRevision = 4;
+  const original = structuredClone(stored);
+  const analysis = result();
+  const db = { query: async (sql: string) => {
+    if (sql.includes("SELECT status,result_json,body_policy_json")) return { rows: [{ status: "completed", result_json: JSON.stringify(analysis), body_policy_json: policy }] };
+    if (sql.startsWith("SELECT value FROM body_selections")) return { rows: [{ value: structuredClone(stored) }] };
+    throw new Error("unexpected write");
+  } } as unknown as BodyDb;
+  const value = await readSelection(db, "owner", analysis.jobId, 0, c);
+  assert.equal(value.resolutionStatus, "ready");
+  assert.equal(value.resolvedBody?.characterId, "male-base-v0-7-2");
+  assert.equal(value.selectionRevision, 4);
+  assert.deepEqual(stored, original);
+  stored.intent = "manual";
+  const manual = await readSelection(db, "owner", analysis.jobId, 0, c);
+  assert.equal(manual.resolvedBody, null);
+  assert.equal(manual.resolutionStatus, "unavailable");
+});
+
+test("automatic failure statuses and unusable last bodies share the registered male fallback", () => {
+  const c = catalog(); c.assets[0].characterId = "male-base-v0-7-2";
+  c.assets[2].shape = { schemaVersion: "body-shape.v1", controls: [{ key: "height", min: 150, max: 200, step: 1, default: 175 }] };
+  for (const status of ["unavailable", "disabled", "not_applicable"] as const) {
+    const rec = { status, body: null, reasonCodes: ["provider_error"] };
+    const auto = snapshot({ ...defaultPreferences(), mode: "auto" }, c);
+    for (const intent of ["inherit", "auto"] as const) {
+      const value = resolveBody(0, auto, rec, c, ["pose-a"], intent);
+      assert.equal(value.resolutionStatus, "ready");
+      assert.deepEqual(value.resolvedBody, bodyRef(c.assets[0]));
+      assert.equal(value.recommendation.status, status);
+      assert.equal(value.shape, null);
+    }
+    for (const lastUsed of [null, { characterId: "gone", controls: null, usedAt: "now" },
+      { characterId: "character-2", controls: { invalid: 3 }, usedAt: "now" }]) {
+      const policy = snapshot({ ...defaultPreferences(), lastUsed }, c);
+      assert.deepEqual(resolveBody(0, policy, rec, c, ["pose-a"]).resolvedBody, bodyRef(c.assets[0]));
+    }
+    const manual = resolveBody(0, auto, rec, c, ["pose-a"], "manual", bodyRef(c.assets[2]));
+    assert.equal(manual.resolvedSource, "manual");
+  }
+  const policy = snapshot({ ...defaultPreferences(), mode: "auto" }, c);
+  // A valid but visually wrong recommendation is still a recommendation.
+  assert.equal(resolveBody(0, policy, recommendation(), c, ["pose-a"]).resolvedSource, "auto_recommendation");
+  c.assets.splice(0, 1);
+  assert.equal(resolveBody(0, policy, { status: "disabled", body: null, reasonCodes: [] }, c, ["pose-a"]).resolutionStatus, "unavailable");
+});
+
+test("legacy installation rows and job selections migrate without overwriting manual choices", async () => {
+  const { normalizePreferences } = await import("./model.js");
+  const c = catalog(); c.assets[0].characterId = "male-base-v0-7-2";
+  const old = { ...defaultPreferences(), mode: "fixed_default", defaultCharacterId: "character-2",
+    shapeDefault: { characterId: "character-2", controls: { height: 180 } },
+    cards: [{ cardId: "existing", name: "주인공", characterId: "character-1", controls: {}, createdAt: "", updatedAt: "" }], revision: 9 };
+  const prefs = normalizePreferences(old as unknown as ReturnType<typeof defaultPreferences>);
+  assert.equal(prefs.mode, "last_used"); assert.equal(prefs.revision, 9);
+  assert.deepEqual(prefs.cards!.map(c => c.cardId), ["existing", "my-default"]);
+  assert.equal("defaultCharacterId" in prefs, false); assert.equal("shapeDefault" in prefs, false);
+  assert.deepEqual(normalizePreferences(prefs), prefs);
+  for (const mode of ["auto", "last_used"] as const)
+    assert.equal(normalizePreferences({ ...old, mode }).mode, mode);
+  const policy = { preferences: old, userDefault: bodyRef(c.assets[2]), catalogDefault: bodyRef(c.assets[2]) };
+  const rec = { status: "disabled" as const, body: null, reasonCodes: [] };
+  const original = resolveBody(0, snapshot(defaultPreferences(), c), rec, c, ["pose-a"], "manual", bodyRef(c.assets[2]), 8);
+  const analysis = result();
+  for (const source of ["fixed_default", "user_default_fallback", "catalog_default_fallback", null, "manual"] as const) {
+    const stored = { ...original, intent: source === "manual" ? "manual" : "inherit", resolvedSource: source };
+    const db = { query: async (sql: string) => {
+      if (sql.includes("SELECT status,result_json,body_policy_json")) return { rows: [{ status: "completed", result_json: JSON.stringify(analysis), body_policy_json: policy }] };
+      if (sql.startsWith("SELECT value FROM body_selections")) return { rows: [{ value: stored }] };
+      throw new Error("unexpected mutation");
+    } } as unknown as BodyDb;
+    // Null source with an existing valid body is not a legacy default. Only unresolved nulls migrate.
+    if (source === null) stored.resolvedBody = null;
+    const value = await readSelection(db, "owner", analysis.jobId, 0, c);
+    assert.equal(value.resolvedBody?.characterId, source === "manual" ? "character-2" : "male-base-v0-7-2");
+    assert.equal(value.selectionRevision, 8);
+  }
+});
+
+test("PostgreSQL schema: migrate settings, persist explicit-auto fallback and preserve guards", async (t) => {
+  const { PGlite } = await import("@electric-sql/pglite");
+  const { SCHEMA } = await import("../db.js");
+  const { readPreferences, writePreferences, writeCards, captureBodyPolicy, initializeBodySelections, writeSelection } = await import("./store.js");
+  const pg = new PGlite(); t.after(() => pg.close()); await pg.exec(SCHEMA);
+  const db = pg as unknown as BodyDb;
+  const now = new Date().toISOString();
+  await pg.query(`INSERT INTO installations
+    (id,token_hash,consent_version,consented_at,created_at,last_seen_at,app_version,os_name,os_version,architecture,locale)
+    VALUES ('owner','hash','test',$1,$1,$1,'test','test','test','test','ko')`, [now]);
+  const legacy = { ...defaultPreferences(), mode: "fixed_default", defaultCharacterId: "character-2",
+    shapeDefault: { characterId: "character-2", controls: { height: 180 } } };
+  await pg.query("INSERT INTO body_preferences (installation_id,value) VALUES ('owner',$1)", [JSON.stringify(legacy)]);
+  assert.equal((await readPreferences(db, "owner")).cards![0].cardId, "my-default");
+  const c = catalog(); c.assets[0].characterId = "male-base-v0-7-2";
+  const deps = { catalog: () => c, check: async () => "ok" as const };
+  const prefs = await writePreferences(db, "owner", { mode: "auto", expectedRevision: 0, mutationId: "pref-current" }, deps);
+  assert.equal(prefs.cards![0].controls.height, 180);
+  assert.equal("shapeDefault" in (await pg.query<{value: object}>("SELECT value FROM body_preferences")).rows[0].value, false);
+  const analysis = result();
+  for (const p of analysis.candidatesByPerson) p.bodyRecommendation = { status: "unavailable", body: null, reasonCodes: ["provider_error"] };
+  await pg.query("INSERT INTO jobs(id,status,created_at,updated_at,installation_id,result_json) VALUES ($1,'completed',$2,$2,'owner',$3)", [analysis.jobId, now, JSON.stringify(analysis)]);
+  await captureBodyPolicy(db, analysis.jobId, "owner", c);
+  await initializeBodySelections(db, analysis.jobId, analysis, c);
+  const initial = await readSelection(db, "owner", analysis.jobId, 0, c);
+  assert.equal(initial.resolutionStatus, "ready"); assert.equal(initial.resolvedBody?.characterId, "male-base-v0-7-2");
+  const change = { intent: "auto" as const, expectedRevision: 0, mutationId: "explicit-auto" };
+  const saved = await writeSelection(db, "owner", analysis.jobId, 0, change, deps);
+  assert.equal(saved.selectionRevision, 1); assert.deepEqual(saved.resolvedBody, initial.resolvedBody);
+  assert.deepEqual(await writeSelection(db, "owner", analysis.jobId, 0, change, deps), saved);
+  assert.equal((await readPreferences(db, "owner")).lastUsed, null);
+  await assert.rejects(writeSelection(db, "owner", analysis.jobId, 0, { ...change, expectedRevision: 1, mutationId: "asset-missing" }, { ...deps, check: async () => "unavailable" as never }), /BODY_UNAVAILABLE/);
+  assert.equal((await readSelection(db, "owner", analysis.jobId, 0, c)).selectionRevision, 1);
+  await writeSelection(db, "owner", analysis.jobId, 0, { intent: "manual", characterId: "character-2", expectedRevision: 1, mutationId: "pick-manually" }, deps);
+  assert.equal((await readPreferences(db, "owner")).lastUsed?.characterId, "character-2");
+  await writeCards(db, "owner", { op: "delete", cardId: "my-default", expectedRevision: 1, mutationId: "delete-old-card" }, deps);
+  assert.deepEqual((await readPreferences(db, "owner")).cards, []);
+  await initializeBodySelections(db, analysis.jobId, analysis, c);
+  assert.equal((await readSelection(db, "owner", analysis.jobId, 0, c)).resolvedBody?.characterId, "character-2");
+});

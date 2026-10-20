@@ -36,6 +36,51 @@ beforeEach(() => {
   __resetCharacterCache();
 });
 
+test("retired adult and teen models cannot reappear; shape-key models and children remain selectable", async () => {
+  const retired = [
+    "body-female-athletic",
+    "body-female-base",
+    "body-female-muscular",
+    "body-male-athletic",
+    "body-male-base",
+    "body-male-muscular",
+    "body-teen-male",
+    "body-teen-female",
+  ];
+  const overrides = deps([
+    ...retired,
+    "female-base-v0-3-4",
+    "male-base-v0-7-2",
+    "body-child",
+  ]);
+  const catalog = await listCharacters({
+    ...overrides,
+    defaultCharacterId: "body-female-base",
+  });
+  assert.equal(catalog.defaultCharacterId, "female-base-v0-3-4");
+  for (const id of retired) {
+    assert.equal(
+      catalog.characters.some((c) => c.characterId === id),
+      false,
+    );
+    assert.equal(await checkCharacter(id, overrides), "unavailable");
+  }
+  assert.equal(await checkCharacter("female-base-v0-3-4", overrides), "ok");
+  assert.equal(await checkCharacter("male-base-v0-7-2", overrides), "ok");
+  assert.equal(
+    catalog.characters.find((c) => c.characterId === "body-child")
+      ?.availability,
+    "available",
+  );
+});
+
+test("retired bodies alone do not enable character selection", async () => {
+  assert.equal(
+    await characterSelectionEnabled(deps([DEFAULT_ID, "body-female-base"])),
+    false,
+  );
+});
+
 test("converter가 못 만드는 체형도 목록에 남기고 coming_soon으로 표시한다", async () => {
   // 여성 artifact URI가 아직 없는 배포. 목록에서 빼면 앱에는 "모델 선택이라는 기능이
   // 없다"로 보인다 — 준비 중이라는 것이 드러나야 한다.
@@ -48,7 +93,9 @@ test("converter가 못 만드는 체형도 목록에 남기고 coming_soon으로
 });
 
 test("표현은 BFF가 소유한다 — converter의 내부 코드명을 그대로 내보내지 않는다", async () => {
-  const catalog = await listCharacters(deps([DEFAULT_ID, "standin-female-v2-lbs"]));
+  const catalog = await listCharacters(
+    deps([DEFAULT_ID, "standin-female-v2-lbs"]),
+  );
   const male = catalog.characters.find((row) => row.characterId === DEFAULT_ID);
 
   assert.equal(male?.displayName, "기본 남성");
@@ -59,13 +106,19 @@ test("표현은 BFF가 소유한다 — converter의 내부 코드명을 그대�
 });
 
 test("기본 체형이 목록 맨 앞에 온다", async () => {
-  const catalog = await listCharacters(deps([DEFAULT_ID, "standin-female-v2-lbs"]));
+  const catalog = await listCharacters(
+    deps([DEFAULT_ID, "standin-female-v2-lbs"]),
+  );
   assert.equal(catalog.characters[0]?.characterId, DEFAULT_ID);
 });
 
 test("우리가 모르는 캐릭터도 감추지 않는다 — 등록된 줄도 모르는 것보다 낫다", async () => {
-  const catalog = await listCharacters(deps([DEFAULT_ID, "standin-newcomer-v1"]));
-  const newcomer = catalog.characters.find((row) => row.characterId === "standin-newcomer-v1");
+  const catalog = await listCharacters(
+    deps([DEFAULT_ID, "standin-newcomer-v1"]),
+  );
+  const newcomer = catalog.characters.find(
+    (row) => row.characterId === "standin-newcomer-v1",
+  );
 
   assert.equal(newcomer?.availability, "available");
   assert.equal(newcomer?.gender, "unspecified");
@@ -79,7 +132,9 @@ test("기본 체형뿐이면 characterSelection을 켜지 않는다", async () =
 
   __resetCharacterCache();
   assert.equal(
-    await characterSelectionEnabled(deps([DEFAULT_ID, "standin-female-v2-lbs"])),
+    await characterSelectionEnabled(
+      deps([DEFAULT_ID, "standin-female-v2-lbs"]),
+    ),
     true,
   );
 });
@@ -115,6 +170,9 @@ test("export 검증은 '모르는 값'과 '아는데 못 만듦'을 나눈다", 
   // 사용자가 할 일이 다르다 — 앞은 다시 고르는 것, 뒤는 기다리거나 기본 체형으로 저장.
   const only = deps([DEFAULT_ID]);
   assert.equal(await checkCharacter(DEFAULT_ID, only), "ok");
-  assert.equal(await checkCharacter("standin-female-v2-lbs", only), "unavailable");
+  assert.equal(
+    await checkCharacter("standin-female-v2-lbs", only),
+    "unavailable",
+  );
   assert.equal(await checkCharacter("not-a-character", only), "unknown");
 });

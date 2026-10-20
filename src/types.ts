@@ -1,6 +1,18 @@
+export type {
+  BodyPreferences,
+  BodyRef,
+  BodySelection,
+  BodyRecommendation,
+} from "./body-selection/model.js";
 // 클라(Tauri)와의 /v1 계약 타입.
 // ⚠ 클라 `endpoints.ts`의 타입과 단일 소스로 공유하는 것이 목표(드리프트 방지).
 //   나중에 공용 패키지(packages/contract)로 승격 검토.
+
+import type {
+  BodyRecommendation,
+  BodySelection,
+} from "./body-selection/model.js";
+import type { OutputScope } from "./output-scope/model.js";
 
 export type MatchLevel = "high" | "medium" | "low";
 
@@ -15,27 +27,90 @@ export type AnalysisJobStatus = "queued" | "running" | "completed" | "failed";
 export type FallbackMode = "none" | "soft" | "hard";
 
 export type PersonConfidence = "high" | "low";
-export type SkeletonState = "valid" | "partial" | "suspect" | "missing" | "invalid";
+export type SkeletonState =
+  | "valid"
+  | "partial"
+  | "suspect"
+  | "missing"
+  | "invalid";
 export type SkeletonSource = "full_image" | "crop_retry" | "none";
-export type CoverageClass = "full" | "reduced" | "sparse" | "insufficient";
+export type CoverageClass =
+  | "full"
+  | "reduced"
+  | "sparse"
+  | "upper_only"
+  | "insufficient";
+
+/** Server-owned camera; consumers must not derive it from the legacy search view. */
+interface CandidateCameraBase {
+  rotation: number[][];
+  source_bvh_sha256: string;
+  canonical_yaw: number;
+  display_view: string;
+  status: "fitted" | "canonical_fallback";
+  fit_error: number;
+  facing_source: "person_observation" | "geometry_only";
+  depth_ambiguous: boolean;
+}
+
+export type CandidateCamera = CandidateCameraBase &
+  (
+    | { version: "candidate-camera-v1"; reference: "pelvis-torso-yaw" }
+    | {
+        version: "candidate-camera-v2";
+        reference: "search-fit";
+        projection: "orthographic" | "perspective";
+        distance_torso: number | null;
+        labels_swapped: boolean;
+        pose_id: string;
+        query_sha256: string;
+        observed_joint_mask: boolean[];
+      }
+  );
 
 export interface PoseCandidate {
+  source?: "dynamic" | "semantic" | "library" | "generation";
+  rankScore?: number;
+  lookupAllowed?: boolean;
+  refineAllowed?: boolean;
+  releaseAllowed?: boolean;
+  /** Explicit author selection + final review only; never an automatic search approval. */
+  manualExportAllowed?: boolean;
+  presentationKind?: string;
+  actualMeshValidated?: boolean;
+  reviewRequired?: boolean;
+  notExactMatch?: boolean;
+  searchCamera?: import("./routed-search.js").SearchPreviewCamera;
+  semantic?: {
+    familyId: string;
+    alternate: boolean;
+    description: string;
+    near?: boolean;
+  };
+  sourceBvhSha256?: string;
+  camera?: CandidateCamera;
   id: string; // unique exposed candidate id (pose + view)
-  poseId: string;
+  poseId: string | null;
   rank: number;
   view: string;
   tags: string[];
   matchLevel: MatchLevel;
   bvhAvailable: boolean;
   thumbnailUrl?: string;
+  posterUrl?: string;
+  /** Existing library JPEG for a fast, approximate candidate card. */
+  quickThumbnailUrl?: string;
   // 개발자 모드 전용 원시 점수(UI 기본 노출 X)
   distance?: number;
   rerankScore?: number | null;
 }
 
 export interface AnalysisResult {
+  manualExportVersion?: 1 | 2;
   jobId: string;
-  image: { width: number; height: number };
+  source?: "image" | "semantic";
+  semantic?: { query: string; index: Record<string, string> };
+  image: { width: number; height: number } | null;
   inferenceMetadata: {
     deploymentVersion: string;
     vlmProvider: string;
@@ -44,6 +119,9 @@ export interface AnalysisResult {
     poseModelVersion: string;
     poseLibraryVersion: string;
     featureVersion: number;
+    /** 아래 둘은 추론이 함께 보낼 때만 있다. 그 전에 저장된 결과에는 없다. */
+    vlmPromptVersion?: string | null;
+    poseLibrarySha256?: string | null;
   };
   candidatesByPerson: AnalysisPerson[];
   notes: string[];
@@ -54,6 +132,14 @@ export interface AnalysisResult {
    * 추론 endpoint가 살아 있어도 BFF flag가 꺼져 있으면 여기서 false가 나간다.
    */
   capabilities: {
+    handSelection?: boolean;
+    bodySelection?: boolean;
+    semanticBodySelection?: boolean;
+    bodyRecommendation?: boolean;
+    bodyPreviews?: boolean;
+    presentationBodyPreviews?: boolean;
+    /** Read-only versioned Top-K assets. Does not enable the end-to-end body UX. */
+    bodyPreviewAssets?: boolean;
     refine: boolean;
     /**
      * FBX 저장을 노출해도 되는가. converter는 추론 서버와 별개로 배포되므로 refine과 함께
@@ -61,12 +147,16 @@ export interface AnalysisResult {
      * 배포에서 전건 실패한다 — 그래서 서버가 알려 준다.
      */
     fbxExport: boolean;
+    sceneExport?: boolean;
     /**
      * export의 `characterId`를 존중하는가(ADR-013). 모델 목록과 export 처리는 따로
      * 배포될 수 있어 fbxExport와 따로 둔다 — 목록만 먼저 나가면 클라이언트가 고른 체형과
      * 다른 FBX가 저장된다. 기본 체형 말고 고를 것이 없어도 false다.
      */
     characterSelection: boolean;
+    outputScopeSelection?: boolean;
+    outputScopeCropping?: boolean;
+    modelPreview?: boolean;
   };
 }
 
@@ -74,6 +164,14 @@ export interface AnalysisResult {
 export type ExportFormat = "bvh" | "fbx";
 
 export interface AnalysisPerson {
+  posePresentation?: import("./pose-presentation.js").PosePresentation;
+  routedSearch?: import("./routed-search.js").RoutedSearch;
+  hands?: import("./hands/model.js").PersonHands;
+  handSelection?: import("./hands/model.js").HandSelection;
+  bodyRecommendation?: BodyRecommendation;
+  bodySelection?: BodySelection;
+  bodyPreviewManifestUrl?: string;
+  outputScope?: OutputScope;
   personIndex: number;
   box: number[] | null;
   tags: Record<string, string>;

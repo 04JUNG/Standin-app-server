@@ -1,5 +1,7 @@
+import { SemanticError } from "./semantic/contract.js";
 // 도원 추론 서버 호출을 한 곳에 격리한다(계약이 바뀌어도 여기만 수정).
 // 계약 원본: Standin-server/docs/API_CONTRACT.md
+import type { CandidateCamera } from "./types.js";
 import { config } from "./config.js";
 import { currentContext } from "./requestContext.js";
 
@@ -11,6 +13,15 @@ import { currentContext } from "./requestContext.js";
  * 실패시키는 대신 `mapping.ts`가 low/refine-off 쪽으로 안전하게 해석한다.
  */
 export interface UpstreamPerson {
+  refine_candidates?: UpstreamPerson["candidates"];
+  pose_presentation?: unknown;
+  dynamic_search?: unknown;
+  semantic_candidates?: unknown;
+  search_routing?: unknown;
+  hands?: unknown;
+  output_scope?: { detected?: unknown; source?: unknown; mesh_scope?: unknown };
+  /** 인물별 action·view(추론 `person_tags`). 공백 분석용이며 공개 응답에는 넣지 않는다. */
+  person_tags?: { action?: unknown; view?: unknown; source?: unknown };
   index: number;
   box: number[] | null;
   tags: Record<string, string>;
@@ -28,6 +39,7 @@ export interface UpstreamPerson {
     rerank_score: number | null;
     bvh_url: string;
     thumbnail_url: string | null;
+    camera?: CandidateCamera | null;
   }>;
   // ── PR #10 스켈레톤 품질 신호 ────────────────────────────────
   skeleton_state?: string;
@@ -60,6 +72,7 @@ export interface UpstreamPerson {
 
 // 추론 /analyze 응답(CutResult) — 필요한 필드만.
 export interface CutResult {
+  body_matching?: unknown;
   route: string;
   count_confidence: string;
   detector_count: number;
@@ -71,11 +84,17 @@ export interface CutResult {
     deployment_version: string;
     vlm_provider: string;
     vlm_model: string;
+    /** 답한 VLM 프롬프트. 이 필드가 생기기 전 추론 응답에는 없다. */
+    vlm_prompt_version?: string | null;
     pose_backend: string;
     pose_model_version: string;
     pose_library_version: string;
+    /** 번들 manifest의 내용 해시. manifest 없는 옛 번들이면 null. */
+    pose_library_sha256?: string | null;
     feature_version: number;
   };
+  /** VLM이 컷에 대해 실제로 말한 태그. 어휘 밖 값은 null이다(people[].tags와 다름). */
+  vlm_tags?: Record<string, unknown> | null;
 }
 
 /** 추론 호출이 상한 시간을 넘겼다. 5xx와 구분해 Job 실패 사유로 남긴다. */
@@ -105,6 +124,10 @@ export class InferenceError extends Error {
 export type AnalysisFailureCode =
   | "ANALYSIS_TIMEOUT"
   | "ANALYSIS_UNAVAILABLE"
+  | "ANALYSIS_RATE_LIMITED"
+  | "ANALYSIS_DAILY_QUOTA_EXHAUSTED"
+  | "ANALYSIS_UPSTREAM_TIMEOUT"
+  | "ANALYSIS_UPSTREAM_ERROR"
   | "INFERENCE_FAILED";
 
 /**
@@ -132,14 +155,50 @@ export type AnalysisFailureCode =
  * (master-docs #6 「남는 질문」).
  */
 export function shouldRefundQuota(code: AnalysisFailureCode): boolean {
-  return code === "ANALYSIS_UNAVAILABLE";
+  // 기존에 모두 ANALYSIS_UNAVAILABLE로 환급하던 HTTP 503의 세부 사유다.
+  // 원인 표시만 분리하고 차감/환급 정책은 바꾸지 않는다.
+  return (
+    code === "ANALYSIS_UNAVAILABLE" ||
+    code === "ANALYSIS_RATE_LIMITED" ||
+    code === "ANALYSIS_DAILY_QUOTA_EXHAUSTED" ||
+    code === "ANALYSIS_UPSTREAM_TIMEOUT" ||
+    code === "ANALYSIS_UPSTREAM_ERROR"
+  );
 }
 
 export function analysisFailureCode(error: unknown): AnalysisFailureCode {
   if (error instanceof InferenceTimeoutError) return "ANALYSIS_TIMEOUT";
-  // 503은 HTTP 의미 그대로 "지금은 못 하지만 나중엔 된다"다. 추론이 이 상태로만
-  // 답하도록 계약을 맞춰 뒀으므로 본문 code를 파싱하지 않고 상태로 판단한다.
-  if (error instanceof InferenceError && error.status === 503) return "ANALYSIS_UNAVAILABLE";
+  if (error instanceof InferenceError && error.status === 503) {
+    // Standin-server #86: HTTP 503은 유지하되 detail.reason으로 원인을 구분한다.
+    // 알려진 계약만 읽고 제공자 원문/메시지는 클라이언트로 전달하지 않는다.
+    try {
+      const body: unknown = JSON.parse(error.detail);
+      if (body && typeof body === "object" && "detail" in body) {
+        const detail = body.detail;
+        if (
+          detail &&
+          typeof detail === "object" &&
+          "code" in detail &&
+          detail.code === "VLM_UNAVAILABLE" &&
+          "reason" in detail
+        ) {
+          switch (detail.reason) {
+            case "rate_limited":
+              return "ANALYSIS_RATE_LIMITED";
+            case "daily_quota_exhausted":
+              return "ANALYSIS_DAILY_QUOTA_EXHAUSTED";
+            case "timeout":
+              return "ANALYSIS_UPSTREAM_TIMEOUT";
+            case "upstream_error":
+              return "ANALYSIS_UPSTREAM_ERROR";
+          }
+        }
+      }
+    } catch {
+      /* 구 서버/비 JSON 503은 기존 경로를 유지한다. */
+    }
+    return "ANALYSIS_UNAVAILABLE";
+  }
   return "INFERENCE_FAILED";
 }
 
@@ -177,7 +236,8 @@ export async function analyze(file: Blob, hint = ""): Promise<CutResult> {
       signal: AbortSignal.timeout(config.analysisTimeoutMs),
     });
   } catch (error) {
-    if (isAbortTimeout(error)) throw new InferenceTimeoutError(config.analysisTimeoutMs);
+    if (isAbortTimeout(error))
+      throw new InferenceTimeoutError(config.analysisTimeoutMs);
     throw error;
   }
   if (!res.ok) {
@@ -201,6 +261,8 @@ export async function analyze(file: Blob, hint = ""): Promise<CutResult> {
  *   전부 `/analyze` 때 DB에 넣어 둔 값이며 클라이언트가 되돌려 보내는 값이 아니다(BFF-04).
  */
 export interface RefineUpstreamRequest {
+  render_thumbnail?: boolean;
+  camera?: CandidateCamera;
   pose_id: string;
   view: string;
   keypoints: number[][];
@@ -278,7 +340,9 @@ export interface RefineUpstreamThumbnail {
  * 명시적 timeout을 둔다(BFF-07). refine은 사용자가 저장을 기다리는 동기 경로이므로
  * 추론이 느려질 때 무한정 붙잡고 있으면 저장 흐름 전체가 멈춘다.
  */
-export async function refine(req: RefineUpstreamRequest): Promise<RefineUpstreamResponse> {
+export async function refine(
+  req: RefineUpstreamRequest,
+): Promise<RefineUpstreamResponse> {
   const res = await fetch(`${config.inferenceBaseUrl}/refine`, {
     method: "POST",
     body: JSON.stringify(req),
@@ -295,16 +359,38 @@ export async function refine(req: RefineUpstreamRequest): Promise<RefineUpstream
 // 디스크에서 조정본을 받아오던 경로인데, 이제 조정본은 /refine 응답 본문으로만 온다.
 
 // GET /pose/{id}/bvh → 원본 응답(상태·바디를 호출측이 그대로 프록시)
-export async function getPoseBvh(poseId: string): Promise<Response> {
+export async function getPoseBvh(
+  poseId: string,
+  signal?: AbortSignal,
+): Promise<Response> {
   return fetch(
     `${config.inferenceBaseUrl}/pose/${encodeURIComponent(poseId)}/bvh`,
     {
       headers: authHeaders(),
+      signal: signal ?? AbortSignal.timeout(10_000),
     },
   );
 }
 
 // GET /pose/{id}/thumbnail?view=... → PNG 원본 응답
+/** 포즈 라이브러리 한 페이지(관리자 모아 보기). 쿼리는 호출하는 쪽이 검증해서 넘긴다. */
+export async function listLibraryPoses(
+  params: URLSearchParams,
+): Promise<Response> {
+  return fetch(`${config.inferenceBaseUrl}/poses?${params.toString()}`, {
+    headers: { ...authHeaders() },
+    signal: AbortSignal.timeout(10_000),
+  });
+}
+
+/** 포즈 라이브러리의 출처별·분류별 폴더. */
+export async function libraryFolders(): Promise<Response> {
+  return fetch(`${config.inferenceBaseUrl}/poses/folders`, {
+    headers: { ...authHeaders() },
+    signal: AbortSignal.timeout(10_000),
+  });
+}
+
 export async function getPoseThumbnail(
   poseId: string,
   view: string,
@@ -324,6 +410,52 @@ export async function getPoseThumbnail(
 }
 
 // GET /healthz → 추론 서버 가용 여부
+/** 추론 `/healthz`의 `pose_library`. 이 필드가 없는 추론 서버면 null. */
+export interface InferenceLibrary {
+  version: string;
+  source: string | null;
+  contentSha256: string | null;
+}
+
+/**
+ * 추론 상태와 떠 있는 포즈 라이브러리. 운영 대시보드가 쓴다.
+ * health()와 같은 상한을 쓴다 — 추론이 멈춰도 대시보드 요청까지 멈추면 안 된다.
+ */
+export async function inferenceStatus(): Promise<{
+  healthy: boolean;
+  library: InferenceLibrary | null;
+}> {
+  try {
+    const res = await fetch(`${config.inferenceBaseUrl}/healthz`, {
+      headers: authHeaders(),
+      signal: AbortSignal.timeout(config.healthTimeoutMs),
+    });
+    const body = (await res.json().catch(() => null)) as Record<
+      string,
+      unknown
+    > | null;
+    const library = body?.pose_library as
+      Record<string, unknown> | null | undefined;
+    return {
+      healthy: res.ok,
+      library:
+        library && typeof library.version === "string"
+          ? {
+              version: library.version,
+              source:
+                typeof library.source === "string" ? library.source : null,
+              contentSha256:
+                typeof library.content_sha256 === "string"
+                  ? library.content_sha256
+                  : null,
+            }
+          : null,
+    };
+  } catch {
+    return { healthy: false, library: null };
+  }
+}
+
 export async function health(): Promise<boolean> {
   try {
     // ⚠ 상한이 없으면 추론이 멈출 때 /healthz도 같이 멈춘다. ALB는 그걸 BFF 장애로
@@ -343,5 +475,150 @@ async function safeText(res: Response): Promise<string> {
     return await res.text();
   } catch {
     return "";
+  }
+}
+
+// Hand metadata uses the same internal authentication and timeout as other reads.
+export async function getHandCatalog(): Promise<Response> {
+  return fetch(`${config.inferenceBaseUrl}/hands/catalog`, {
+    headers: authHeaders(),
+    signal: AbortSignal.timeout(config.healthTimeoutMs),
+  });
+}
+export async function getHandThumbnail(
+  preset: string,
+  side: "left" | "right",
+  etag?: string,
+): Promise<Response> {
+  return fetch(
+    `${config.inferenceBaseUrl}/hands/${encodeURIComponent(preset)}/thumbnail?side=${side}`,
+    {
+      headers: { ...authHeaders(), ...(etag ? { "If-None-Match": etag } : {}) },
+      signal: AbortSignal.timeout(config.healthTimeoutMs),
+    },
+  );
+}
+
+/** Direct user text only; never run VLM or refine on this path. Do not log the query/body. */
+export async function searchSemantic(
+  query: string,
+  topK: number | null,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  const response = await fetch(`${config.inferenceBaseUrl}/semantic-search`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ query, topK }),
+    signal: signal ?? AbortSignal.timeout(config.semanticSearchTimeoutMs),
+  });
+  const body: unknown = await response.json().catch(() => null);
+  if (
+    !response.ok &&
+    !(
+      body &&
+      typeof body === "object" &&
+      "status" in body &&
+      body.status === "error"
+    )
+  )
+    throw new SemanticError(
+      response.status === 422 ? "INVALID_INPUT" : "SEMANTIC_UNAVAILABLE",
+      response.status === 422 ? 400 : 503,
+    );
+  return body;
+}
+export async function semanticReadiness(): Promise<boolean> {
+  try {
+    const response = await fetch(`${config.inferenceBaseUrl}/healthz`, {
+      headers: authHeaders(),
+      signal: AbortSignal.timeout(config.healthTimeoutMs),
+    });
+    const body: unknown = await response.json();
+    if (
+      !response.ok ||
+      !body ||
+      typeof body !== "object" ||
+      !("semantic_text" in body)
+    )
+      return false;
+    const semantic = body.semantic_text;
+    return (
+      !!semantic &&
+      typeof semantic === "object" &&
+      "ready" in semantic &&
+      semantic.ready === true
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Offline poster or cheap pose-only reference; the inference endpoint never calls Blender. */
+export function getPosePoster(
+  poseId: string,
+  sourceSha256: string,
+  scope = "full",
+): Promise<Response> {
+  const params = new URLSearchParams({ source_sha256: sourceSha256, scope });
+  return fetch(
+    `${config.inferenceBaseUrl}/pose/${encodeURIComponent(poseId)}/poster?${params}`,
+    {
+      headers: authHeaders(),
+      signal: AbortSignal.timeout(5_000),
+    },
+  );
+}
+
+/** Shared immutable default mesh; no selected-body conversion. */
+export function getDefaultBodyTemplate(scope: string): Promise<Response> {
+  return fetch(
+    `${config.inferenceBaseUrl}/pose-poster-template/${encodeURIComponent(scope)}`,
+    {
+      headers: authHeaders(),
+      signal: AbortSignal.timeout(5_000),
+    },
+  );
+}
+
+/** Separate opt-in scene worker; does not alter /analyze's deadline. */
+export async function sceneRefinementRequest(
+  stage: "plan" | "build",
+  value: unknown,
+): Promise<Record<string, any>> {
+  if (!config.sceneRefinementBaseUrl || !config.sceneRefinementToken)
+    throw new Error("scene worker disabled");
+  const response = await fetch(
+    `${config.sceneRefinementBaseUrl.replace(/\/+$/, "")}/scene/${stage}`,
+    {
+      method: "POST",
+      redirect: "error",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${config.sceneRefinementToken}`,
+      },
+      body: JSON.stringify(value),
+      signal: AbortSignal.timeout(config.sceneRefinementTimeoutMs),
+    },
+  );
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new Error(`scene worker rejected (${response.status})`);
+  }
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("empty scene result");
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const v = await reader.read();
+      if (v.done) break;
+      size += v.value.length;
+      if (size > 192 * 1024 * 1024) throw new Error("scene response too large");
+      chunks.push(v.value);
+    }
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
 }

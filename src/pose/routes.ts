@@ -1,11 +1,22 @@
+import { createHumanReferenceRoutes } from "../human-reference.js";
+import { refinableLibraryCandidate } from "../refine/eligibility.js";
+import { exportCandidateAllowed, manualExportCandidate } from "../routed-search.js";
+import { createDefaultPosterRoutes } from "../pose-posters.js";
+import { createRoutedPreviewRoutes } from "../routed-preview.js";
+import { createReleaseGuard } from "../release-policy.js";
+import { createAlignedRoutes } from "../candidate-camera/routes.js";
+import { getOwnedJob } from "../jobs/store.js";
+import { cameraArtifact } from "../candidate-camera/artifacts.js";
+import { EXPECTED_SOLVER_VERSION } from "../converter/client.js";
+import { createFramingRoutes } from "../output-scope/framingRoutes.js";
 // /v1/pose-candidates — 선택 후보의 최종 포즈 파일(BVH 또는 V3.2 FBX)을 내려준다.
 import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
 import { config } from "../config.js";
 import { log } from "../log.js";
-import { getPoseBvh, getPoseThumbnail } from "../inference.js";
+import { getPoseBvh, getPoseThumbnail, getPosePoster, getDefaultBodyTemplate } from "../inference.js";
 import { errorEnvelope } from "../mapping.js";
-import { recordExport, validateExportCandidate } from "../analytics/store.js";
+import { recordExport, validateExportCandidate, validateConfirmedSelection } from "../analytics/store.js";
 import { resolveExportArtifact } from "../refine/service.js";
 import { checkCharacter } from "../characters/service.js";
 import type { ExportFormat } from "../types.js";
@@ -17,7 +28,19 @@ import {
   sha256Hex,
 } from "../converter/client.js";
 
-export const poseRoutes = new Hono<AppEnv>();
+const defaults = {
+  getOwnedJob, getPoseBvh, getPoseThumbnail, getPosePoster, getDefaultBodyTemplate, validateExportCandidate, validateConfirmedSelection,
+  recordExport, resolveExportArtifact, checkCharacter, converterEnabled, convertBvhToFbx,
+};
+export function createPoseRoutes(overrides: Partial<typeof defaults> = {}) {
+const deps = { ...defaults, ...overrides };
+const poseRoutes = new Hono<AppEnv>();
+poseRoutes.route("/", createDefaultPosterRoutes(deps));
+poseRoutes.route("/", createHumanReferenceRoutes(deps));
+poseRoutes.use("/:id/export", createReleaseGuard(deps.getOwnedJob, deps.validateConfirmedSelection));
+poseRoutes.route("/", createRoutedPreviewRoutes());
+poseRoutes.route("/", createFramingRoutes());
+poseRoutes.route("/", createAlignedRoutes());
 
 function bytesResponse(bytes: Uint8Array, fileName: string): Response {
   return new Response(bytes, {
@@ -90,7 +113,7 @@ poseRoutes.get("/:id/export", async (c) => {
     !Number.isInteger(personIndex) ||
     personIndex < 0 ||
     !candidateId ||
-    !(await validateExportCandidate(installationId, jobId, personIndex, candidateId))
+    !(await deps.validateExportCandidate(installationId, jobId, personIndex, candidateId))
   ) {
     return c.json(
       errorEnvelope("INVALID_EXPORT", "작업에서 선택된 후보가 아닙니다.", c.get("requestId")),
@@ -98,9 +121,17 @@ poseRoutes.get("/:id/export", async (c) => {
     );
   }
 
+  if (format === "fbx") {
+    const job = await deps.getOwnedJob(jobId, installationId);
+    if (manualExportCandidate(job?.result?.candidatesByPerson.find((p) => p.personIndex === personIndex)?.candidates.find((p) => p.id === candidateId)))
+      return c.json(errorEnvelope("MANUAL_REVIEW_REQUIRED", "선택한 포즈의 최종 미리보기를 확인한 뒤 저장해 주세요.", c.get("requestId")), 409);
+    if (job?.result?.candidatesByPerson.find((p) => p.personIndex === personIndex)?.handSelection)
+      return c.json(errorEnvelope("HAND_REVIEW_REQUIRED", "손이 적용된 최종 미리보기를 확인한 뒤 저장해 주세요.", c.get("requestId")), 409);
+  }
+
   // FBX가 꺼진 배포에서 fbx 요청이 오면 조용히 BVH로 바꾸지 않는다. 사용자가 고른 포맷과
   // 저장된 파일이 달라지면 클립스튜디오에서 열리지 않는 이유를 알 방법이 없다.
-  if (format === "fbx" && !converterEnabled()) {
+  if (format === "fbx" && !deps.converterEnabled()) {
     return c.json(
       errorEnvelope(
         "FBX_UNAVAILABLE",
@@ -120,7 +151,7 @@ poseRoutes.get("/:id/export", async (c) => {
    */
   const requestedCharacterId = format === "fbx" ? (c.req.query("characterId") ?? "") : "";
   if (requestedCharacterId) {
-    const check = await checkCharacter(requestedCharacterId);
+    const check = await deps.checkCharacter(requestedCharacterId);
     // ⚠ 조용히 기본 체형으로 바꾸지 않는다. 고른 체형과 파일이 일치하는 것이 이 기능의
     //   전부다 — 대체하면 사용자는 다른 인형을 받고도 알 방법이 없다.
     if (check === "unknown") {
@@ -146,7 +177,7 @@ poseRoutes.get("/:id/export", async (c) => {
   }
   const characterId = requestedCharacterId || config.converterCharacterId;
 
-  await recordExport({
+  await deps.recordExport({
     installationId,
     jobId,
     personIndex,
@@ -157,11 +188,11 @@ poseRoutes.get("/:id/export", async (c) => {
 
   // 이 바이트가 조정본과 베이스 중 무엇인지는 서버가 정한다(BFF-06). 클라이언트는
   // 추론 서버의 로컬 handle을 알 필요가 없고, 알아서도 안 된다.
-  const artifact = await resolveExportArtifact(jobId, personIndex, candidateId);
+  const artifact = await deps.resolveExportArtifact(jobId, personIndex, candidateId);
   const variant = artifact.variant;
   const fallbackReason = artifact.variant === "base" ? artifact.fallbackReason : null;
   const failed = (errorCode: string) =>
-    recordExport({
+    deps.recordExport({
       installationId,
       jobId,
       personIndex,
@@ -179,7 +210,7 @@ poseRoutes.get("/:id/export", async (c) => {
   } else {
     let upstream: Response;
     try {
-      upstream = await getPoseBvh(poseId);
+      upstream = await deps.getPoseBvh(poseId);
     } catch {
       await failed("INFERENCE_UNAVAILABLE");
       throw new Error("pose export upstream unavailable");
@@ -214,8 +245,24 @@ poseRoutes.get("/:id/export", async (c) => {
     finalBvh = new Uint8Array(await upstream.arrayBuffer());
   }
 
+  const job = await deps.getOwnedJob(jobId, installationId);
+  const exposed = job?.result?.candidatesByPerson.find((p) => p.personIndex === personIndex)?.candidates.find((p) => p.id === candidateId && p.poseId === poseId);
+  let sourceValid = !exposed?.sourceBvhSha256;
+  if (exposed?.sourceBvhSha256) {
+    if (artifact.variant === "base") sourceValid = sha256Hex(finalBvh) === exposed.sourceBvhSha256;
+    else if (refinableLibraryCandidate(exposed)) {
+      const base = await deps.getPoseBvh(poseId);
+      sourceValid = base.ok && sha256Hex(new Uint8Array(await base.arrayBuffer())) === exposed.sourceBvhSha256;
+      if (!base.ok) await base.body?.cancel();
+    }
+  }
+  if (job?.status !== "completed" || !exposed || !exportCandidateAllowed(exposed) ||
+    (manualExportCandidate(exposed) && !(await deps.validateConfirmedSelection(installationId, jobId, personIndex, candidateId))) || !sourceValid) {
+    await failed("POSE_UNAVAILABLE");
+    return c.json(errorEnvelope("POSE_UNAVAILABLE", "포즈가 변경되었습니다. 다시 검색해 주세요.", c.get("requestId")), 409);
+  }
   if (format === "bvh") {
-    await recordExport({
+    await deps.recordExport({
       installationId,
       jobId,
       personIndex,
@@ -230,9 +277,15 @@ poseRoutes.get("/:id/export", async (c) => {
 
   // ── FBX: 확정한 바이트 하나만 converter로 보낸다 ──────────────────────────
   const finalBvhSha256 = sha256Hex(finalBvh);
+  const candidate = job?.result?.candidatesByPerson.find(p => p.personIndex === personIndex)?.candidates.find(p => p.id === candidateId && p.poseId === poseId);
+  if (!candidate) return c.json(errorEnvelope("INVALID_EXPORT", "선택된 후보가 아닙니다.", c.get("requestId")), 409);
+  if (variant === "base" && candidate.camera && finalBvhSha256 !== candidate.camera.source_bvh_sha256)
+    return c.json(errorEnvelope("POSE_UNAVAILABLE", "포즈가 변경되었습니다. 다시 분석해 주세요.", c.get("requestId")), 409);
   let conversion;
   try {
-    conversion = await convertBvhToFbx({
+    conversion = candidate.camera
+      ? { ...await cameraArtifact([installationId, jobId, personIndex, candidateId], { bvhBytes: finalBvh, characterId, scope: "full", cameraRotation: candidate.camera.rotation }), solverVersion: EXPECTED_SOLVER_VERSION }
+      : await deps.convertBvhToFbx({
       bvhBytes: finalBvh,
       fileName: converterUploadName(poseId),
       // MVP에서 mirror는 converter가 한 번만 적용하고, 우리는 아직 사용자에게 노출하지
@@ -269,6 +322,10 @@ poseRoutes.get("/:id/export", async (c) => {
     );
   }
 
+  const current = await deps.getOwnedJob(jobId, installationId);
+  if (current?.result?.candidatesByPerson.find((p) => p.personIndex === personIndex)?.handSelection)
+    return c.json(errorEnvelope("HAND_REVIEW_REQUIRED", "손이 적용된 최종 미리보기를 확인한 뒤 저장해 주세요.", c.get("requestId")), 409);
+
   log.info({
     type: "converter",
     event: "convert_completed",
@@ -286,7 +343,7 @@ poseRoutes.get("/:id/export", async (c) => {
     characterId,
     mirror: false,
   });
-  await recordExport({
+  await deps.recordExport({
     installationId,
     jobId,
     personIndex,
@@ -313,7 +370,7 @@ poseRoutes.get("/:id/thumbnail", async (c) => {
     );
   }
 
-  const upstream = await getPoseThumbnail(
+  const upstream = await deps.getPoseThumbnail(
     c.req.param("id"),
     view,
     c.req.header("if-none-match"),
@@ -340,3 +397,8 @@ poseRoutes.get("/:id/thumbnail", async (c) => {
 
   return new Response(upstream.body, { status: upstream.status, headers });
 });
+
+return poseRoutes;
+}
+
+export const poseRoutes = createPoseRoutes();

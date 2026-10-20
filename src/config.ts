@@ -5,10 +5,51 @@ function env(key: string, def = ""): string {
   return process.env[key] ?? def;
 }
 
+/** 프로덕션 BFF 주소. staging 전용 스위치가 여기서 켜지지 않게 막는 데 쓴다. */
+const PRODUCTION_PUBLIC_URL = "https://api.standinpose.com";
+
 export const config = {
+  poseThumbnailRevision: env(
+    "POSE_THUMBNAIL_REVISION",
+    env("DEPLOYMENT_VERSION"),
+  ),
+  handSelectionEnabled: env("HAND_SELECTION_ENABLED", "false") === "true",
+  semanticSearchEnabled: env("SEMANTIC_SEARCH_ENABLED", "false") === "true",
+  semanticSearchPerMinute: Math.max(
+    1,
+    Number(env("SEMANTIC_SEARCH_PER_MINUTE", "10")) || 10,
+  ),
+  semanticSearchTimeoutMs: Math.max(
+    1000,
+    Number(env("SEMANTIC_SEARCH_TIMEOUT_MS", "30000")) || 30000,
+  ),
+  bodyUxEnabled: env("BODY_UX_ENABLED", "false") === "true",
+  bodySelectionEnabled: env("BODY_SELECTION_ENABLED", "false") === "true",
+  bodyCatalogPath: env("BODY_CATALOG_PATH", "config/body-models.json"),
+  /**
+   * Numeric body controls (`body-shape.v1`). Even when on, only assets whose catalog
+   * entry declares `shape` are editable, and shaped selections cannot render until the
+   * converter accepts controls.
+   */
+  bodyShapeBakeEnabled: env("BODY_SHAPE_BAKE_ENABLED", "false") === "true",
+  bodyShapeEditEnabled: env("BODY_SHAPE_EDIT_ENABLED", "false") === "true",
   port: Number(process.env.PORT ?? 8080),
   // BFF 공개 URL(OAuth 콜백·이메일 인증 링크 구성용)
   publicUrl: env("PUBLIC_URL", "http://localhost:8080"),
+
+  /**
+   * 관리자 열람을 품질 검토 동의와 떼어 놓는 스위치. **staging 전용.**
+   *
+   * staging은 팀원만 쓴다. 동의 화면을 거치지 않은 설치도 원본·설치별 상세·결과를
+   * 대시보드에서 볼 수 있게 한다(2026-10-19 사용자 결정, 품질 개선에는 쓰지 않음).
+   * 철회·삭제 요청한 설치는 여전히 뺀다. 수집 쪽(이벤트·피드백)은 바꾸지 않는다 —
+   * 동의 없는 설치에서는 애초에 그 기록이 오지 않는다.
+   *
+   * 프로덕션 주소에서는 값과 상관없이 꺼진다. 배포 워크플로도 main에서는 false로 고정한다.
+   */
+  reviewWithoutQualityConsent:
+    env("REVIEW_WITHOUT_QUALITY_CONSENT", "false") === "true" &&
+    env("PUBLIC_URL", "http://localhost:8080") !== PRODUCTION_PUBLIC_URL,
 
   /**
    * CORS 허용 출처. 콤마로 구분해 CORS_ORIGINS로 덮어쓴다.
@@ -34,9 +75,10 @@ export const config = {
    * refine 노출 스위치(OPS-02). 추론 서버의 REFINE_ENABLED와 **별도**다.
    *
    * 추론 endpoint가 살아 있어도 이 값이 false면 클라이언트에 refine을 노출하지 않는다.
-   * 조정본 영속화와 저장 전 미리보기가 staging에서 검증되기 전까지 production 기본값은 off다.
+   * 선택한 후보의 명시적 권한·저장 컨텍스트·기존 solver 게이트를 통과할 때만 호출한다.
+   * 명시적 false는 배포 환경의 비상 스위치로 유지한다.
    */
-  refineFeatureEnabled: env("REFINE_FEATURE_ENABLED", "false") === "true",
+  refineFeatureEnabled: env("REFINE_FEATURE_ENABLED", "true") === "true",
   /**
    * refine은 사용자가 저장을 기다리는 동기 경로다. 느려지면 베이스로 넘어간다(BFF-07).
    *
@@ -46,6 +88,14 @@ export const config = {
    *   복구 경로가 실전에서 한 번도 관측되지 않는다.
    */
   refineTimeoutMs: Number(process.env.REFINE_TIMEOUT_MS ?? 9000),
+  /**
+   * 추론이 `/refine` 안에서 미리보기를 그리게 할지. 기본은 끈다.
+   *
+   * 미리보기 렌더가 20초쯤 걸려 위 `refineTimeoutMs`(운영 5초) 안에 끝나지 않는다. 켜 두면
+   * 미리보기만 못 받는 게 아니라 조정 결과까지 `upstream_unavailable`로 버려진다. 미리보기는
+   * 처음 볼 때 따로 그린다(`refine/thumbnail.ts`).
+   */
+  refineInlineThumbnail: process.env.REFINE_INLINE_THUMBNAIL === "1",
 
   /**
    * 내부 Converter API(V3.2 BVH→FBX). 추론 서버와 **다른 서비스**다 — 별도 ECS service,
@@ -62,6 +112,13 @@ export const config = {
    * 반대로 flag만 보고 켜면 URL 없이 켜져 전건 실패한다. 둘을 함께 요구하는 이유다.
    */
   fbxExportEnabled: env("FBX_EXPORT_ENABLED", "false") === "true",
+  sceneRefinementEnabled: env("SCENE_REFINEMENT_ENABLED", "false") === "true",
+  sceneRefinementBaseUrl: env("SCENE_REFINEMENT_BASE_URL", ""),
+  sceneRefinementToken: env("SCENE_REFINEMENT_TOKEN", ""),
+  sceneRefinementTimeoutMs: Number(
+    process.env.SCENE_REFINEMENT_TIMEOUT_MS ?? 900_000,
+  ),
+  sceneExportEnabled: env("SCENE_EXPORT_ENABLED", "false") === "true",
   /**
    * converter 호출 상한. converter 자체 변환 timeout이 30초이므로 **그보다 커야** 한다.
    *
@@ -69,6 +126,13 @@ export const config = {
    * 양쪽 로그를 conversion_id로 이을 수 없어 어느 변환이 늦었는지 추적하지 못한다.
    */
   converterTimeoutMs: Number(process.env.CONVERTER_TIMEOUT_MS ?? 35_000),
+  /**
+   * 수치 체형 굽기 호출 상한. converter의 `CONVERTER_SHAPE_TIMEOUT_SECONDS`(기본 300초)보다 커야 한다.
+   * 굽기는 원본 .blend를 두 번 열고 접촉 보정을 돌려 한 번에 30~110초(2 vCPU 실측) 걸린다.
+   */
+  converterShapeTimeoutMs: Number(
+    process.env.CONVERTER_SHAPE_TIMEOUT_MS ?? 320_000,
+  ),
   /**
    * **기본** 캐릭터. 클라이언트가 `characterId`를 보내지 않으면 이 값으로 변환한다(ADR-013).
    *
@@ -125,15 +189,27 @@ export const config = {
    * 설정 화면에 그대로 표시되므로 그 값을 넣는다. 인증(기기 토큰)을 통과한 뒤에만 적용된다.
    */
   quotaExemptInstallations: parseExemptList(env("QUOTA_EXEMPT_INSTALLATIONS")),
+  /**
+   * 라이브러리 공백 분석용 비식별 export(`GET /v1/admin/gaps/observations`).
+   * 키는 커서 암호화와 export별 가명 salt 유도에 쓴다. 비어 있으면 그 엔드포인트만 503이다.
+   * 인프라 시크릿 `standin/<env>/gap-export`의 `hmacKey`·`reviewers`가 주입된다.
+   */
+  gapExportHmacKey: env("GAP_EXPORT_HMAC_KEY"),
+  /** export를 받을 검토자 이름(콤마 구분, BETA_REVIEW_ADMIN_TOKEN JSON의 키). 비면 아무도 못 받는다. */
+  gapExportReviewers: parseExemptList(env("GAP_EXPORT_REVIEWERS")),
   // 설치별 동시 분석. 중복 클릭·폭주 방지가 목적이라 1이면 충분하다.
-  quotaInstallationConcurrent: Number(process.env.QUOTA_INSTALLATION_CONCURRENT ?? 1),
+  quotaInstallationConcurrent: Number(
+    process.env.QUOTA_INSTALLATION_CONCURRENT ?? 1,
+  ),
   /**
    * 이 시간이 지나도 queued/running인 Job은 유실로 본다.
    *
    * 러너가 프로세스 내 fire-and-forget이라 배포·태스크 교체 시 상태가 running인 채로 남는다.
    * 동시 분석 한도가 1이면 그 설치는 영원히 막히므로, 오래된 Job은 세지 않고 실패로 정리한다.
    */
-  analysisStaleAfterSeconds: Number(process.env.ANALYSIS_STALE_AFTER_SECONDS ?? 300),
+  analysisStaleAfterSeconds: Number(
+    process.env.ANALYSIS_STALE_AFTER_SECONDS ?? 300,
+  ),
   // IP burst. NAT·공용망 사용자를 고려해 너무 낮게 잡지 않는다.
   rateIpRegister: Number(process.env.RATE_IP_REGISTER ?? 5),
   rateIpRegisterWindow: Number(process.env.RATE_IP_REGISTER_WINDOW ?? 3600),
@@ -158,7 +234,10 @@ export const config = {
 
   // BFF 전용 DB(추론 poses.db와 분리). PostgreSQL.
   // 기본 포트가 5433인 이유는 docker-compose.yml 주석 참고(네이티브 Postgres와 충돌 회피).
-  databaseUrl: env("DATABASE_URL", "postgres://standin:standin@localhost:5433/standin"),
+  databaseUrl: env(
+    "DATABASE_URL",
+    "postgres://standin:standin@localhost:5433/standin",
+  ),
   /**
    * PGHOST가 있으면 접속 문자열 대신 표준 PG* 변수를 쓴다.
    *
@@ -174,9 +253,18 @@ export const config = {
   // 소셜 로그인 성공 후 토큰을 넘길 클라 리디렉트(데스크톱 딥링크 등). 없으면 콜백이 JSON 반환.
   oauthSuccessRedirect: env("OAUTH_SUCCESS_REDIRECT"),
   oauth: {
-    google: { clientId: env("GOOGLE_CLIENT_ID"), clientSecret: env("GOOGLE_CLIENT_SECRET") },
-    kakao: { clientId: env("KAKAO_CLIENT_ID"), clientSecret: env("KAKAO_CLIENT_SECRET") },
-    naver: { clientId: env("NAVER_CLIENT_ID"), clientSecret: env("NAVER_CLIENT_SECRET") },
+    google: {
+      clientId: env("GOOGLE_CLIENT_ID"),
+      clientSecret: env("GOOGLE_CLIENT_SECRET"),
+    },
+    kakao: {
+      clientId: env("KAKAO_CLIENT_ID"),
+      clientSecret: env("KAKAO_CLIENT_SECRET"),
+    },
+    naver: {
+      clientId: env("NAVER_CLIENT_ID"),
+      clientSecret: env("NAVER_CLIENT_SECRET"),
+    },
   },
 
   /**
@@ -203,8 +291,12 @@ export const config = {
    * 추론 서버 헬스 확인 주기와 P1 승격 임계. 일시적 흔들림으로 사람을 깨우지 않기 위해
    * 연속 실패 횟수를 센다(기본 30초 × 3회 = 약 1분 30초).
    */
-  inferenceWatchIntervalMs: Number(process.env.INFERENCE_WATCH_INTERVAL_MS ?? 30_000),
-  inferenceWatchFailureThreshold: Number(process.env.INFERENCE_WATCH_FAILURES ?? 3),
+  inferenceWatchIntervalMs: Number(
+    process.env.INFERENCE_WATCH_INTERVAL_MS ?? 30_000,
+  ),
+  inferenceWatchFailureThreshold: Number(
+    process.env.INFERENCE_WATCH_FAILURES ?? 3,
+  ),
 
   // 이메일 인증 발송(SMTP). 미설정이면 콘솔에 링크 출력(dev).
   smtp: {

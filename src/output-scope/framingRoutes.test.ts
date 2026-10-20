@@ -1,0 +1,481 @@
+import type { HandBake } from "../hands/model.js";
+import assert from "node:assert/strict";
+import test from "node:test";
+import { Hono } from "hono";
+import type { AppEnv } from "../env.js";
+import type { Job } from "../jobs/store.js";
+import { createFramingRoutes } from "./framingRoutes.js";
+import { resolveOutputScope } from "./model.js";
+import { sha256Hex } from "../converter/client.js";
+
+const sourceSha = sha256Hex(Buffer.from("HIERARCHY MOTION"));
+function libraryModel(characterSha = "b".repeat(64)) {
+  const json = JSON.stringify({
+    asset: {
+      extras: {
+        version: "posed-mesh-v1",
+        source_bvh_sha256: sourceSha,
+        character_id: "master",
+        character_sha256: characterSha,
+        scope: "full",
+        coordinates: "Y-up-hips-origin",
+      },
+    },
+  });
+  const size = Math.ceil(Buffer.byteLength(json) / 4) * 4;
+  const bytes = Buffer.alloc(size + 32);
+  [0x46546c67, 2, bytes.length, size, 0x4e4f534a].forEach((v, i) =>
+    bytes.writeUInt32LE(v, i * 4),
+  );
+  bytes.fill(32, 20, 20 + size);
+  bytes.write(json, 20);
+  return bytes;
+}
+
+function setup() {
+  const state = {
+    hands: null as HandBake | null,
+    changeHandDuringConversion: false,
+    sentHands: null as HandBake | null,
+    sentPurpose: undefined as string | undefined,
+    sentPreviewFormat: undefined as string | undefined,
+    pinnedSemanticSource: undefined as string | undefined,
+    owner: true,
+    confirmed: true,
+    scope: "half" as "half" | "head" | "full" | "bust" | "shoulder_head",
+    handCalls: 0,
+    available: true,
+    changeDuringConversion: false,
+    calls: 0,
+    reads: 0,
+    revision: "a".repeat(64),
+    refined: false,
+    libraryReads: 0,
+    libraryCharacter: "b".repeat(64),
+    pending: undefined as Promise<void> | undefined,
+  };
+  const app = new Hono<AppEnv>();
+  app.use("*", async (c, next) => {
+    c.set("installationId", "inst_test");
+    c.set("requestId", "req_test");
+    await next();
+  });
+  app.route(
+    "/",
+    createFramingRoutes({
+      recordExport: async () => {},
+      getOwnedJob: async (_job, installation) => {
+        assert.equal(installation, "inst_test");
+        return state.owner
+          ? ({
+              status: "completed",
+              result: {
+                candidatesByPerson: [
+                  {
+                    personIndex: 0,
+                    outputScope: resolveOutputScope({ selection: state.scope }),
+                    candidates: [
+                      {
+                        sourceBvhSha256: state.pinnedSemanticSource,
+                        id: "pick",
+                        poseId: "pose",
+                        camera:
+                          state.scope === "full"
+                            ? {
+                                source_bvh_sha256: sourceSha,
+                                rotation: [
+                                  [1, 0, 0],
+                                  [0, 1, 0],
+                                  [0, 0, 1],
+                                ],
+                              }
+                            : undefined,
+                      },
+                    ],
+                  },
+                ],
+              },
+            } as Job)
+          : undefined;
+      },
+      validateExportCandidate: async () => state.confirmed,
+      resolveExportArtifact: async () =>
+        state.refined
+          ? {
+              variant: "refined" as const,
+              bytes: Buffer.from("REFINED"),
+              fallbackReason: null,
+            }
+          : {
+              variant: "base" as const,
+              fallbackReason: null,
+            },
+      getPoseBvh: async () => {
+        state.reads++;
+        return new Response("HIERARCHY MOTION", {
+          status: state.available ? 200 : 409,
+        });
+      },
+      checkCharacter: async () => "ok" as const,
+      getPreviewModel: async () => {
+        state.libraryReads++;
+        return libraryModel(state.libraryCharacter);
+      },
+      handBakeFor: async () => { state.handCalls++; return state.hands; },
+      converterEnabled: () => true,
+      modelPreviewIdentity: async () => ({
+        modelRevision: state.revision,
+        characterSha256: "b".repeat(64),
+      }),
+      convertFramed: async (input) => {
+        state.sentHands = input.hands ?? null;
+        state.sentPurpose = input.purpose;
+        state.sentPreviewFormat = input.previewFormat;
+        if (state.changeHandDuringConversion && state.hands)
+          state.hands = {
+            ...state.hands,
+            left: "open",
+            revision: state.hands.revision + 1,
+          };
+        state.calls++;
+        await state.pending;
+        if (state.changeDuringConversion) state.scope = "head";
+        return {
+          fbx: Buffer.from("fbx"),
+          preview: Buffer.from(input.previewFormat === "model" ? "glb" : "png"),
+          conversionId: "id",
+          artifactSha256: "sha",
+          sourceBvhSha256: "sha",
+        };
+      },
+    }),
+  );
+  const request = (overrides: Record<string, string> = {}, pose = "pose") =>
+    app.request(
+      `/${pose}/framed?` +
+        new URLSearchParams({
+          jobId: "job" + Math.random(),
+          personIndex: "0",
+          candidateId: "pick",
+          outputScope: "half",
+          format: "preview",
+          ...overrides,
+        }),
+    );
+  return { state, request };
+}
+test("owned confirmed scope returns private preview; same pair can export FBX", async () => {
+  const { state, request } = setup();
+  const response = await request({ jobId: "paired-job" });
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "png");
+  assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+  assert.equal(
+    await (await request({ jobId: "paired-job", format: "fbx" })).text(),
+    "fbx",
+  );
+  assert.equal(state.calls, 1);
+});
+
+test("model review and download share one conversion but exporter revisions invalidate it", async () => {
+  const { state, request } = setup();
+  const query = { jobId: "model-pair", format: "model" };
+  const model = await request(query);
+  assert.equal(model.headers.get("Content-Type"), "model/gltf-binary");
+  assert.equal(await model.text(), "glb");
+  const exported = await request({
+    ...query,
+    format: "fbx",
+    previewType: "model",
+  });
+  assert.equal(await exported.text(), "fbx");
+  assert.equal(state.calls, 1);
+  state.revision = "c".repeat(64);
+  await request(query);
+  assert.equal(state.calls, 2);
+  state.owner = false;
+  assert.equal((await request(query)).status, 409);
+  assert.equal(state.calls, 2);
+});
+for (const kind of ["owner", "confirmation", "stale", "pose", "quarantine"]) {
+  test(`reject ${kind} before converting`, async () => {
+    const { state, request } = setup();
+    if (kind === "owner") state.owner = false;
+    if (kind === "confirmation") state.confirmed = false;
+    if (kind === "stale") state.scope = "head";
+    if (kind === "quarantine") state.available = false;
+    assert.equal(
+      (await request({}, kind === "pose" ? "another" : "pose")).status,
+      409,
+    );
+    assert.equal(state.calls, 0);
+  });
+}
+test("missing person or automatic scope is not accepted as an explicit framing request", async () => {
+  const { request } = setup();
+  assert.equal((await request({ personIndex: "" })).status, 400);
+  assert.equal((await request({ outputScope: "auto" })).status, 400);
+});
+
+test("scope changed during conversion cannot be returned as the reviewed result", async () => {
+  const { state, request } = setup();
+  state.changeDuringConversion = true;
+  const response = await request();
+  assert.equal(response.status, 409);
+  const body = (await response.json()) as { error: { code: string } };
+  assert.equal(body.error.code, "OUTPUT_SCOPE_CHANGED");
+});
+test("paired cache still rechecks ownership on every download", async () => {
+  const { state, request } = setup();
+  const jobId = "owned-cache-job";
+  assert.equal((await request({ jobId })).status, 200);
+  state.owner = false;
+  assert.equal((await request({ jobId, format: "fbx" })).status, 409);
+  assert.equal(state.calls, 1);
+});
+
+test("server-confirmed library model returns before preparation; save joins the same work", async () => {
+  const { state, request } = setup();
+  state.scope = "full";
+  let finish!: () => void;
+  state.pending = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const query = {
+    jobId: "library-pair",
+    outputScope: "full",
+    characterId: "master",
+    format: "model",
+    useLibraryModel: "true",
+  };
+  const response = await request(query);
+  assert.equal(response.status, 200);
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), libraryModel());
+  assert.equal(response.headers.get("X-Standin-Artifact-SHA256"), null);
+  assert.equal(state.calls, 1);
+  const download = request({
+    ...query,
+    format: "fbx",
+    previewType: "model",
+    expectedBvhSha256: sourceSha,
+  });
+  finish();
+  assert.equal(await (await download).text(), "fbx");
+  assert.equal(state.calls, 1);
+});
+
+test("lost refine response cannot make the server return an unmodified library model", async () => {
+  const { state, request } = setup();
+  state.scope = "full";
+  state.refined = true;
+  const response = await request({
+    outputScope: "full",
+    format: "model",
+    useLibraryModel: "true",
+  });
+  assert.equal(await response.text(), "glb");
+  assert.equal(state.libraryReads, 0);
+});
+
+test("a library model with an old character hash falls through to final conversion", async () => {
+  const { state, request } = setup();
+  state.scope = "full";
+  state.libraryCharacter = "f".repeat(64);
+  const response = await request({
+    outputScope: "full",
+    characterId: "master",
+    format: "model",
+    useLibraryModel: "true",
+  });
+  assert.equal(await response.text(), "glb");
+  assert.equal(state.calls, 1);
+});
+
+for (const field of [
+  "expectedBvhSha256",
+  "expectedCharacterSha256",
+  "expectedModelRevision",
+]) {
+  test(`changed ${field} rejects save before conversion`, async () => {
+    const { state, request } = setup();
+    const response = await request({
+      format: "fbx",
+      previewType: "model",
+      [field]: "f".repeat(64),
+    });
+    assert.equal(response.status, 409);
+    const body = (await response.json()) as { error: { code: string } };
+    assert.equal(body.error.code, "PREVIEW_CHANGED");
+    assert.equal(state.calls, 0);
+  });
+}
+
+test("a refinement stored after review invalidates the pinned original source", async () => {
+  const { state, request } = setup();
+  state.refined = true;
+  const response = await request({
+    format: "fbx",
+    previewType: "model",
+    expectedBvhSha256: sourceSha,
+  });
+  assert.equal(response.status, 409);
+  assert.equal(state.calls, 0);
+});
+
+const handFixture: HandBake = {
+  left: "fist",
+  right: "relaxed",
+  library_sha256: "a".repeat(64),
+  library_version: "hand-library-v1",
+  revision: 1,
+};
+test("hand preview and download reuse the exact baked pair and require the reviewed revision", async () => {
+  const { state, request } = setup();
+  state.hands = { ...handFixture };
+  assert.equal((await request({ jobId: "hands-pair" })).status, 409);
+  const query = { jobId: "hands-pair", handSelectionRevision: "1" };
+  const preview = await request(query);
+  assert.equal(preview.status, 200);
+  assert.deepEqual(state.sentHands, handFixture);
+  assert.equal(preview.headers.get("X-Standin-Hand-Revision"), "1");
+  assert.equal(
+    preview.headers.get("X-Standin-Hand-Library-SHA256"),
+    handFixture.library_sha256,
+  );
+  const reviewKey = preview.headers.get("X-Standin-Review-Key")!;
+  const unreviewed = await request({ ...query, format: "fbx" });
+  assert.equal(unreviewed.status, 409);
+  assert.equal(
+    ((await unreviewed.json()) as { error: { code: string } }).error.code,
+    "HAND_REVIEW_REQUIRED",
+  );
+  const download = await request({ ...query, format: "fbx", reviewKey });
+  assert.equal(download.status, 200);
+  assert.equal(await download.text(), "fbx");
+  assert.equal(state.calls, 1);
+  state.hands = { ...handFixture, left: "open", revision: 2 };
+  assert.equal(
+    (await request({ ...query, format: "fbx", reviewKey })).status,
+    409,
+  );
+  assert.equal(
+    (await request({ ...query, handSelectionRevision: "2" })).status,
+    200,
+  );
+  assert.equal(state.calls, 2);
+  assert.equal(
+    (
+      await request({
+        ...query,
+        handSelectionRevision: "2",
+        format: "fbx",
+        reviewKey,
+      })
+    ).status,
+    409,
+  );
+});
+test("hand changes during conversion discard the old output", async () => {
+  const { state, request } = setup();
+  state.hands = { ...handFixture };
+  state.changeHandDuringConversion = true;
+  const response = await request({ handSelectionRevision: "1" });
+  assert.equal(response.status, 409);
+  assert.equal(
+    ((await response.json()) as { error: { code: string } }).error.code,
+    "HANDS_CHANGED",
+  );
+});
+test("a selected hand disables the unmodified precomputed model shortcut", async () => {
+  const { state, request } = setup();
+  state.scope = "full";
+  state.hands = { ...handFixture };
+  const response = await request({
+    outputScope: "full",
+    handSelectionRevision: "1",
+    format: "model",
+    useLibraryModel: "true",
+  });
+  assert.equal(response.status, 200);
+  assert.equal(state.libraryReads, 0);
+  assert.deepEqual(state.sentHands, handFixture);
+});
+test("semantic source identity survives preview/download cache and rejects changed BVH", async () => {
+  const { state, request } = setup();
+  state.pinnedSemanticSource = sourceSha;
+  const query = { jobId: "semantic-paired" };
+  assert.equal(await (await request(query)).text(), "png");
+  assert.equal(
+    await (await request({ ...query, format: "fbx" })).text(),
+    "fbx",
+  );
+  assert.equal(state.calls, 1);
+  state.pinnedSemanticSource = "f".repeat(64);
+  assert.equal((await request(query)).status, 409);
+  assert.equal(state.calls, 1);
+});
+test("semantic candidate never exports a stale refined artifact", async () => {
+  const { state, request } = setup();
+  state.pinnedSemanticSource = sourceSha;
+  state.refined = true;
+  assert.equal((await request()).status, 409);
+  assert.equal(state.calls, 0);
+});
+
+test("cold final FBX with model review uses protected export and preserves paired preview", async () => {
+  const { state, request } = setup();
+  const jobId = "cold-protected-model-pair";
+  const exported = await request({
+    jobId,
+    format: "fbx",
+    previewType: "model",
+  });
+  assert.equal(exported.status, 200);
+  assert.equal(await exported.text(), "fbx");
+  assert.equal(state.calls, 1);
+  assert.equal(state.sentPurpose, "export");
+  assert.equal(state.sentPreviewFormat, "model");
+  assert.equal(await (await request({ jobId, format: "model" })).text(), "glb");
+  assert.equal(state.calls, 1);
+  state.owner = false;
+  assert.equal(
+    (await request({ jobId, format: "fbx", previewType: "model" })).status,
+    409,
+  );
+  assert.equal(state.calls, 1);
+});
+
+
+for (const scope of ["head", "shoulder_head", "bust"] as const) {
+  test(`${scope} PNG and FBX skip hand library, revision and review waits; cache is independent of saved hands`, async () => {
+    const { state, request } = setup();
+    state.scope = scope;
+    state.hands = { left: "fist", right: "relaxed", revision: 2, library_version: "old", library_sha256: "e".repeat(64) };
+    const query = { jobId: `no-hands-${scope}`, outputScope: scope };
+    const png = await request(query);
+    assert.equal(png.status, 200);
+    assert.equal(png.headers.get("X-Standin-Output-Scope"), scope);
+    assert.equal(png.headers.get("X-Standin-Hand-Revision"), null);
+    assert.equal(state.handCalls, 0);
+    assert.equal(state.sentHands, null);
+    state.hands.revision++;
+    const fbx = await request({ ...query, format: "fbx" });
+    assert.equal(fbx.status, 200);
+    assert.equal(fbx.headers.get("X-Standin-Hand-Library-SHA256"), null);
+    assert.equal(state.calls, 1);
+    assert.equal(state.handCalls, 0);
+    // Going back to a hand-bearing mesh restores its existing review gate.
+    state.scope = "half";
+    const stale = await request({ ...query, outputScope: "half" });
+    assert.equal(stale.status, 409);
+    assert.equal((await stale.json() as { error: { code: string } }).error.code, "HANDS_CHANGED");
+  });
+}
+test("no-hand conversion still discards an output scope changed while rendering", async () => {
+  const { state, request } = setup();
+  state.scope = "bust";
+  state.changeDuringConversion = true;
+  const r = await request({ outputScope: "bust" });
+  assert.equal(r.status, 409);
+  assert.equal((await r.json() as { error: { code: string } }).error.code, "OUTPUT_SCOPE_CHANGED");
+});

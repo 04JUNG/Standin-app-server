@@ -5,6 +5,8 @@
 // 파일 DB를 두면 배포할 때마다 가입한 사용자가 통째로 없어진다.
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import { config } from "./config.js";
+import { GAP_THRESHOLDS } from "./admin/library.js";
+import { deleteExpiredRows } from "./retention.js";
 
 export const pool = new Pool({
   // undefined면 pg가 표준 PG* 환경변수를 읽는다(config.usePgEnvVars 주석 참고).
@@ -53,7 +55,9 @@ export async function transaction<T>(fn: (client: PoolClient) => Promise<T>): Pr
   }
 }
 
-const SCHEMA = `
+import { QUALITY_CONSENT_SCHEMA } from "./installations/qualityConsent.js";
+
+export const SCHEMA = `
   CREATE TABLE IF NOT EXISTS installations (
     id                    TEXT PRIMARY KEY,
     token_hash            TEXT NOT NULL,
@@ -94,6 +98,26 @@ const SCHEMA = `
     expires_at BIGINT NOT NULL                           -- unix seconds
   );
 
+  CREATE TABLE IF NOT EXISTS body_preferences (
+    installation_id TEXT PRIMARY KEY REFERENCES installations(id) ON DELETE CASCADE,
+    value JSONB NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS body_selections (
+    job_id TEXT NOT NULL,
+    person_index INTEGER NOT NULL CHECK (person_index >= 0),
+    value JSONB NOT NULL,
+    PRIMARY KEY (job_id,person_index)
+  );
+  CREATE TABLE IF NOT EXISTS body_mutations (
+    installation_id TEXT NOT NULL REFERENCES installations(id) ON DELETE CASCADE,
+    resource TEXT NOT NULL,
+    mutation_id TEXT NOT NULL,
+    job_id TEXT,
+    payload_hash TEXT NOT NULL,
+    response JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (installation_id,resource,mutation_id)
+  );
   CREATE TABLE IF NOT EXISTS jobs (
     id          TEXT PRIMARY KEY,
     user_id     TEXT,
@@ -105,6 +129,7 @@ const SCHEMA = `
     rerun_of    TEXT
   );
 
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS body_policy_json JSONB;
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS installation_id TEXT;
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS source TEXT;
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS input_s3_key TEXT;
@@ -163,11 +188,23 @@ const SCHEMA = `
   ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS slot_origin TEXT;
   ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS lower_body_observed BOOLEAN NOT NULL DEFAULT FALSE;
 
+  -- 라이브러리 공백 분석(러프 데이터 선순환)용 인물 신호. 공개 응답에는 나가지 않는다.
+  -- person_tags_json은 추론 person_tags({action, view, source}), output_scope_json은 출력 구도
+  -- ({detected, source}), 아래 넷은 검색 신호다. 이 칸들이 생기기 전 행은 NULL이다.
+  ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS person_tags_json TEXT;
+  ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS output_scope_json TEXT;
+  ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS rank_distance DOUBLE PRECISION;
+  ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS distance_metric TEXT;
+  ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS search_stability TEXT;
+  ALTER TABLE analysis_people ADD COLUMN IF NOT EXISTS confidence_threshold DOUBLE PRECISION;
+  -- 컷 단위 요약(route, 개수 신뢰도, 검출기·VLM 인원수, VLM이 실제로 말한 컷 태그).
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS cut_summary_json TEXT;
+
   CREATE TABLE IF NOT EXISTS analysis_candidates (
     job_id               TEXT NOT NULL,
     person_index         INTEGER NOT NULL,
     candidate_id         TEXT NOT NULL,
-    pose_id              TEXT NOT NULL,
+    pose_id              TEXT,
     rank                  INTEGER NOT NULL,
     view                  TEXT NOT NULL,
     distance              DOUBLE PRECISION,
@@ -177,6 +214,8 @@ const SCHEMA = `
     pose_library_version  TEXT NOT NULL,
     PRIMARY KEY (job_id, person_index, candidate_id)
   );
+
+  ALTER TABLE analysis_candidates ALTER COLUMN pose_id DROP NOT NULL;
 
   CREATE TABLE IF NOT EXISTS analytics_events (
     event_id        TEXT PRIMARY KEY,
@@ -339,6 +378,8 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS candidates_job_rank ON analysis_candidates (job_id, person_index, rank);
   CREATE INDEX IF NOT EXISTS ops_metrics_bucket ON ops_metrics (bucket_at);
 
+  ${QUALITY_CONSENT_SCHEMA}
+
   CREATE OR REPLACE VIEW analytics_job_funnel AS
   SELECT
     j.id AS job_id,
@@ -359,7 +400,7 @@ const SCHEMA = `
     (SELECT count(*) FROM analytics_events ae
       WHERE ae.job_id = j.id AND ae.event_name = 'candidate_selected'
         AND ae.properties_json::jsonb->>'previousCandidateId' IS NOT NULL)::integer AS candidate_change_count
-  FROM jobs j
+  FROM quality_review_jobs j
   WHERE j.installation_id IS NOT NULL;
 
   CREATE OR REPLACE VIEW analytics_candidate_quality AS
@@ -391,12 +432,130 @@ const SCHEMA = `
         AND cs.candidate_id = ac.candidate_id
     ) AS selected,
     jf.reason AS feedback_reason
-  FROM jobs j
+  FROM quality_review_jobs j
   JOIN analysis_people ap ON ap.job_id = j.id
   LEFT JOIN analysis_candidates ac
     ON ac.job_id = ap.job_id AND ac.person_index = ap.person_index
   LEFT JOIN job_feedback jf ON jf.job_id = j.id
   WHERE j.installation_id IS NOT NULL;
+
+  /* 라이브러리 공백 분석용 관측. GET /v1/admin/gaps/observations(admin/gapExport.ts)가 읽는다.
+     원본 테이블 위의 뷰라서 작업 삭제·동의 철회·365일 보관 만료와 함께 행이 사라진다.
+     완료된 작업과, 철회·삭제 요청이 없는 설치만 담는다. 열을 바꿀 때는 _v2를 새로 만든다 —
+     CREATE OR REPLACE VIEW는 기존 열의 이름·순서를 바꾸지 못한다. */
+  CREATE OR REPLACE VIEW gap_observations_v1 AS
+  SELECT
+    ap.job_id,
+    ap.person_index,
+    j.installation_id,
+    j.created_at,
+    j.inference_metadata_json,
+    j.cut_summary_json,
+    ap.tags_json,
+    ap.skeleton_json,
+    ap.raw_scores_json,
+    ap.refine_context_json,
+    ap.person_tags_json,
+    ap.output_scope_json,
+    ap.coverage_class,
+    ap.skeleton_state,
+    ap.skeleton_source,
+    ap.slot_origin,
+    ap.lower_body_observed,
+    ap.confidence,
+    ap.fallback_mode,
+    ap.rank_distance,
+    ap.distance_metric,
+    ap.search_stability,
+    ap.confidence_threshold,
+    (SELECT jsonb_agg(jsonb_build_object(
+        'pose_id', ac.pose_id, 'view', ac.view, 'rank', ac.rank, 'distance', ac.distance,
+        'match_level', ac.match_level, 'pose_library_version', ac.pose_library_version)
+        ORDER BY ac.rank)
+       FROM analysis_candidates ac
+      WHERE ac.job_id = ap.job_id AND ac.person_index = ap.person_index AND ac.rank <= 5
+    ) AS candidates,
+    cs.rank AS selected_rank,
+    EXISTS (SELECT 1 FROM export_events ee
+             WHERE ee.job_id = ap.job_id AND ee.person_index = ap.person_index
+               AND ee.status = 'completed') AS exported,
+    (SELECT ra.refined FROM refined_artifacts ra
+      WHERE ra.job_id = ap.job_id AND ra.person_index = ap.person_index
+        AND ra.candidate_id = cs.candidate_id) AS selected_refined,
+    jf.reason AS job_feedback
+  FROM analysis_people ap
+  JOIN quality_review_jobs j ON j.id = ap.job_id
+  JOIN installations i ON i.id = j.installation_id
+  LEFT JOIN confirmed_selections cs
+    ON cs.job_id = ap.job_id AND cs.person_index = ap.person_index
+  LEFT JOIN job_feedback jf ON jf.job_id = ap.job_id
+  WHERE j.status = 'completed'
+    AND i.revoked_at IS NULL
+    AND i.deletion_requested_at IS NULL;
+
+  CREATE INDEX IF NOT EXISTS export_events_job_person ON export_events (job_id, person_index);
+  CREATE INDEX IF NOT EXISTS jobs_created_at ON jobs (created_at);
+  -- 시간대별 활동(관리자 대시보드)이 이벤트 시각만으로 범위를 훑는다. 위의
+  -- analytics_events_installation은 설치가 앞이라 이 질의에 쓰이지 않는다.
+  CREATE INDEX IF NOT EXISTS analytics_events_occurred ON analytics_events (occurred_at);
+
+  /* 라이브러리 버전별 공백 측정(러프 데이터 선순환 P8). /v1/admin/product의 library 섹션과
+     아래 daily_library_aggregates가 함께 읽는다. 인물 1명이 한 행이다.
+     적격 판정은 Standin-server pose_gaps/eligibility.py의 운영 조건과 같다. 관절 수 같은 정량
+     조건은 SQL로 옮기지 않았다. search_scope가 없는 행은 body-scope 이전 분석이라 전신 검색이었다. */
+  CREATE OR REPLACE VIEW library_observations_v1 AS
+  SELECT
+    left(j.created_at, 10) AS day,
+    j.created_at,
+    j.installation_id,
+    COALESCE(top1.pose_library_version, j.inference_metadata_json::jsonb ->> 'poseLibraryVersion',
+             'unknown') AS pose_library_version,
+    COALESCE(ap.coverage_class, 'insufficient') AS coverage_class,
+    top1.distance AS top1_distance,
+    (ap.slot_origin = 'vlm'
+      AND ap.skeleton_source = 'full_image'
+      AND ap.skeleton_state IN ('valid', 'partial')
+      AND ap.coverage_class IN ('full', 'reduced')
+      AND COALESCE(ap.refine_context_json::jsonb -> 'qualityTrace' ->> 'search_scope',
+                   'full_body') = 'full_body'
+      AND COALESCE(ap.tags_json::jsonb ->> 'relationship', '') NOT IN ('hugging', 'fighting')
+      AND COALESCE(jf.reason, '') NOT IN ('skeleton_wrong', 'person_missing')
+      AND top1.distance IS NOT NULL) AS eligible,
+    (cs.job_id IS NOT NULL) AS selected,
+    COALESCE(jf.reason = 'candidates_irrelevant', false) AS irrelevant_feedback
+  FROM analysis_people ap
+  JOIN quality_review_jobs j ON j.id = ap.job_id
+  LEFT JOIN LATERAL (
+    SELECT ac.distance, ac.pose_library_version
+    FROM analysis_candidates ac
+    WHERE ac.job_id = ap.job_id AND ac.person_index = ap.person_index
+    ORDER BY ac.rank
+    LIMIT 1
+  ) top1 ON true
+  LEFT JOIN confirmed_selections cs
+    ON cs.job_id = ap.job_id AND cs.person_index = ap.person_index
+  LEFT JOIN job_feedback jf ON jf.job_id = ap.job_id
+  WHERE j.status = 'completed' AND j.installation_id IS NOT NULL;
+
+  /* 라이브러리 공백의 일별 집계. ID가 없는 장기 보관용이다 — 원본 행이 365일 뒤 지워져도
+     버전 사이 비교가 남는다. daily_analytics_aggregates처럼 기동마다 원본이 남아 있는 지난
+     날짜를 다시 계산한다. top1_histogram_json은 적격 인물의 Top-1 거리를 0.05 폭 구간
+     ("0"~"20", 20은 1.0 이상)으로 센 것이다. 중앙값은 더할 수 없어서 구간 수를 둔다. */
+  CREATE TABLE IF NOT EXISTS daily_library_aggregates (
+    day                  TEXT NOT NULL,
+    pose_library_version TEXT NOT NULL,
+    coverage_class       TEXT NOT NULL,
+    people               INTEGER NOT NULL,
+    eligible             INTEGER NOT NULL,
+    weak_gap             INTEGER NOT NULL,
+    strong_gap           INTEGER NOT NULL,
+    extraction_suspect   INTEGER NOT NULL,
+    selected             INTEGER NOT NULL,
+    irrelevant_feedback  INTEGER NOT NULL,
+    top1_histogram_json  TEXT NOT NULL,
+    refreshed_at         TEXT NOT NULL,
+    PRIMARY KEY (day, pose_library_version, coverage_class)
+  );
 `;
 
 // 이 앱 전용 advisory lock 키. 다른 서비스와 겹치지 않게 고정값 하나를 쓴다.
@@ -443,7 +602,7 @@ async function refreshAggregatesAndRetention(client: PoolClient): Promise<void> 
         (SELECT sum(1.0 / cs.rank) FROM confirmed_selections cs WHERE cs.job_id = j.id AND cs.rank > 0) AS reciprocal_rank_sum,
         (SELECT count(*) FROM export_events ee WHERE ee.job_id = j.id AND ee.status = 'completed') AS completed_export_count,
         (SELECT jf.reason FROM job_feedback jf WHERE jf.job_id = j.id) AS feedback_reason
-      FROM jobs j
+      FROM quality_review_jobs j
       WHERE j.installation_id IS NOT NULL AND left(j.created_at, 10) < current_date::text
     )
     SELECT
@@ -486,23 +645,59 @@ async function refreshAggregatesAndRetention(client: PoolClient): Promise<void> 
       refreshed_at = EXCLUDED.refreshed_at
   `);
 
-  const oldJobs = `SELECT id FROM jobs WHERE installation_id IS NOT NULL
-    AND created_at::timestamptz < now() - interval '365 days'`;
-  await client.query(`DELETE FROM export_events WHERE job_id IN (${oldJobs})`);
-  await client.query(`DELETE FROM job_feedback WHERE job_id IN (${oldJobs})`);
-  await client.query(`DELETE FROM confirmed_selections WHERE job_id IN (${oldJobs})`);
-  await client.query("DELETE FROM analytics_events WHERE occurred_at::timestamptz < now() - interval '365 days'");
-  await client.query(`DELETE FROM admin_access_audit WHERE job_id IN (${oldJobs})`);
-  // job_id가 빈 감사 행(kill switch 토글, 설치 단위 열람)은 위 삭제에 딸려 가지 않아
-  // 그대로 쌓인다. 대상이 없는 행은 시간으로 자른다.
+  // 라이브러리 공백 일별 집계. 원본을 지우기 전에 남긴다. 개발 단말(쿼터 면제 설치)은 뺀다.
   await client.query(
-    "DELETE FROM admin_access_audit WHERE job_id IS NULL AND occurred_at::timestamptz < now() - interval '365 days'",
+    `INSERT INTO daily_library_aggregates (
+       day, pose_library_version, coverage_class, people, eligible, weak_gap, strong_gap,
+       extraction_suspect, selected, irrelevant_feedback, top1_histogram_json, refreshed_at
+     )
+     WITH obs AS (
+       SELECT day, pose_library_version, coverage_class, eligible, selected, irrelevant_feedback,
+              top1_distance, LEAST(floor(top1_distance / 0.05)::int, 20) AS bucket
+       FROM library_observations_v1
+       WHERE day < current_date::text AND NOT (installation_id = ANY($1::text[]))
+     ),
+     hist AS (
+       SELECT day, pose_library_version, coverage_class, jsonb_object_agg(bucket::text, n) AS histogram
+       FROM (
+         SELECT day, pose_library_version, coverage_class, bucket, count(*)::int AS n
+         FROM obs WHERE eligible GROUP BY 1, 2, 3, 4
+       ) counted
+       GROUP BY 1, 2, 3
+     )
+     SELECT o.day, o.pose_library_version, o.coverage_class,
+       count(*)::int,
+       count(*) FILTER (WHERE o.eligible)::int,
+       count(*) FILTER (WHERE o.eligible AND o.top1_distance > $2 AND o.top1_distance <= $3)::int,
+       count(*) FILTER (WHERE o.eligible AND o.top1_distance > $3 AND o.top1_distance <= $4)::int,
+       count(*) FILTER (WHERE o.eligible AND o.top1_distance > $4)::int,
+       count(*) FILTER (WHERE o.eligible AND o.selected)::int,
+       count(*) FILTER (WHERE o.eligible AND o.irrelevant_feedback)::int,
+       COALESCE(h.histogram, '{}'::jsonb)::text,
+       now()::text
+     FROM obs o
+     LEFT JOIN hist h USING (day, pose_library_version, coverage_class)
+     GROUP BY o.day, o.pose_library_version, o.coverage_class, h.histogram
+     ON CONFLICT (day, pose_library_version, coverage_class) DO UPDATE SET
+       people = EXCLUDED.people,
+       eligible = EXCLUDED.eligible,
+       weak_gap = EXCLUDED.weak_gap,
+       strong_gap = EXCLUDED.strong_gap,
+       extraction_suspect = EXCLUDED.extraction_suspect,
+       selected = EXCLUDED.selected,
+       irrelevant_feedback = EXCLUDED.irrelevant_feedback,
+       top1_histogram_json = EXCLUDED.top1_histogram_json,
+       refreshed_at = EXCLUDED.refreshed_at`,
+    [
+      [...config.quotaExemptInstallations],
+      GAP_THRESHOLDS.weak,
+      GAP_THRESHOLDS.strong,
+      GAP_THRESHOLDS.extractionCap,
+    ],
   );
+
   // S3 객체 자체는 버킷 lifecycle(90일)과 동의 철회 삭제 스윕이 지운다. 여기서는 대장만 정리한다.
-  await client.query(`DELETE FROM refined_artifacts WHERE job_id IN (${oldJobs})`);
-  await client.query(`DELETE FROM analysis_candidates WHERE job_id IN (${oldJobs})`);
-  await client.query(`DELETE FROM analysis_people WHERE job_id IN (${oldJobs})`);
-  await client.query(`DELETE FROM jobs WHERE id IN (${oldJobs})`);
+  await deleteExpiredRows(client);
 }
 
 export async function runDataMaintenance(): Promise<void> {

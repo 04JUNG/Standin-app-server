@@ -4,6 +4,7 @@
 // 테스트가 없으므로, 페이지 경계와 입력 검증처럼 틀리기 쉬운 부분을 순수 함수로 빼야
 // `node --test`로 확인할 수 있다.
 import type { JobStatus } from "./store.js";
+import { poseThumbnailUrl } from "../pose-thumbnail.js";
 
 /**
  * 커서는 `(created_at, id)` 복합 키다.
@@ -166,7 +167,7 @@ export function toHistoryItem(row: JobHistoryRow): JobHistoryItem {
     hasSelection: selectionCount > 0,
     thumbnailUrl:
       row.thumb_pose_id && row.thumb_view
-        ? `/v1/pose-candidates/${encodeURIComponent(row.thumb_pose_id)}/thumbnail?view=${encodeURIComponent(row.thumb_view)}`
+        ? poseThumbnailUrl(row.thumb_pose_id, row.thumb_view)
         : null,
     inputAvailable: row.has_input,
     inputWidth: row.input_width,

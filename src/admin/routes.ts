@@ -3,17 +3,32 @@ import { Hono, type Context } from "hono";
 import { config } from "../config.js";
 import { execute, query, queryOne } from "../db.js";
 import type { AppEnv } from "../env.js";
-import { signedInputUrl } from "../inputStorage.js";
+import { qualityReviewGuard } from "./qualityAccess.js";
+import { loadInput } from "../inputStorage.js";
 import { getAnalysisFlag, setAnalysisEnabled } from "../limits/flags.js";
 import { dailyWindow } from "../limits/policy.js";
 import { currentUsage } from "../limits/store.js";
 import { errorEnvelope } from "../mapping.js";
 import { getInstallationSummary, listInstallations } from "../installations/store.js";
 import { parseRosterQuery, toRosterPage } from "./installationList.js";
+import { toAccuracy, toUsage } from "./quality.js";
+import { toOverviewKpis } from "./overview.js";
+import { overviewExtras } from "./overviewStore.js";
+import { fillBuckets, parseTimeseriesQuery } from "./timeseries.js";
+import { activityTimeseries } from "./timeseriesStore.js";
+import { dailyAggregates } from "./qualityStore.js";
+import { parseCutSummary, toReviewPeople, type AnalysisPersonRow } from "./reviewDetail.js";
+import { ensureRefinedThumbnail } from "../refine/thumbnail.js";
+import { resolveExportArtifact } from "../refine/service.js";
+import { findRefinedArtifact } from "../refine/store.js";
+import { convertBvhToFbx, ConverterError } from "../converter/client.js";
+
 import { DEFAULT_REVIEWER, matchReviewer, parseReviewers } from "./reviewers.js";
 import { parseWindowDays, toCohorts, toDropoff, toFunnel } from "./product.js";
 import { toColumnHealth, toDistanceBuckets, toStageGaps } from "./instrumentation.js";
 import { toFirstRunFunnel, toRetry } from "./adoption.js";
+import { GAP_THRESHOLDS, toLibraryWeeks, toVlmPrompts } from "./library.js";
+import { libraryWeekly, vlmPrompts } from "./libraryStore.js";
 import {
   clientStageCounts,
   cohortCounts,
@@ -32,9 +47,28 @@ import {
   firstSelectionAttempt,
   rerunRatio,
 } from "./productStore.js";
-import { isInstallationId, parseHistoryQuery, toHistoryPage } from "../jobs/history.js";
-import { listJobHistory } from "../jobs/store.js";
-import { getPoseThumbnail, health } from "../inference.js";
+import { encodeCursor as encodeHistoryCursor, isInstallationId, parseHistoryQuery, toHistoryPage } from "../jobs/history.js";
+import { listJobHistory, listRecentJobs } from "../jobs/store.js";
+import { getPoseBvh, getPoseThumbnail, inferenceStatus, libraryFolders, listLibraryPoses } from "../inference.js";
+import { buildActivity, buildStrips, kstDay, OUTCOME_LABELS, type OutcomeKey } from "./activity.js";
+import { activityJobs, visitDays, visitStrips } from "./activityStore.js";
+import { GALLERY_PAGE, parseGalleryQuery, parseGroup, STATUS_ORDER } from "./gallery.js";
+import { galleryFolders, galleryItems } from "./galleryStore.js";
+import { notify } from "../notify.js";
+import {
+  GAP_EXPORT_PAGE_SIZE,
+  GAP_EXPORT_SCHEMA_VERSION,
+  RETENTION_HINT,
+  decodeCursor,
+  encodeCursor,
+  exportSalt,
+  parseExportDays,
+  privacyProblems,
+  startExport,
+  toObservation,
+  windowStart,
+} from "./gapExport.js";
+import { listGapObservations } from "./gapExportStore.js";
 import { DASHBOARD_HTML } from "../ops/dashboard.js";
 import {
   activeTasks,
@@ -74,6 +108,8 @@ adminRoutes.use("*", async (c, next) => {
   c.set("reviewer", reviewer);
   await next();
 });
+
+adminRoutes.use("*", qualityReviewGuard());
 
 /**
  * 관리자 접근을 남긴다.
@@ -123,7 +159,7 @@ adminRoutes.get("/ops", async (c) => {
   const [
     bffMinutes, bffHours, bffTotals,
     inferenceTotals, errors, routes, tasks,
-    flag, quotaUsed, inferenceHealthy, jobs,
+    flag, quotaUsed, inference, jobs,
   ] = await Promise.all([
     minuteSeries(hourAgo, "bff"),
     hourSeries(dayAgo, "bff"),
@@ -134,7 +170,7 @@ adminRoutes.get("/ops", async (c) => {
     activeTasks(hourAgo),
     getAnalysisFlag(),
     currentUsage("global_day", "all", day),
-    health(),
+    inferenceStatus(),
     query<{ status: string; count: string }>(
       `SELECT status, count(*)::text AS count FROM jobs
        WHERE created_at >= $1 GROUP BY status ORDER BY count(*) DESC`,
@@ -147,7 +183,9 @@ adminRoutes.get("/ops", async (c) => {
     // 화면에 누구로 보고 있는지 띄운다. 토큰을 나눠 쓰던 습관이 남아 있으면
     // "내 이름으로 열람 기록이 남는다"는 사실이 눈에 보여야 한다.
     reviewer: c.get("reviewer") ?? DEFAULT_REVIEWER,
-    inferenceHealthy,
+    inferenceHealthy: inference.healthy,
+    // 추론이 떠 있는 포즈 라이브러리(manifest 버전). 옛 추론 서버면 null.
+    inferenceLibrary: inference.library,
     analysisEnabled: flag.enabled,
     analysisReason: flag.reason,
     tasks,
@@ -210,6 +248,64 @@ adminRoutes.put("/flags/analysis_enabled", async (c) => {
  * 새는지 보고, 코호트에서 누가 거기 멈췄는지 세고, 신호에서 그들이 무엇이 달랐는지로
  * 내려간다. 따로 부르면 세 번 왕복하면서 기간이 어긋날 수 있다.
  */
+/**
+ * GET /v1/admin/overview?days=7 — 대시보드 첫 화면의 KPI 띠와 추이.
+ *
+ * `/product`는 블록이 많아 무겁고 "불러오기"를 눌러야 뜬다. 첫 화면은 열자마자 핵심
+ * 숫자가 보여야 하므로 가벼운 질의만 따로 둔다. 퍼널 집계는 `/product`와 같은 함수를
+ * 재사용한다 — 같은 숫자를 두 군데서 다르게 세지 않는다.
+ *
+ * KPI는 원본을 바로 세서 오늘이 들어간다. 추이는 일별 집계라 어제까지다.
+ */
+/**
+ * GET /v1/admin/timeseries?range=24h&bucket=1h — 시간대별 활동.
+ *
+ * 구간마다 들어온 설치 수, 분석 Job(시작·완료·실패), 다운로드 수. 빈 구간은 0으로 채워
+ * 시간축이 끊기지 않게 한다. 구간은 KST 자정에 맞춘다. 숫자뿐이라 개인 정보는 없다.
+ */
+adminRoutes.get("/timeseries", async (c) => {
+  const parsed = parseTimeseriesQuery({ range: c.req.query("range"), bucket: c.req.query("bucket") });
+  if (!parsed.ok) {
+    return c.json(errorEnvelope("INVALID_INPUT", parsed.message, c.get("requestId")), 400);
+  }
+  const now = Date.now();
+  const rows = await activityTimeseries(parsed.query, now);
+  await audit(c, "review_timeseries", {});
+  return c.json({
+    range: parsed.query.range,
+    bucket: parsed.query.bucket,
+    bucketSeconds: parsed.query.bucketSeconds,
+    timezone: "Asia/Seoul",
+    points: fillBuckets(rows, Math.floor(now / 1000), parsed.query),
+  });
+});
+
+adminRoutes.get("/overview", async (c) => {
+  const parsed = parseWindowDays(c.req.query("days"));
+  if (!parsed.ok) {
+    return c.json(errorEnvelope("INVALID_INPUT", parsed.message, c.get("requestId")), 400);
+  }
+  const { days } = parsed;
+  const [funnelRow, extras, daily] = await Promise.all([
+    funnelCounts(days),
+    overviewExtras(days),
+    dailyAggregates(days),
+  ]);
+  const accuracy = toAccuracy(daily);
+  const usage = toUsage(daily, funnelRow.active_installations);
+  await audit(c, "review_overview", {});
+  return c.json({
+    windowDays: days,
+    since: new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString(),
+    kpis: toOverviewKpis(funnelRow, extras),
+    trends: {
+      selection: accuracy.trend,
+      usage: usage.trend,
+      days: accuracy.days,
+    },
+  });
+});
+
 adminRoutes.get("/product", async (c) => {
   const parsed = parseWindowDays(c.req.query("days"));
   if (!parsed.ok) {
@@ -240,6 +336,9 @@ adminRoutes.get("/product", async (c) => {
     firstSelectionAttempt(days),
     rerunRatio(days),
   ]);
+  const [libraryWeeks, prompts, daily] = await Promise.all([
+    libraryWeekly(days), vlmPrompts(days), dailyAggregates(days),
+  ]);
 
   const clientByName: Record<string, number> = {};
   for (const stage of clientStages) clientByName[stage.event_name] = stage.events;
@@ -248,6 +347,9 @@ adminRoutes.get("/product", async (c) => {
   return c.json({
     windowDays: days,
     since: new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString(),
+    // 정확도·사용률은 일별 집계에서 온다. 그 표에는 **오늘이 없다**(하루가 끝나야 넣는다).
+    accuracy: toAccuracy(daily),
+    usage: toUsage(daily, funnelRow.active_installations),
     funnel: toFunnel(funnelRow),
     jobsFailed: funnelRow.jobs_failed,
     clientStages: clientStages.map((stage) => ({
@@ -282,6 +384,13 @@ adminRoutes.get("/product", async (c) => {
     },
     /** ② 몇 번째에 건지나. */
     retry: toRetry(curve, firstSelection, reruns.reruns, reruns.jobs),
+    /**
+     * ⑥ 라이브러리 버전별 공백. 포즈를 더한 뒤 맞는 포즈가 없던 인물이 실제로 줄었는지 본다.
+     * 경계는 Standin-server pose_gaps와 같다(GAP_THRESHOLDS).
+     */
+    library: { thresholds: GAP_THRESHOLDS, weeks: toLibraryWeeks(libraryWeeks) },
+    /** ⑦ VLM 프롬프트 버전별 route·인원수 일치·인물 태그 채움. 프롬프트를 바꾼 뒤 이상을 본다. */
+    vlm: { prompts: toVlmPrompts(prompts) },
   });
 });
 
@@ -323,7 +432,7 @@ adminRoutes.get("/review/installations", async (c) => {
  *
  * - `thumbnailUrl`은 설치 토큰이 필요한 경로다. 관리자 토큰으로는 열리지 않는다.
  * - 원본 러프는 목록에 싣지 않는다. `inputAvailable`이 true인 Job을 아래 상세로 열면
- *   5분짜리 서명 URL이 나온다. 20건에 서명 URL을 달면 한 번의 조회가 그 설치의 사진
+ *   동의를 다시 확인하는 인증 경로가 나온다. 목록에 원본을 달면 한 번의 조회가 그 설치의 사진
  *   전부를 한꺼번에 꺼내는 열쇠가 된다.
  */
 adminRoutes.get("/review/installations/:id/jobs", async (c) => {
@@ -350,34 +459,271 @@ adminRoutes.get("/review/installations/:id/jobs", async (c) => {
     return c.json(errorEnvelope("NOT_FOUND", "unknown installationId", c.get("requestId")), 404);
   }
 
-  const rows = await listJobHistory(installationId, parsed.query);
+  const rows = await listJobHistory(installationId, parsed.query, true);
   await audit(c, "review_installation_jobs", { installationId });
   return c.json({ installation, ...toHistoryPage(rows, parsed.query.limit) });
 });
 
+/**
+ * GET /v1/admin/review/jobs — 설치를 가리지 않은 최근 Job 목록.
+ *
+ * 이게 없으면 운영자는 "방금 들어온 분석"을 보려고 설치 명부부터 열어 id를 옮겨 적어야
+ * 했다. 정렬·커서·status 필터는 설치별 목록과 같은 규칙을 쓴다.
+ *
+ * 응답에 서명 URL은 없다. 목록 한 번이 사진 여러 장을 한꺼번에 여는 열쇠가 되지 않게
+ * 하는 기존 방침 그대로이고, 원본은 상세(`/review/jobs/:id`)에서 한 건씩 연다.
+ */
+adminRoutes.get("/review/jobs", async (c) => {
+  const parsed = parseHistoryQuery({
+    limit: c.req.query("limit"),
+    cursor: c.req.query("cursor"),
+    status: c.req.query("status"),
+  });
+  if (!parsed.ok) {
+    return c.json(errorEnvelope("INVALID_INPUT", parsed.message, c.get("requestId")), 400);
+  }
+  const rows = await listRecentJobs(parsed.query);
+  const page = toHistoryPage(rows, parsed.query.limit);
+  const installationByJob = new Map(rows.map((row) => [row.id, row.installation_id]));
+  await audit(c, "review_recent_jobs", {});
+  return c.json({
+    ...page,
+    items: page.items.map((item) => ({
+      ...item,
+      installationId: installationByJob.get(item.jobId) ?? null,
+    })),
+  });
+});
+
+/** `/review/jobs/:id/refined/:personIndex/...`의 경로 검사. 틀리면 null. */
+function refinedTarget(c: Context<AppEnv>): { jobId: string; personIndex: number; candidateId: string } | null {
+  const jobId = c.req.param("id") ?? "";
+  const personIndex = Number(c.req.param("personIndex"));
+  const candidateId = c.req.query("candidateId") ?? "";
+  if (!/^job_[0-9a-f-]{36}$/.test(jobId)) return null;
+  if (!Number.isInteger(personIndex) || personIndex < 0 || personIndex > 99) return null;
+  if (candidateId.length === 0 || candidateId.length > 200) return null;
+  return { jobId, personIndex, candidateId };
+}
+
+/**
+ * GET /v1/admin/review/jobs/:id/refined/:personIndex/thumbnail?candidateId= — 조정본 미리보기.
+ *
+ * 저장된 미리보기가 있으면 그것을, 없으면 그 자리에서 그려 저장한 뒤 돌려준다. refine이
+ * 미리보기 없이 끝나도록 바뀌었으므로(추론이 그리면 5초 상한을 넘긴다) 처음 한 번은 여기서
+ * 그려진다. 전환기가 한 번에 한 건만 처리해 처음엔 수십 초 걸릴 수 있다.
+ */
+adminRoutes.get("/review/jobs/:id/refined/:personIndex/thumbnail", async (c) => {
+  const target = refinedTarget(c);
+  if (!target) {
+    return c.json(errorEnvelope("INVALID_INPUT", "jobId·personIndex·candidateId가 올바르지 않습니다.", c.get("requestId")), 400);
+  }
+  const png = await ensureRefinedThumbnail(target.jobId, target.personIndex, target.candidateId);
+  await audit(c, "review_refined_thumbnail", { jobId: target.jobId });
+  if (!png) {
+    return c.json(errorEnvelope("NOT_FOUND", "그릴 조정본이 없습니다.", c.get("requestId")), 404);
+  }
+  return new Response(png, {
+    status: 200,
+    // 관리자 화면 전용이고 그 사이 다시 그려질 수 있다. 캐시에 남기지 않는다.
+    headers: { "Content-Type": "image/png", "Cache-Control": "private, no-store" },
+  });
+});
+
+/**
+ * GET /v1/admin/review/jobs/:id/refined/:personIndex/fbx?candidateId= — 조정본 FBX.
+ *
+ * 조정본이 있으면 그것을, 없거나 만료됐으면 라이브러리 원본 포즈를 FBX로 바꾼다. 어느 쪽이
+ * 나갔는지는 `X-Standin-Variant`로 알린다. FBX는 저장해 두지 않고 매번 전환기가 만든다.
+ */
+adminRoutes.get("/review/jobs/:id/refined/:personIndex/fbx", async (c) => {
+  const target = refinedTarget(c);
+  if (!target) {
+    return c.json(errorEnvelope("INVALID_INPUT", "jobId·personIndex·candidateId가 올바르지 않습니다.", c.get("requestId")), 400);
+  }
+  const artifact = await findRefinedArtifact(target.jobId, target.personIndex, target.candidateId);
+  if (!artifact) {
+    return c.json(errorEnvelope("NOT_FOUND", "refine 기록이 없습니다.", c.get("requestId")), 404);
+  }
+  const resolved = await resolveExportArtifact(target.jobId, target.personIndex, target.candidateId);
+  let bvh: Uint8Array;
+  if (resolved.variant === "refined") {
+    bvh = resolved.bytes;
+  } else {
+    const res = await getPoseBvh(artifact.poseId);
+    if (!res.ok) {
+      return c.json(errorEnvelope("NOT_FOUND", "원본 포즈를 찾을 수 없습니다.", c.get("requestId")), 404);
+    }
+    bvh = new Uint8Array(await res.arrayBuffer());
+  }
+  try {
+    const result = await convertBvhToFbx({ bvhBytes: bvh, fileName: "admin-export.bvh" });
+    await audit(c, "review_refined_fbx", { jobId: target.jobId });
+    const safePose = artifact.poseId.replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 60);
+    return new Response(result.fbx, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": `attachment; filename="${target.jobId}-p${target.personIndex}-${safePose}.fbx"`,
+        "Cache-Control": "private, no-store",
+        "X-Standin-Variant": resolved.variant,
+      },
+    });
+  } catch (error) {
+    const code = error instanceof ConverterError ? error.code : "CONVERTER_UNAVAILABLE";
+    return c.json(errorEnvelope(code, "FBX 변환에 실패했습니다.", c.get("requestId")), 502);
+  }
+});
+
+// ── 사용자(설치)별 활동 ─────────────────────────────────────
+
+const ACTIVITY_DAYS = 14;
+const STRIP_DAYS = 7;
+
+/**
+ * GET /v1/admin/review/installations/:id/activity — 최근 14일, 날마다 왔는지·무엇을 돌렸는지.
+ *
+ * "오늘은 왔고 어제는 안 왔고, 오늘 두 개 돌렸는데 하나는 골랐다"를 한눈에 본다.
+ * 날짜는 KST. 방문은 그날 앱 이벤트나 Job이 하나라도 있었는지다.
+ */
+adminRoutes.get("/review/installations/:id/activity", async (c) => {
+  const installationId = c.req.param("id");
+  if (!isInstallationId(installationId)) {
+    return c.json(errorEnvelope("INVALID_INPUT", "installationId가 올바르지 않습니다.", c.get("requestId")), 400);
+  }
+  const today = kstDay(new Date());
+  // 하루 여유를 둔다. KST 날짜 경계와 UTC 경계가 9시간 어긋난다.
+  const since = new Date(Date.now() - (ACTIVITY_DAYS + 1) * 86_400_000).toISOString();
+  const [days, jobs] = await Promise.all([visitDays(installationId, since), activityJobs(installationId, since)]);
+  await audit(c, "review_installation_activity", { installationId });
+  return c.json({ today, ...buildActivity(days, jobs, today, ACTIVITY_DAYS) });
+});
+
+/** GET /v1/admin/review/installations-activity?ids=a,b — 설치 목록의 7일 출석 점. */
+adminRoutes.get("/review/installations-activity", async (c) => {
+  const ids = (c.req.query("ids") ?? "").split(",").map((id) => id.trim()).filter(Boolean);
+  if (ids.length === 0 || ids.length > 50 || !ids.every(isInstallationId)) {
+    return c.json(errorEnvelope("INVALID_INPUT", "ids는 설치 id 1~50개여야 합니다.", c.get("requestId")), 400);
+  }
+  const today = kstDay(new Date());
+  const since = new Date(Date.now() - (STRIP_DAYS + 1) * 86_400_000).toISOString();
+  const rows = await visitStrips(ids, since);
+  await audit(c, "review_installation_strips", {});
+  return c.json({ today, strips: buildStrips(rows, ids, today, STRIP_DAYS) });
+});
+
+// ── 모아 보기 ───────────────────────────────────────────────
+
+/** GET /v1/admin/gallery/folders?group=date|installation|status — 러프 폴더와 장수. */
+adminRoutes.get("/gallery/folders", async (c) => {
+  const group = parseGroup(c.req.query("group"));
+  if (!group) return c.json(errorEnvelope("INVALID_INPUT", "group이 올바르지 않습니다.", c.get("requestId")), 400);
+  const rows = await galleryFolders(group);
+  const folders = rows.map((row) => ({
+    key: row.key,
+    label: group === "status" ? OUTCOME_LABELS[row.key as OutcomeKey] ?? row.key : row.key,
+    count: row.count,
+    withImage: row.with_image,
+    lastAt: row.last_at,
+  }));
+  if (group === "status") {
+    folders.sort((a, b) => STATUS_ORDER.indexOf(a.key as OutcomeKey) - STATUS_ORDER.indexOf(b.key as OutcomeKey));
+  }
+  await audit(c, "review_gallery_folders", {});
+  return c.json({ group, folders });
+});
+
+/**
+ * GET /v1/admin/gallery/roughs?group=&key=&cursor= — 한 폴더의 러프 24장.
+ *
+ * 사용자 사진을 여러 장 여는 유일한 경로다. 그래서 페이지를 열 때마다 **그 페이지의 Job을
+ * 하나하나** 열람 기록에 남기고, 원본 열람 때마다 동의를 다시 확인한다. 일괄 다운로드는 없다.
+ */
+adminRoutes.get("/gallery/roughs", async (c) => {
+  const parsed = parseGalleryQuery({ group: c.req.query("group"), key: c.req.query("key"), cursor: c.req.query("cursor") });
+  if (!parsed.ok) return c.json(errorEnvelope("INVALID_INPUT", parsed.message, c.get("requestId")), 400);
+  const rows = await galleryItems(parsed.query);
+  const page = rows.slice(0, GALLERY_PAGE);
+  const items = await Promise.all(page.map(async (row) => ({
+    jobId: row.id,
+    installationId: row.installation_id,
+    status: row.status,
+    createdAt: row.created_at,
+    errorCode: row.error_code,
+    personCount: row.person_count,
+    selectionCount: row.selection_count,
+    outcome: row.outcome,
+    outcomeLabel: OUTCOME_LABELS[row.outcome as OutcomeKey] ?? row.outcome,
+    exported: row.exported,
+    refined: row.refined,
+    inputUrl: row.input_s3_key ? `/v1/admin/review/jobs/${encodeURIComponent(row.id)}/input` : null,
+  })));
+  for (const row of page) await audit(c, "review_gallery", { jobId: row.id, installationId: row.installation_id });
+  const last = page[page.length - 1];
+  return c.json({
+    items,
+    inputUrlExpiresInSeconds: null,
+    nextCursor: rows.length > GALLERY_PAGE && last ? encodeHistoryCursor({ createdAt: last.created_at, id: last.id }) : null,
+  });
+});
+
+/** GET /v1/admin/gallery/pose-folders — 포즈 라이브러리 출처·분류 폴더(추론 프록시). */
+adminRoutes.get("/gallery/pose-folders", async (c) => {
+  const res = await libraryFolders().catch(() => null);
+  if (!res || !res.ok) {
+    return c.json(errorEnvelope("UPSTREAM_UNAVAILABLE", "추론 서버가 라이브러리 목록을 주지 않았습니다.", c.get("requestId")), 502);
+  }
+  return c.json(await res.json());
+});
+
+/** GET /v1/admin/gallery/poses?source=&category=&q=&cursor= — 포즈 라이브러리 한 페이지. 공용 자산이라 열람 기록은 남기지 않는다. */
+adminRoutes.get("/gallery/poses", async (c) => {
+  const params = new URLSearchParams();
+  for (const key of ["source", "category", "q", "cursor"]) {
+    const value = c.req.query(key);
+    if (value) params.set(key, value.slice(0, 120));
+  }
+  params.set("limit", "48");
+  const res = await listLibraryPoses(params).catch(() => null);
+  if (!res || !res.ok) {
+    return c.json(errorEnvelope("UPSTREAM_UNAVAILABLE", "추론 서버가 라이브러리 목록을 주지 않았습니다.", c.get("requestId")), 502);
+  }
+  return c.json(await res.json());
+});
+
 adminRoutes.get("/review/jobs/:id", async (c) => {
   const jobId = c.req.param("id");
+  // result_json은 건당 수십~수백 KB라 목록 쿼리에는 넣지 않는다(jobs/store.ts). 여기는
+  // Job 하나라 읽어도 되고, 인물별 출력 범위가 이 안에만 있다.
   const job = await queryOne<{
     id: string;
     status: string;
     created_at: string;
     input_s3_key: string | null;
+    input_width: number | null;
+    input_height: number | null;
     inference_metadata_json: string | null;
+    result_json: string | null;
+    cut_summary_json: string | null;
   }>(
-    `SELECT id, status, created_at, input_s3_key, inference_metadata_json
-     FROM jobs WHERE id = $1 AND installation_id IS NOT NULL`,
+    `SELECT id, status, created_at, input_s3_key, input_width, input_height,
+            inference_metadata_json, result_json, cut_summary_json
+     FROM quality_review_jobs WHERE id = $1 AND installation_id IS NOT NULL`,
     [jobId],
   );
   if (!job) return c.json(errorEnvelope("NOT_FOUND", "unknown jobId", c.get("requestId")), 404);
 
-  const [people, candidates, selections, feedback, refinedRows] = await Promise.all([
-    query("SELECT * FROM analysis_people WHERE job_id = $1 ORDER BY person_index", [jobId]),
-    query(
-      "SELECT * FROM analysis_candidates WHERE job_id = $1 ORDER BY person_index, rank",
+  const [peopleRows, candidates, selections, feedback, refinedRows] = await Promise.all([
+    query<AnalysisPersonRow>(
+      "SELECT * FROM quality_review_analysis_people WHERE job_id = $1 ORDER BY person_index",
       [jobId],
     ),
-    query("SELECT * FROM confirmed_selections WHERE job_id = $1 ORDER BY person_index", [jobId]),
-    queryOne<{ reason: string }>("SELECT reason FROM job_feedback WHERE job_id = $1", [jobId]),
+    query(
+      "SELECT * FROM quality_review_analysis_candidates WHERE job_id = $1 ORDER BY person_index, rank",
+      [jobId],
+    ),
+    query("SELECT * FROM quality_review_confirmed_selections WHERE job_id = $1 ORDER BY person_index", [jobId]),
+    queryOne<{ reason: string }>("SELECT reason FROM quality_review_job_feedback WHERE job_id = $1", [jobId]),
     query<{
       person_index: number;
       candidate_id: string;
@@ -391,14 +737,14 @@ adminRoutes.get("/review/jobs/:id", async (c) => {
     }>(
       `SELECT person_index, candidate_id, pose_id, refined, reason, object_key,
               thumbnail_key, limbs_json, created_at
-       FROM refined_artifacts WHERE job_id = $1 ORDER BY person_index, candidate_id`,
+       FROM quality_review_refined_artifacts WHERE job_id = $1 ORDER BY person_index, candidate_id`,
       [jobId],
     ),
   ]);
 
   /**
    * refine 산출물은 키만 DB에 있고 본체는 betaData 버킷에 있다. 검토 화면이 바로
-   * 볼 수 있게 서명해 내려보낸다.
+   * 볼 수 있게 동의를 재확인하는 인증 경로를 내려보낸다.
    *
    * `refined=false`인 행도 뺴지 않는다 — 왜 조정하지 않았는지(`reason`)가 조정 결과
    * 만큼이나 중요하다. 그 경우 키가 비어 URL은 null이 된다.
@@ -412,8 +758,8 @@ adminRoutes.get("/review/jobs/:id", async (c) => {
       reason: row.reason,
       limbs: JSON.parse(row.limbs_json || "[]"),
       createdAt: row.created_at,
-      bvhUrl: row.object_key ? await signedInputUrl(row.object_key) : null,
-      thumbnailUrl: row.thumbnail_key ? await signedInputUrl(row.thumbnail_key) : null,
+      bvhUrl: row.object_key ? `/v1/admin/review/jobs/${encodeURIComponent(jobId)}/refined/${row.person_index}/bvh?candidateId=${encodeURIComponent(row.candidate_id)}` : null,
+      thumbnailUrl: row.thumbnail_key ? `/v1/admin/review/jobs/${encodeURIComponent(jobId)}/refined/${row.person_index}/thumbnail?candidateId=${encodeURIComponent(row.candidate_id)}` : null,
     })),
   );
 
@@ -422,12 +768,18 @@ adminRoutes.get("/review/jobs/:id", async (c) => {
     jobId: job.id,
     status: job.status,
     createdAt: job.created_at,
-    inputUrl: job.input_s3_key ? await signedInputUrl(job.input_s3_key) : null,
-    inputUrlExpiresInSeconds: job.input_s3_key ? 300 : null,
+    inputUrl: job.input_s3_key ? `/v1/admin/review/jobs/${encodeURIComponent(jobId)}/input` : null,
+    inputUrlExpiresInSeconds: null,
+    // 관절은 원본 픽셀 좌표다. 화면이 겹쳐 그리려면 그 좌표계의 크기를 알아야 한다.
+    image:
+      job.input_width && job.input_height
+        ? { width: job.input_width, height: job.input_height }
+        : null,
     inferenceMetadata: job.inference_metadata_json
       ? JSON.parse(job.inference_metadata_json)
       : null,
-    people,
+    cutSummary: parseCutSummary(job.cut_summary_json),
+    people: toReviewPeople(peopleRows, job.result_json),
     candidates,
     selections,
     refined,
@@ -462,4 +814,129 @@ adminRoutes.get("/review/pose-candidates/:id/thumbnail", async (c) => {
   if (etag) headers["ETag"] = etag;
   if (upstream.status === 304) return new Response(null, { status: 304, headers });
   return new Response(upstream.body, { status: upstream.status, headers });
+});
+
+/**
+ * GET /v1/admin/gaps/observations?days=90&cursor=… — 라이브러리 공백 분석용 비식별 관측.
+ *
+ * 받는 쪽은 Standin-server `pose_gaps pull`이다(계약: 그 저장소 docs/POSE_GAP_LOOP.md).
+ * 관리자 토큰에 더해 `GAP_EXPORT_REVIEWERS`에 든 검토자만 받는다. 한 번에 모든 사용자의
+ * 관측을 가져가는 경로라서, 한 건씩 여는 검토 화면보다 좁게 연다.
+ * 페이지마다 감사 기록을 남기고, 첫 페이지에서는 운영 채널에 알린다.
+ */
+adminRoutes.get("/gaps/observations", async (c) => {
+  const requestId = c.get("requestId");
+  const key = config.gapExportHmacKey;
+  if (!key) {
+    return c.json(
+      errorEnvelope("GAP_EXPORT_DISABLED", "공백 관측 export가 설정되지 않았습니다.", requestId),
+      503,
+    );
+  }
+  const reviewer = c.get("reviewer") ?? DEFAULT_REVIEWER;
+  if (!config.gapExportReviewers.has(reviewer)) {
+    return c.json(
+      errorEnvelope("FORBIDDEN", "공백 관측 export 권한이 없습니다.", requestId),
+      403,
+    );
+  }
+
+  const now = Date.now();
+  const cursor = c.req.query("cursor");
+  let state;
+  if (cursor) {
+    state = decodeCursor(key, cursor, now);
+    if (!state) {
+      return c.json(
+        errorEnvelope("INVALID_CURSOR", "커서가 잘못됐거나 만료됐습니다. 처음부터 다시 받으세요.", requestId),
+        400,
+      );
+    }
+  } else {
+    const days = parseExportDays(c.req.query("days"));
+    if (days === null) {
+      return c.json(
+        errorEnvelope("INVALID_INPUT", "days는 1~365 정수여야 합니다.", requestId),
+        400,
+      );
+    }
+    state = startExport(now, days);
+  }
+
+  const rows = await listGapObservations({
+    since: windowStart(state),
+    until: state.generatedAt,
+    after: state.after,
+    // 개발자 단말(쿼터 면제 설치)의 시험 분석은 사용자 공백이 아니다.
+    excludeInstallations: [...config.quotaExemptInstallations],
+    limit: GAP_EXPORT_PAGE_SIZE,
+  });
+  const salt = exportSalt(key, state.exportId);
+  const items = rows
+    .map((row) => toObservation(row, salt))
+    .filter((item): item is Record<string, unknown> => item !== null);
+  const last = rows.at(-1);
+  const nextCursor =
+    rows.length === GAP_EXPORT_PAGE_SIZE && last
+      ? encodeCursor(key, {
+          ...state,
+          after: { createdAt: last.created_at, jobId: last.job_id, personIndex: last.person_index },
+        })
+      : null;
+  const page = {
+    schemaVersion: GAP_EXPORT_SCHEMA_VERSION,
+    exportId: state.exportId,
+    window: { days: state.days },
+    generatedAt: state.generatedAt,
+    retention: RETENTION_HINT,
+    items,
+    nextCursor,
+  };
+
+  // 받는 쪽도 같은 검사를 하지만, 걸리면 이미 내보낸 뒤다. 나가기 전에 막는다.
+  const problems = privacyProblems(items);
+  if (problems.length > 0) {
+    notify({
+      severity: "P2",
+      code: "GAP_EXPORT_PRIVACY",
+      message: "공백 관측 export에 원본 ID 모양 값이 섞여 페이지를 막았습니다.",
+      context: { problems: problems.slice(0, 5) },
+    });
+    return c.json(
+      errorEnvelope("GAP_EXPORT_PRIVACY", "export 항목이 비식별 검사를 통과하지 못했습니다.", requestId),
+      500,
+    );
+  }
+
+  await audit(c, cursor ? "gap_export_page" : "gap_export_start");
+  if (!cursor) {
+    notify({
+      severity: "P3",
+      code: "GAP_EXPORT_STARTED",
+      message: "공백 관측 export를 시작했습니다.",
+      context: { reviewer, days: state.days },
+    });
+  }
+  return c.json(page);
+});
+
+// Authenticated proxies: never hand out S3 bearer URLs that outlive withdrawal.
+adminRoutes.get("/review/jobs/:id/input", async c => {
+  const jobId = c.req.param("id");
+  const job = await queryOne<{ input_s3_key: string | null }>("SELECT input_s3_key FROM quality_review_jobs WHERE id=$1", [jobId]);
+  if (!job?.input_s3_key) return c.json(errorEnvelope("NOT_FOUND", "not found", c.get("requestId")), 404);
+  const blob = await loadInput(job.input_s3_key);
+  await audit(c, "review_input", { jobId });
+  return new Response(await blob.arrayBuffer(), { headers: { "Content-Type": blob.type, "Cache-Control": "private, no-store" } });
+});
+adminRoutes.get("/review/jobs/:id/refined/:personIndex/bvh", async c => {
+  const target = refinedTarget(c);
+  if (!target) return c.json(errorEnvelope("INVALID_INPUT", "invalid target", c.get("requestId")), 400);
+  const row = await queryOne<{ object_key: string | null }>(
+    "SELECT object_key FROM quality_review_refined_artifacts WHERE job_id=$1 AND person_index=$2 AND candidate_id=$3",
+    [target.jobId, target.personIndex, target.candidateId]);
+  if (!row?.object_key) return c.json(errorEnvelope("NOT_FOUND", "not found", c.get("requestId")), 404);
+  const blob = await loadInput(row.object_key);
+  await audit(c, "review_refined_bvh", { jobId: target.jobId });
+  return new Response(await blob.arrayBuffer(), { headers: { "Content-Type": "application/octet-stream", "Content-Disposition": 'attachment; filename="refined.bvh"', "Cache-Control": "private, no-store" } });
 });

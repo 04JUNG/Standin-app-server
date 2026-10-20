@@ -125,6 +125,7 @@ export async function runRefine(
     jobId: string;
     personIndex: number;
     candidateId: string;
+    deferPreview?: boolean;
   },
   deps: RefineDeps = defaultDeps,
 ): Promise<RefineOutcome | RefineFailure> {
@@ -211,8 +212,11 @@ export async function runRefine(
   let upstream;
   try {
     upstream = await deps.refineUpstream({
+      // 미리보기는 refine 밖에서 그린다. 안에서 그리면 5초 상한을 넘겨 조정 결과까지 잃는다.
+      ...(input.deferPreview || !config.refineInlineThumbnail ? { render_thumbnail: false } : {}),
       pose_id: candidate.poseId,
       view: candidate.view,
+      ...(candidate.camera ? { camera: candidate.camera } : {}),
       keypoints: context.keypoints,
       scores: context.scores,
       search_distance: candidate.distance,
