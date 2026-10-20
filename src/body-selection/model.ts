@@ -1,4 +1,5 @@
 /** Body choices are independent of pose selection. No inference is performed here. */
+import { automaticRecommendation, isChildBody } from "./childPolicy.js";
 import {
   bodyShape,
   type BodyShape,
@@ -231,6 +232,7 @@ export function resolveBody(
   shape: BodyShape | null = null,
   previewOnly = false,
 ): BodySelection {
+  recommendation = automaticRecommendation(recommendation, catalog);
   const state: BodySelection = {
     schemaVersion: "body-selection.v1",
     personIndex,
@@ -279,7 +281,7 @@ export function resolveBody(
   if (intent === "auto") return { ...state, resolutionStatus: "unavailable" };
   if (bodyEligible(policy.userDefault, catalog, poses, previewOnly))
     return use(policy.userDefault, "user_default_fallback");
-  if (bodyEligible(policy.catalogDefault, catalog, poses, previewOnly))
+  if (!isChildBody(policy.catalogDefault, catalog) && bodyEligible(policy.catalogDefault, catalog, poses, previewOnly))
     return use(policy.catalogDefault, "catalog_default_fallback");
   return state;
 }

@@ -1,3 +1,4 @@
+import { resolveOutputScope, scopeIncludesHands, type BodyScope } from "./output-scope/model.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Hono } from "hono";
@@ -44,7 +45,7 @@ function fixture(kind = "near_match", semantic = false) {
 }
 function setup(kind: string, semantic: boolean, bodyMode: boolean, handsMode: boolean) {
   const f = fixture(kind, semantic);
-  const state = { owner: true, confirmed: false, available: true, changed: false, calls: 0, late: "", revision: 1, runtime: "c".repeat(64), character: "b".repeat(64), modelRevision: "e".repeat(64), badLineage: false };
+  const state = { scope: "half" as BodyScope, handCalls: 0, owner: true, confirmed: false, available: true, changed: false, calls: 0, late: "", revision: 1, runtime: "c".repeat(64), character: "b".repeat(64), modelRevision: "e".repeat(64), badLineage: false };
   const body = (): BodySelection => ({ schemaVersion: "body-selection.v1", personIndex: 0,
     intent: "manual", manualCharacterId: "chosen", recommendation: { status: "unavailable", body: null, reasonCodes: [] },
     resolvedBody: { bodyId: "body", bodyVersion: "1", assetSha256: state.character, characterId: "chosen", measurementVersion: "1", rigVersion: "1" },
@@ -61,13 +62,13 @@ function setup(kind: string, semantic: boolean, bodyMode: boolean, handsMode: bo
     resolveExportArtifact: async () => ({ variant: "base", fallbackReason: null }),
     getPoseBvh: async () => new Response(state.changed ? "changed" : f.source, { status: state.available ? 200 : 409 }),
     checkCharacter: async () => "ok", converterEnabled: () => true, recordExport: async () => {},
-    handBakeFor: async () => hands,
+    handBakeFor: async () => { state.handCalls++; return hands; },
     modelPreviewIdentity: async () => ({ characterSha256: state.character, modelRevision: state.modelRevision }),
     convertFramed: async (input) => {
       state.calls++;
-      assert.equal(input.scope, "half"); assert.deepEqual(Buffer.from(input.bvhBytes), f.source);
+      assert.equal(input.scope, state.scope); assert.deepEqual(Buffer.from(input.bvhBytes), f.source);
       assert.deepEqual(input.cameraRotation, f.row.render_camera.rotation);
-      assert.deepEqual(input.hands ?? null, hands);
+      assert.deepEqual(input.hands ?? null, scopeIncludesHands(state.scope) ? hands : null);
       if (bodyMode) assert.equal(input.characterId, "chosen");
       const bytes = Buffer.from("FBX exact registered asset " + input.scope);
       const artifact = { fbx: bytes, preview: Buffer.from(input.previewFormat === "model" ? "GLB" : "PNG"),
@@ -84,8 +85,8 @@ function setup(kind: string, semantic: boolean, bodyMode: boolean, handsMode: bo
   }, { selection: async () => body(), runtime: async () => ({ schemaVersion: "body-preview-runtime.v1", previewRevision: state.runtime,
     modelVersion: "posed-mesh-v1", modelRevision: state.modelRevision, solverVersion: "solver", framingVersion: "framing" }), enabled: () => true }));
   const request = (extra: Record<string, string> = {}) => app.request("/registered/framed?" + new URLSearchParams({
-    jobId: f.result.jobId, personIndex: "0", candidateId: f.c.id, outputScope: "half", format: "preview",
-    ...(bodyMode ? { bodySelectionRevision: "1" } : {}), ...(hands ? { handSelectionRevision: "2" } : {}), ...extra,
+    jobId: f.result.jobId, personIndex: "0", candidateId: f.c.id, outputScope: state.scope, format: "preview",
+    ...(bodyMode ? { bodySelectionRevision: "1" } : {}), ...(hands && scopeIncludesHands(state.scope) ? { handSelectionRevision: "2" } : {}), ...extra,
   }));
   return { ...f, state, request };
 }
@@ -292,3 +293,29 @@ test("actual PostgreSQL schema: old near/semantic jobs gain owned manual rows an
   const stored = (await db.query<{ result_json: string }>("SELECT result_json FROM jobs WHERE id=$1", [expired.result.jobId])).rows[0];
   assert.equal(JSON.parse(stored.result_json).manualExportVersion, undefined, "expired work is not migrated or revived");
 });
+
+for (const bodyMode of [false, true]) {
+  test(`head mirror manual export still requires confirmation and exact review, body=${bodyMode}, without hand work`, async () => {
+    const f = setup("mirror_reference", false, bodyMode, true);
+    f.state.scope = "head";
+    f.p.outputScope = resolveOutputScope({ selection: "head", detected: "full" });
+    const unconfirmed = await f.request({ format: "fbx" });
+    assert.equal(unconfirmed.status, 409);
+    assert.equal((await unconfirmed.json() as { error: { code: string } }).error.code, "MANUAL_SELECTION_REQUIRED");
+    f.state.confirmed = true;
+    const unchecked = await f.request({ format: "fbx" });
+    assert.equal(unchecked.status, 409);
+    assert.equal((await unchecked.json() as { error: { code: string } }).error.code, "MANUAL_REVIEW_REQUIRED");
+    const preview = await f.request();
+    assert.equal(preview.status, 200);
+    assert.equal(preview.headers.get("X-Standin-Hand-Revision"), null);
+    const reviewKey = preview.headers.get("X-Standin-Review-Key")!;
+    assert.match(reviewKey, /^[a-f0-9]{64}$/);
+    const download = await f.request({ format: "fbx", reviewKey });
+    assert.equal(download.status, 200);
+    assert.equal(download.headers.get("X-Standin-Artifact-SHA256"), preview.headers.get("X-Standin-Artifact-SHA256"));
+    assert.equal(f.state.handCalls, 0);
+    assert.equal(f.c.manualExportAllowed, true);
+    assert.equal(f.c.releaseAllowed, false);
+  });
+}
