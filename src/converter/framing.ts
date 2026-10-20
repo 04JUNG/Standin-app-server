@@ -1,6 +1,7 @@
 /** Paired FBX + PNG from the same final artifact. No pose inference lives here. */
 import { sameShapeSource, type BodyShape, type ShapeSource } from "../body-selection/shape.js";
 import { config } from "../config.js";
+import { framedPairStore, type FramedLocation, type FramedPairStore } from "./framedStorage.js";
 import {
   ConverterError,
   converterEnabled,
@@ -343,11 +344,15 @@ export class FramedArtifactCache {
     private readonly maxBytes = 128 * 1024 * 1024,
     private readonly ttlMs = 600_000,
     private readonly maxPending = 4,
+    private readonly shared: FramedPairStore = framedPairStore,
   ) {}
   async get(
     key: string,
     create: () => Promise<FramedArtifact>,
+    location?: FramedLocation,
   ): Promise<FramedArtifact> {
+    // Scope the in-memory layer too; persistence is never an authorization grant.
+    if (location) key = JSON.stringify([EXPECTED_SOLVER_VERSION, location, key]);
     for (const [id, entry] of this.entries)
       if (entry.expires <= Date.now()) this.remove(id);
     const hit = this.entries.get(key);
@@ -356,7 +361,13 @@ export class FramedArtifactCache {
     if (running) return running;
     if (this.pending.size >= this.maxPending)
       throw new ConverterError("CONVERTER_UNAVAILABLE", "framing queue full");
-    const promise = create()
+    const resolve = async () => {
+      const stored = location ? await this.shared.load(location, key) : null;
+      if (stored) return stored;
+      const result = await create();
+      return location ? this.shared.publish(location, key, result) : result;
+    };
+    const promise = resolve()
       .then((result) => {
         const size = result.fbx.byteLength + result.preview.byteLength;
         while (this.bytes + size > this.maxBytes && this.entries.size)
