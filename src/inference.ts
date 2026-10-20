@@ -553,16 +553,71 @@ export async function semanticReadiness(): Promise<boolean> {
 }
 
 /** Offline poster or cheap pose-only reference; the inference endpoint never calls Blender. */
-export function getPosePoster(poseId: string, sourceSha256: string, scope = "full"): Promise<Response> {
+export function getPosePoster(
+  poseId: string,
+  sourceSha256: string,
+  scope = "full",
+): Promise<Response> {
   const params = new URLSearchParams({ source_sha256: sourceSha256, scope });
-  return fetch(`${config.inferenceBaseUrl}/pose/${encodeURIComponent(poseId)}/poster?${params}`, {
-    headers: authHeaders(), signal: AbortSignal.timeout(5_000),
-  });
+  return fetch(
+    `${config.inferenceBaseUrl}/pose/${encodeURIComponent(poseId)}/poster?${params}`,
+    {
+      headers: authHeaders(),
+      signal: AbortSignal.timeout(5_000),
+    },
+  );
 }
 
 /** Shared immutable default mesh; no selected-body conversion. */
 export function getDefaultBodyTemplate(scope: string): Promise<Response> {
-  return fetch(`${config.inferenceBaseUrl}/pose-poster-template/${encodeURIComponent(scope)}`, {
-    headers: authHeaders(), signal: AbortSignal.timeout(5_000),
-  });
+  return fetch(
+    `${config.inferenceBaseUrl}/pose-poster-template/${encodeURIComponent(scope)}`,
+    {
+      headers: authHeaders(),
+      signal: AbortSignal.timeout(5_000),
+    },
+  );
+}
+
+/** Separate opt-in scene worker; does not alter /analyze's deadline. */
+export async function sceneRefinementRequest(
+  stage: "plan" | "build",
+  value: unknown,
+): Promise<Record<string, any>> {
+  if (!config.sceneRefinementBaseUrl || !config.sceneRefinementToken)
+    throw new Error("scene worker disabled");
+  const response = await fetch(
+    `${config.sceneRefinementBaseUrl.replace(/\/+$/, "")}/scene/${stage}`,
+    {
+      method: "POST",
+      redirect: "error",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${config.sceneRefinementToken}`,
+      },
+      body: JSON.stringify(value),
+      signal: AbortSignal.timeout(config.sceneRefinementTimeoutMs),
+    },
+  );
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new Error(`scene worker rejected (${response.status})`);
+  }
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("empty scene result");
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const v = await reader.read();
+      if (v.done) break;
+      size += v.value.length;
+      if (size > 192 * 1024 * 1024) throw new Error("scene response too large");
+      chunks.push(v.value);
+    }
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
 }

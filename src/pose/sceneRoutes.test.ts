@@ -7,7 +7,7 @@ import { sha256Hex } from "../converter/client.js";
 import { createSceneRoutes } from "./sceneRoutes.js";
 
 const fbx = Buffer.from("Kaydara FBX Binary  \0\x1a\0person");
-function setup() {
+function setup(refinement = false) {
   const state = {
     owner: true,
     confirmed: true,
@@ -15,10 +15,13 @@ function setup() {
     reads: 0,
     composed: 0,
     changeHands: false,
+    preparations: 0,
     tamper: false,
     sent: [] as number[],
   };
   const job = {
+    id: "job",
+    inputS3Key: "owned-raw-image",
     status: "completed",
     updatedAt: "v1",
     result: {
@@ -55,6 +58,18 @@ function setup() {
       },
       {
         enabled: () => true,
+        refinementEnabled: () => refinement,
+        prepareRefinedScene: async () => {
+          state.composed++;
+          state.preparations++;
+          return {
+            bytes: fbx,
+            sha256: sha256Hex(fbx),
+            preview: Buffer.from("preview").toString("base64"),
+            previewSha256: sha256Hex(Buffer.from("preview")),
+            summary: [],
+          };
+        },
         getOwnedJob: async () => (state.owner ? job : undefined),
         validateConfirmedSelection: async () => state.confirmed,
         composeRoughScene: async (_id, image, sources) => {
@@ -77,7 +92,7 @@ function setup() {
   return {
     state,
     rows,
-    send: () =>
+    send: (extra: Record<string, unknown> = {}) =>
       app.request("/job/scene", {
         method: "POST",
         headers: {
@@ -85,7 +100,7 @@ function setup() {
           "X-Installation-Id": "owner",
           "X-Device-Token": "token",
         },
-        body: JSON.stringify({ persons: rows }),
+        body: JSON.stringify({ persons: rows, ...extra }),
       }),
   };
 }
@@ -127,4 +142,35 @@ test("artifact substitution and body/hand changes during composition fail closed
   b.state.changeHands = true;
   assert.equal((await b.send()).status, 409);
   assert.equal(b.state.composed, 1);
+});
+
+test("scene refinement requires review, pins exact artifact and rechecks hands on release", async () => {
+  const s = setup(true);
+  assert.equal((await s.send()).status, 409);
+  const prepared = await s.send({ prepare: true });
+  assert.equal(prepared.status, 200);
+  const receipt = (await prepared.json()) as {
+    reviewKey: string;
+    artifactSha256: string;
+  };
+  assert.equal(receipt.artifactSha256, sha256Hex(fbx));
+  const download = await s.send({ reviewKey: receipt.reviewKey });
+  assert.equal(download.status, 200);
+  assert.equal(
+    download.headers.get("X-Standin-Scene-Version"),
+    "scene-refinement-v4",
+  );
+  assert.deepEqual(Buffer.from(await download.arrayBuffer()), fbx);
+  assert.equal(s.state.preparations, 1);
+  s.state.changeHands = true;
+  assert.equal((await s.send({ reviewKey: receipt.reviewKey })).status, 409);
+});
+test("review receipts cannot cross jobs or source references", async () => {
+  const a = setup(true);
+  const receipt = (await (await a.send({ prepare: true })).json()) as {
+    reviewKey: string;
+  };
+  a.rows[0]!.exportPath += "&changed=1";
+  assert.equal((await a.send({ reviewKey: receipt.reviewKey })).status, 409);
+  assert.equal((await a.send({ reviewKey: "unknown" })).status, 409);
 });

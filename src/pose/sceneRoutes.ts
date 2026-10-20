@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+import { prepareRefinedScene, type RefinedScene } from "./sceneRefinement.js";
 import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
 import { getOwnedJob } from "../jobs/store.js";
@@ -15,8 +17,36 @@ const defaults = {
   getOwnedJob,
   validateConfirmedSelection,
   composeRoughScene,
+  prepareRefinedScene,
+  refinementEnabled: () =>
+    config.sceneRefinementEnabled &&
+    !!config.sceneRefinementBaseUrl &&
+    !!config.sceneRefinementToken,
   enabled: () => config.sceneExportEnabled && converterEnabled(),
 };
+// Bounded process-local receipts: never regenerate a file after scene confirmation.
+const receipts = new Map<
+  string,
+  { binding: string; expires: number; scene: RefinedScene }
+>();
+const MAX_RECEIPT_BYTES = 256 * 1024 * 1024;
+function remember(binding: string, scene: RefinedScene) {
+  for (const [k, v] of receipts) if (v.expires < Date.now()) receipts.delete(k);
+  let size = scene.bytes.length + scene.preview.length;
+  for (const v of receipts.values())
+    size += v.scene.bytes.length + v.scene.preview.length;
+  while (size > MAX_RECEIPT_BYTES && receipts.size) {
+    const key = receipts.keys().next().value!;
+    const v = receipts.get(key)!;
+    size -= v.scene.bytes.length + v.scene.preview.length;
+    receipts.delete(key);
+  }
+  if (size > MAX_RECEIPT_BYTES)
+    throw new Error("scene review exceeds memory budget");
+  const key = randomBytes(24).toString("hex");
+  receipts.set(key, { binding, scene, expires: Date.now() + 15 * 60_000 });
+  return key;
+}
 export function createSceneRoutes(
   dispatch: (request: Request) => Response | Promise<Response>,
   overrides: Partial<typeof defaults> = {},
@@ -43,7 +73,11 @@ export function createSceneRoutes(
     } catch {
       return fail(400, "INVALID_INPUT", "저장할 인물을 다시 선택해 주세요.");
     }
-    const input = value as { persons?: unknown } | null;
+    const input = value as {
+      persons?: unknown;
+      prepare?: unknown;
+      reviewKey?: unknown;
+    } | null;
     if (
       !input ||
       !Array.isArray(input.persons) ||
@@ -170,7 +204,42 @@ export function createSceneRoutes(
         });
         refs.push(row);
       }
-      const scene = await deps.composeRoughScene(jobId, image, sources);
+      const binding = sha256Hex(
+        Buffer.from(JSON.stringify([owner, jobId, job.updatedAt, refs])),
+      );
+      const refined = deps.refinementEnabled() && !!job.inputS3Key;
+      let scene: { bytes: Uint8Array; sha256: string };
+      let prepared: RefinedScene | undefined;
+      if (refined) {
+        if (input.prepare === true) {
+          prepared = await deps.prepareRefinedScene(owner, job, refs, sources);
+          scene = prepared;
+        } else {
+          const receipt =
+            typeof input.reviewKey === "string"
+              ? receipts.get(input.reviewKey)
+              : undefined;
+          if (
+            !receipt ||
+            receipt.binding !== binding ||
+            receipt.expires < Date.now()
+          )
+            return fail(
+              409,
+              "SCENE_REVIEW_REQUIRED",
+              "보정된 장면을 다시 확인한 뒤 저장해 주세요.",
+            );
+          scene = receipt.scene;
+        }
+      } else {
+        if (input.prepare !== undefined || input.reviewKey !== undefined)
+          return fail(
+            409,
+            "SCENE_UNAVAILABLE",
+            "장면 보정을 사용할 수 없습니다.",
+          );
+        scene = await deps.composeRoughScene(jobId, image, sources);
+      }
       const current = await deps.getOwnedJob(jobId, owner);
       if (
         !current ||
@@ -219,13 +288,28 @@ export function createSceneRoutes(
             "확인한 체형이나 손이 바뀌었습니다. 다시 확인해 주세요.",
           );
       }
+      if (prepared) {
+        const reviewKey = remember(binding, prepared);
+        c.header("Cache-Control", "private, no-store");
+        return c.json({
+          version: "scene-refinement-v4",
+          reviewKey,
+          artifactSha256: prepared.sha256,
+          previewSha256: prepared.previewSha256,
+          previewBase64: prepared.preview,
+          summary: prepared.summary,
+          personCount: refs.length,
+        });
+      }
       return new Response(scene.bytes, {
         headers: {
           "Content-Type": "application/octet-stream",
           "Cache-Control": "private, no-store",
           "X-Standin-Artifact-SHA256": scene.sha256,
           "X-Standin-Person-Count": String(sources.length),
-          "X-Standin-Scene-Version": "rough-layout-v1",
+          "X-Standin-Scene-Version": refined
+            ? "scene-refinement-v4"
+            : "rough-layout-v1",
           "Content-Disposition": 'attachment; filename="standin_scene.fbx"',
         },
       });
