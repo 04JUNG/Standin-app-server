@@ -56,6 +56,10 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
   .pill.ok { background:color-mix(in srgb,var(--ok) 18%,transparent); color:var(--ok); }
   .pill.warn { background:color-mix(in srgb,var(--warn) 18%,transparent); color:var(--warn); }
   .pill.bad { background:color-mix(in srgb,var(--bad) 18%,transparent); color:var(--bad); }
+  .pill.search { background:color-mix(in srgb,var(--c-down) 16%,transparent); color:var(--c-down); }
+  .searchq { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:4px; font-family:inherit; }
+  .searchq .q { color:var(--text); font-size:12.5px; word-break:break-all; }
+  .tile .img .searchq { flex-direction:column; padding:12px; text-align:center; margin:0; }
   table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
   th,td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); }
   th { color:var(--muted); font-size:12.5px; font-weight:600; }
@@ -380,6 +384,13 @@ async function load() {
 }
 
 function pill(text, kind) { return '<span class="pill ' + kind + '">' + text + "</span>"; }
+// 텍스트 검색 Job은 이미지가 없다. "원본 만료" 대신 종류와 검색어를 보여 준다.
+function isSearch(item) { return item && item.source === "semantic"; }
+function searchNote(item) {
+  if (!isSearch(item)) return "";
+  return '<div class="searchq">' + pill("텍스트 검색", "search") +
+    (item.searchQuery ? '<span class="q">“' + esc(item.searchQuery) + '”</span>' : "") + "</div>";
+}
 function esc(value) { return String(value).replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c])); }
 function ms(value) { return value === null || value === undefined ? "—" : value >= 1000 ? (value/1000).toFixed(1) + "s" : value + "ms"; }
 
@@ -916,7 +927,9 @@ function detailRender(detail) {
         : "");
   }).join("");
 
-  const shot = detail.inputUrl
+  const shot = isSearch(detail)
+    ? searchNote(detail) + '<p class="sub">텍스트로 찾은 검색이라 원본 이미지가 없습니다.</p>'
+    : detail.inputUrl
     ? '<div class="shotWrap"><img class="shot" data-review-image="' + esc(detail.inputUrl) + '" alt="">' + overlay.svg + "</div>" +
       '<p class="sub">원본을 열 때마다 품질 검토 동의를 확인합니다.</p>'
     : overlay.svg
@@ -992,7 +1005,7 @@ function recentRender() {
   }
   const rows = recent.items.map((item) =>
     "<tr><td>" + jobStatus(item) + "</td>" +
-    '<td class="mono">' + esc(item.jobId) + "</td>" +
+    '<td class="mono">' + esc(item.jobId) + searchNote(item) + "</td>" +
     '<td class="sub">' + when(item.createdAt) + "</td>" +
     '<td class="num">' + took(item) + "</td>" +
     "<td>" + (item.installationId
@@ -1074,7 +1087,9 @@ function lookupRender() {
     '<td class="' + (item.errorCode ? "err mono" : "sub") + '">' + esc(item.errorCode || "—") + "</td>" +
     '<td class="num">' + (item.personCount || 0) + "</td>" +
     '<td class="num">' + (item.selectionCount || 0) + "</td>" +
-    "<td>" + (item.inputAvailable
+    "<td>" + (isSearch(item)
+      ? searchNote(item)
+      : item.inputAvailable
       ? '<span class="sub">' + (item.inputWidth || "?") + "×" + (item.inputHeight || "?") + "</span>"
       : '<span class="sub" title="버킷 lifecycle 90일">만료</span>') + "</td>" +
     '<td><button class="ghost" data-detail="' + esc(item.jobId) + '">상세</button></td></tr>'
@@ -1843,7 +1858,7 @@ function activityRenderInstall(data) {
     '<div class="dayhead">' + esc(date === data.today ? "오늘 · " + dayLabel(date) : dayLabel(date)) + " · " + byDay[date].length + "건</div>" +
     '<div class="scroll"><table><tbody>' + byDay[date].map((job) =>
       "<tr><td class=\"sub\">" + esc(kst(job.createdAt).hm) + "</td>" +
-      "<td>" + pill(esc(job.outcomeLabel), OUTCOME_PILL[job.outcome] || "warn") + "</td>" +
+      "<td>" + pill(esc(job.outcomeLabel), OUTCOME_PILL[job.outcome] || "warn") + searchNote(job) + "</td>" +
       '<td class="sub">인물 ' + job.personCount + "명</td>" +
       "<td>" + (job.exported ? pill("내보냄", "ok") : '<span class="sub">내보내기 없음</span>') + "</td>" +
       "<td>" + (job.refined ? pill("조정됨", "ok") : "") + "</td>" +
@@ -1993,7 +2008,11 @@ async function galleryLoad() {
 function roughTile(item) {
   return '<button class="tile" data-job="' + esc(item.jobId) + '">' +
     '<div class="bar o-' + esc(item.outcome) + '"></div>' +
-    '<div class="img">' + (item.inputUrl ? '<img loading="lazy" data-review-image="' + esc(item.inputUrl) + '" alt="">' : '<span class="sub">원본 만료</span>') + "</div>" +
+    '<div class="img">' + (isSearch(item)
+      ? searchNote(item)
+      : item.inputUrl
+      ? '<img loading="lazy" data-review-image="' + esc(item.inputUrl) + '" alt="">'
+      : '<span class="sub">원본 만료</span>') + "</div>" +
     '<div class="cap"><div>' + pill(esc(item.outcomeLabel), OUTCOME_PILL[item.outcome] || "warn") + "</div>" +
     '<div class="sub">' + esc(kst(item.createdAt).md + " " + kst(item.createdAt).hm) + " · 인물 " + item.personCount + "명</div>" +
     '<div class="sub">' + (item.exported ? "내보냄" : "내보내기 없음") + (item.refined ? " · 조정됨" : "") + "</div></div></button>";
