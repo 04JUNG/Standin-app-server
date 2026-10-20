@@ -25,6 +25,7 @@ import { failStaleJobs } from "./jobs/store.js";
 import { dispatchPendingJobs } from "./jobs/queue.js";
 import { characterRoutes } from "./characters/routes.js";
 import { poseRoutes } from "./pose/routes.js";
+import { createSceneRoutes } from "./pose/sceneRoutes.js";
 import { analyticsRoutes } from "./analytics/routes.js";
 import { installationRoutes } from "./installations/routes.js";
 import { requireInstallation } from "./installations/middleware.js";
@@ -185,6 +186,8 @@ app.use("/v1/events/*", requireInstallation);
 
 app.route("/v1/users", usersRoutes);
 app.route("/v1/analysis/jobs", jobsRoutes);
+app.use("/v1/analysis/jobs/:jobId/scene", bodyLimit({ maxSize: 32768 }));
+app.route("/v1/analysis/jobs", createSceneRoutes((request) => app.fetch(request)));
 app.route("/v1/models", characterRoutes);
 app.route("/v1/pose-candidates", poseRoutes);
 app.route("/v1/events", analyticsRoutes);

@@ -9,6 +9,7 @@ function env(key: string, def = ""): string {
 const PRODUCTION_PUBLIC_URL = "https://api.standinpose.com";
 
 export const config = {
+  poseThumbnailRevision: env("POSE_THUMBNAIL_REVISION", env("DEPLOYMENT_VERSION")),
   handSelectionEnabled: env("HAND_SELECTION_ENABLED", "false") === "true",
   semanticSearchEnabled: env("SEMANTIC_SEARCH_ENABLED", "false") === "true",
   semanticSearchPerMinute: Math.max(1, Number(env("SEMANTIC_SEARCH_PER_MINUTE", "10")) || 10),
@@ -101,6 +102,7 @@ export const config = {
    * 반대로 flag만 보고 켜면 URL 없이 켜져 전건 실패한다. 둘을 함께 요구하는 이유다.
    */
   fbxExportEnabled: env("FBX_EXPORT_ENABLED", "false") === "true",
+  sceneExportEnabled: env("SCENE_EXPORT_ENABLED", "false") === "true",
   /**
    * converter 호출 상한. converter 자체 변환 timeout이 30초이므로 **그보다 커야** 한다.
    *

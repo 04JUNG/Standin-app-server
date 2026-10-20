@@ -1,3 +1,4 @@
+import { poseThumbnailUrl } from "../pose-thumbnail.js";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { AppEnv } from "../env.js";
@@ -77,6 +78,7 @@ export function createSemanticRoutes(overrides: Partial<typeof defaults> = {}) {
         available: deps.enabled() && (await deps.readiness()),
         maxQueryLength: 500,
         maxTopK: SEMANTIC_MAX_TOP_K,
+        supportsAllResults: true,
       },
       200,
       { "Cache-Control": "private, no-store" },
@@ -173,7 +175,7 @@ export function createSemanticRoutes(overrides: Partial<typeof defaults> = {}) {
               sourceBvhSha256: sha256Hex(bytes),
               ...(variant.thumbnail
                 ? {
-                    thumbnailUrl: `/v1/pose-candidates/${encodeURIComponent(variant.poseId)}/thumbnail?view=front`,
+                    thumbnailUrl: poseThumbnailUrl(variant.poseId, "front"),
                   }
                 : {}),
             };

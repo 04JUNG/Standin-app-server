@@ -47,7 +47,7 @@ function setup() {
     upstream: response() as unknown,
     created: 0,
     calls: 0,
-    requestedTopK: 0,
+    requestedTopK: 0 as number | null,
     result: null as AnalysisResult | null,
     missingBvh: false,
     failed: false,
@@ -123,12 +123,19 @@ test("input bounds and provenance cannot be overridden", () => {
     query: "던지기",
     topK: 5,
   });
+  assert.deepEqual(readSearchInput({ query: "던지기", topK: null }), {
+    query: "던지기",
+    topK: null,
+  });
   for (const body of [
     { query: " " },
     { query: "a".repeat(501) },
     { query: "a", source: "vlm" },
     { query: "a", tags: [] },
-    { query: "a", topK: 21 },
+    { query: "a", topK: true },
+    { query: "a", topK: "20" },
+    { query: "a", topK: -1 },
+    { query: "a", topK: Number.MAX_SAFE_INTEGER + 1 },
     { query: "a", topK: 0 },
     { query: "a", topK: 1.5 },
   ])
@@ -166,8 +173,85 @@ test("twenty results pass through the route and persisted presentation without t
       (c) => !!c.sourceBvhSha256 && c.refineAllowed === false,
     ),
   );
-  assert.equal((await post({ query: "던지는 자세", topK: 21 })).status, 400);
-  assert.equal(state.calls, 1);
+  assert.equal((await post({ query: "던지는 자세", topK: 21 })).status, 200);
+  assert.equal(state.calls, 2);
+});
+
+test("null preserves every ranked result and keeps near candidates separate", async () => {
+  const { app, post, state } = setup();
+  const capability = (await (
+    await app.request("/search/capabilities")
+  ).json()) as {
+    maxTopK: number;
+    supportsAllResults: boolean;
+  };
+  assert.equal(capability.maxTopK, 20);
+  assert.equal(capability.supportsAllResults, true);
+  const upstream = response();
+  const template = upstream.candidates[0]!;
+  const many = (length: number, prefix: string) =>
+    Array.from({ length }, (_, i) => ({
+      ...structuredClone(template),
+      rank: i + 1,
+      pose_id: `${prefix}_${i + 1}`,
+      pose: {
+        ...structuredClone(template.pose),
+        pose_id: `${prefix}_${i + 1}`,
+      },
+    }));
+  upstream.candidates = many(65, "match");
+  const all = { ...upstream, near_candidates: many(27, "near"), top_k: null };
+  state.upstream = all;
+  assert.equal((await post({ query: "던지는 자세", topK: null })).status, 200);
+  assert.equal(state.requestedTopK, null);
+  const person = state.result!.candidatesByPerson[0]!;
+  assert.equal(person.candidateCount, 92);
+  const presentation = person.posePresentation!;
+  assert.deepEqual(
+    presentation.library_candidates.map((c) => c.pose_id),
+    all.candidates.map((c) => c.pose_id),
+  );
+  assert.deepEqual(
+    presentation.review_candidates.map((c) => c.pose_id),
+    all.near_candidates.map((c) => c.pose_id),
+  );
+  assert.deepEqual(
+    presentation.library_candidates.map((c) => c.rank),
+    all.candidates.map((c) => c.rank),
+  );
+  assert.deepEqual(
+    presentation.review_candidates.map((c) => c.rank),
+    all.near_candidates.map((c) => c.rank),
+  );
+  assert(
+    person.candidates.every(
+      (c) =>
+        c.manualExportAllowed &&
+        !!c.sourceBvhSha256 &&
+        !c.releaseAllowed &&
+        !c.refineAllowed,
+    ),
+  );
+});
+
+test("numeric requests above twenty are not clamped", async () => {
+  const { post, state } = setup();
+  const upstream = response();
+  const template = upstream.candidates[0]!;
+  upstream.candidates = Array.from({ length: 31 }, (_, i) => ({
+    ...structuredClone(template),
+    rank: i + 1,
+    pose_id: `pose_${i}`,
+    pose: { ...structuredClone(template.pose), pose_id: `pose_${i}` },
+  }));
+  state.upstream = upstream;
+  assert.equal((await post({ query: "던지는 자세", topK: 31 })).status, 200);
+  assert.equal(state.requestedTopK, 31);
+  assert.equal(
+    state.result!.candidatesByPerson[0]!.posePresentation!.library_candidates
+      .length,
+    31,
+  );
 });
 
 test("owned job pins original and actual mirror ids, publishes no skeleton/refine/body camera", async () => {
@@ -300,7 +384,7 @@ test("live capabilities cannot re-enable refine when an old text result is reope
     false,
   );
 });
-test("inference uses internal auth, forced source user, bounded request and exact top_k", async (t) => {
+test("inference sends explicit null and legacy numeric limits unchanged with internal auth", async (t) => {
   const old = globalThis.fetch,
     token = config.inferenceServiceToken;
   t.after(() => {
@@ -308,6 +392,7 @@ test("inference uses internal auth, forced source user, bounded request and exac
     Object.assign(config, { inferenceServiceToken: token });
   });
   Object.assign(config, { inferenceServiceToken: "internal-test" });
+  let expectedTopK: number | null = 20;
   globalThis.fetch = async (url, init) => {
     assert(String(url).endsWith("/semantic-search"));
     assert.equal(
@@ -316,7 +401,7 @@ test("inference uses internal auth, forced source user, bounded request and exac
     );
     assert.deepEqual(JSON.parse(String(init?.body)), {
       query: "던지기",
-      topK: 20,
+      topK: expectedTopK,
     });
     assert(init?.signal);
     return Response.json(response());
@@ -325,6 +410,8 @@ test("inference uses internal auth, forced source user, bounded request and exac
     ((await searchSemantic("던지기", 20)) as { status: string }).status,
     "ok",
   );
+  expectedTopK = null;
+  await searchSemantic("던지기", null);
 });
 test("geometry health alone does not advertise semantic readiness", async (t) => {
   const old = globalThis.fetch;

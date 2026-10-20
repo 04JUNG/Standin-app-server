@@ -1,23 +1,42 @@
 # 직접 문장 검색 연동 (2026-10-18)
 
-기준은 추론 PR #96, develop `6411c129`다. `/semantic-search`는 `{query, topK}`만 받는다.
+기본 계약은 추론 PR #96이며, 전체 결과 반환은 PR #107(develop `766ce81` 포함)의 배포가 선행돼야 한다. `/semantic-search`는 `{query, topK}`만 받는다.
 이전 PR #87의 source/tags/mirror_alternates 계약을 보내거나 가정하지 않는다.
 `/healthz.semantic_text.ready`가 실제 index·validator 준비 상태를 나타낸다.
 
 ## 공개 API
 
-- `GET /v1/semantic-search/capabilities`: 설치 인증, feature flag와 실제 추론 준비 상태, 최대 500자·TopK 20.
-- `POST /v1/semantic-search`: `{query, topK?}`. 입력을 trim하고 빈 문장·추가 정책 필드·범위를 거절한다. `topK`는 정수 1–20, 생략 시 기존 기본값 5다. 앱은 capabilities의 `maxTopK`를 요청해 최대 20개를 받는다.
+- `GET /v1/semantic-search/capabilities`: 설치 인증, feature flag와 실제 추론 준비 상태, 최대 500자. 기존 설치 앱과의 호환을 위해 `maxTopK:20`을 유지하고 `supportsAllResults:true`를 추가한다. `maxTopK`는 구형 앱의 요청 개수 힌트이며 서버의 결과 상한이 아니다.
+- `POST /v1/semantic-search`: `{query, topK?}`. 입력을 trim하고 빈 문장·추가 정책 필드·잘못된 개수를 거절한다. `topK` 생략은 기존 기본값 5, 양의 안전 정수는 지정 개수, 명시적인 `null`은 검색 기준을 통과한 전체 결과다. 숫자 문자열·bool·0·음수·소수는 거절한다. `null`을 5/20으로 바꾸거나 응답 배열을 잘라내지 않는다.
 - 후보가 전혀 없으면 `{status:no_result,jobId:null}`. 근접 후보만 있으면 조회 작업을 만들고 참고 그룹으로만 표시한다.
 - 오류·미준비·정상 빈 결과는 서로 다르다. 입력 원문이나 추론 예외 원문을 요청 로그에 남기지 않는다.
 - 별도 설치별 10회/분 제한과 30초 기본 기한을 사용한다. 검색 API는 VLM·이미지 처리·포즈 생성을 호출하지 않는다.
 
-앱은 검색 후보와 근접 참고 그룹을 각각 5개씩 페이지로 표시한다. 총 개수·현재 범위·이전/다음 버튼을 제공하고 표시 중인 페이지의 3D 모델만 올린다. 그룹별 상한이 20이며 두 그룹의 개수는 합치지 않는다. `/analyze`의 러프 입력 Top-5와 이미지 내부 의미 라우팅은 변경하지 않는다.
-자연어 모델 미리보기는 설치별 60회/분으로 제한한다. 두 그룹(최대 40개)을 모두 탐색하고 체형 변경·재시도에도 여유를 두되, 기존 모델 변환 동시 실행 제한은 유지한다.
+새 앱은 `supportsAllResults:true`를 확인한 뒤 다음 요청을 보낸다.
+
+```json
+{"query":"공을 던지는 자세","topK":null}
+```
+
+서버 페이지네이션은 없다. 전체 JSON 결과를 저장하고 정식 결과와 근접 참고 그룹을 분리해
+스크롤 시 각각 20개씩 점진 표시한다. BFF의 `candidateCount`는 두 그룹의 총 자산 수이므로
+정식 검색 결과 개수로 사용하지 않는다. 정식 개수는 `posePresentation.library_candidates.length`,
+근접 개수는 `posePresentation.review_candidates.length`다. 각 그룹의 원래 순서와 rank를 유지한다.
+`no_result`에서도 근접 후보가 있으면 작업을 만들며, 근접을 정식 후보로 승격하지 않는다.
+
+목록은 저장된 기본 체형 썸네일을 지연 로딩하고, 3D 변환·렌더는 상세 선택 시에만 실행한다.
+BFF는 기존 자산 소유권·수동 저장 계약을 위해 검색 시 BVH를 최대 4개 병렬로 읽어 SHA를 묶는다.
+이 검증은 Converter/Blender 렌더가 아니며, 결과 개수가 커지면 자산 조회 시간은 늘 수 있다.
+검색창은 상단에 유지하고 입력 변경 300ms 뒤 재검색한다. 이전 요청 취소와 늦은 응답 차단은
+클라이언트가 처리한다. `/analyze`의 러프 입력 Top-5와 이미지 내부 의미 라우팅은 변경하지 않는다.
+자연어 모델 미리보기의 설치별 제한과 기존 모델 변환 동시 실행 제한도 유지한다.
 
 ## 배포 순서
 
-새 앱을 먼저 배포하고 BFF를 배포한다. 새 앱은 기존 `maxTopK:10`과 새 `maxTopK:20`을 모두 허용한다. 구형 앱은 capabilities를 `maxTopK:10` 리터럴로 검사하므로 BFF를 먼저 올리면 문장 검색을 미준비로 처리할 수 있다. 추론 서버는 이미 TopK 20을 지원해 이번 변경이 없다.
+전체 결과 지원 추론 서버 → BFF → 새 앱 순서다. 구형 추론은 `null`을 거절하므로
+BFF/앱 전환 전에 PR #107 적용을 확인한다. 이전 BFF는 `supportsAllResults`가 없으므로
+새 앱이 그 환경에서 `null` 검색을 지원하는 것으로 가정하면 안 된다. 기존 앱의 숫자 요청과
+기존 `maxTopK:10/20` 인식 계약은 유지한다.
 
 ## 결과와 미리보기
 
