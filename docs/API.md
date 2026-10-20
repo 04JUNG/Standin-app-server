@@ -1428,3 +1428,9 @@ body manifest의 선택적 hands는 revision/library_sha256을 포함하며 rend
 Poster responses may identify `X-Standin-Preview-Method=reference-skinning-v1` and `X-Standin-Template-SHA256`. This is actual default-human geometry with approximate reference retarget, not the frozen final Converter solver. It must be labeled as approximate reference. CORS exposes method/template/source provenance for desktop webviews. Unknown methods, wrong body/digests and lookup/source/scope changes fail closed. Selected-body detail/final export paths are unchanged.
 
 Deployment prerequisites: matching inference reader/template endpoint and full verified five-scope asset snapshot; matching client loader and approximate-reference captions. Local staging and production snapshots were prepared separately; no remote write/deployment was performed by this change. See `Standin-server/docs/HUMAN_REFERENCE_POSTERS.md` and client counterpart for complete workflow and validation limits.
+
+### 아동형 자동 추천 제한 (2026-10-20)
+
+현재 이미지 계약은 검증된 아동 디자인 근거를 제공하지 않는다. 따라서 아동 자산의 자동 추천은 `status=unavailable`, `body=null`, `reasonCodes`에 `child_requires_explicit_user_selection`을 기록한다. 나이 추정/비율/얼굴 스타일만으로 추천을 승격하지 않는다. 일반 성인/TOON64 추천은 유지한다.
+
+명시적 manual, fixed_default, 사용자 기본값, 수동 선택에서 기록된 last_used의 아동은 유지한다. 새 자동 catalog_default로는 아동을 쓰지 않으며 기존 안전한 기본값이 없으면 선택을 요구한다. explicit auto는 unavailable을 유지한다. 과거 `auto_recommendation`/`catalog_default_fallback` 아동 선택은 읽기 시 `resolvedBody=null`, `resolvedSource=null`, `resolutionStatus=needs_selection`으로 재검증하고 revision/DB를 변경하지 않는다. 사용자가 선택한 아동을 강제로 성인으로 덮어쓰지 않는다. 카탈로그 자산·수동 옵션·Export 적격성은 삭제하지 않는다.
