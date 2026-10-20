@@ -182,6 +182,7 @@ for (const change of [
       };
     const p = mapCutResult("job", cut(r)).candidatesByPerson[0];
     assert.equal(p.posePresentation?.status, "error");
+    assert.equal(p.posePresentation?.search_reason, change === "version" ? "presentation_contract_unsupported" : "presentation_contract_invalid");
     assert.equal(p.candidateCount, 0);
     assert.equal(p.routedSearch, undefined);
   });

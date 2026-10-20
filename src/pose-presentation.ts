@@ -537,6 +537,9 @@ export function mapPosePresentation(
     return {
       presentation: {
         ...empty,
+        search_reason: error instanceof Error && error.message === "unsupported_presentation_version"
+          ? "presentation_contract_unsupported"
+          : "presentation_contract_invalid",
         library_candidates: [],
         review_candidates: [],
         generated_candidates: [],
