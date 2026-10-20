@@ -4,6 +4,7 @@ import { config } from "../config.js";
 import { parseCatalog } from "./catalog.js";
 import { catalog, result } from "./fixtures.js";
 import {
+  bodyRef,
   defaultPreferences,
   snapshot,
   resolveBody,
@@ -18,7 +19,7 @@ import {
 import {
   bodyShape,
   normalizeControls,
-  shapeDefault,
+  cardShape,
   shapeEditable,
   shapeRenderable,
   ShapeInputError,
@@ -199,15 +200,7 @@ test("routes accept shape envelopes only where they make sense", () => {
     { intent: "manual", characterId: "x", shape: { controls: {}, extra: 1 } },
   ])
     assert.throws(() => parseSelectionChange({ ...base, ...bad }), BodyError);
-  assert.equal(
-    parsePreferenceChange({
-      ...base,
-      mode: "auto",
-      defaultCharacterId: null,
-      shapeDefault: null,
-    }).shapeDefault,
-    null,
-  );
+  assert.equal(parsePreferenceChange({ ...base, mode: "auto" }).mode, "auto");
   assert.throws(
     () =>
       parsePreferenceChange({
@@ -220,11 +213,11 @@ test("routes accept shape envelopes only where they make sense", () => {
   );
 });
 
-test("my-default shapes are validated against the catalog", () => {
+test("card shapes are validated against the catalog", () => {
   const c = shaped();
   withFlag(true, () => {
     assert.deepEqual(
-      shapeDefault(c, {
+      cardShape(c, {
         characterId: "character-1",
         controls: { height: 170 },
       }),
@@ -233,17 +226,17 @@ test("my-default shapes are validated against the catalog", () => {
         controls: { height: 170, physique: 0 },
       },
     );
-    assert.equal(shapeDefault(c, null), null);
+    assert.equal(cardShape(c, null), null);
     assert.throws(
-      () => shapeDefault(c, { characterId: "character-0", controls: {} }),
+      () => cardShape(c, { characterId: "character-0", controls: {} }),
       /SHAPE_UNSUPPORTED/,
     );
     assert.throws(
-      () => shapeDefault(c, { characterId: "character-1" }),
+      () => cardShape(c, { characterId: "character-1" }),
       /INVALID_SHAPE/,
     );
     assert.throws(
-      () => shapeDefault(c, { characterId: "character-1", controls: {}, x: 1 }),
+      () => cardShape(c, { characterId: "character-1", controls: {}, x: 1 }),
       /INVALID_SHAPE/,
     );
   });
@@ -251,7 +244,7 @@ test("my-default shapes are validated against the catalog", () => {
     presentPreferences(defaultPreferences(), c).shapeEditable,
     [],
   );
-  assert.equal(presentPreferences(defaultPreferences(), c).shapeDefault, null);
+  assert.equal("shapeDefault" in presentPreferences(defaultPreferences(), c), false);
 });
 
 test("settings get the name and live-preview runtime of each editable body", () => {
@@ -467,7 +460,7 @@ test("manual shape writes are stored, replayed and rejected when unsupported", a
   });
 });
 
-test("options advertise shape specs; preferences keep my-default shape across writes", async () => {
+test("options advertise shape specs; mode writes preserve migrated cards", async () => {
   const c = shaped();
   const initial = resolveBody(
     0,
@@ -485,45 +478,16 @@ test("options advertise shape specs; preferences keep my-default shape across wr
         .filter(Boolean),
       ["character-1"],
     );
-    const first = await writePreferences(
-      db,
-      "owner",
-      {
-        mode: "auto",
-        defaultCharacterId: null,
-        shapeDefault: { characterId: "character-1", controls: { height: 170 } },
-        expectedRevision: 0,
-        mutationId: "pref-shape-1",
-      },
-      deps,
-    );
-    assert.equal(first.shapeDefault?.controls.height, 170);
-    // Old clients omit the key: the saved shape survives.
-    const second = await writePreferences(
-      db,
-      "owner",
-      {
-        mode: "auto",
-        defaultCharacterId: "character-2",
-        expectedRevision: 1,
-        mutationId: "pref-shape-2",
-      },
-      deps,
-    );
-    assert.equal(second.shapeDefault?.controls.height, 170);
-    const cleared = await writePreferences(
-      db,
-      "owner",
-      {
-        mode: "auto",
-        defaultCharacterId: null,
-        shapeDefault: null,
-        expectedRevision: 2,
-        mutationId: "pref-shape-3",
-      },
-      deps,
-    );
-    assert.equal(cleared.shapeDefault, null);
+    const first = await writePreferences(db, "owner", {
+      mode: "auto", expectedRevision: 0, mutationId: "pref-mode-1",
+    }, deps);
+    assert.equal(first.mode, "auto");
+    const second = await writePreferences(db, "owner", {
+      mode: "last_used", expectedRevision: 1, mutationId: "pref-mode-2",
+    }, deps);
+    assert.deepEqual(second.cards, first.cards);
+    assert.equal("shapeDefault" in second, false);
+
   });
   await withFlagAsync(false, async () => {
     const { db } = memoryDb(initial);
@@ -952,7 +916,7 @@ test("an older 내 기본값 shows up as a card and deleting it clears the old v
       deps,
     );
     assert.deepEqual(gone.cards, []);
-    assert.equal(gone.shapeDefault, null);
+    assert.equal("shapeDefault" in gone, false);
     assert.deepEqual(cardsOf(gone), []);
   });
 });
@@ -961,7 +925,7 @@ test("a hand-picked body becomes the next job's starting body without a revision
   const c = shaped();
   const rec = {
     status: "available" as const,
-    body: snapshot(defaultPreferences(), c).catalogDefault,
+    body: bodyRef(c.assets[0]),
     reasonCodes: [],
   };
   const initial = resolveBody(0, snapshot(defaultPreferences(), c), rec, c, [
@@ -1010,7 +974,7 @@ test("a hand-picked body becomes the next job's starting body without a revision
     // A body these poses cannot use is skipped (here nothing else fits either).
     assert.equal(
       resolveBody(1, snapshot(prefs, c), rec, c, ["pose-z"]).resolvedSource,
-      null,
+      "catalog_default_fallback",
     );
     // Controls the catalog no longer accepts are dropped, never rendered as the plain asset.
     const stale = {
@@ -1083,7 +1047,6 @@ test("card routes accept only their envelopes", () => {
     parsePreferenceChange({
       ...base,
       mode: "last_used",
-      defaultCharacterId: null,
     }).mode,
     "last_used",
   );
@@ -1113,7 +1076,8 @@ test("presentation-only jobs resolve the original body snapshot and persist nume
     const { db, rows } = memoryDb(initial, analysis);
     const first = await readSelection(db, "owner", "job_test", 0, c);
     assert.equal(first.previewOnly, true);
-    assert.equal(first.resolvedBody?.characterId, "character-0");
+    assert.equal(first.resolutionStatus, "unavailable");
+    assert.equal(first.resolvedBody, null);
     assert.equal(first.selectionRevision, 0);
     assert.equal(rows.selection.resolutionStatus, "not_applicable"); // GET does not mutate.
     // Text-search presentations share the same selection, without the fixed-male default override.

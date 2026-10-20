@@ -34,25 +34,8 @@ const id = (v: unknown): v is string =>
 export function parsePreferenceChange(raw: unknown): PreferenceChange {
   const v = obj(raw);
   mutation(v);
-  only(v, [
-    "mode",
-    "defaultCharacterId",
-    "shapeDefault",
-    "expectedRevision",
-    "mutationId",
-  ]);
-  // Contents are checked against the catalog in the store; only the envelope here.
-  if (
-    "shapeDefault" in v &&
-    v.shapeDefault !== null &&
-    (typeof v.shapeDefault !== "object" || Array.isArray(v.shapeDefault))
-  )
-    throw new BodyError("INVALID_INPUT", 400);
-  if (
-    !["auto", "fixed_default", "last_used"].includes(String(v.mode)) ||
-    !(v.defaultCharacterId === null || id(v.defaultCharacterId)) ||
-    (v.mode === "fixed_default" && !v.defaultCharacterId)
-  )
+  only(v, ["mode", "expectedRevision", "mutationId"]);
+  if (!["auto", "last_used"].includes(String(v.mode)))
     throw new BodyError("INVALID_INPUT", 400);
   return v as unknown as PreferenceChange;
 }
