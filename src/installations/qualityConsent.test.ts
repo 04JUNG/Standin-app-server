@@ -355,3 +355,38 @@ test("review guard denies every direct file route and rechecks after slow work",
   );
   assert.equal(visited, false);
 });
+
+test("staging switch: review views ignore consent but still hide revoked installations", async (t) => {
+  const { qualityReviewViews } = await import("./qualityConsent.js");
+  const db = new PGlite();
+  t.after(() => db.close());
+  await db.exec(SCHEMA);
+  const now = new Date().toISOString();
+  const install = (id: string, revokedAt: string | null) =>
+    db.query(
+      `INSERT INTO installations (id, token_hash, consent_version, consented_at, created_at, last_seen_at,
+         app_version, os_name, os_version, architecture, locale, revoked_at)
+       VALUES ($1, 'h', 'v', $2, $2, $2, '0', 'windows', '11', 'x64', 'ko', $3)`,
+      [id, now, revokedAt],
+    );
+  await install("inst_open", null);
+  await install("inst_revoked", now);
+  for (const [id, installationId] of [["job_open", "inst_open"], ["job_revoked", "inst_revoked"]]) {
+    await db.query(
+      "INSERT INTO jobs (id, installation_id, status, created_at, updated_at) VALUES ($1, $2, 'completed', $3, $3)",
+      [id, installationId, now],
+    );
+  }
+  const visible = async () =>
+    (await db.query<{ id: string }>("SELECT id FROM quality_review_jobs ORDER BY id")).rows.map((r) => r.id);
+
+  assert.deepEqual(await visible(), [], "default: no consent, nothing to review");
+  await db.exec(qualityReviewViews(true));
+  assert.deepEqual(await visible(), ["job_open"]);
+  assert.equal(
+    (await db.query("SELECT 1 FROM quality_review_installations WHERE id = 'inst_revoked'")).rows.length,
+    0,
+  );
+  await db.exec(qualityReviewViews(false));
+  assert.deepEqual(await visible(), [], "turning the switch off restores the consent scope");
+});
