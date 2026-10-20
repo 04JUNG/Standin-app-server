@@ -45,6 +45,7 @@ import {
 import { runAnalysisJob } from "./runner.js";
 import { dispatchPendingJobs } from "./queue.js";
 import { currentCapabilities } from "../characters/service.js";
+import { converterEnabled } from "../converter/client.js";
 import { refineRoutes } from "../refine/routes.js";
 import { isAnalysisEnabled } from "../limits/flags.js";
 import { limitErrorResponse } from "../limits/http.js";
@@ -324,6 +325,7 @@ jobsRoutes.get("/:id/result", async (c) => {
       })),
     })),
     capabilities: {
+      sceneExport: config.sceneExportEnabled && converterEnabled() && result.source !== "semantic" && !!result.image,
       presentationBodyPreviews:
         (await currentCapabilities()).bodyPreviews === true &&
         result.candidatesByPerson.some(

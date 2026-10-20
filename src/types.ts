@@ -147,6 +147,7 @@ export interface AnalysisResult {
      * 배포에서 전건 실패한다 — 그래서 서버가 알려 준다.
      */
     fbxExport: boolean;
+    sceneExport?: boolean;
     /**
      * export의 `characterId`를 존중하는가(ADR-013). 모델 목록과 export 처리는 따로
      * 배포될 수 있어 fbxExport와 따로 둔다 — 목록만 먼저 나가면 클라이언트가 고른 체형과

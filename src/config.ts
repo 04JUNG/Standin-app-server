@@ -85,6 +85,7 @@ export const config = {
    * 반대로 flag만 보고 켜면 URL 없이 켜져 전건 실패한다. 둘을 함께 요구하는 이유다.
    */
   fbxExportEnabled: env("FBX_EXPORT_ENABLED", "false") === "true",
+  sceneExportEnabled: env("SCENE_EXPORT_ENABLED", "false") === "true",
   /**
    * converter 호출 상한. converter 자체 변환 timeout이 30초이므로 **그보다 커야** 한다.
    *
