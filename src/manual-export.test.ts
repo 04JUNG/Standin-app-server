@@ -1,3 +1,4 @@
+import { candidateSourceBytes } from "./candidate-source.js";
 import { resolveOutputScope, scopeIncludesHands, type BodyScope } from "./output-scope/model.js";
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -424,3 +425,20 @@ test("generated FBX forwards the approved numeric body/hand/scope input and reje
     assert.equal(result.headers.get("X-Standin-Artifact-SHA256"), preview.headers.get("X-Standin-Artifact-SHA256"));
   }
 });
+
+for (const failure of ["missing", "changed", "checks"])
+  test(`generated source recovery code distinguishes ${failure} without substitution`, async () => {
+    const f = generatedFixture();
+    const result = upgradeManualResult(f.result, f.assets);
+    const person = result.candidatesByPerson[0], candidate = person.candidates[0];
+    const asset = f.assets.get(0)![candidate.id];
+    if (failure === "missing") delete f.assets.get(0)![candidate.id];
+    if (failure === "changed") asset.bvh_sha256 = "b".repeat(64);
+    if (failure === "checks") asset.validation = { diagnostics: { kinematic_probe_pass: false } };
+    let libraryCalls = 0;
+    await assert.rejects(candidateSourceBytes("job", person, candidate,
+      async () => { libraryCalls++; throw new Error("must not fetch library"); },
+      async () => f.assets.get(0)!),
+      (e: unknown) => (e as { code: string }).code === ({ missing: "GENERATED_SOURCE_UNAVAILABLE", changed: "PREVIEW_SOURCE_CHANGED", checks: "GENERATED_CHECKS_FAILED" }[failure]));
+    assert.equal(libraryCalls, 0);
+  });

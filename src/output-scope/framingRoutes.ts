@@ -588,7 +588,8 @@ export function createFramingRoutes(
           errorEnvelope(
             error.code,
             error.code === "GENERATED_SOURCE_UNAVAILABLE" ? "새로 만든 포즈의 원본을 찾지 못했습니다. 다시 분석해 주세요." :
-            error.code === "PREVIEW_HASH_MISMATCH" ? "포즈 파일이 변경되었습니다. 다시 분석해 주세요." : "체형 또는 포즈 상태를 다시 확인해 주세요.",
+            error.code === "GENERATED_CHECKS_FAILED" ? "만든 포즈가 확인 과정을 통과하지 못했습니다. 다른 포즈를 선택해 주세요." :
+            error.code === "PREVIEW_HASH_MISMATCH" || error.code === "PREVIEW_SOURCE_CHANGED" ? "포즈 파일이 변경되었습니다. 다시 분석해 주세요." : "체형 또는 포즈 상태를 다시 확인해 주세요.",
             c.get("requestId"),
           ),
           error.status,

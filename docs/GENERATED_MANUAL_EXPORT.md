@@ -65,3 +65,5 @@ HTTP: `GENERATED_SOURCE_UNAVAILABLE`(409), `PREVIEW_SOURCE_CHANGED`/`PREVIEW_HAS
 `converter/framing.test.ts`: 복제본/재시작에서도 같은 저장된 파일, 만료 시 재변환 없음.
 `pose-presentation.test.ts`: 기존 생성/라이브러리 비공개 미리보기 유지.
 테스트 Converter는 fixture다. 실제 설치 앱/실제 생성 FBX 재열기·육안 확인·스테이징은 별도 검증해야 한다.
+
+09 복구 코드: private validation에 기존 검사 탈락이 있으면 `GENERATED_CHECKS_FAILED`(409), 원본 transport/등록 해시 변경은 `PREVIEW_SOURCE_CHANGED`(409), 원본 소실은 `GENERATED_SOURCE_UNAVAILABLE`(409). 검사 기준은 동일하며 다른 포즈/체형으로 대체하지 않는다.

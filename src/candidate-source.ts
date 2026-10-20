@@ -17,9 +17,13 @@ export async function candidateSourceBytes(
     const asset = (await assetsFor(jobId, person.personIndex))[candidate.id];
     if (candidate.poseId !== null || !manualPresentationCamera(person, candidate) ||
         person.posePresentation?.generation_status !== "preview_ready" || !row ||
-        !asset || generatedChecksFailed(asset.validation) || asset.transport !== "inline_bvh" || asset.pose_id !== null ||
-        row.asset.transport !== asset.transport || asset.bvh_sha256 !== candidate.sourceBvhSha256)
+        !asset)
       throw new BodyError("GENERATED_SOURCE_UNAVAILABLE", 409);
+    if (generatedChecksFailed(asset.validation))
+      throw new BodyError("GENERATED_CHECKS_FAILED", 409);
+    if (asset.transport !== "inline_bvh" || asset.pose_id !== null ||
+        row.asset.transport !== asset.transport || asset.bvh_sha256 !== candidate.sourceBvhSha256)
+      throw new BodyError("PREVIEW_SOURCE_CHANGED", 409);
     bytes = await previewAssetBytes(asset, fetchBvh);
   } else {
     if (!candidate.poseId) throw new BodyError("POSE_UNAVAILABLE", 409);
