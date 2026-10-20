@@ -1,3 +1,4 @@
+import { renderFinalPreview } from "../converter/finalPreview.js";
 import { candidatePathId, candidateSourceBytes } from "../candidate-source.js";
 import { refinableLibraryCandidate } from "../refine/eligibility.js";
 import { loadAssets } from "../pose-presentation.js";
@@ -41,6 +42,7 @@ import { isBodyScope, resolvePersonOutputScope, scopeIncludesHands } from "./mod
 
 const cache = new FramedArtifactCache();
 const defaults = {
+  renderFinalPreview,
   loadAssets,
   getOwnedJob,
   validateExportCandidate,
@@ -79,6 +81,14 @@ export function createFramingRoutes(
     const personIndex = Number(rawPerson);
     const scope = c.req.query("outputScope"),
       format = c.req.query("format");
+    // A receipt grants no authority. Every request rechecks the owned job and
+    // all current selections before accessing the immutable artifact cache.
+    const artifactReceipt = c.req.query("artifactReceipt");
+    const prepared = format === "ready" || artifactReceipt !== undefined;
+    const release = format === "fbx" || format === "ready";
+    if ((artifactReceipt !== undefined && !/^[a-f0-9]{64}$/.test(artifactReceipt)) ||
+        (artifactReceipt !== undefined && format !== "fbx" && format !== "preview"))
+      return fail(400, "INVALID_INPUT", "파일 준비 정보를 다시 확인해 주세요.");
     const poseId = c.req.param("id");
     const expectedSource = c.req.query("expectedBvhSha256");
     const expectedCharacter = c.req.query("expectedCharacterSha256");
@@ -96,7 +106,7 @@ export function createFramingRoutes(
       !Number.isInteger(personIndex) ||
       personIndex < 0 ||
       !isBodyScope(scope) ||
-      (format !== "preview" && format !== "fbx" && format !== "model")
+      (format !== "preview" && format !== "fbx" && format !== "model" && format !== "ready")
     )
       return fail(
         400,
@@ -122,7 +132,7 @@ export function createFramingRoutes(
     )
       return fail(409, "INVALID_EXPORT", "작업에서 선택된 후보가 아닙니다.");
     if (
-      format === "fbx" &&
+      release &&
       (!exportCandidateAllowed(candidate) || (job.result?.source === "semantic" && !manualExportCandidate(candidate)))
     )
       return fail(
@@ -173,7 +183,7 @@ export function createFramingRoutes(
       const bodyMode = revision !== undefined;
       const manual = manualPresentationCamera(person, candidate);
       const authorReview = manualExportCandidate(candidate);
-      if (format === "fbx" && authorReview && !(await deps.validateConfirmedSelection(installationId, jobId, personIndex, candidateId)))
+      if (release && authorReview && !(await deps.validateConfirmedSelection(installationId, jobId, personIndex, candidateId)))
         return fail(409, "MANUAL_SELECTION_REQUIRED", "저장할 포즈를 직접 선택하고 확정해 주세요.");
       if (authorReview && !manual)
         return fail(409, "MANUAL_REVIEW_UNAVAILABLE", "선택한 포즈의 검수 정보를 확인하지 못했습니다.");
@@ -229,9 +239,9 @@ export function createFramingRoutes(
             "체형이 변경되었습니다. 다시 확인해 주세요.",
           );
       }
-      const runtime = (bodyMode || authorReview) ? await bodyDeps.runtime() : null;
-      const authorIdentity = authorReview ? await deps.modelPreviewIdentity(characterId) : null;
-      if (authorReview && !authorIdentity)
+      const runtime = (bodyMode || authorReview || prepared) ? await bodyDeps.runtime() : null;
+      const authorIdentity = (authorReview || prepared) ? await deps.modelPreviewIdentity(characterId) : null;
+      if ((authorReview || prepared) && !authorIdentity)
         return fail(503, "PREVIEW_UNAVAILABLE", "최종 모델 버전을 확인하지 못했습니다. 다시 시도해 주세요.");
       const expectedReview = c.req.query("reviewKey");
       if (
@@ -259,9 +269,10 @@ export function createFramingRoutes(
       // Refined output still belongs to this approved base pose. Check quarantine
       // and source lineage on every body request, including paired cache hits.
       let checkedBase: Uint8Array | undefined;
-      if (bodyMode || (artifact.variant === "refined" && candidate.sourceBvhSha256)) {
+      if (bodyMode || prepared || (artifact.variant === "refined" && candidate.sourceBvhSha256)) {
         checkedBase = await candidateSourceBytes(jobId, person!, candidate, deps.getPoseBvh, deps.loadAssets);
-        if (sha256Hex(checkedBase) !== (manual?.sourceBvhSha256 ?? candidate.camera?.source_bvh_sha256 ?? candidate.sourceBvhSha256))
+        const expectedBase = manual?.sourceBvhSha256 ?? candidate.sourceBvhSha256 ?? candidate.camera?.source_bvh_sha256;
+        if (expectedBase && sha256Hex(checkedBase) !== expectedBase)
           return fail(409, "POSE_UNAVAILABLE", "포즈가 변경되었습니다. 다시 확인해 주세요.");
       }
       let bvhBytes: Uint8Array;
@@ -312,13 +323,13 @@ export function createFramingRoutes(
               shapeSource: body.shapeSource,
               expectedPreviewRevision: runtime.previewRevision,
             }
-          : authorReview ? {
+          : (authorReview || prepared) ? {
               expectedCharacterSha256: authorIdentity!.characterSha256,
               expectedPreviewRevision: runtime!.previewRevision,
             } : {};
       const useModel =
-        format === "model" ||
-        (format === "fbx" && c.req.query("previewType") === "model");
+        !prepared && (format === "model" ||
+        (format === "fbx" && c.req.query("previewType") === "model"));
       const identity = useModel
         ? authorIdentity ?? await deps.modelPreviewIdentity(characterId)
         : authorIdentity;
@@ -343,7 +354,14 @@ export function createFramingRoutes(
         );
       }
       const prepare = () =>
-        useModel
+        prepared
+          ? cameraArtifact(
+              [installationId, jobId, personIndex, candidateId, key, "verified-fbx-v1"],
+              { bvhBytes, purpose: "export", characterId, scope, cameraRotation,
+                previewFormat: "none", ...expected, ...(hands ? { hands } : {}) },
+              deps.convertFramed, format !== "ready", c.req.raw.signal,
+            )
+          : useModel
           ? cameraArtifact(
               [
                 installationId,
@@ -426,6 +444,8 @@ export function createFramingRoutes(
         }
       }
       const result = libraryModel ? undefined : await prepare();
+      if (prepared && result?.artifactContract !== "verified-fbx-v1")
+        return fail(409, "CONVERTER_INTEGRITY", "검증된 파일을 확인하지 못했습니다.");
       if (authorReview && (!result || !/^[a-f0-9]{64}$/.test(result.characterSha256 ?? "") ||
         (expectedCharacter && expectedCharacter !== result.characterSha256) ||
         result.previewRevision !== runtime!.previewRevision || result.characterSha256 !== authorIdentity!.characterSha256))
@@ -465,8 +485,18 @@ export function createFramingRoutes(
           "HANDS_CHANGED",
           "손 선택이 바뀌었습니다. 다시 확인해 주세요.",
         );
+      if (prepared) {
+        const freshBase = await candidateSourceBytes(jobId, currentPerson, candidate, deps.getPoseBvh, deps.loadAssets);
+        const freshArtifact = await deps.resolveExportArtifact(jobId, personIndex, candidateId);
+        if (sha256Hex(freshBase) !== sha256Hex(checkedBase!) || freshArtifact.variant !== artifact.variant ||
+            sha256Hex(freshArtifact.variant === "refined" ? freshArtifact.bytes : freshBase) !== sha256Hex(bvhBytes))
+          return fail(409, "PREVIEW_CHANGED", "포즈 파일이 변경되었습니다. 다시 준비해 주세요.");
+      }
+      if (prepared && (JSON.stringify(await bodyDeps.runtime()) !== JSON.stringify(runtime) ||
+          JSON.stringify(await deps.modelPreviewIdentity(characterId)) !== JSON.stringify(authorIdentity)))
+        return fail(409, "PREVIEW_CHANGED", "파일 버전이 바뀌었습니다. 다시 준비해 주세요.");
       if (authorReview) {
-        if ((format === "fbx" && !(await deps.validateConfirmedSelection(installationId, jobId, personIndex, candidateId))) ||
+        if ((release && !(await deps.validateConfirmedSelection(installationId, jobId, personIndex, candidateId))) ||
           JSON.stringify(await bodyDeps.runtime()) !== JSON.stringify(runtime) ||
           JSON.stringify(await deps.modelPreviewIdentity(characterId)) !== JSON.stringify(authorIdentity))
           return fail(409, "MANUAL_REVIEW_REQUIRED", "선택 또는 렌더 버전이 변경되었습니다. 다시 확인해 주세요.");
@@ -477,6 +507,8 @@ export function createFramingRoutes(
       const reviewKey = sha256Hex(
         new TextEncoder().encode(JSON.stringify([key, result?.artifactSha256])),
       );
+      if (prepared && format !== "ready" && artifactReceipt !== reviewKey)
+        return fail(409, "PREVIEW_CHANGED", "선택한 파일이 변경되었습니다. 다시 준비해 주세요.");
       if ((hands || authorReview) && format === "fbx" && expectedReview !== reviewKey)
         return fail(
           409,
@@ -534,14 +566,20 @@ export function createFramingRoutes(
             "체형 파일을 확인하지 못했습니다.",
           );
       }
+      // Image work is a separate, low priority job on the exact persisted FBX.
+      // Its failure cannot poison the verified artifact or its receipt.
+      const finalPreview = prepared && format === "preview"
+        ? await deps.renderFinalPreview(result!, cameraRotation !== undefined, {}, false, c.req.raw.signal) : undefined;
       await exportEvent("completed");
       if (libraryModel) void prepare().catch(() => {});
       const bytes =
-        libraryModel ?? (format === "fbx" ? result!.fbx : result!.preview);
+        format === "ready" ? Buffer.alloc(0) : finalPreview ?? libraryModel ?? (format === "fbx" ? result!.fbx : result!.preview);
       return new Response(bytes, {
         headers: {
           "Content-Type":
-            format === "model"
+            format === "ready"
+              ? "application/vnd.standin.verified-fbx-v1"
+              : format === "model"
               ? "model/gltf-binary"
               : format === "preview"
                 ? "image/png"
@@ -549,11 +587,18 @@ export function createFramingRoutes(
           "Content-Length": String(bytes.byteLength),
           "Cache-Control": "private, no-store",
           "X-Standin-Output-Scope": scope,
+          ...(prepared ? {
+            "X-Standin-Artifact-Contract": "verified-fbx-v1",
+            "X-Standin-Review-Key": reviewKey,
+            "X-Standin-Character-SHA256": result!.characterSha256!,
+            "X-Standin-Source-BVH-SHA256": sha256Hex(bvhBytes),
+            ...(finalPreview ? { "X-Standin-Preview-Artifact-SHA256": sha256Hex(finalPreview) } : {}),
+          } : {}),
           ...((hands || authorReview) ? { "X-Standin-Review-Key": reviewKey } : {}),
           ...(authorReview ? {
             "X-Standin-Character-SHA256": result!.characterSha256!,
             "X-Standin-Source-BVH-SHA256": sha256Hex(bvhBytes),
-            "X-Standin-Preview-Artifact-SHA256": sha256Hex(result!.preview),
+            ...(prepared ? {} : { "X-Standin-Preview-Artifact-SHA256": sha256Hex(result!.preview) }),
           } : {}),
           ...(hands
             ? {

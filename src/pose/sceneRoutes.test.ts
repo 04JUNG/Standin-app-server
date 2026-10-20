@@ -1,3 +1,4 @@
+import { encodeSceneReceipt, decodeSceneReceipt } from "./sceneStorage.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Hono } from "hono";
@@ -17,6 +18,8 @@ function setup(refinement = false) {
     changeHands: false,
     preparations: 0,
     tamper: false,
+    previewFails: false,
+    renders: 0,
     sent: [] as number[],
   };
   const job = {
@@ -57,6 +60,11 @@ function setup(refinement = false) {
         });
       },
       {
+        renderFinalPreview: async () => {
+          state.renders++;
+          if (state.previewFails) throw new Error("render unavailable");
+          return Buffer.from([137,80,78,71,13,10,26,10]);
+        },
         enabled: () => true,
         refinementEnabled: () => refinement,
         prepareRefinedScene: async () => {
@@ -184,4 +192,31 @@ test("generated sources explicitly require individual files and never enter scen
   assert.equal(r.status, 409);
   assert.equal((await r.json() as { error: { code: string } }).error.code, "GENERATED_INDIVIDUAL_ONLY");
   assert.equal(f.state.reads, 0); assert.equal(f.state.composed, 0);
+});
+
+test("scene image failure cannot block the verified scene receipt and never rebuilds FBX", async () => {
+  const s = setup(true);
+  const ready = await s.send({ prepare: true });
+  assert.equal(ready.status, 200);
+  const receipt = await ready.json() as { reviewKey: string };
+  assert.equal(s.state.renders, 0);
+  s.state.previewFails = true;
+  assert.equal((await s.send({ reviewKey: receipt.reviewKey, preview: true })).status, 502);
+  assert.equal((await s.send({ reviewKey: receipt.reviewKey })).status, 200);
+  assert.equal(s.state.preparations, 1);
+  s.state.previewFails = false;
+  assert.equal((await s.send({ reviewKey: receipt.reviewKey, preview: true })).status, 200);
+  s.state.changeHands = true;
+  assert.equal((await s.send({ reviewKey: receipt.reviewKey, preview: true })).status, 409);
+});
+
+test("shared scene receipt roundtrip pins final bytes and rejects corruption", () => {
+  const receipt = { binding: "a".repeat(64), expires: Date.now()+1000, scene: {
+    artifactContract: "verified-scene-fbx-v1" as const, bytes: fbx, sha256: sha256Hex(fbx),
+    preview: "", previewSha256: sha256Hex(Buffer.alloc(0)), summary: [],
+  } };
+  assert.deepEqual(decodeSceneReceipt(encodeSceneReceipt(receipt)), receipt);
+  const changed = JSON.parse(encodeSceneReceipt(receipt).toString("utf8"));
+  changed.scene.bytes = Buffer.from("different").toString("base64");
+  assert.throws(() => decodeSceneReceipt(Buffer.from(JSON.stringify(changed))), { code: "CONVERTER_INTEGRITY" });
 });

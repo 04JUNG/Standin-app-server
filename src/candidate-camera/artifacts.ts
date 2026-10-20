@@ -13,6 +13,7 @@ export function cameraArtifact(
   input: FramedInput,
   convert = convertFramed,
   existingOnly = false,
+  signal?: AbortSignal,
 ) {
   const key = JSON.stringify([
     owner,
@@ -34,6 +35,6 @@ export function cameraArtifact(
   // Long-lived reuse requires the character and exporter revision to be pinned.
   const pinned = (input.expectedCharacterSha256 && input.expectedPreviewRevision) ||
     (input.characterSha256 && input.modelRevision);
-  return cache.get(key, () => convert(input), pinned
-    ? { installationId: owner[0], jobId: owner[1] } : undefined, existingOnly);
+  return cache.get(key, (workSignal) => convert({ ...input, signal: workSignal }), pinned
+    ? { installationId: owner[0], jobId: owner[1] } : undefined, existingOnly, signal);
 }
