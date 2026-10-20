@@ -71,7 +71,7 @@ export interface BodyPreferences {
   scope: "installation";
   /**
    * `last_used` (default): new jobs start with the last hand-picked body, else the
-   * recommendation. `fixed_default` is kept for rows saved by older clients.
+   * male base body when nothing has been picked yet. `fixed_default` is kept for older clients.
    */
   mode: "auto" | "fixed_default" | "last_used";
   defaultCharacterId: string | null;
@@ -89,6 +89,8 @@ export interface BodyPolicy {
   catalogDefault: BodyRef | null;
   /** Resolved at capture time so a later catalog change cannot reshape a running job. */
   lastUsed?: { body: BodyRef; shape: BodyShape | null } | null;
+  /** Catalog identity captured for the first-use male base, independent of recommendations. */
+  firstUseDefault?: BodyRef | null;
 }
 export interface BodyRecommendation {
   status: "available" | "unavailable" | "disabled" | "not_applicable";
@@ -198,7 +200,13 @@ export function snapshot(
     userDefault: find(preferences.defaultCharacterId),
     catalogDefault: find(catalog.defaultCharacterId),
     lastUsed: lastUsedBody(preferences, catalog),
+    firstUseDefault: firstUseBody(catalog),
   };
+}
+/** Use only a registered current male BASE asset; never invent a fallback identity. */
+function firstUseBody(catalog: BodyCatalog): BodyRef | null {
+  const asset = catalog.assets.find((a) => /^male-base(?:-|$)/.test(a.characterId));
+  return asset ? bodyRef(asset) : null;
 }
 /**
  * The last hand-picked body as the catalog accepts it now. If its controls no longer fit
@@ -272,6 +280,19 @@ export function resolveBody(
     bodyEligible(last.body, catalog, poses, previewOnly)
   )
     return { ...use(last.body, "last_used"), shape: last.shape };
+  if (
+    intent === "inherit" &&
+    policy.preferences.mode === "last_used" &&
+    !policy.preferences.lastUsed
+  ) {
+    // Old policy snapshots predate firstUseDefault; still require today's catalog identity.
+    const first =
+      policy.firstUseDefault === undefined
+        ? firstUseBody(catalog)
+        : policy.firstUseDefault;
+    if (bodyEligible(first, catalog, poses, previewOnly))
+      return use(first, "catalog_default_fallback");
+  }
   if (
     recommendation.status === "available" &&
     bodyEligible(recommendation.body, catalog, poses, previewOnly)

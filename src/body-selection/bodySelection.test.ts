@@ -22,7 +22,7 @@ import {
   parsePreferenceChange,
   parseSelectionChange,
 } from "./routes.js";
-import { BodyError, bodyStore } from "./store.js";
+import { BodyError, bodyStore, readSelection, type BodyDb } from "./store.js";
 import { catalog, fixture, result } from "./fixtures.js";
 const recommendation = () =>
   mapBodyRecommendations(fixture(), catalog()).get(0)!;
@@ -608,4 +608,68 @@ test("older semantic history initializes preview choices once without overwritin
     4,
   );
   assert.equal(writes, 1);
+});
+
+test("first use in last-used mode starts with the cataloged male base, independent of recommendations", () => {
+  const c = catalog();
+  c.assets[0].characterId = "male-base-v0-7-2";
+  c.defaultCharacterId = c.assets[2].characterId;
+  const policy = snapshot(defaultPreferences(), c);
+  for (const rec of [recommendation(), { status: "disabled" as const, body: null, reasonCodes: [] }]) {
+    const value = resolveBody(0, policy, rec, c, ["pose-a"]);
+    assert.equal(value.resolvedBody?.characterId, "male-base-v0-7-2");
+    assert.equal(value.resolvedSource, "catalog_default_fallback");
+    assert.equal(value.resolutionStatus, "ready");
+    assert.deepEqual(value.recommendation, rec);
+    assert.equal(value.shape, null);
+  }
+  assert.equal(resolveBody(0, policy, recommendation(), c, ["pose-a"], "auto").resolvedSource, "auto_recommendation");
+  const auto = snapshot({ ...defaultPreferences(), mode: "auto" }, c);
+  assert.equal(resolveBody(0, auto, recommendation(), c, ["pose-a"]).resolvedSource, "auto_recommendation");
+  const used = snapshot({ ...defaultPreferences(), lastUsed: { characterId: "character-2", controls: null, usedAt: "now" } }, c);
+  assert.equal(resolveBody(0, used, recommendation(), c, ["pose-a"]).resolvedBody?.characterId, "character-2");
+});
+
+test("the first-use default respects frozen identity and pose coverage, including old policy snapshots", () => {
+  const c = catalog();
+  c.assets[0].characterId = "male-base-v0-7-2";
+  c.defaultCharacterId = c.assets[2].characterId;
+  const policy = snapshot(defaultPreferences(), c);
+  const old = { ...policy };
+  delete old.firstUseDefault;
+  assert.equal(resolveBody(0, old, recommendation(), c, ["pose-a"]).resolvedBody?.characterId, "male-base-v0-7-2");
+  assert.equal(resolveBody(0, policy, recommendation(), c, []).resolutionStatus, "not_applicable");
+  c.assets[0].supportedPoseIds = [];
+  assert.equal(resolveBody(0, policy, recommendation(), c, ["pose-a"]).resolvedBody?.characterId, "character-1");
+  assert.equal(resolveBody(0, policy, recommendation(), c, ["pose-a"], "inherit", null, 0, null, true).resolvedBody?.characterId, "male-base-v0-7-2");
+  c.assets[0].supportedPoseIds = ["pose-a"];
+  c.assets[0].assetSha256 = "f".repeat(64);
+  assert.equal(resolveBody(0, policy, recommendation(), c, ["pose-a"]).resolvedBody?.characterId, "character-1");
+});
+
+test("an unresolved first-use history row gets the male base without writes or changing manual intent", async () => {
+  const c = catalog();
+  c.assets[0].characterId = "male-base-v0-7-2";
+  c.defaultCharacterId = c.assets[0].characterId;
+  const policy = snapshot(defaultPreferences(), c);
+  delete policy.firstUseDefault;
+  const rec = { status: "disabled" as const, body: null, reasonCodes: [] };
+  const stored = resolveBody(0, { ...policy, firstUseDefault: null, catalogDefault: null }, rec, c, ["pose-a"]);
+  stored.selectionRevision = 4;
+  const original = structuredClone(stored);
+  const analysis = result();
+  const db = { query: async (sql: string) => {
+    if (sql.includes("SELECT status,result_json,body_policy_json")) return { rows: [{ status: "completed", result_json: JSON.stringify(analysis), body_policy_json: policy }] };
+    if (sql.startsWith("SELECT value FROM body_selections")) return { rows: [{ value: structuredClone(stored) }] };
+    throw new Error("unexpected write");
+  } } as unknown as BodyDb;
+  const value = await readSelection(db, "owner", analysis.jobId, 0, c);
+  assert.equal(value.resolutionStatus, "ready");
+  assert.equal(value.resolvedBody?.characterId, "male-base-v0-7-2");
+  assert.equal(value.selectionRevision, 4);
+  assert.deepEqual(stored, original);
+  stored.intent = "manual";
+  const manual = await readSelection(db, "owner", analysis.jobId, 0, c);
+  assert.equal(manual.resolvedBody, null);
+  assert.equal(manual.resolutionStatus, "needs_selection");
 });
