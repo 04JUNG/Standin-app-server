@@ -15,3 +15,9 @@ GENERATED_CHECKS_FAILED, 원본 등록 정보 변경은 PREVIEW_SOURCE_CHANGED,
 이 테스트의 Converter는 fixture다. 실제 Blender 검증은 서버 워크트리 보고서로 분리한다.
 
 외부 운영/Staging 데이터 수정, 기본 checkout 수정, develop/main 반영, push/PR/배포 없음.
+
+PR 준비 시 최신 origin/develop과 비교했으며 BFF 기준 커밋은 동일했다. 추가 실제 검증에서는
+현재 로컬 등록 male 0.7.2 / female 0.3.4의 pinned shape worker에 생성 BVH·수치·양손·full/half를
+적용하고 재열기에 성공했다. 이는 HTTP/native end-to-end를 뜻하지 않는다. 주먹 자체 겹침 경고와
+설치 앱/CSP 미검증을 포함한 상세 한계는 서버 `docs/GENERATED_RECOVERY_QA_2026-10-20.md`를 따른다.
+사용자 최신 지시로 01(확대)은 제외되며 사진 선택을 유지한다.
