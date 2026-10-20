@@ -330,11 +330,13 @@ jobsRoutes.get("/:id/result", async (c) => {
         config.sceneRefinementEnabled &&
         !!config.sceneRefinementBaseUrl &&
         !!config.sceneRefinementToken &&
+        !result.candidatesByPerson.some(p => p.candidates.some(c => c.source === "generation")) &&
         config.sceneExportEnabled &&
         converterEnabled() &&
         result.source !== "semantic" &&
         !!result.image,
       sceneExport:
+        !result.candidatesByPerson.some(p => p.candidates.some(c => c.source === "generation")) &&
         config.sceneExportEnabled &&
         converterEnabled() &&
         result.source !== "semantic" &&

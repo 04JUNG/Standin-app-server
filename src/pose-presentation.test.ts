@@ -133,7 +133,7 @@ test("authoritative presentation preserves groups/counts while private assets ne
   assert.equal(p.candidateCount, 2);
   assert.equal(p.fallbackMode, "soft");
   assert.equal(p.refineAllowed, false);
-  assert.equal(p.candidates.length, 1);
+  assert.equal(p.candidates.length, 2);
   assert.equal(p.candidates[0].id, id);
   assert.equal(p.candidates[0].source, "library");
   assert.equal(p.candidates[0].releaseAllowed, false);
@@ -270,7 +270,7 @@ for (const status of ["blocked", "error", "not_run", "no_result"]) {
     const value = raw();
     value.search_status = status;
     const person = mapCutResult("job", cut(value)).candidatesByPerson[0];
-    assert.equal(person.candidates.length, 1);
+    assert.equal(person.candidates.length, status === "no_result" ? 2 : 1);
     assert.equal(person.posePresentation!.search_status, status);
     assert.equal(person.candidates[0].manualExportAllowed, true);
     assert.equal(person.candidates[0].releaseAllowed, false);
@@ -437,7 +437,7 @@ test("selected-body preview binds private library/generated sources, shape, scop
     false,
   );
   const library = result.candidatesByPerson[0].candidates;
-  assert.equal(library.length, 1);
+  assert.equal(library.length, 2);
   assert.equal(library[0].source, "library");
   assert.equal(library[0].releaseAllowed, false);
   assert.equal(library[0].manualExportAllowed, true);

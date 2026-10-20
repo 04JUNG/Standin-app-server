@@ -1433,7 +1433,7 @@ reviewKey를 사용한다. 렌더 중 원본·카메라·체형·수치/source �
 새 수동 후보의 이 예외는 원본 해시가 확인된 라이브러리와 작가의 선택·확인에 한정된다.
 기존 자동 포즈 커버리지 검사와 actual_mesh_validated=false, auto/refine 금지는 유지한다.
 2026-10-19부터 hash-bound 참고/semantic은 별도 manualExportAllowed 계약으로 작가 검수 후 저장한다.
-inline 생성 후보는 여전히 수동 저장 대상이 아니다. 후보가 없는 참고 인물은 저장 가능한 다른 인물의 체형 기능을
+2026-10-20부터 유효한 inline 생성 후보도 별도 manualExportAllowed 계약으로 수동 선택·최종 확인·개별 FBX 저장을 지원한다. 후보가 없는 참고 인물은 저장 가능한 다른 인물의 체형 기능을
 비활성화하지 않으며, 별도의 조회 전용 체형 미리보기를 유지한다.
 
 
@@ -1479,3 +1479,12 @@ Deployment prerequisites: matching inference reader/template endpoint and full v
   다시 수행한다. 다른 인물의 손 처리는 유지한다. 렌더 중 범위 변경 결과는 폐기한다.
 - 이는 손 적용의 불필요한 작업만 제외한다. 자동 release/refine 자격이나 수동 후보의 확정·
   최종 검수 요구는 변경하지 않는다. 추론의 검색 후 실제 피부 검사 정책은 별도 계약이다.
+
+## 생성 참고 포즈 수동 저장 확장 (2026-10-20)
+
+`source=generation`, `poseId=null`, 원래 candidateId와 원본 BVH 해시를 유지한다.
+생성은 owned job/person/candidate의 비공개 자산으로만 조회하며 라이브러리 ID를 만들지 않는다.
+`manualExportVersion=2` 마이그레이션은 기존 사용자 설정·선택을 덮어쓰지 않는다.
+자동 금지 정책과 완전한 메시 인증 여부는 그대로다. 체형·손·범위의 최종 확인과 동일 FBX
+파일만 개별 저장한다. 생성 포함 작업의 통합/v4는 지원하지 않는다.
+[상세 계약과 검증](GENERATED_MANUAL_EXPORT.md).

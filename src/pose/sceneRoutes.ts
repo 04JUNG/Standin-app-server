@@ -100,6 +100,8 @@ export function createSceneRoutes(
         "SCENE_OBSERVATION_MISSING",
         "러프의 인물 위치를 찾지 못했습니다. 다시 분석해 주세요.",
       );
+    if (job.result.candidatesByPerson.some(p => p.candidates.some(c => c.source === "generation")))
+      return fail(409, "GENERATED_INDIVIDUAL_ONLY", "새로 만든 포즈는 인물별로 저장해 주세요.");
     const image = job.result.image;
     const seen = new Set<number>();
     const refs: {
@@ -153,7 +155,7 @@ export function createSceneRoutes(
         // Local dispatch reuses every existing body/hand/scope/review/lineage guard.
         // This is never a network request to a client-supplied URL.
         const url = new URL(row.exportPath, "https://scene.internal");
-        const prefix = `/v1/pose-candidates/${encodeURIComponent(candidate.poseId)}/`;
+        const prefix = `/v1/pose-candidates/${encodeURIComponent(candidate.poseId!)}/`;
         if (
           url.origin !== "https://scene.internal" ||
           !row.exportPath.startsWith("/v1/") ||

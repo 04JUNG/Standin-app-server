@@ -50,6 +50,7 @@ export interface MirrorComparison {
   matches_observed_side: false;
 }
 export interface PreviewCandidate {
+  manual_use_block_reason?: "generation_unavailable" | "source_missing" | "source_changed" | "policy_unavailable";
   candidate_id: string;
   pose_id: string | null;
   source: "library" | "generation";
@@ -99,8 +100,8 @@ export interface PosePresentation {
   refine_allowed: false;
   export_allowed: false;
 }
-/** Only an explicitly selectable, owned library row can use its stored presentation camera.
- * This does not fabricate a fitted candidate-camera contract or promote references/generation.
+/** Only an explicitly selectable, owned asset can use its stored presentation camera.
+ * This does not fabricate a fitted camera contract or grant automatic approval.
  */
 export function manualPresentationCamera(
   person: AnalysisPerson | undefined,
@@ -109,7 +110,7 @@ export function manualPresentationCamera(
   const p = person?.posePresentation;
   if (
     !candidate ||
-    !["library", "semantic"].includes(candidate.source ?? "") ||
+    !["library", "semantic", "generation"].includes(candidate.source ?? "") ||
     candidate.lookupAllowed !== true ||
     !(candidate.releaseAllowed === true || manualExportCandidate(candidate)) ||
     !candidate.bvhAvailable ||
@@ -117,12 +118,12 @@ export function manualPresentationCamera(
     !p || !["dynamic-pose-presentation-v1", "semantic-pose-presentation-v1"].includes(p.version)
   )
     return null;
-  const row = [...p.library_candidates, ...p.review_candidates].find(
+  const row = [...p.library_candidates, ...p.review_candidates, ...p.generated_candidates].find(
     (c) =>
       c.candidate_id === candidate.id &&
       c.pose_id === candidate.poseId &&
-      c.source === "library" &&
-      c.asset.transport === "library_bvh" &&
+      c.source === (candidate.source === "generation" ? "generation" : "library") &&
+      c.asset.transport === (candidate.source === "generation" ? "inline_bvh" : "library_bvh") &&
       c.asset.bvh_sha256 === candidate.sourceBvhSha256,
   );
   if (!row) return null;
@@ -140,6 +141,8 @@ export interface PrivatePreviewAsset {
   bvh_sha256: string;
   pose_id: string | null;
   bvh?: string;
+  /** Original inference checks, bound to these private bytes; never a full mesh certification. */
+  validation?: unknown;
 }
 const groups = [
   "library_candidates",
@@ -391,6 +394,7 @@ export function mapPosePresentation(
             bvh_sha256: hash,
             pose_id: null,
             bvh: a.bvh,
+            validation: structuredClone(c.validation ?? null),
           };
         } else {
           if (
@@ -544,7 +548,7 @@ export function mapPosePresentation(
     };
   }
 }
-async function loadAssets(
+export async function loadAssets(
   jobId: string,
   index: number,
 ): Promise<Record<string, PrivatePreviewAsset>> {

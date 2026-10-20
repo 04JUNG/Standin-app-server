@@ -204,7 +204,7 @@ export const SCHEMA = `
     job_id               TEXT NOT NULL,
     person_index         INTEGER NOT NULL,
     candidate_id         TEXT NOT NULL,
-    pose_id              TEXT NOT NULL,
+    pose_id              TEXT,
     rank                  INTEGER NOT NULL,
     view                  TEXT NOT NULL,
     distance              DOUBLE PRECISION,
@@ -214,6 +214,8 @@ export const SCHEMA = `
     pose_library_version  TEXT NOT NULL,
     PRIMARY KEY (job_id, person_index, candidate_id)
   );
+
+  ALTER TABLE analysis_candidates ALTER COLUMN pose_id DROP NOT NULL;
 
   CREATE TABLE IF NOT EXISTS analytics_events (
     event_id        TEXT PRIMARY KEY,

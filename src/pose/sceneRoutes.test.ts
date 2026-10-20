@@ -91,6 +91,7 @@ function setup(refinement = false) {
   }));
   return {
     state,
+    job,
     rows,
     send: (extra: Record<string, unknown> = {}) =>
       app.request("/job/scene", {
@@ -173,4 +174,14 @@ test("review receipts cannot cross jobs or source references", async () => {
   a.rows[0]!.exportPath += "&changed=1";
   assert.equal((await a.send({ reviewKey: receipt.reviewKey })).status, 409);
   assert.equal((await a.send({ reviewKey: "unknown" })).status, 409);
+});
+
+test("generated sources explicitly require individual files and never enter scene/refinement", async () => {
+  const f = setup(true);
+  const c = f.job.result!.candidatesByPerson[0].candidates[0];
+  c.source = "generation"; c.poseId = null;
+  const r = await f.send();
+  assert.equal(r.status, 409);
+  assert.equal((await r.json() as { error: { code: string } }).error.code, "GENERATED_INDIVIDUAL_ONLY");
+  assert.equal(f.state.reads, 0); assert.equal(f.state.composed, 0);
 });

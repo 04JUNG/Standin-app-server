@@ -379,7 +379,7 @@ export function personBodyContext(person: AnalysisPerson, semantic = false) {
           ...p!.review_candidates,
           ...p!.generated_candidates,
         ].map((c) => c.candidate_id)
-      : person.candidates.map((c) => c.poseId),
+      : person.candidates.flatMap((c) => c.poseId ? [c.poseId] : []),
   };
 }
 function initialBody(

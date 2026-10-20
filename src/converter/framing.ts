@@ -350,6 +350,7 @@ export class FramedArtifactCache {
     key: string,
     create: () => Promise<FramedArtifact>,
     location?: FramedLocation,
+    existingOnly = false,
   ): Promise<FramedArtifact> {
     // Scope the in-memory layer too; persistence is never an authorization grant.
     if (location) key = JSON.stringify([EXPECTED_SOLVER_VERSION, location, key]);
@@ -364,6 +365,7 @@ export class FramedArtifactCache {
     const resolve = async () => {
       const stored = location ? await this.shared.load(location, key) : null;
       if (stored) return stored;
+      if (existingOnly) throw new ConverterError("PREVIEW_NOT_READY", "reviewed artifact expired");
       const result = await create();
       return location ? this.shared.publish(location, key, result) : result;
     };

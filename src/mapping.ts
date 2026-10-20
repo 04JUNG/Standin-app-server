@@ -1,3 +1,4 @@
+import { upgradeManualResult } from "./manual-export.js";
 import { poseThumbnailUrl } from "./pose-thumbnail.js";
 // 계약 번역 = BFF가 소유하는 책임.
 //  - 추론의 원시 distance → 클라 UI 라벨(matchLevel)
@@ -166,9 +167,9 @@ export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
   const bodies = config.bodySelectionEnabled
     ? mapBodyRecommendations(cut, loadBodyCatalog())
     : undefined;
-  return {
+  const result: AnalysisResult = {
     jobId,
-    manualExportVersion: 1,
+    manualExportVersion: 2,
     image: cut.image,
     inferenceMetadata: {
       deploymentVersion: cut.inference_metadata.deployment_version,
@@ -296,11 +297,12 @@ export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
           : `ROUTED_${routed.summary.status.toUpperCase()}`;
       for (const c of person.candidates) {
         const params = new URLSearchParams({ jobId, personIndex: String(p.index), candidateId: c.id });
-        c.posterUrl = `/v1/pose-candidates/${encodeURIComponent(c.poseId)}/poster?${params}`;
+        c.posterUrl = `/v1/pose-candidates/${encodeURIComponent(c.poseId ?? c.id)}/poster?${params}`;
       }
       return person;
     }),
   };
+  return upgradeManualResult(result, new Map(extractRefineContexts(cut).map(c => [c.personIndex, c.posePresentationAssets ?? {}])));
 }
 
 /**

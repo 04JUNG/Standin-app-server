@@ -41,6 +41,7 @@ function previewCamera(value: unknown): SearchPreviewCamera | undefined {
 export const restrictedCandidate = (
   candidate: Pick<PoseCandidate, "source" | "releaseAllowed" | "lookupAllowed" | "sourceBvhSha256"> | undefined,
 ) =>
+  candidate?.source === "generation" ||
   candidate?.source === "dynamic" ||
   candidate?.source === "semantic" ||
   (candidate?.source === "library" && (candidate.releaseAllowed !== true ||
@@ -50,7 +51,7 @@ export const restrictedCandidate = (
 /** A stored, hash-bound library asset may be manually reviewed without claiming search validation. */
 export const manualExportCandidate = (candidate: PoseCandidate | undefined): boolean =>
   candidate?.manualExportAllowed === true &&
-  ["library", "semantic"].includes(candidate.source ?? "") &&
+  ["library", "semantic", "generation"].includes(candidate.source ?? "") &&
   candidate.lookupAllowed === true && candidate.bvhAvailable === true &&
   candidate.reviewRequired === true && candidate.refineAllowed === false &&
   /^[a-f0-9]{64}$/.test(candidate.sourceBvhSha256 ?? "");

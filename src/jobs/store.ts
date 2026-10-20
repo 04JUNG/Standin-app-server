@@ -324,7 +324,7 @@ export async function getOwnedJob(
   );
   if (!row) return undefined;
   const job = toJob(row);
-  if (job.status === "completed" && job.result && job.result.manualExportVersion !== 1 &&
+  if (job.status === "completed" && job.result && job.result.manualExportVersion !== 2 &&
     job.result.candidatesByPerson.some((p) => !!p.posePresentation)) {
     const result = await transaction((db) => upgradeOwnedManualResult(db, id, installationId));
     if (!result) return undefined; // Deleted/changed while acquiring the ownership lock.

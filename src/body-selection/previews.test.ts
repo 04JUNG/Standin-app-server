@@ -54,7 +54,7 @@ function setup(count = 5) {
   }
   for (const a of bodies.assets)
     a.supportedPoseIds = analysis.candidatesByPerson[0].candidates.map(
-      (p) => p.poseId,
+      (p) => p.poseId!,
     );
   const policy = snapshot({ ...defaultPreferences(), mode: "auto" }, bodies);
   const initial = (i: number) =>
@@ -562,7 +562,7 @@ function searchCamera(
 test("v2 search cameras retain projection/binding metadata through manifest and both preview transports", async () => {
   const s = setup();
   for (const c of s.analysis.candidatesByPerson[0].candidates)
-    c.camera = searchCamera(c.camera!, c.poseId);
+    c.camera = searchCamera(c.camera!, c.poseId!);
   const m = await s.manifest();
   assert.deepEqual(
     m.candidates[0].camera,

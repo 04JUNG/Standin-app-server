@@ -1,3 +1,5 @@
+import { candidatePathId, candidateSourceBytes } from "../candidate-source.js";
+import { loadAssets } from "../pose-presentation.js";
 import { manualPresentationCamera } from "../pose-presentation.js";
 import { exportCandidateAllowed, manualExportCandidate } from "../routed-search.js";
 import { shapeRenderable } from "../body-selection/shape.js";
@@ -38,6 +40,7 @@ import { isBodyScope, resolvePersonOutputScope, scopeIncludesHands } from "./mod
 
 const cache = new FramedArtifactCache();
 const defaults = {
+  loadAssets,
   getOwnedJob,
   validateExportCandidate,
   validateConfirmedSelection,
@@ -104,7 +107,7 @@ export function createFramingRoutes(
       (p) => p.personIndex === personIndex,
     );
     const candidate = person?.candidates.find(
-      (p) => p.id === candidateId && p.poseId === poseId,
+      (p) => p.id === candidateId && candidatePathId(p) === poseId,
     );
     if (
       !candidate ||
@@ -256,33 +259,13 @@ export function createFramingRoutes(
       // and source lineage on every body request, including paired cache hits.
       let checkedBase: Uint8Array | undefined;
       if (bodyMode) {
-        const response = await deps.getPoseBvh(poseId);
-        if (!response.ok)
-          return fail(409, "POSE_UNAVAILABLE", "이 포즈를 사용할 수 없습니다.");
-        checkedBase = new Uint8Array(await response.arrayBuffer());
-        if (
-          sha256Hex(checkedBase) !==
-          (manual?.sourceBvhSha256 ?? candidate.camera!.source_bvh_sha256)
-        )
-          return fail(
-            409,
-            "POSE_UNAVAILABLE",
-            "포즈가 변경되었습니다. 다시 확인해 주세요.",
-          );
+        checkedBase = await candidateSourceBytes(jobId, person!, candidate, deps.getPoseBvh, deps.loadAssets);
+        if (sha256Hex(checkedBase) !== (manual?.sourceBvhSha256 ?? candidate.camera!.source_bvh_sha256))
+          return fail(409, "POSE_UNAVAILABLE", "포즈가 변경되었습니다. 다시 확인해 주세요.");
       }
       let bvhBytes: Uint8Array;
       if (artifact.variant === "refined") bvhBytes = artifact.bytes;
-      else if (checkedBase) bvhBytes = checkedBase;
-      else {
-        const response = await deps.getPoseBvh(poseId);
-        if (!response.ok)
-          return fail(
-            response.status === 409 ? 409 : 502,
-            "POSE_UNAVAILABLE",
-            "이 포즈를 사용할 수 없습니다. 다른 후보를 선택해 주세요.",
-          );
-        bvhBytes = new Uint8Array(await response.arrayBuffer());
-      }
+      else bvhBytes = checkedBase ?? await candidateSourceBytes(jobId, person!, candidate, deps.getPoseBvh, deps.loadAssets);
       if (
         candidate.sourceBvhSha256 &&
         (artifact.variant !== "base" ||
@@ -379,6 +362,7 @@ export function createFramingRoutes(
                 ...expected,
               },
               deps.convertFramed,
+              authorReview && format === "fbx",
             )
           : cameraRotation
             ? cameraArtifact(
@@ -399,6 +383,7 @@ export function createFramingRoutes(
                   ...expected,
                 },
                 deps.convertFramed,
+                authorReview && format === "fbx",
               )
             : cache.get(key, () =>
                 deps.convertFramed({
@@ -451,7 +436,7 @@ export function createFramingRoutes(
       if (
         current?.status !== "completed" ||
         !currentPerson ||
-        !exportCandidateAllowed(currentPerson.candidates.find((c) => c.id === candidateId && c.poseId === poseId)) ||
+        !exportCandidateAllowed(currentPerson.candidates.find((c) => c.id === candidateId && candidatePathId(c) === poseId)) ||
         JSON.stringify(currentPerson.candidates.find((c) => c.id === candidateId)) !== JSON.stringify(candidate) ||
         JSON.stringify(manualPresentationCamera(currentPerson, currentPerson.candidates.find((c) => c.id === candidateId))) !== JSON.stringify(manual) ||
         resolvePersonOutputScope(currentPerson).resolved !== scope ||
@@ -483,8 +468,8 @@ export function createFramingRoutes(
           JSON.stringify(await bodyDeps.runtime()) !== JSON.stringify(runtime) ||
           JSON.stringify(await deps.modelPreviewIdentity(characterId)) !== JSON.stringify(authorIdentity))
           return fail(409, "MANUAL_REVIEW_REQUIRED", "선택 또는 렌더 버전이 변경되었습니다. 다시 확인해 주세요.");
-        const fresh = await deps.getPoseBvh(poseId);
-        if (!fresh.ok || sha256Hex(new Uint8Array(await fresh.arrayBuffer())) !== candidate.sourceBvhSha256)
+        const fresh = await candidateSourceBytes(jobId, currentPerson, candidate, deps.getPoseBvh, deps.loadAssets);
+        if (sha256Hex(fresh) !== candidate.sourceBvhSha256)
           return fail(409, "POSE_UNAVAILABLE", "포즈가 변경되었거나 더 이상 제공되지 않습니다.");
       }
       const reviewKey = sha256Hex(
@@ -602,22 +587,24 @@ export function createFramingRoutes(
         return c.json(
           errorEnvelope(
             error.code,
-            "체형 상태를 다시 확인해 주세요.",
+            error.code === "GENERATED_SOURCE_UNAVAILABLE" ? "새로 만든 포즈의 원본을 찾지 못했습니다. 다시 분석해 주세요." :
+            error.code === "GENERATED_CHECKS_FAILED" ? "만든 포즈가 확인 과정을 통과하지 못했습니다. 다른 포즈를 선택해 주세요." :
+            error.code === "PREVIEW_HASH_MISMATCH" || error.code === "PREVIEW_SOURCE_CHANGED" ? "포즈 파일이 변경되었습니다. 다시 분석해 주세요." : "체형 또는 포즈 상태를 다시 확인해 주세요.",
             c.get("requestId"),
           ),
           error.status,
         );
       const code =
-        error instanceof ConverterError ? error.code : "CONVERTER_FAILED";
+        error instanceof ConverterError ? (error.code === "PREVIEW_NOT_READY" && manualExportCandidate(candidate) ? "MANUAL_REVIEW_REQUIRED" : error.code) : "CONVERTER_FAILED";
       await exportEvent("failed", code);
       return fail(
         code === "CONVERTER_TIMEOUT"
           ? 504
-          : code === "CONVERTER_REJECTED" || code === "CONVERTER_INTEGRITY"
+          : code === "MANUAL_REVIEW_REQUIRED" || code === "CONVERTER_REJECTED" || code === "CONVERTER_INTEGRITY"
             ? 409
             : 503,
         code,
-        "선택한 범위로 결과를 만들지 못했습니다. 다시 시도하거나 다른 후보를 선택해 주세요.",
+        code === "MANUAL_REVIEW_REQUIRED" ? "확인한 파일이 만료되었습니다. 최종 결과를 다시 확인해 주세요." : "선택한 범위로 결과를 만들지 못했습니다. 다시 시도하거나 다른 후보를 선택해 주세요.",
       );
     }
   });

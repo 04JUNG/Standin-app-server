@@ -53,7 +53,7 @@ export function createAlignedRoutes(overrides: Partial<typeof defaults> = {}) {
         ?.candidates.find(
           (p) => p.id === candidateId && p.poseId === c.req.param("id"),
         );
-      if (job?.status !== "completed" || !candidate?.camera)
+      if (job?.status !== "completed" || (!candidate?.camera || !candidate.poseId))
         return fail(409, "INVALID_EXPORT");
       if (!deps.converterEnabled()) return fail(503, "FBX_UNAVAILABLE");
       const characterId =
