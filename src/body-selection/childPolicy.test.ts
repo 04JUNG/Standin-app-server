@@ -8,6 +8,7 @@ import { readSelection, type BodyDb } from "./store.js";
 
 function scene() {
   const c = catalog();
+  c.assets[0].characterId = "male-base-v0-7-2";
   c.assets[1].bodyId = "child";
   c.assets[1].characterId = "body-child";
   const child = bodyRef(c.assets[1]);
@@ -28,30 +29,23 @@ test("a valid old inference sidecar cannot automatically recommend a child", () 
   assert.ok(rec.reasonCodes.includes(CHILD_SELECTION_REASON));
 });
 
-test("untrusted/cached child recommendation uses existing adult default and explicit auto stays unavailable", () => {
+test("untrusted child recommendation uses the male base, including explicit auto", () => {
   const { c, rec } = scene();
   const policy = snapshot(defaultPreferences(), c);
   const state = resolveBody(0, policy, rec, c, ["pose-a"]);
-  assert.equal(state.resolvedBody?.characterId, c.defaultCharacterId);
+  assert.equal(state.resolvedBody?.characterId, "male-base-v0-7-2");
   assert.equal(state.resolvedSource, "catalog_default_fallback");
   assert.equal(state.recommendation.body, null);
-  assert.equal(resolveBody(0, policy, rec, c, ["pose-a"], "auto").resolvedBody, null);
+  assert.equal(resolveBody(0, policy, rec, c, ["pose-a"], "auto").resolvedBody?.characterId, "male-base-v0-7-2");
   c.defaultCharacterId = "body-child";
-  assert.equal(resolveBody(0, snapshot(defaultPreferences(), c), rec, c, ["pose-a"]).resolvedBody, null);
+  assert.equal(resolveBody(0, snapshot(defaultPreferences(), c), rec, c, ["pose-a"]).resolvedBody?.characterId, "male-base-v0-7-2");
 });
 
-test("explicit manual, fixed default, saved user default and last-used child choices remain usable", () => {
+test("explicit manual and last-used child choices remain usable", () => {
   const { c, child, rec } = scene();
   const pref = defaultPreferences();
   let policy = snapshot(pref, c);
   assert.equal(resolveBody(0, policy, rec, c, ["pose-a"], "manual", child).resolvedSource, "manual");
-  pref.mode = "fixed_default";
-  pref.defaultCharacterId = "body-child";
-  policy = snapshot(pref, c);
-  assert.equal(resolveBody(0, policy, rec, c, ["pose-a"]).resolvedSource, "fixed_default");
-  pref.mode = "auto";
-  policy = snapshot(pref, c);
-  assert.equal(resolveBody(0, policy, rec, c, ["pose-a"]).resolvedSource, "user_default_fallback");
   pref.mode = "last_used";
   pref.lastUsed = { characterId: "body-child", controls: null, usedAt: "2026-10-20" };
   policy = snapshot(pref, c);
@@ -69,7 +63,7 @@ test("ordinary and compact adult recommendation objects pass through unchanged",
   }
 });
 
-for (const source of ["auto_recommendation", "catalog_default_fallback", "manual", "last_used", "fixed_default", "user_default_fallback"] as const) {
+for (const source of ["auto_recommendation", "catalog_default_fallback", "manual", "last_used"] as const) {
   test(`history revalidation protects ${source} provenance without writes`, async () => {
     const { c, child, rec } = scene();
     const analysis = result();
@@ -86,8 +80,8 @@ for (const source of ["auto_recommendation", "catalog_default_fallback", "manual
     } } as unknown as BodyDb;
     const value = await readSelection(db, "owner", analysis.jobId, 0, c);
     const blocked = source === "auto_recommendation" || source === "catalog_default_fallback";
-    assert.equal(value.resolvedBody?.characterId ?? null, blocked ? null : "body-child");
-    assert.equal(value.resolutionStatus, blocked ? "needs_selection" : "ready");
+    assert.equal(value.resolvedBody?.characterId ?? null, blocked ? "male-base-v0-7-2" : "body-child");
+    assert.equal(value.resolutionStatus, "ready");
     assert.equal(value.recommendation.body, null);
     assert.equal(value.selectionRevision, 7);
     assert.equal(writes, 0);

@@ -56,7 +56,7 @@ function setup(count = 5) {
     a.supportedPoseIds = analysis.candidatesByPerson[0].candidates.map(
       (p) => p.poseId!,
     );
-  const policy = snapshot(defaultPreferences(), bodies);
+  const policy = snapshot({ ...defaultPreferences(), mode: "auto" }, bodies);
   const initial = (i: number) =>
     resolveBody(
       i,
@@ -703,3 +703,20 @@ for (const scope of ["head", "shoulder_head", "bust"] as const) {
     assert.notEqual(restored.renderKey, m.renderKey);
   });
 }
+
+
+test("failed body detection uses the male base through paired final review and export guards", async () => {
+  const { app, state, bodies, manifest } = setup();
+  bodies.assets[0].characterId = "male-base-v0-7-2";
+  const policy = snapshot({ ...defaultPreferences(), mode: "auto" }, bodies);
+  state.selections[0] = resolveBody(0, policy, { status: "unavailable", body: null, reasonCodes: ["provider_error"] },
+    bodies, bodies.assets[0].supportedPoseIds, "auto");
+  const m = await manifest();
+  assert.equal(m.resolvedBody.characterId, "male-base-v0-7-2");
+  assert.equal((await app.request(m.candidates[0].thumbnailUrl)).status, 200);
+  assert.equal((await app.request(m.candidates[0].previewModel.url)).status, 200);
+  state.available = false;
+  assert.equal((await app.request(m.candidates[0].thumbnailUrl)).status, 409);
+  state.available = true; state.converter = false;
+  assert.equal((await app.request(m.candidates[0].previewModel.url)).status, 503);
+});

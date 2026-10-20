@@ -67,7 +67,7 @@ export function sameShapeSource(a: ShapeSource | null | undefined, b: unknown) {
     v.controllerSha256 === a.controllerSha256
   );
 }
-export interface ShapeDefault {
+export interface CardShape {
   characterId: string;
   controls: Record<string, number>;
 }
@@ -203,10 +203,10 @@ export function bodyShape(
   };
 }
 
-export function shapeDefault(
+export function cardShape(
   catalog: BodyCatalog,
   raw: unknown,
-): ShapeDefault | null {
+): CardShape | null {
   if (raw === null) return null;
   const v = raw as Record<string, unknown> | null;
   if (

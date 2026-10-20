@@ -1253,7 +1253,7 @@ BVH downloads and final FBX/refined/cropped export contracts are unchanged.
 
 `BODY_SELECTION_ENABLED=true`인 새 작업에서 선택적 body 추천·선택 저장 계약을 제공한다. 기본은 off다.
 
-- GET/PUT `/v1/installations/current/body-preferences`: 설치별 기본 캐릭터와 last_used/auto/fixed_default 설정, 체형 카드(아래 "체형 카드").
+- GET/PUT `/v1/installations/current/body-preferences`: 설치별 last_used/auto 모드와 체형 카드. PUT 본문은 `{ mode, expectedRevision, mutationId }`만 받는다. 과거 사용자 기본값 필드/모드의 새 쓰기는 `400 INVALID_INPUT`이다.
 - GET/PUT `/v1/analysis/jobs/{jobId}/people/{personIndex}/body-selection`: inherit/manual/auto 선택 저장·조회.
 - GET 같은 인물 경로의 `/body-options`: 적용 가능한 승인 체형 목록.
 - GET result에 person별 bodyRecommendation/bodySelection 추가. 기존 포즈 후보는 유지한다.
@@ -1266,7 +1266,7 @@ BVH downloads and final FBX/refined/cropped export contracts are unchanged.
 
 현재 이미지 계약은 검증된 아동 디자인 근거를 제공하지 않는다. 따라서 아동 자산의 자동 추천은 `status=unavailable`, `body=null`, `reasonCodes`에 `child_requires_explicit_user_selection`을 기록한다. 나이 추정/비율/얼굴 스타일만으로 추천을 승격하지 않는다. 일반 성인/TOON64 추천은 유지한다.
 
-명시적 manual, fixed_default, 사용자 기본값, 수동 선택에서 기록된 last_used의 아동은 유지한다. 새 자동 catalog_default로는 아동을 쓰지 않으며 기존 안전한 기본값이 없으면 선택을 요구한다. explicit auto는 unavailable을 유지한다. 과거 `auto_recommendation`/`catalog_default_fallback` 아동 선택은 읽기 시 `resolvedBody=null`, `resolvedSource=null`, `resolutionStatus=needs_selection`으로 재검증하고 revision/DB를 변경하지 않는다. 사용자가 선택한 아동을 강제로 성인으로 덮어쓰지 않는다. 카탈로그 자산·수동 옵션·Export 적격성은 삭제하지 않는다.
+명시적 manual 및 수동으로 고른 last_used 아동은 유지한다. 자동 아동 추천은 추천으로 쓰지 않고 공통 남성 기본형으로 시작한다. 과거 자동 아동 선택은 읽기 때 같은 정책으로 재검증한다.
 
 ### 체형 수치 조절 (body-shape.v1, 2026-10-14)
 
@@ -1276,7 +1276,7 @@ BVH downloads and final FBX/refined/cropped export contracts are unchanged.
 - `GET .../body-options`: 조절 가능한 체형에만 `shape`(위 spec)를 싣는다.
 - `PUT .../body-selection`: `intent: "manual"`일 때만 `shape: { controls: { key: number } }`를 받는다. 빠진 key는 default, 모르는 key·범위 밖·step에 맞지 않는 값은 `400 INVALID_SHAPE`, 조절을 선언하지 않은 체형은 `409 SHAPE_UNSUPPORTED`. 모든 값이 default면 `shape: null`로 저장한다(평범한 asset과 같은 렌더 키).
 - `body-selection` 응답: `shape: { schemaVersion, controls, shapeSha256 } | null`. `shapeSha256 = sha256(["body-shape.v1", characterId, assetSha256, sorted controls])`. 체형이 더는 조절을 선언하지 않으면 `resolutionStatus: "unavailable"`.
-- `GET/PUT /v1/installations/current/body-preferences`: `shapeDefault: { characterId, controls } | null`("내 기본값")과 읽기 전용 `shapeEditable: [{ characterId, shape, displayName?, neutralPreview?, shapeRuntime? }]`. `displayName`·`neutralPreview`·`shapeRuntime`은 body-options와 같은 메타데이터로, 작업 밖의 설정 화면이 체형 이름·고정 그림·실시간 3D를 그릴 때 쓴다(서버 경로는 내보내지 않음). PUT에서 `shapeDefault` key를 빼면 저장된 값을 유지한다(구 클라이언트 호환). 클라이언트는 "내 기본값"을 저장할 때 `defaultCharacterId`와 `shapeDefault.characterId`를 같은 체형으로 맞춰 보낸다.
+- 설정 GET은 읽기 전용 `shapeEditable: [{ characterId, shape, displayName?, neutralPreview?, shapeRuntime? }]`를 제공한다. 작업 밖의 체형 커스텀에서도 같은 메타데이터를 사용한다. 개인 수치는 카드 API로 저장한다.
 - `BODY_SHAPE_BAKE_ENABLED=false`(기본)이면 `shape`가 있는 선택은 `body-previews`와 체형 FBX export에서 `409 BODY_SHAPE_RENDER_UNSUPPORTED`로 거절한다 — 조절 전 체형을 조절한 것처럼 그리거나 저장하지 않는다.
 - `BODY_SHAPE_BAKE_ENABLED=true`는 검증된 shape-bake.v2 converter와 일치하는 카탈로그를 배포한 뒤에만 켠다. on에서는 `/convert-framed`에 저장된 shape 전체와 `expected_shape_source`를 전달하고, 응답 `shape_sha256`과 `shape_bake`(rules·blend_sha256·controller_sha256)가 약속한 원본과 같은지 검증한다. 캐시 키에도 shapeSha256과 원본을 포함한다. 수치 체형 호출 상한은 `CONVERTER_SHAPE_TIMEOUT_MS`(기본 320000, converter `CONVERTER_SHAPE_TIMEOUT_SECONDS` 300보다 크게)다 — 굽기 1회 30~110초 실측.
 - **체형 원본 바인딩 (2026-10-16 확정)**: manifest asset에 `shapeSource: { rules, blendSha256, controllerSha256 }`(컨트롤러 `VERSION`과 .blend·`standin_body.py` SHA-256). `shape`가 없는 asset에 선언하거나 형식이 틀리면 카탈로그를 닫는다. 수치 선택은 읽을 때마다 현재 카탈로그에서 `shapeSource`를 붙여 돌려주고(저장하지 않음), 원본이 없으면 굽기가 켜져 있어도 `409 BODY_SHAPE_RENDER_UNSUPPORTED`다. converter가 다른 원본이면 `409 SHAPE_SOURCE_MISMATCH` → BFF `CONVERTER_REJECTED`.
@@ -1290,11 +1290,20 @@ BVH downloads and final FBX/refined/cropped export contracts are unchanged.
 
 체형 커스텀에서 만든 체형을 이름 붙인 카드("주인공 A")로 저장하고, 새 작업은 마지막으로 직접 고른 체형으로 시작한다. 카드는 설치(installation) 단위로 body-preferences 안에 저장된다.
 
-- `GET .../body-preferences` 응답에 `cards: [{ cardId, name, characterId, controls, createdAt, updatedAt }]`와 `lastUsed: { characterId, controls | null, usedAt } | null`이 붙는다. 카드가 생기기 전 행에 `shapeDefault`("내 기본값")가 있으면 그 값을 `cardId: "my-default"`, 이름 "내 기본 체형"인 카드 한 장으로 보여 준다(첫 카드 쓰기 때 실제로 저장됨). 그 카드를 지우면 `shapeDefault`도 지운다.
+- `GET .../body-preferences`는 `cards: [{ cardId, name, characterId, controls, createdAt, updatedAt }]`와 `lastUsed: { characterId, controls | null, usedAt } | null`을 반환한다. 과거 수치는 카드로 마이그레이션한다(아래).
 - `POST .../body-preferences/cards` `{ name, characterId, controls, expectedRevision, mutationId }` — 카드 추가. `PUT .../cards/{cardId}` `{ name?, characterId?, controls?, expectedRevision, mutationId }` — 이름 변경·수치 변경(하나 이상). `DELETE .../cards/{cardId}` `{ expectedRevision, mutationId }`. 셋 다 응답은 GET과 같은 설정 전체이고 `revision`이 1 오른다(설정 PUT과 같은 revision·mutationId 규칙, 충돌은 `409 BODY_PREFERENCE_CONFLICT`).
-  - 이름은 앞뒤 공백을 지운 1–24자(`400 INVALID_CARD_NAME`). 카드는 수치 조절이 열린 체형만(`409 SHAPE_UNSUPPORTED`), controls는 `shapeDefault`와 같은 규칙으로 정규화한다(`400 INVALID_SHAPE`). 최대 48장(`409 CARD_LIMIT`), 없는 카드는 `404 CARD_NOT_FOUND`. 카탈로그 프리셋은 카드가 아니다 — 이름을 바꾸거나 지울 수 없다.
+  - 이름은 앞뒤 공백을 지운 1–24자(`400 INVALID_CARD_NAME`). 카드는 수치 조절이 열린 체형만(`409 SHAPE_UNSUPPORTED`), controls는 카탈로그의 수치 규칙으로 정규화한다(`400 INVALID_SHAPE`). 최대 48장(`409 CARD_LIMIT`), 없는 카드는 `404 CARD_NOT_FOUND`. 카탈로그 프리셋은 카드가 아니다 — 이름을 바꾸거나 지울 수 없다.
   - 카드의 성별은 따로 저장하지 않는다. `characterId`(기준 체형)의 종류를 따른다.
-- `mode`에 `last_used`가 추가됐고 새 설치의 기본값이다. 아직 `lastUsed`가 없으면 승인 카탈로그의 현행 남성 기본형(`male-base-*`)으로 시작한다. 해당 자산의 식별자는 작업 정책에 고정하고, 포즈 지원 검증을 통과할 때만 `catalog_default_fallback`으로 사용한다. 없거나 지원되지 않으면 기존 추천·기본값 순서를 유지한다. `PUT .../body-selection`이 `manual`로 성공하면 그 체형과 수치를 `lastUsed`에 적는다(설정 `revision`은 올리지 않는다 — 설정 화면이 건드리지 않는 값이라 충돌을 만들지 않게). 새 작업의 `inherit` 인물은 `lastUsed`가 그 포즈에 쓸 수 있으면 그 체형·수치로 시작하고 `resolvedSource: "last_used"`가 된다. 쓸 수 없거나 수치가 지금 카탈로그 규칙에 맞지 않으면 기존 순서(추천 → 사용자 기본 → 카탈로그 기본)로 내려간다. `auto`·`fixed_default` 행은 이전과 같다.
+- 지원 모드는 `last_used`(새 설치 기본)와 `auto`다. `last_used`는 마지막 수동 선택의 체형·수치가 유효하면 그대로 쓰고, 최초 사용·삭제된 체형·무효 수치는 공통 남성 기본형으로 시작한다.
+- `auto` 및 인물별 명시적 `auto`는 정상 추천을 사용한다. 추천 없음·실패·disabled·not_applicable·지원 불가이면 같은 남성 기본형을 사용한다. 유효하지만 그림과 다른 추천을 실패로 임의 판단하지 않는다.
+- `manual`은 언제나 직접 고른 체형·수치를 유지한다. 자산 소실·해시 변경·변환 실패를 다른 체형으로 숨기지 않는다.
+- 남성 기본형은 승인 카탈로그의 현행 `male-base-*` 자산이다. 작업 시작에 자산·버전·해시·리그를 고정한다. 구 snapshot에 이 정보가 없을 때만 현재 카탈로그에서 찾는다. 자산이 없거나 출력 조건을 만족하지 못하면 unavailable로 저장을 막는다. 후보가 없으면 not_applicable이다.
+
+과거 저장 경계에서만 legacy를 읽는다. `fixed_default`는 `last_used`로 정규화하고 기존 `auto`/`last_used`, 카드, 마지막 선택을 보존한다. `shapeDefault`의 체형·수치는 `my-default` 개인 카드로 합치고, 현재 응답/다음 설정 쓰기에는 `defaultCharacterId`·`shapeDefault`를 넣지 않는다. 카드 삭제 후 다시 생기지 않는다. `catalog.defaultCharacterId`와 일반 모델 카탈로그 계약은 유지한다.
+
+과거 작업의 `fixed_default`/`user_default_fallback`, 자동 기본형, 미확정 자동 선택은 작업 snapshot을 기준으로 읽기 때 다시 결정한다. 유효한 수동/마지막 선택과 정상 추천은 유지한다. GET은 DB·revision을 바꾸지 않고 다음 명시적 변경은 현재 계약으로 저장한다. 이전 mutation 응답도 반환 경계에서 정규화한다.
+
+`manual` 선택 성공 시 `lastUsed`를 적되 설정 revision은 올리지 않는다. 기본형 선택은 lastUsed를 덮어쓰지 않는다.
   - ⚠ `lastUsed`에 수치가 있으면 그 인물의 선택에도 `shape`가 붙으므로 위 `BODY_SHAPE_RENDER_UNSUPPORTED` 가드가 똑같이 적용된다.
 
 구형 고정 성인 6종과 `body-teen-male`, `body-teen-female`은 모델·체형 옵션 목록과 직접 선택에서 제외한다. `body-child` 아동 체형은 유지한다. 기존 청소년 선택/마지막 사용 체형은 현재 카탈로그로 재검증하며, 지원 종료 모델을 다시 렌더하거나 자동으로 다른 체형으로 덮어쓰지 않는다.

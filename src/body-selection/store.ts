@@ -10,7 +10,7 @@ import { checkCharacter } from "../characters/service.js";
 import { loadBodyCatalog } from "./catalog.js";
 import {
   bodyShape,
-  shapeDefault,
+  cardShape,
   shapeEditable,
   shapeSpec,
   ShapeInputError,
@@ -19,6 +19,7 @@ import {
 import {
   bodyRef,
   defaultPreferences,
+  normalizePreferences,
   bodyEligible,
   resolveBody,
   snapshot,
@@ -45,9 +46,6 @@ export interface Mutation {
 }
 export interface PreferenceChange extends Mutation {
   mode: BodyPreferences["mode"];
-  defaultCharacterId: string | null;
-  /** Absent keeps the saved value; null clears it. */
-  shapeDefault?: unknown;
 }
 /** Card edits. Each bumps the preferences revision like any other preference write. */
 export type CardChange = Mutation &
@@ -107,8 +105,7 @@ export function presentPreferences(
   catalog: BodyCatalog = loadBodyCatalog(),
 ): PresentedPreferences {
   return {
-    ...value,
-    shapeDefault: value.shapeDefault ?? null,
+    ...normalizePreferences(value),
     cards: cardsOf(value),
     lastUsed: value.lastUsed ?? null,
     shapeEditable: presentShapeEditable(catalog),
@@ -119,20 +116,7 @@ export function presentPreferences(
  * user keeps it; the first card write stores that list for real.
  */
 export function cardsOf(value: BodyPreferences): BodyCard[] {
-  if (value.cards) return value.cards;
-  const mine = value.shapeDefault;
-  if (!mine) return [];
-  const epoch = new Date(0).toISOString();
-  return [
-    {
-      cardId: MIGRATED_CARD_ID,
-      name: "내 기본 체형",
-      characterId: mine.characterId,
-      controls: mine.controls,
-      createdAt: epoch,
-      updatedAt: epoch,
-    },
-  ];
+  return normalizePreferences(value).cards ?? [];
 }
 export const bodyDeps = { catalog: loadBodyCatalog, check: checkCharacter };
 export type BodyDeps = typeof bodyDeps;
@@ -144,7 +128,7 @@ export async function readPreferences(
     "SELECT value FROM body_preferences WHERE installation_id=$1",
     [installationId],
   );
-  return rows[0]?.value ?? defaultPreferences();
+  return normalizePreferences(rows[0]?.value ?? defaultPreferences());
 }
 async function replay(
   db: BodyDb,
@@ -193,51 +177,24 @@ export async function writePreferences(
   db: BodyDb,
   owner: string,
   change: PreferenceChange,
-  deps: BodyDeps = bodyDeps,
+  _deps: BodyDeps = bodyDeps,
 ): Promise<BodyPreferences> {
   const lock = await db.query(
     "SELECT id FROM installations WHERE id=$1 FOR UPDATE",
     [owner],
   );
   if (!lock.rows.length) throw new BodyError("NOT_FOUND", 404);
-  const keepShape = !("shapeDefault" in change);
   const previous = await replay(db, owner, "preferences", change, [
     change.mode,
-    change.defaultCharacterId,
     change.expectedRevision,
-    // Old clients never send the key; their replay hash must stay unchanged.
-    ...(keepShape ? [] : [change.shapeDefault ?? null]),
   ]);
-  if (previous.value) return previous.value as BodyPreferences;
+  if (previous.value)
+    return normalizePreferences(previous.value as BodyPreferences);
   const current = await readPreferences(db, owner);
   expect(current.revision, change.expectedRevision, "BODY_PREFERENCE_CONFLICT");
-  if (change.mode === "fixed_default" && !change.defaultCharacterId)
-    throw new BodyError("INVALID_INPUT", 400);
-  if (change.defaultCharacterId) {
-    if (
-      !deps
-        .catalog()
-        .assets.some((a) => a.characterId === change.defaultCharacterId)
-    )
-      throw new BodyError("INVALID_CHARACTER", 400);
-    if ((await deps.check(change.defaultCharacterId)) !== "ok")
-      throw new BodyError("BODY_UNAVAILABLE", 409);
-  }
-  let nextShape = current.shapeDefault ?? null;
-  if (!keepShape) {
-    try {
-      nextShape = shapeDefault(deps.catalog(), change.shapeDefault ?? null);
-    } catch (e) {
-      shapeError(e);
-    }
-    if (nextShape && (await deps.check(nextShape.characterId)) !== "ok")
-      throw new BodyError("BODY_UNAVAILABLE", 409);
-  }
   const value: BodyPreferences = {
     ...current,
     mode: change.mode,
-    defaultCharacterId: change.defaultCharacterId,
-    shapeDefault: nextShape,
     revision: current.revision + 1,
   };
   await db.query(
@@ -265,7 +222,7 @@ function cardName(raw: unknown) {
     throw new BodyError("INVALID_CARD_NAME", 400);
   return name;
 }
-/** A card always carries controls for a shape-capable body (same rule as "내 기본값"). */
+/** A card always carries controls validated against a shape-capable catalog asset. */
 async function cardBody(
   characterId: string,
   controls: unknown,
@@ -273,7 +230,7 @@ async function cardBody(
 ) {
   let body;
   try {
-    body = shapeDefault(deps.catalog(), { characterId, controls });
+    body = cardShape(deps.catalog(), { characterId, controls });
   } catch (e) {
     shapeError(e);
   }
@@ -301,7 +258,8 @@ export async function writeCards(
     expectedRevision,
     payload,
   ]);
-  if (previous.value) return previous.value as BodyPreferences;
+  if (previous.value)
+    return normalizePreferences(previous.value as BodyPreferences);
   const current = await readPreferences(db, owner);
   expect(current.revision, expectedRevision, "BODY_PREFERENCE_CONFLICT");
   const cards = cardsOf(current);
@@ -355,10 +313,6 @@ export async function writeCards(
   const value: BodyPreferences = {
     ...current,
     cards: next,
-    // The migrated card *is* the old "내 기본값"; deleting it must not bring it back.
-    ...(change.op === "delete" && change.cardId === MIGRATED_CARD_ID
-      ? { shapeDefault: null }
-      : {}),
     revision: current.revision + 1,
   };
   await storePreferences(db, owner, value);
@@ -411,7 +365,9 @@ export function personBodyContext(person: AnalysisPerson, semantic = false) {
     ["dynamic-pose-presentation-v1", "semantic-pose-presentation-v1"].includes(
       p.version,
     ) &&
-    ["full", "half", "bust", "shoulder_head", "head"].includes(p.output_scope ?? "") &&
+    ["full", "half", "bust", "shoulder_head", "head"].includes(
+      p.output_scope ?? "",
+    ) &&
     [p.library_candidates, p.review_candidates, p.generated_candidates].some(
       (g) => g.length > 0,
     );
@@ -507,14 +463,37 @@ function revalidate(
   person: AnalysisPerson,
   catalog: BodyCatalog,
   semantic = false,
+  policy?: BodyPolicy,
 ): BodySelection {
   const { poses, previewOnly } = personBodyContext(person, semantic);
-  // Old automatic results must pass today's recommendation policy. Do not
-  // rewrite persisted/manual/last-used choices or bump their revision on GET.
-  const autoChild = ["auto_recommendation", "catalog_default_fallback"].includes(value.resolvedSource ?? "") &&
+  // Normalize saved automatic/default choices using the captured job policy. A manual
+  // choice (including its controls) is never replaced by a fallback on read.
+  const source = value.resolvedSource as string | null;
+  const legacyDefault =
+    source === "fixed_default" || source === "user_default_fallback";
+  const automaticDefault = source === "catalog_default_fallback";
+  const unresolved = !value.resolvedBody && value.intent !== "manual";
+  const autoChild =
+    source === "auto_recommendation" &&
     isChildBody(value.resolvedBody, catalog);
-  if (autoChild) value = { ...value, resolvedBody: null, resolvedSource: null,
-    shape: null, shapeSource: null, resolutionStatus: "needs_selection" };
+  if (
+    policy &&
+    value.intent !== "manual" &&
+    (legacyDefault || automaticDefault || unresolved || autoChild)
+  ) {
+    value = resolveBody(
+      value.personIndex,
+      policy,
+      value.recommendation,
+      catalog,
+      poses,
+      value.intent,
+      null,
+      value.selectionRevision,
+      null,
+      previewOnly,
+    );
+  }
   const recommendation =
     value.recommendation.status === "available" &&
     !bodyEligible(value.recommendation.body, catalog, poses, previewOnly)
@@ -562,23 +541,7 @@ export async function readSelection(
   );
   if (!rows[0]) throw new BodyError("BODY_SELECTION_UNSUPPORTED", 409);
   const stored = rows[0].value;
-  // Resolve old presentation jobs and unresolved first-use defaults from the original
-  // policy, never today's preferences. Manual choices and revisions stay unchanged.
-  const firstUseMissing =
-    stored.resolutionStatus === "needs_selection" &&
-    !stored.resolvedBody &&
-    stored.intent === "inherit" &&
-    policy.preferences.mode === "last_used" &&
-    !policy.preferences.lastUsed;
-  const value =
-    (personBodyContext(person, semantic).previewOnly &&
-      stored.resolutionStatus === "not_applicable") || firstUseMissing
-      ? {
-          ...initialBody(person, policy, catalog, semantic),
-          selectionRevision: stored.selectionRevision,
-        }
-      : stored;
-  return revalidate(value, person, catalog, semantic);
+  return revalidate(stored, person, catalog, semantic, policy);
 }
 export async function writeSelection(
   db: BodyDb,
@@ -601,8 +564,15 @@ export async function writeSelection(
     change.expectedRevision,
     ...(change.shape ? [change.shape] : []),
   ]);
-  if (previous.value) return previous.value as BodySelection;
   const catalog = deps.catalog();
+  if (previous.value)
+    return revalidate(
+      previous.value as BodySelection,
+      person,
+      catalog,
+      semantic,
+      policy,
+    );
   const stored = await db.query<{ value: BodySelection }>(
     "SELECT value FROM body_selections WHERE job_id=$1 AND person_index=$2",
     [jobId, index],
@@ -712,8 +682,9 @@ export async function attachBodySelections(
   const { rows } = await db.query<{
     person_index: number;
     value: BodySelection;
+    body_policy_json: BodyPolicy | null;
   }>(
-    `SELECT b.person_index,b.value FROM body_selections b
+    `SELECT b.person_index,b.value,j.body_policy_json FROM body_selections b
     JOIN jobs j ON j.id=b.job_id WHERE j.id=$1 AND j.installation_id=$2`,
     [result.jobId, owner],
   );
@@ -730,6 +701,7 @@ export async function attachBodySelections(
               p,
               catalog,
               result.source === "semantic",
+              row.body_policy_json ?? undefined,
             ),
           }
         : p;

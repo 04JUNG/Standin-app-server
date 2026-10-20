@@ -98,7 +98,7 @@ PNG magic·2MiB 상한·파일 SHA256과 승인 manifest의 일치를 검사한�
 
 ## 디자인 단서 기반 기본 체형
 
-감지의 `auto_presentation_default`는 mock 아님, 인물 소유권 명확, provider 오류 없음, visible feminine/masculine, compatible_candidates, 관측값/진단값 일치 및 face_design/body_contour 근거를 검증한 후 승인 자산·지원 포즈 조건을 통과해야 추천으로 전달한다. reasonCodes에 `presentation_supported_shape_default`를 남긴다. 일반 auto_default는 기존처럼 추천으로 승격하지 않는다. manual/fixed_default는 우선하고 명시적 auto는 추천을 선택한다.
+감지의 `auto_presentation_default`는 mock 아님, 인물 소유권 명확, provider 오류 없음, visible feminine/masculine, compatible_candidates, 관측값/진단값 일치 및 face_design/body_contour 근거를 검증한 후 승인 자산·지원 포즈 조건을 통과해야 추천으로 전달한다. reasonCodes에 `presentation_supported_shape_default`를 남긴다. 일반 auto_default는 기존처럼 추천으로 승격하지 않는다. manual은 우선하고 명시적 auto는 정상 추천, 없으면 공통 남성 기본형을 선택한다.
 
 2026-10-15 사용자 확정: 기본 사진과 체형 비교는 T 포즈다. 새 카탈로그는 `pose: "t_pose"`를 사용한다. 기존 attention 자산은 과거 릴리스 호환용으로만 허용한다.
 
@@ -106,4 +106,4 @@ PNG magic·2MiB 상한·파일 SHA256과 승인 manifest의 일치를 검사한�
 
 현재 이미지 계약은 검증된 아동 디자인 근거를 제공하지 않는다. 따라서 아동 자산의 자동 추천은 `status=unavailable`, `body=null`, `reasonCodes`에 `child_requires_explicit_user_selection`을 기록한다. 나이 추정/비율/얼굴 스타일만으로 추천을 승격하지 않는다. 일반 성인/TOON64 추천은 유지한다.
 
-명시적 manual, fixed_default, 사용자 기본값, 수동 선택에서 기록된 last_used의 아동은 유지한다. 새 자동 catalog_default로는 아동을 쓰지 않으며 기존 안전한 기본값이 없으면 선택을 요구한다. explicit auto는 unavailable을 유지한다. 과거 `auto_recommendation`/`catalog_default_fallback` 아동 선택은 읽기 시 `resolvedBody=null`, `resolvedSource=null`, `resolutionStatus=needs_selection`으로 재검증하고 revision/DB를 변경하지 않는다. 사용자가 선택한 아동을 강제로 성인으로 덮어쓰지 않는다. 카탈로그 자산·수동 옵션·Export 적격성은 삭제하지 않는다.
+명시적 manual 및 수동으로 고른 last_used 아동은 유지한다. 자동 아동 추천은 추천으로 쓰지 않고 공통 남성 기본형으로 시작한다. 과거 자동 아동 선택은 읽기 때 같은 정책으로 재검증한다.
