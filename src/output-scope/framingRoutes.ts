@@ -1,5 +1,6 @@
 import { renderFinalPreview } from "../converter/finalPreview.js";
 import { candidatePathId, candidateSourceBytes } from "../candidate-source.js";
+import { refinableLibraryCandidate } from "../refine/eligibility.js";
 import { loadAssets } from "../pose-presentation.js";
 import { manualPresentationCamera } from "../pose-presentation.js";
 import { exportCandidateAllowed, manualExportCandidate } from "../routed-search.js";
@@ -268,7 +269,7 @@ export function createFramingRoutes(
       // Refined output still belongs to this approved base pose. Check quarantine
       // and source lineage on every body request, including paired cache hits.
       let checkedBase: Uint8Array | undefined;
-      if (bodyMode || prepared) {
+      if (bodyMode || prepared || (artifact.variant === "refined" && candidate.sourceBvhSha256)) {
         checkedBase = await candidateSourceBytes(jobId, person!, candidate, deps.getPoseBvh, deps.loadAssets);
         const expectedBase = manual?.sourceBvhSha256 ?? candidate.sourceBvhSha256 ?? candidate.camera?.source_bvh_sha256;
         if (expectedBase && sha256Hex(checkedBase) !== expectedBase)
@@ -279,8 +280,9 @@ export function createFramingRoutes(
       else bvhBytes = checkedBase ?? await candidateSourceBytes(jobId, person!, candidate, deps.getPoseBvh, deps.loadAssets);
       if (
         candidate.sourceBvhSha256 &&
-        (artifact.variant !== "base" ||
-          sha256Hex(bvhBytes) !== candidate.sourceBvhSha256)
+        (artifact.variant === "refined"
+          ? !refinableLibraryCandidate(candidate)
+          : sha256Hex(bvhBytes) !== candidate.sourceBvhSha256)
       )
         return fail(
           409,

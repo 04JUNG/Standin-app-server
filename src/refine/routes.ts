@@ -1,6 +1,6 @@
 // POST /v1/analysis/jobs/:jobId/people/:personIndex/refine — 선택 후보 refine 프록시.
 // jobsRoutes 아래에 마운트된다(경로 prefix는 /v1/analysis/jobs).
-import { restrictedCandidate } from "../routed-search.js";
+import { candidateRefineAllowed } from "./eligibility.js";
 import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
 import { errorEnvelope } from "../mapping.js";
@@ -93,7 +93,7 @@ export function createRefineRoutes(overrides: Partial<typeof defaults> = {}) {
     const selected = owned.result?.candidatesByPerson
       .find((p) => p.personIndex === personIndex)
       ?.candidates.find((p) => p.id === candidateId);
-    if (owned.result?.source === "semantic" || restrictedCandidate(selected) || selected?.refineAllowed === false)
+    if (owned.result?.source === "semantic" || !candidateRefineAllowed(selected))
       return c.json(
         errorEnvelope(
           "CANDIDATE_REFINE_FORBIDDEN",

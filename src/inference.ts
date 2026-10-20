@@ -13,6 +13,7 @@ import { currentContext } from "./requestContext.js";
  * 실패시키는 대신 `mapping.ts`가 low/refine-off 쪽으로 안전하게 해석한다.
  */
 export interface UpstreamPerson {
+  refine_candidates?: UpstreamPerson["candidates"];
   pose_presentation?: unknown;
   dynamic_search?: unknown;
   semantic_candidates?: unknown;
