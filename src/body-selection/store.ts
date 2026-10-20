@@ -1,4 +1,5 @@
 import { shapeRuntimeMetadata } from "./shapeRuntime.js";
+import { automaticRecommendation, isChildBody } from "./childPolicy.js";
 import { neutralMetadata } from "./neutral.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
@@ -508,6 +509,12 @@ function revalidate(
   semantic = false,
 ): BodySelection {
   const { poses, previewOnly } = personBodyContext(person, semantic);
+  // Old automatic results must pass today's recommendation policy. Do not
+  // rewrite persisted/manual/last-used choices or bump their revision on GET.
+  const autoChild = ["auto_recommendation", "catalog_default_fallback"].includes(value.resolvedSource ?? "") &&
+    isChildBody(value.resolvedBody, catalog);
+  if (autoChild) value = { ...value, resolvedBody: null, resolvedSource: null,
+    shape: null, shapeSource: null, resolutionStatus: "needs_selection" };
   const recommendation =
     value.recommendation.status === "available" &&
     !bodyEligible(value.recommendation.body, catalog, poses, previewOnly)
@@ -528,7 +535,7 @@ function revalidate(
     shape: value.shape ?? null,
     // Derived, never stored: the source a shaped body must be baked with right now.
     ...(value.shape ? { shapeSource: asset?.shapeSource ?? null } : {}),
-    recommendation,
+    recommendation: automaticRecommendation(recommendation, catalog),
     resolutionStatus:
       (value.resolvedBody &&
         !bodyEligible(value.resolvedBody, catalog, poses, previewOnly)) ||
