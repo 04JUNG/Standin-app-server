@@ -54,6 +54,7 @@ import { buildActivity, buildStrips, kstDay, OUTCOME_LABELS, type OutcomeKey } f
 import { activityJobs, visitDays, visitStrips } from "./activityStore.js";
 import { GALLERY_PAGE, parseGalleryQuery, parseGroup, STATUS_ORDER } from "./gallery.js";
 import { galleryFolders, galleryItems } from "./galleryStore.js";
+import { SEMANTIC_SOURCE, searchQueries, searchQueryOf } from "./searchQueries.js";
 import { notify } from "../notify.js";
 import {
   GAP_EXPORT_PAGE_SIZE,
@@ -460,8 +461,14 @@ adminRoutes.get("/review/installations/:id/jobs", async (c) => {
   }
 
   const rows = await listJobHistory(installationId, parsed.query, true);
+  const page = toHistoryPage(rows, parsed.query.limit);
+  const queries = await searchQueries(semanticIds(page.items));
   await audit(c, "review_installation_jobs", { installationId });
-  return c.json({ installation, ...toHistoryPage(rows, parsed.query.limit) });
+  return c.json({
+    installation,
+    ...page,
+    items: page.items.map((item) => ({ ...item, searchQuery: queries.get(item.jobId) ?? null })),
+  });
 });
 
 /**
@@ -485,15 +492,22 @@ adminRoutes.get("/review/jobs", async (c) => {
   const rows = await listRecentJobs(parsed.query);
   const page = toHistoryPage(rows, parsed.query.limit);
   const installationByJob = new Map(rows.map((row) => [row.id, row.installation_id]));
+  const queries = await searchQueries(semanticIds(page.items));
   await audit(c, "review_recent_jobs", {});
   return c.json({
     ...page,
     items: page.items.map((item) => ({
       ...item,
       installationId: installationByJob.get(item.jobId) ?? null,
+      searchQuery: queries.get(item.jobId) ?? null,
     })),
   });
 });
+
+/** 목록에 올라간 텍스트 검색 Job의 id. 이것만 검색어를 꺼낸다. */
+function semanticIds(items: Array<{ jobId: string; source: string | null }>): string[] {
+  return items.filter((item) => item.source === SEMANTIC_SOURCE).map((item) => item.jobId);
+}
 
 /** `/review/jobs/:id/refined/:personIndex/...`의 경로 검사. 틀리면 null. */
 function refinedTarget(c: Context<AppEnv>): { jobId: string; personIndex: number; candidateId: string } | null {
@@ -595,8 +609,14 @@ adminRoutes.get("/review/installations/:id/activity", async (c) => {
   // 하루 여유를 둔다. KST 날짜 경계와 UTC 경계가 9시간 어긋난다.
   const since = new Date(Date.now() - (ACTIVITY_DAYS + 1) * 86_400_000).toISOString();
   const [days, jobs] = await Promise.all([visitDays(installationId, since), activityJobs(installationId, since)]);
+  const activity = buildActivity(days, jobs, today, ACTIVITY_DAYS);
+  const queries = await searchQueries(semanticIds(activity.jobs));
   await audit(c, "review_installation_activity", { installationId });
-  return c.json({ today, ...buildActivity(days, jobs, today, ACTIVITY_DAYS) });
+  return c.json({
+    today,
+    ...activity,
+    jobs: activity.jobs.map((job) => ({ ...job, searchQuery: queries.get(job.jobId) ?? null })),
+  });
 });
 
 /** GET /v1/admin/review/installations-activity?ids=a,b — 설치 목록의 7일 출석 점. */
@@ -656,12 +676,14 @@ adminRoutes.get("/gallery/roughs", async (c) => {
     outcomeLabel: OUTCOME_LABELS[row.outcome as OutcomeKey] ?? row.outcome,
     exported: row.exported,
     refined: row.refined,
+    source: row.source,
     inputUrl: row.input_s3_key ? `/v1/admin/review/jobs/${encodeURIComponent(row.id)}/input` : null,
   })));
+  const queries = await searchQueries(semanticIds(items));
   for (const row of page) await audit(c, "review_gallery", { jobId: row.id, installationId: row.installation_id });
   const last = page[page.length - 1];
   return c.json({
-    items,
+    items: items.map((item) => ({ ...item, searchQuery: queries.get(item.jobId) ?? null })),
     inputUrlExpiresInSeconds: null,
     nextCursor: rows.length > GALLERY_PAGE && last ? encodeHistoryCursor({ createdAt: last.created_at, id: last.id }) : null,
   });
@@ -705,9 +727,10 @@ adminRoutes.get("/review/jobs/:id", async (c) => {
     inference_metadata_json: string | null;
     result_json: string | null;
     cut_summary_json: string | null;
+    source: string | null;
   }>(
     `SELECT id, status, created_at, input_s3_key, input_width, input_height,
-            inference_metadata_json, result_json, cut_summary_json
+            inference_metadata_json, result_json, cut_summary_json, source
      FROM quality_review_jobs WHERE id = $1 AND installation_id IS NOT NULL`,
     [jobId],
   );
@@ -768,6 +791,8 @@ adminRoutes.get("/review/jobs/:id", async (c) => {
     jobId: job.id,
     status: job.status,
     createdAt: job.created_at,
+    source: job.source,
+    searchQuery: searchQueryOf(job.source, job.result_json),
     inputUrl: job.input_s3_key ? `/v1/admin/review/jobs/${encodeURIComponent(jobId)}/input` : null,
     inputUrlExpiresInSeconds: null,
     // 관절은 원본 픽셀 좌표다. 화면이 겹쳐 그리려면 그 좌표계의 크기를 알아야 한다.

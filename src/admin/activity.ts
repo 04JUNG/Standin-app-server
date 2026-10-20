@@ -46,6 +46,8 @@ export interface ActivityJobRow {
   exported: boolean;
   refined: boolean;
   feedback: string | null;
+  /** "semantic"이면 이미지 없는 텍스트 검색이다. */
+  source?: string | null;
 }
 
 export function outcomeOf(row: Pick<ActivityJobRow, "status" | "person_count" | "selection_count">): OutcomeKey {
@@ -79,6 +81,7 @@ export interface ActivityJob {
   refined: boolean;
   feedback: string | null;
   errorCode: string | null;
+  source: string | null;
 }
 
 export interface ActivitySummary {
@@ -116,6 +119,7 @@ export function buildActivity(
         refined: row.refined,
         feedback: row.feedback,
         errorCode: row.error_code,
+        source: row.source ?? null,
       };
     })
     .filter((job) => inWindow.has(job.day))
