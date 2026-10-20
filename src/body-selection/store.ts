@@ -562,11 +562,17 @@ export async function readSelection(
   );
   if (!rows[0]) throw new BodyError("BODY_SELECTION_UNSUPPORTED", 409);
   const stored = rows[0].value;
-  // Old presentation jobs stored not_applicable because legacy candidates are empty.
-  // Resolve their original snapshot, not today's preferences; GET remains read-only.
+  // Resolve old presentation jobs and unresolved first-use defaults from the original
+  // policy, never today's preferences. Manual choices and revisions stay unchanged.
+  const firstUseMissing =
+    stored.resolutionStatus === "needs_selection" &&
+    !stored.resolvedBody &&
+    stored.intent === "inherit" &&
+    policy.preferences.mode === "last_used" &&
+    !policy.preferences.lastUsed;
   const value =
-    personBodyContext(person, semantic).previewOnly &&
-    stored.resolutionStatus === "not_applicable"
+    (personBodyContext(person, semantic).previewOnly &&
+      stored.resolutionStatus === "not_applicable") || firstUseMissing
       ? {
           ...initialBody(person, policy, catalog, semantic),
           selectionRevision: stored.selectionRevision,
