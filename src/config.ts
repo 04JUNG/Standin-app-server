@@ -75,9 +75,10 @@ export const config = {
    * refine 노출 스위치(OPS-02). 추론 서버의 REFINE_ENABLED와 **별도**다.
    *
    * 추론 endpoint가 살아 있어도 이 값이 false면 클라이언트에 refine을 노출하지 않는다.
-   * 조정본 영속화와 저장 전 미리보기가 staging에서 검증되기 전까지 production 기본값은 off다.
+   * 선택한 후보의 명시적 권한·저장 컨텍스트·기존 solver 게이트를 통과할 때만 호출한다.
+   * 명시적 false는 배포 환경의 비상 스위치로 유지한다.
    */
-  refineFeatureEnabled: env("REFINE_FEATURE_ENABLED", "false") === "true",
+  refineFeatureEnabled: env("REFINE_FEATURE_ENABLED", "true") === "true",
   /**
    * refine은 사용자가 저장을 기다리는 동기 경로다. 느려지면 베이스로 넘어간다(BFF-07).
    *

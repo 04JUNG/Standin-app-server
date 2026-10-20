@@ -1,4 +1,5 @@
 import { generatedChecksFailed } from "./generated-policy.js";
+import { refinableLibraryCandidate } from "./refine/eligibility.js";
 import { createHash } from "node:crypto";
 import { poseThumbnailUrl } from "./pose-thumbnail.js";
 /** Server-owned migration from inspect-only results to explicit author review.
@@ -32,13 +33,16 @@ export function upgradeManualResult(
         asset.bvh_sha256 !== row.asset.bvh_sha256) continue;
       try { validateRenderCamera(row.render_camera); } catch { continue; }
       const prior = person.candidates.find((c) => c.poseId === row.pose_id && c.sourceBvhSha256 === row.asset.bvh_sha256);
+      const refine = result.source !== "semantic" && person.refineAllowed === true &&
+        row.kind === "library_match" && refinableLibraryCandidate(prior);
       if (result.source === "semantic" && (!prior?.semantic || prior.source !== "semantic")) continue;
       candidates.push({
         ...(result.source === "semantic" ? prior! : {}),
         id: row.candidate_id, poseId: row.pose_id, rank: result.source === "semantic" ? prior!.rank : candidates.length + 1,
         view: "front", tags: prior?.tags ?? [row.kind === "library_match" ? "검색 후보" : "참고 후보"],
         matchLevel: "low", source: result.source === "semantic" ? "semantic" : "library",
-        lookupAllowed: true, bvhAvailable: true, refineAllowed: false, releaseAllowed: false,
+        lookupAllowed: true, bvhAvailable: true, refineAllowed: refine, releaseAllowed: false,
+        ...(refine ? { camera: prior!.camera, distance: prior!.distance } : {}),
         actualMeshValidated: false, reviewRequired: true, manualExportAllowed: true,
         presentationKind: row.kind, notExactMatch: row.kind !== "library_match",
         sourceBvhSha256: row.asset.bvh_sha256,

@@ -1,4 +1,5 @@
 import { candidatePathId, candidateSourceBytes } from "../candidate-source.js";
+import { refinableLibraryCandidate } from "../refine/eligibility.js";
 import { loadAssets } from "../pose-presentation.js";
 import { manualPresentationCamera } from "../pose-presentation.js";
 import { exportCandidateAllowed, manualExportCandidate } from "../routed-search.js";
@@ -258,9 +259,9 @@ export function createFramingRoutes(
       // Refined output still belongs to this approved base pose. Check quarantine
       // and source lineage on every body request, including paired cache hits.
       let checkedBase: Uint8Array | undefined;
-      if (bodyMode) {
+      if (bodyMode || (artifact.variant === "refined" && candidate.sourceBvhSha256)) {
         checkedBase = await candidateSourceBytes(jobId, person!, candidate, deps.getPoseBvh, deps.loadAssets);
-        if (sha256Hex(checkedBase) !== (manual?.sourceBvhSha256 ?? candidate.camera!.source_bvh_sha256))
+        if (sha256Hex(checkedBase) !== (manual?.sourceBvhSha256 ?? candidate.camera?.source_bvh_sha256 ?? candidate.sourceBvhSha256))
           return fail(409, "POSE_UNAVAILABLE", "포즈가 변경되었습니다. 다시 확인해 주세요.");
       }
       let bvhBytes: Uint8Array;
@@ -268,8 +269,9 @@ export function createFramingRoutes(
       else bvhBytes = checkedBase ?? await candidateSourceBytes(jobId, person!, candidate, deps.getPoseBvh, deps.loadAssets);
       if (
         candidate.sourceBvhSha256 &&
-        (artifact.variant !== "base" ||
-          sha256Hex(bvhBytes) !== candidate.sourceBvhSha256)
+        (artifact.variant === "refined"
+          ? !refinableLibraryCandidate(candidate)
+          : sha256Hex(bvhBytes) !== candidate.sourceBvhSha256)
       )
         return fail(
           409,

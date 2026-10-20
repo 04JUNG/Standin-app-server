@@ -1,4 +1,5 @@
 import type { PoseCandidate } from "./types.js";
+import { refinableLibraryCandidate } from "./refine/eligibility.js";
 
 export interface SearchPreviewCamera {
   yaw?: number;
@@ -53,7 +54,8 @@ export const manualExportCandidate = (candidate: PoseCandidate | undefined): boo
   candidate?.manualExportAllowed === true &&
   ["library", "semantic", "generation"].includes(candidate.source ?? "") &&
   candidate.lookupAllowed === true && candidate.bvhAvailable === true &&
-  candidate.reviewRequired === true && candidate.refineAllowed === false &&
+  candidate.reviewRequired === true &&
+  (candidate.refineAllowed === false || refinableLibraryCandidate(candidate)) &&
   /^[a-f0-9]{64}$/.test(candidate.sourceBvhSha256 ?? "");
 
 export const exportCandidateAllowed = (candidate: PoseCandidate | undefined): boolean =>

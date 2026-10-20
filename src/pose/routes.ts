@@ -1,4 +1,5 @@
 import { createHumanReferenceRoutes } from "../human-reference.js";
+import { refinableLibraryCandidate } from "../refine/eligibility.js";
 import { exportCandidateAllowed, manualExportCandidate } from "../routed-search.js";
 import { createDefaultPosterRoutes } from "../pose-posters.js";
 import { createRoutedPreviewRoutes } from "../routed-preview.js";
@@ -246,8 +247,17 @@ poseRoutes.get("/:id/export", async (c) => {
 
   const job = await deps.getOwnedJob(jobId, installationId);
   const exposed = job?.result?.candidatesByPerson.find((p) => p.personIndex === personIndex)?.candidates.find((p) => p.id === candidateId && p.poseId === poseId);
+  let sourceValid = !exposed?.sourceBvhSha256;
+  if (exposed?.sourceBvhSha256) {
+    if (artifact.variant === "base") sourceValid = sha256Hex(finalBvh) === exposed.sourceBvhSha256;
+    else if (refinableLibraryCandidate(exposed)) {
+      const base = await deps.getPoseBvh(poseId);
+      sourceValid = base.ok && sha256Hex(new Uint8Array(await base.arrayBuffer())) === exposed.sourceBvhSha256;
+      if (!base.ok) await base.body?.cancel();
+    }
+  }
   if (job?.status !== "completed" || !exposed || !exportCandidateAllowed(exposed) ||
-    (manualExportCandidate(exposed) && !(await deps.validateConfirmedSelection(installationId, jobId, personIndex, candidateId))) || (exposed.sourceBvhSha256 && (artifact.variant !== "base" || sha256Hex(finalBvh) !== exposed.sourceBvhSha256))) {
+    (manualExportCandidate(exposed) && !(await deps.validateConfirmedSelection(installationId, jobId, personIndex, candidateId))) || !sourceValid) {
     await failed("POSE_UNAVAILABLE");
     return c.json(errorEnvelope("POSE_UNAVAILABLE", "포즈가 변경되었습니다. 다시 검색해 주세요.", c.get("requestId")), 409);
   }

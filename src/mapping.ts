@@ -1,4 +1,5 @@
 import { upgradeManualResult } from "./manual-export.js";
+import { dynamicRefineBinding, refinableLibraryCandidate } from "./refine/eligibility.js";
 import { poseThumbnailUrl } from "./pose-thumbnail.js";
 // 계약 번역 = BFF가 소유하는 책임.
 //  - 추론의 원시 distance → 클라 UI 라벨(matchLevel)
@@ -259,27 +260,31 @@ export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
           ...presentation.presentation.library_candidates,
           ...presentation.presentation.review_candidates,
         ];
-        person.candidates = library.map((candidate, i) => ({
-          id: candidate.candidate_id,
-          poseId: candidate.pose_id!,
-          rank: i + 1,
-          view: "front",
-          tags: [candidate.kind === "library_match" ? "검색 후보" : "참고 후보"],
-          matchLevel: "low",
-          source: "library",
-          lookupAllowed: true,
-          refineAllowed: false,
-          releaseAllowed: false,
-          manualExportAllowed: true,
-          presentationKind: candidate.kind,
-          reviewRequired: true,
-          actualMeshValidated: false,
-          notExactMatch: candidate.kind !== "library_match",
-          sourceBvhSha256: candidate.asset.bvh_sha256,
-          rankScore: candidate.rank_score ?? undefined,
-          bvhAvailable: true,
-          thumbnailUrl: poseThumbnailUrl(candidate.pose_id!, "front"),
-        }));
+        person.candidates = library.map((candidate, i) => {
+          const binding = dynamicRefineBinding(p, candidate);
+          return {
+            id: candidate.candidate_id,
+            poseId: candidate.pose_id!,
+            rank: i + 1,
+            view: "front",
+            tags: [candidate.kind === "library_match" ? "검색 후보" : "참고 후보"],
+            matchLevel: "low",
+            source: "library",
+            lookupAllowed: true,
+            refineAllowed: binding !== null,
+            ...(binding?.camera ? { camera: binding.camera, distance: binding.distance } : {}),
+            releaseAllowed: false,
+            manualExportAllowed: true,
+            presentationKind: candidate.kind,
+            reviewRequired: true,
+            actualMeshValidated: false,
+            notExactMatch: candidate.kind !== "library_match",
+            sourceBvhSha256: candidate.asset.bvh_sha256,
+            rankScore: candidate.rank_score ?? undefined,
+            bvhAvailable: true,
+            thumbnailUrl: poseThumbnailUrl(candidate.pose_id!, "front"),
+          };
+        });
         const count =
           presentation.presentation.library_candidates.length +
           presentation.presentation.review_candidates.length +
@@ -287,8 +292,8 @@ export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
         person.candidateCount = count;
         person.fallbackMode = count ? "soft" : "hard";
         person.confidence = "low";
-        person.refineAllowed = false;
-        person.refinableLimbs = [];
+        person.refineAllowed = person.candidates.some(refinableLibraryCandidate);
+        person.refinableLimbs = person.refineAllowed ? p.refinable_limbs ?? [] : [];
         person.candidateShortfallReason = "POSE_PRESENTATION";
       }
       if (routed)

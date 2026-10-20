@@ -1262,7 +1262,7 @@ BVH downloads and final FBX/refined/cropped export contracts are unchanged.
 
 요청/응답·오류·승인 manifest·호환 정책의 정본: [체형 선택 저장 설계](BODY_SELECTION_DESIGN.md).
 
-### 아동형 자동 추천 제한 (2026-10-20)
+### 아동형 자동 추천 제한 (2026-10-21)
 
 현재 이미지 계약은 검증된 아동 디자인 근거를 제공하지 않는다. 따라서 아동 자산의 자동 추천은 `status=unavailable`, `body=null`, `reasonCodes`에 `child_requires_explicit_user_selection`을 기록한다. 나이 추정/비율/얼굴 스타일만으로 추천을 승격하지 않는다. 일반 성인/TOON64 추천은 유지한다.
 
@@ -1488,3 +1488,21 @@ Deployment prerequisites: matching inference reader/template endpoint and full v
 자동 금지 정책과 완전한 메시 인증 여부는 그대로다. 체형·손·범위의 최종 확인과 동일 FBX
 파일만 개별 저장한다. 생성 포함 작업의 통합/v4는 지원하지 않는다.
 [상세 계약과 검증](GENERATED_MANUAL_EXPORT.md).
+
+## 동적 라이브러리 refine 복구 (2026-10-21)
+
+추론의 `people[].refine_candidates`는 선택 후보별 기존 CandidateOut + candidate-camera-v2
+바인딩이다. `pose_presentation.library_candidates`의 library_match와 pose_id·BVH 해시·
+관절 해시·원래 검색 카메라가 같은 항목만 공개 후보의 `refineAllowed=true` 및 `camera`로
+전달한다. 인물의 refineAllowed/refinableLimbs도 기존 추론 구조 정책을 따른다. 검색 confidence와
+fallbackMode를 high/none으로 승격하지 않는다. preview 객체 자체의 refine_allowed는 계속 false다.
+
+이 권한은 자동 release와 별개다. 기존 수동 선택·최종 확인·해시/격리 검사를 유지하면서
+`POST /v1/analysis/jobs/:jobId/people/:personIndex/refine`을 호출할 수 있다. 원본을 재검증한 뒤
+보관된 조정 BVH가 최종 미리보기와 FBX/BVH 저장에 사용된다. 조정본을 원본 해시와 다르다는
+이유만으로 거절하지 않는다. 참고/생성/문장 직접 입력 및 바인딩 없는 구 결과는 보정하지 않는다.
+
+`REFINE_FEATURE_ENABLED`의 코드 기본값과 예시는 true다. ECS 등의 명시적 false는 비상 스위치로
+유지되므로 활성화 배포에서는 true로 설정해야 한다. 추론의 REFINE_ENABLED도 1이어야 한다.
+배포 순서는 추론 → BFF → 클라이언트다. 과거 Job은 소급 승격하지 않으며 새로 분석해야 한다.
+Converter 코드·모델·라이브러리 자산 변경은 필요 없다.
