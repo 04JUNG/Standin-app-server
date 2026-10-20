@@ -65,11 +65,12 @@ export interface GalleryRow {
   outcome: string;
   exported: boolean;
   refined: boolean;
+  source: string | null;
 }
 
 export async function galleryItems(params: GalleryQuery): Promise<GalleryRow[]> {
   return query<GalleryRow>(
-    `SELECT j.id, j.installation_id, j.status, j.created_at, j.error_code, j.input_s3_key,
+    `SELECT j.id, j.installation_id, j.status, j.created_at, j.error_code, j.input_s3_key, j.source,
             coalesce(p.n, 0)::int AS person_count,
             coalesce(s.n, 0)::int AS selection_count,
             ${OUTCOME_CASE} AS outcome,

@@ -22,7 +22,7 @@ export async function visitDays(installationId: string, since: string): Promise<
 /** 설치 하나의 최근 Job과 그 결과. 최대 100건. */
 export async function activityJobs(installationId: string, since: string): Promise<ActivityJobRow[]> {
   return query<ActivityJobRow>(
-    `SELECT j.id, j.created_at, j.status, j.error_code,
+    `SELECT j.id, j.created_at, j.status, j.error_code, j.source,
             coalesce(p.n, 0)::int AS person_count,
             coalesce(s.n, 0)::int AS selection_count,
             EXISTS (SELECT 1 FROM quality_review_export_events e WHERE e.job_id = j.id AND e.status = 'completed') AS exported,
