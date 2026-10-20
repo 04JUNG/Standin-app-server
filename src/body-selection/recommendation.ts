@@ -1,4 +1,5 @@
 import type { CutResult } from "../inference.js";
+import { automaticRecommendation } from "./childPolicy.js";
 import {
   bodyRef,
   eligible,
@@ -171,7 +172,7 @@ export function mapBodyRecommendations(
             ? ["presentation_supported_shape_default"]
             : [],
       };
-    result.set(p.index, rec);
+    result.set(p.index, automaticRecommendation(rec, catalog));
   }
   return result;
 }
