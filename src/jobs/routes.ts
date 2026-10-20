@@ -325,7 +325,20 @@ jobsRoutes.get("/:id/result", async (c) => {
       })),
     })),
     capabilities: {
-      sceneExport: config.sceneExportEnabled && converterEnabled() && result.source !== "semantic" && !!result.image,
+      sceneRefinement:
+        !!job.inputS3Key &&
+        config.sceneRefinementEnabled &&
+        !!config.sceneRefinementBaseUrl &&
+        !!config.sceneRefinementToken &&
+        config.sceneExportEnabled &&
+        converterEnabled() &&
+        result.source !== "semantic" &&
+        !!result.image,
+      sceneExport:
+        config.sceneExportEnabled &&
+        converterEnabled() &&
+        result.source !== "semantic" &&
+        !!result.image,
       presentationBodyPreviews:
         (await currentCapabilities()).bodyPreviews === true &&
         result.candidatesByPerson.some(
@@ -466,7 +479,14 @@ jobsRoutes.put("/:id/selections", async (c) => {
   }
   const owned = await getOwnedJob(c.req.param("id"), c.get("installationId")!); // Lazily register old inspect-only rows before confirmation.
   if (owned?.status !== "completed")
-    return c.json(errorEnvelope("INVALID_SELECTION", "완료된 작업을 찾을 수 없습니다.", c.get("requestId")), 409);
+    return c.json(
+      errorEnvelope(
+        "INVALID_SELECTION",
+        "완료된 작업을 찾을 수 없습니다.",
+        c.get("requestId"),
+      ),
+      409,
+    );
   const saved = await confirmSelections(
     c.get("installationId")!,
     c.req.param("id"),

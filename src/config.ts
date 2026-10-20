@@ -9,11 +9,20 @@ function env(key: string, def = ""): string {
 const PRODUCTION_PUBLIC_URL = "https://api.standinpose.com";
 
 export const config = {
-  poseThumbnailRevision: env("POSE_THUMBNAIL_REVISION", env("DEPLOYMENT_VERSION")),
+  poseThumbnailRevision: env(
+    "POSE_THUMBNAIL_REVISION",
+    env("DEPLOYMENT_VERSION"),
+  ),
   handSelectionEnabled: env("HAND_SELECTION_ENABLED", "false") === "true",
   semanticSearchEnabled: env("SEMANTIC_SEARCH_ENABLED", "false") === "true",
-  semanticSearchPerMinute: Math.max(1, Number(env("SEMANTIC_SEARCH_PER_MINUTE", "10")) || 10),
-  semanticSearchTimeoutMs: Math.max(1000, Number(env("SEMANTIC_SEARCH_TIMEOUT_MS", "30000")) || 30000),
+  semanticSearchPerMinute: Math.max(
+    1,
+    Number(env("SEMANTIC_SEARCH_PER_MINUTE", "10")) || 10,
+  ),
+  semanticSearchTimeoutMs: Math.max(
+    1000,
+    Number(env("SEMANTIC_SEARCH_TIMEOUT_MS", "30000")) || 30000,
+  ),
   bodyUxEnabled: env("BODY_UX_ENABLED", "false") === "true",
   bodySelectionEnabled: env("BODY_SELECTION_ENABLED", "false") === "true",
   bodyCatalogPath: env("BODY_CATALOG_PATH", "config/body-models.json"),
@@ -102,6 +111,12 @@ export const config = {
    * 반대로 flag만 보고 켜면 URL 없이 켜져 전건 실패한다. 둘을 함께 요구하는 이유다.
    */
   fbxExportEnabled: env("FBX_EXPORT_ENABLED", "false") === "true",
+  sceneRefinementEnabled: env("SCENE_REFINEMENT_ENABLED", "false") === "true",
+  sceneRefinementBaseUrl: env("SCENE_REFINEMENT_BASE_URL", ""),
+  sceneRefinementToken: env("SCENE_REFINEMENT_TOKEN", ""),
+  sceneRefinementTimeoutMs: Number(
+    process.env.SCENE_REFINEMENT_TIMEOUT_MS ?? 900_000,
+  ),
   sceneExportEnabled: env("SCENE_EXPORT_ENABLED", "false") === "true",
   /**
    * converter 호출 상한. converter 자체 변환 timeout이 30초이므로 **그보다 커야** 한다.
@@ -114,7 +129,9 @@ export const config = {
    * 수치 체형 굽기 호출 상한. converter의 `CONVERTER_SHAPE_TIMEOUT_SECONDS`(기본 300초)보다 커야 한다.
    * 굽기는 원본 .blend를 두 번 열고 접촉 보정을 돌려 한 번에 30~110초(2 vCPU 실측) 걸린다.
    */
-  converterShapeTimeoutMs: Number(process.env.CONVERTER_SHAPE_TIMEOUT_MS ?? 320_000),
+  converterShapeTimeoutMs: Number(
+    process.env.CONVERTER_SHAPE_TIMEOUT_MS ?? 320_000,
+  ),
   /**
    * **기본** 캐릭터. 클라이언트가 `characterId`를 보내지 않으면 이 값으로 변환한다(ADR-013).
    *
