@@ -137,7 +137,7 @@ export function createDefaultPosterRoutes(
       (p) => p.personIndex === Number(raw),
     );
     const candidate = find(job);
-    if (!person || !candidate || candidate.lookupAllowed === false)
+    if (!person || !candidate || !candidate.poseId || candidate.lookupAllowed === false)
       return fail();
     const candidateSnapshot = JSON.stringify(candidate);
     const scope = previewScope(person);

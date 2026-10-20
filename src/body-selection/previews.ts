@@ -341,6 +341,7 @@ export function createBodyPreviewRoutes(
     );
     if (!candidate) throw new BodyError("NOT_FOUND", 404);
     // Preserve existing quarantine/source checks even when serving precomputed or cached assets.
+    if (!candidate.poseId) throw new BodyError("BODY_PREVIEW_UNSUPPORTED", 409);
     const response = await deps.getPoseBvh(candidate.poseId);
     if (!response.ok) {
       await response.body?.cancel();

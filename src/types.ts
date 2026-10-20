@@ -69,7 +69,7 @@ export type CandidateCamera = CandidateCameraBase &
   );
 
 export interface PoseCandidate {
-  source?: "dynamic" | "semantic" | "library";
+  source?: "dynamic" | "semantic" | "library" | "generation";
   rankScore?: number;
   lookupAllowed?: boolean;
   refineAllowed?: boolean;
@@ -90,7 +90,7 @@ export interface PoseCandidate {
   sourceBvhSha256?: string;
   camera?: CandidateCamera;
   id: string; // unique exposed candidate id (pose + view)
-  poseId: string;
+  poseId: string | null;
   rank: number;
   view: string;
   tags: string[];
@@ -106,7 +106,7 @@ export interface PoseCandidate {
 }
 
 export interface AnalysisResult {
-  manualExportVersion?: 1;
+  manualExportVersion?: 1 | 2;
   jobId: string;
   source?: "image" | "semantic";
   semantic?: { query: string; index: Record<string, string> };

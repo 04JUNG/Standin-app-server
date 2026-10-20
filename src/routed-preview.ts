@@ -27,7 +27,7 @@ export function createRoutedPreviewRoutes(
       );
     if (
       job?.status !== "completed" ||
-      !candidate?.lookupAllowed ||
+      !candidate?.poseId || !candidate.lookupAllowed ||
       !restrictedCandidate(candidate)
     )
       return c.json(

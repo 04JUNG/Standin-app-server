@@ -1,3 +1,4 @@
+import { candidatePathId } from "./candidate-source.js";
 import type { MiddlewareHandler } from "hono";
 import { validateConfirmedSelection } from "./analytics/store.js";
 import type { AppEnv } from "./env.js";
@@ -22,8 +23,11 @@ export function createReleaseGuard(
       .find((p) => p.personIndex === index)
       ?.candidates.find(
         (p) =>
-          p.id === c.req.query("candidateId") && p.poseId === c.req.param("id"),
+          p.id === c.req.query("candidateId") && candidatePathId(p) === c.req.param("id"),
       );
+    if (candidate?.source === "generation")
+      return c.json(errorEnvelope("MANUAL_REVIEW_REQUIRED",
+        "새로 만든 포즈는 최종 모습을 확인한 뒤 FBX로 저장해 주세요.", c.get("requestId")), 409);
     if (
       job?.status !== "completed" ||
       (job.result?.source === "semantic" && !manualExportCandidate(candidate)) ||

@@ -123,7 +123,7 @@ export function createHumanReferenceRoutes(
       return person && candidate ? { person, candidate } : undefined;
     };
     const first = find(await read());
-    if (!first || first.candidate.lookupAllowed === false) return fail();
+    if (!first || first.candidate.lookupAllowed === false || !first.candidate.poseId) return fail();
     const snapshot = JSON.stringify(first.candidate);
     const scope = previewScope(first.person);
     if (c.req.query("scope") !== scope) return fail(409);

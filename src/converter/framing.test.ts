@@ -371,3 +371,20 @@ test("stored envelope validates key, both byte hashes, and lineage", () => {
     assert.throws(() => decodeFramedPair("key", Buffer.from(JSON.stringify(value))));
   }
 });
+
+test("manual export requires the already reviewed file and never renders on a missing receipt", async () => {
+  const { store, data } = memoryStore();
+  let renders = 0;
+  const render = async () => { renders++; return pair("reviewed"); };
+  const first = new FramedArtifactCache(undefined, undefined, undefined, store);
+  const second = new FramedArtifactCache(undefined, undefined, undefined, store);
+  await assert.rejects(first.get("not-reviewed", render, location, true), /reviewed artifact expired/);
+  assert.equal(renders, 0);
+  const preview = await first.get("reviewed", render, location);
+  const download = await second.get("reviewed", render, location, true);
+  assert.deepEqual(download.fbx, preview.fbx); assert.equal(renders, 1);
+  data.clear();
+  await assert.rejects(new FramedArtifactCache(undefined, undefined, undefined, store)
+    .get("reviewed", render, location, true), /reviewed artifact expired/);
+  assert.equal(renders, 1);
+});

@@ -1,3 +1,5 @@
+import { generatedChecksFailed } from "./generated-policy.js";
+import { createHash } from "node:crypto";
 import { poseThumbnailUrl } from "./pose-thumbnail.js";
 /** Server-owned migration from inspect-only results to explicit author review.
  * No VLM, converter, ranking or validation status changes occur here. Source availability
@@ -44,9 +46,39 @@ export function upgradeManualResult(
         posterUrl: `/v1/pose-candidates/${encodeURIComponent(row.pose_id)}/poster?${new URLSearchParams({ jobId: result.jobId, personIndex: String(person.personIndex), candidateId: row.candidate_id })}`,
       });
     }
+    for (const row of p.generated_candidates) {
+      const asset = assets.get(person.personIndex)?.[row.candidate_id];
+      row.manual_use_block_reason = p.generation_status !== "preview_ready" ? "generation_unavailable" :
+        !asset?.bvh ? "source_missing" :
+        asset.bvh_sha256 !== row.asset.bvh_sha256 || createHash("sha256").update(asset.bvh).digest("hex") !== row.asset.bvh_sha256 ? "source_changed" : "policy_unavailable";
+      // preview_ready is emitted only after the existing generation/observation/hand gates.
+      // The automatic-release flags deliberately stay false.
+      if (!(["ok", "no_result"].includes(p.search_status)) || ["error", "blocked", "undetermined"].includes(p.status) ||
+          p.generation_status !== "preview_ready" || p.preview_status !== "ready" ||
+          !/^preview_[a-f0-9]{64}$/.test(row.candidate_id) || row.pose_id !== null ||
+          row.source !== "generation" || row.kind !== "generated_review" ||
+          row.lookup_allowed !== true || row.review_required !== true ||
+          row.auto_apply_allowed !== false || row.refine_allowed !== false ||
+          row.release_allowed !== false || row.export_allowed !== false ||
+          row.actual_mesh_validated !== false || row.asset.transport !== "inline_bvh" ||
+          !hash(row.asset.bvh_sha256) || !asset || asset.transport !== "inline_bvh" ||
+          asset.pose_id !== null || asset.bvh_sha256 !== row.asset.bvh_sha256 ||
+          generatedChecksFailed(asset.validation) || !asset.bvh || Buffer.byteLength(asset.bvh) > 2_000_000 ||
+          createHash("sha256").update(asset.bvh).digest("hex") !== row.asset.bvh_sha256) continue;
+      try { validateRenderCamera(row.render_camera); } catch { continue; }
+      delete row.manual_use_block_reason;
+      candidates.push({ id: row.candidate_id, poseId: null, rank: candidates.length + 1,
+        view: "front", tags: ["새로 만든 포즈"], matchLevel: "low", source: "generation",
+        lookupAllowed: true, bvhAvailable: true, refineAllowed: false, releaseAllowed: false,
+        actualMeshValidated: false, reviewRequired: true, manualExportAllowed: true,
+        presentationKind: "generated_review", notExactMatch: true,
+        sourceBvhSha256: row.asset.bvh_sha256,
+        posterUrl: row.asset.preview_bvh_url + "/poster",
+      });
+    }
     person.candidates = candidates;
   }
-  result.manualExportVersion = 1;
+  result.manualExportVersion = 2;
   return result;
 }
 
@@ -61,7 +93,7 @@ export async function upgradeOwnedManualResult(
   const row = rows[0];
   if (!row || row.status !== "completed" || !row.result_json) return null;
   const original = JSON.parse(row.result_json) as AnalysisResult;
-  if (original.manualExportVersion === 1) return original;
+  if (original.manualExportVersion === 2) return original;
   const contexts = await db.query<{ person_index: number; refine_context_json: string | null }>(
     "SELECT person_index,refine_context_json FROM analysis_people WHERE job_id=$1", [jobId],
   );
