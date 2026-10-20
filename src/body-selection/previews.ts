@@ -1,4 +1,5 @@
 import { handBakeFor } from "../hands/service.js";
+import { scopeIncludesHands } from "../output-scope/model.js";
 import { HandError } from "../hands/model.js";
 /** Read-only Top-K previews bound to the persisted body choice. No search/refine mutation. */
 import { manualPresentationCamera } from "../pose-presentation.js";
@@ -134,7 +135,7 @@ export async function bodyPreviewManifest(
   );
   if (!person) throw new BodyError("NOT_FOUND", 404);
   const outputScope = previewScope(person);
-  const hands = await deps.handBakeFor(person);
+  const hands = scopeIncludesHands(outputScope) ? await deps.handBakeFor(person) : null;
   // selection() checks the current catalog, job policy snapshot and installation ownership.
   const selection = await deps.selection(owner, jobId, personIndex);
   if (!person.candidates.length)

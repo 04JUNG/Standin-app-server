@@ -1428,3 +1428,20 @@ body manifest의 선택적 hands는 revision/library_sha256을 포함하며 rend
 Poster responses may identify `X-Standin-Preview-Method=reference-skinning-v1` and `X-Standin-Template-SHA256`. This is actual default-human geometry with approximate reference retarget, not the frozen final Converter solver. It must be labeled as approximate reference. CORS exposes method/template/source provenance for desktop webviews. Unknown methods, wrong body/digests and lookup/source/scope changes fail closed. Selected-body detail/final export paths are unchanged.
 
 Deployment prerequisites: matching inference reader/template endpoint and full verified five-scope asset snapshot; matching client loader and approximate-reference captions. Local staging and production snapshots were prepared separately; no remote write/deployment was performed by this change. See `Standin-server/docs/HUMAN_REFERENCE_POSTERS.md` and client counterpart for complete workflow and validation limits.
+
+### 최종 메시 범위별 손 단계 제외
+
+`resolvePersonOutputScope`의 최종 범위가 `full`/`half`일 때만 손 선택과 적용을 사용한다.
+`head`, `shoulder_head`, 수동 `bust`는 Converter의 skin-region 규칙상 손 표면이 없다.
+수동 `selection`이 자동 `meshScope`보다 우선하며 자동 `bust`→`half`는 손을 유지한다.
+
+- 해당 인물의 GET/PUT `.../people/:index/hands`와 `.../pose-previews/:candidate/:hash/hands`
+  는 소유권·완료·인물 검증 후 409 `HANDS_NOT_APPLICABLE`을 반환한다. 손 카탈로그 조회,
+  선택 생성/변경, BVH 조회 및 손 변환을 실행하지 않는다.
+- body manifest는 `hands: null`, renderKey는 저장된 손 선택과 독립적이다. 최종 `/framed`
+  PNG/model/FBX도 손 라이브러리 확인, 손 revision 대기와 Converter 손 인자를 생략하고
+  `X-Standin-Hand-*`를 반환하지 않는다. 체형·범위·원본·최종 검수 영수증은 유지한다.
+- 저장된 손 선택은 보존한다. 범위를 `full`/`half`로 되돌리면 기존 revision/library 검사를
+  다시 수행한다. 다른 인물의 손 처리는 유지한다. 렌더 중 범위 변경 결과는 폐기한다.
+- 이는 손 적용의 불필요한 작업만 제외한다. 자동 release/refine 자격이나 수동 후보의 확정·
+  최종 검수 요구는 변경하지 않는다. 추론의 검색 후 실제 피부 검사 정책은 별도 계약이다.

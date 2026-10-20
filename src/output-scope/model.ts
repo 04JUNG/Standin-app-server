@@ -31,6 +31,11 @@ export function isScopeSelection(value: unknown): value is ScopeSelection {
   return value === "auto" || isBodyScope(value);
 }
 
+/** Converter skin-regions-v2: head, shoulder_head and manual bust drop hand surfaces. */
+export function scopeIncludesHands(scope: BodyScope): boolean {
+  return scope === "full" || scope === "half";
+}
+
 /** Recompute derived fields; never trust a caller-supplied resolved value. */
 export function resolveOutputScope(
   raw?: Partial<OutputScope> | null,

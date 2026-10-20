@@ -16,6 +16,7 @@ import type { PrivatePreviewAsset } from "../pose-presentation.js";
 import { tryConsume } from "../limits/store.js";
 import { fixedWindow } from "../limits/policy.js";
 import { previewScope } from "../output-scope/preview.js";
+import { scopeIncludesHands } from "../output-scope/model.js";
 import { validateRenderCamera } from "../pose-presentation.js";
 const cache = new FramedArtifactCache(64 * 1024 * 1024, 300_000, 4);
 const defaults = {
@@ -158,6 +159,8 @@ export function createHandPreviewRoutes(
           candidate.asset.bvh_sha256 !== hash
         )
           return fail(404, "PREVIEW_UNAVAILABLE");
+        const scope = previewScope(person!);
+        if (!scopeIncludesHands(scope)) return fail(409, "HANDS_NOT_APPLICABLE");
         const asset = (await deps.loadAssets(jobId, index))[id];
         if (
           !asset ||
@@ -171,7 +174,6 @@ export function createHandPreviewRoutes(
           return fail(409, "HANDS_CHANGED");
         const hands = await deps.handBakeFor({ handSelection: selection });
         if (!hands) return fail(409, "HANDS_CHANGED");
-        const scope = previewScope(person!);
         if (
           !["full", "half", "bust", "shoulder_head", "head"].includes(
             scope ?? "",

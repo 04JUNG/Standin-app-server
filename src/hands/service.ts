@@ -1,4 +1,5 @@
 import { config } from "../config.js";
+import { resolvePersonOutputScope, scopeIncludesHands, type OutputScope } from "../output-scope/model.js";
 import { getHandCatalog, getHandThumbnail } from "../inference.js";
 import {
   converterEnabled,
@@ -111,8 +112,13 @@ export async function handSelectionAvailable() {
   }
 }
 export async function handBakeFor(
-  person: { handSelection?: HandSelection } | undefined,
+  person: {
+    handSelection?: HandSelection;
+    outputScope?: Partial<OutputScope> | null;
+    posePresentation?: { output_scope: string | null } | null;
+  } | undefined,
 ): Promise<HandBake | null> {
+  if (!scopeIncludesHands(resolvePersonOutputScope(person).resolved)) return null;
   const selection = person?.handSelection;
   if (!selection) return null;
   const catalog = await readyHandCatalog(true);
