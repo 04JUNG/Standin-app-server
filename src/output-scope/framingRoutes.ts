@@ -409,6 +409,7 @@ export function createFramingRoutes(
                   ...expected,
                   ...(hands ? { hands } : {}),
                 }),
+                bodyMode || authorReview ? { installationId, jobId } : undefined,
               );
       let libraryModel: Buffer | undefined;
       // The stored artifact, not a client's refine flag, decides whether the

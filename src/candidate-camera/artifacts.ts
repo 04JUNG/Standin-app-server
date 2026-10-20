@@ -28,5 +28,11 @@ export function cameraArtifact(
     input.shape?.shapeSha256 ?? null,
     input.hands,
   ]);
-  return cache.get(key, () => convert(input));
+  if (typeof owner[0] !== "string" || typeof owner[1] !== "string")
+    throw new Error("missing framed artifact owner");
+  // Long-lived reuse requires the character and exporter revision to be pinned.
+  const pinned = (input.expectedCharacterSha256 && input.expectedPreviewRevision) ||
+    (input.characterSha256 && input.modelRevision);
+  return cache.get(key, () => convert(input), pinned
+    ? { installationId: owner[0], jobId: owner[1] } : undefined);
 }
