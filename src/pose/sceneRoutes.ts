@@ -1,3 +1,5 @@
+import { loadSceneReceipt, saveSceneReceipt } from "./sceneStorage.js";
+import { renderFinalPreview } from "../converter/finalPreview.js";
 import { randomBytes } from "node:crypto";
 import { prepareRefinedScene, type RefinedScene } from "./sceneRefinement.js";
 import { Hono } from "hono";
@@ -14,6 +16,8 @@ import { composeRoughScene, type SceneSource } from "../converter/scene.js";
 import { errorEnvelope } from "../mapping.js";
 
 const defaults = {
+  loadSceneReceipt, saveSceneReceipt,
+  renderFinalPreview,
   getOwnedJob,
   validateConfirmedSelection,
   composeRoughScene,
@@ -30,7 +34,7 @@ const receipts = new Map<
   { binding: string; expires: number; scene: RefinedScene }
 >();
 const MAX_RECEIPT_BYTES = 256 * 1024 * 1024;
-function remember(binding: string, scene: RefinedScene) {
+async function remember(binding: string, scene: RefinedScene, owner: string, job: string, save: typeof saveSceneReceipt) {
   for (const [k, v] of receipts) if (v.expires < Date.now()) receipts.delete(k);
   let size = scene.bytes.length + scene.preview.length;
   for (const v of receipts.values())
@@ -44,7 +48,9 @@ function remember(binding: string, scene: RefinedScene) {
   if (size > MAX_RECEIPT_BYTES)
     throw new Error("scene review exceeds memory budget");
   const key = randomBytes(24).toString("hex");
-  receipts.set(key, { binding, scene, expires: Date.now() + 15 * 60_000 });
+  const receipt = { binding, scene, expires: Date.now() + 15 * 60_000 };
+  await save(owner, job, key, receipt);
+  receipts.set(key, receipt);
   return key;
 }
 export function createSceneRoutes(
@@ -77,9 +83,12 @@ export function createSceneRoutes(
       persons?: unknown;
       prepare?: unknown;
       reviewKey?: unknown;
+      preview?: unknown;
+      artifactOnly?: unknown;
     } | null;
     if (
       !input ||
+      (input.artifactOnly !== undefined && typeof input.artifactOnly !== "boolean") ||
       !Array.isArray(input.persons) ||
       input.persons.length < 1 ||
       input.persons.length > 8
@@ -214,12 +223,12 @@ export function createSceneRoutes(
       let prepared: RefinedScene | undefined;
       if (refined) {
         if (input.prepare === true) {
-          prepared = await deps.prepareRefinedScene(owner, job, refs, sources);
+          prepared = await deps.prepareRefinedScene(owner, job, refs, sources, {}, input.artifactOnly === true);
           scene = prepared;
         } else {
           const receipt =
-            typeof input.reviewKey === "string"
-              ? receipts.get(input.reviewKey)
+            typeof input.reviewKey === "string" && /^[a-f0-9]{48}$/.test(input.reviewKey)
+              ? receipts.get(input.reviewKey) ?? await deps.loadSceneReceipt(owner, jobId, input.reviewKey)
               : undefined;
           if (
             !receipt ||
@@ -290,11 +299,20 @@ export function createSceneRoutes(
             "확인한 체형이나 손이 바뀌었습니다. 다시 확인해 주세요.",
           );
       }
+      if (input.preview !== undefined && input.preview !== true)
+        return fail(400, "INVALID_INPUT", "미리보기 요청을 확인해 주세요.");
+      if (input.preview === true) {
+        if (prepared || !refined) return fail(400, "INVALID_INPUT", "준비한 장면을 다시 선택해 주세요.");
+        const png = await deps.renderFinalPreview({ fbx: scene.bytes, artifactSha256: scene.sha256 }, true, {}, true, c.req.raw.signal);
+        return new Response(png, { headers: { "Content-Type": "image/png", "Cache-Control": "private, no-store",
+          "X-Standin-Artifact-SHA256": scene.sha256, "X-Standin-Preview-Artifact-SHA256": sha256Hex(png) } });
+      }
       if (prepared) {
-        const reviewKey = remember(binding, prepared);
+        const reviewKey = await remember(binding, prepared, owner, jobId, deps.saveSceneReceipt);
         c.header("Cache-Control", "private, no-store");
         return c.json({
           version: "scene-refinement-v4",
+          ...(prepared.artifactContract ? { artifactContract: prepared.artifactContract } : {}),
           reviewKey,
           artifactSha256: prepared.sha256,
           previewSha256: prepared.previewSha256,

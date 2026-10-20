@@ -12,7 +12,7 @@ import { ConverterError, EXPECTED_SOLVER_VERSION, sha256Hex } from "./client.js"
 import { encodeFramedPair, decodeFramedPair, framedObjectKey, type FramedPairStore } from "./framedStorage.js";
 
 const bvhBytes = Buffer.from("HIERARCHY MOTION"),
-  fbx = Buffer.from("Kaydara FBX Binary fixture");
+  fbx = Buffer.from("Kaydara FBX Binary  \0\x1a\0fixture");
 const preview = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1]);
 
 function modelPayload(change: Record<string, unknown> = {}) {
@@ -387,4 +387,42 @@ test("manual export requires the already reviewed file and never renders on a mi
   await assert.rejects(new FramedArtifactCache(undefined, undefined, undefined, store)
     .get("reviewed", render, location, true), /reviewed artifact expired/);
   assert.equal(renders, 1);
+});
+
+test("artifact-only contract validates FBX lineage and persists without any image", async () => {
+  const value = { ...payload(), artifact_contract: "verified-fbx-v1", preview_format: "none",
+    artifact_validation: { version: "final-fbx-v1", artifact_sha256: sha256Hex(fbx), scope: "half", skin_verified: true,
+      bones: 22, meshes: 1, vertices: 8, polygons: 6 } };
+  delete (value as Partial<typeof value>).preview_base64;
+  delete (value as Partial<typeof value>).preview_sha256;
+  const result = await convertFramed({ ...input, previewFormat: "none" }, deps(value));
+  assert.equal(result.preview.length, 0);
+  assert.equal(result.artifactContract, "verified-fbx-v1");
+  assert.deepEqual(decodeFramedPair("ready", encodeFramedPair("ready", result)), result);
+  for (const change of [{ artifact_validation: null }, { artifact_validation: { ...value.artifact_validation, skin_verified: false } }, { artifact_contract: "old" }, { fbx_sha256: "a".repeat(64) }, { output_scope: "head" }, { source_bvh_sha256: "b".repeat(64) }])
+    await assert.rejects(convertFramed({ ...input, previewFormat: "none" }, deps({ ...value, ...change })), { code: "CONVERTER_INTEGRITY" });
+});
+
+test("shared preparation cancels only when every subscriber leaves, then retries cleanly", async () => {
+  const cache = new FramedArtifactCache();
+  const a = new AbortController(), b = new AbortController();
+  let workSignal!: AbortSignal, finish!: (value: FramedArtifact) => void;
+  const create = (signal: AbortSignal) => {
+    workSignal = signal;
+    return new Promise<FramedArtifact>((resolve, reject) => {
+      finish = resolve; signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    });
+  };
+  const first = cache.get("shared", create, undefined, false, a.signal);
+  const second = cache.get("shared", create, undefined, false, b.signal);
+  a.abort();
+  await assert.rejects(first);
+  assert.equal(workSignal.aborted, false);
+  b.abort();
+  await assert.rejects(second);
+  assert.equal(workSignal.aborted, true);
+  const next = cache.get("shared", create);
+  await new Promise((resolve) => setImmediate(resolve));
+  finish({ fbx, preview, conversionId: "new", artifactSha256: sha256Hex(fbx), sourceBvhSha256: sha256Hex(bvhBytes) });
+  assert.equal((await next).conversionId, "new");
 });

@@ -95,16 +95,18 @@ function fixture(replace = false) {
           ],
         };
       }
+      assert.equal(data.artifact_only, true);
       assert.equal(data.persons[0].character_sha256, character);
       return {
         version: "scene-refinement-v4",
         plan_id: "private",
         image_sha256: sha256Hex(image),
         person_count: 1,
+        artifact_contract: "verified-scene-fbx-v1",
         fbx_base64: fbx.toString("base64"),
-        preview_base64: png.toString("base64"),
+        preview_base64: "",
         artifact_sha256: sha256Hex(fbx),
-        preview_sha256: sha256Hex(png),
+        preview_sha256: sha256Hex(Buffer.alloc(0)),
         people: [
           {
             person_index: 4,
@@ -120,7 +122,7 @@ function fixture(replace = false) {
 }
 test("retained pose preserves refined BVH and camera while restoring a full source", async () => {
   const f = fixture();
-  await prepareRefinedScene("owner", f.job, f.refs, f.sources, f.deps);
+  await prepareRefinedScene("owner", f.job, f.refs, f.sources, f.deps, true);
   assert.deepEqual(f.ids, ["original"]);
   assert.deepEqual(f.calls[0]!.bvhBytes, refined);
   assert.equal(f.calls[0]!.scope, "full");
@@ -129,7 +131,7 @@ test("retained pose preserves refined BVH and camera while restoring a full sour
 });
 test("replacement fetches registered pose and never copies old pose camera/refine", async () => {
   const f = fixture(true);
-  await prepareRefinedScene("owner", f.job, f.refs, f.sources, f.deps);
+  await prepareRefinedScene("owner", f.job, f.refs, f.sources, f.deps, true);
   assert.deepEqual(f.ids, ["new_pose"]);
   assert.deepEqual(Buffer.from(f.calls[0]!.bvhBytes), bvh);
   assert.equal(f.calls[0]!.cameraRotation, undefined);
@@ -138,7 +140,7 @@ test("quarantined new pose and unexpected body calibration cannot release scenes
   const f = fixture(true);
   f.deps.getPoseBvh = async () => new Response(null, { status: 409 });
   await assert.rejects(
-    prepareRefinedScene("owner", f.job, f.refs, f.sources, f.deps),
+    prepareRefinedScene("owner", f.job, f.refs, f.sources, f.deps, true),
   );
   assert.equal(f.calls.length, 0);
   const g = fixture();
@@ -148,6 +150,21 @@ test("quarantined new pose and unexpected body calibration cannot release scenes
     characterSha256: "b".repeat(64),
   });
   await assert.rejects(
-    prepareRefinedScene("owner", g.job, g.refs, g.sources, g.deps),
+    prepareRefinedScene("owner", g.job, g.refs, g.sources, g.deps, true),
   );
+});
+test("older clients retain the paired scene preview contract until they opt into readiness", async () => {
+  const f = fixture();
+  const request = f.deps.request;
+  f.deps.request = async (stage, value) => {
+    if (stage === "plan") return request(stage, value);
+    assert.equal((value as any).artifact_only, undefined);
+    const result = await request(stage, { ...(value as object), artifact_only: true });
+    const { artifact_contract: _ignored, ...legacy } = result as any;
+    return { ...legacy, preview_base64: png.toString("base64"), preview_sha256: sha256Hex(png) };
+  };
+  const scene = await prepareRefinedScene("owner", f.job, f.refs, f.sources, f.deps);
+  assert.equal(scene.artifactContract, undefined);
+  assert.equal(scene.preview, png.toString("base64"));
+  assert.equal(f.calls[0]!.previewFormat, undefined);
 });

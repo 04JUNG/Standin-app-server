@@ -15,6 +15,7 @@ import type { BodyScope } from "../output-scope/model.js";
 export const FRAMING_VERSION = "skin-regions-v2-shoulder-head";
 const MAX_RESPONSE = 48 * 1024 * 1024;
 export interface FramedArtifact {
+  artifactContract?: "verified-fbx-v1";
   fbx: Uint8Array;
   preview: Uint8Array;
   conversionId: string;
@@ -24,6 +25,7 @@ export interface FramedArtifact {
   previewRevision?: string;
 }
 export interface FramedInput {
+  signal?: AbortSignal;
   /** Internal scheduling purpose, never a client-supplied authority flag. */
   purpose?: "preview" | "export";
   shape?: BodyShape | null;
@@ -36,7 +38,7 @@ export interface FramedInput {
   cameraRotation?: number[][];
   expectedCharacterSha256?: string;
   expectedPreviewRevision?: string;
-  previewFormat?: "model";
+  previewFormat?: "model" | "none";
   modelRevision?: string;
   characterSha256?: string;
 }
@@ -127,13 +129,11 @@ export async function convertFramed(
     response = await deps.fetch(`${deps.baseUrl}/${input.purpose === "export" ? "convert-framed-export" : "convert-framed"}`, {
       method: "POST",
       body,
-      signal: AbortSignal.timeout(
-        Math.max(
-          deps.timeoutMs,
-          input.cameraRotation ? 300_000 : 0,
-          input.shape ? config.converterShapeTimeoutMs : 0,
-        ),
-      ),
+      signal: AbortSignal.any([
+        AbortSignal.timeout(Math.max(deps.timeoutMs, input.cameraRotation ? 300_000 : 0,
+          input.shape ? config.converterShapeTimeoutMs : 0)),
+        ...(input.signal ? [input.signal] : []),
+      ]),
     });
   } catch (error) {
     const timeout =
@@ -176,8 +176,9 @@ export async function convertFramed(
           hands.library_version !== input.hands.library_version || hands.version !== "hand-bake-v1")
         throw new Error("hand lineage");
     }
+    const validation = value.artifact_validation as Record<string, unknown> | undefined;
     const fbx = decode("fbx_base64"),
-      preview = decode("preview_base64");
+      preview = input.previewFormat === "none" ? Buffer.alloc(0) : decode("preview_base64");
     if (
       (input.cameraRotation !== undefined && JSON.stringify(value.camera_rotation) !== JSON.stringify(input.cameraRotation)) ||
       (input.expectedCharacterSha256 !== undefined && value.character_sha256 !== input.expectedCharacterSha256) ||
@@ -195,11 +196,17 @@ export async function convertFramed(
       typeof value.conversion_id !== "string" ||
       !value.conversion_id ||
       value.fbx_sha256 !== sha256Hex(fbx) ||
-      value.preview_sha256 !== sha256Hex(preview) ||
+      (input.previewFormat !== "none" && value.preview_sha256 !== sha256Hex(preview)) ||
       !fbx
         .subarray(0, 19)
         .equals(Buffer.from("Kaydara FBX Binary" + String.fromCharCode(32))) ||
-      (input.previewFormat === "model"
+      (input.previewFormat === "none"
+        ? value.preview_format !== "none" || value.artifact_contract !== "verified-fbx-v1" ||
+          validation?.version !== "final-fbx-v1" || validation?.artifact_sha256 !== sha256Hex(fbx) ||
+          validation?.scope !== input.scope || validation?.skin_verified !== true ||
+          !["bones", "meshes", "vertices", "polygons"].every((k) => Number.isSafeInteger(validation?.[k]) && Number(validation?.[k]) > 0) ||
+          !fbx.subarray(0, 23).equals(Buffer.from("Kaydara FBX Binary  \0\x1a\0"))
+        : input.previewFormat === "model"
         ? !validFinalModel(preview, input, digest, sha256Hex(fbx), value)
         : !preview
             .subarray(0, 8)
@@ -207,6 +214,7 @@ export async function convertFramed(
     )
       throw new Error("lineage");
     return {
+      ...(input.previewFormat === "none" ? { artifactContract: "verified-fbx-v1" as const } : {}),
       fbx,
       preview,
       conversionId: value.conversion_id,
@@ -338,7 +346,9 @@ export class FramedArtifactCache {
     string,
     { expires: number; result: FramedArtifact; size: number }
   >();
-  private pending = new Map<string, Promise<FramedArtifact>>();
+  private pending = new Map<string, {
+    promise: Promise<FramedArtifact>; controller: AbortController; subscribers: number;
+  }>();
   private bytes = 0;
   constructor(
     private readonly maxBytes = 128 * 1024 * 1024,
@@ -348,25 +358,37 @@ export class FramedArtifactCache {
   ) {}
   async get(
     key: string,
-    create: () => Promise<FramedArtifact>,
+    create: (signal: AbortSignal) => Promise<FramedArtifact>,
     location?: FramedLocation,
     existingOnly = false,
+    signal?: AbortSignal,
   ): Promise<FramedArtifact> {
     // Scope the in-memory layer too; persistence is never an authorization grant.
+    signal?.throwIfAborted();
+    const requestedKey = key;
     if (location) key = JSON.stringify([EXPECTED_SOLVER_VERSION, location, key]);
     for (const [id, entry] of this.entries)
       if (entry.expires <= Date.now()) this.remove(id);
     const hit = this.entries.get(key);
     if (hit) return hit.result;
     const running = this.pending.get(key);
-    if (running) return running;
+    if (running) {
+      if (running.controller.signal.aborted) {
+        await running.promise.catch(() => {});
+        return this.get(requestedKey, create, location, existingOnly, signal);
+      }
+      return this.subscribe(running, signal);
+    }
     if (this.pending.size >= this.maxPending)
       throw new ConverterError("CONVERTER_UNAVAILABLE", "framing queue full");
+    const controller = new AbortController();
     const resolve = async () => {
       const stored = location ? await this.shared.load(location, key) : null;
+      controller.signal.throwIfAborted();
       if (stored) return stored;
       if (existingOnly) throw new ConverterError("PREVIEW_NOT_READY", "reviewed artifact expired");
-      const result = await create();
+      const result = await create(controller.signal);
+      controller.signal.throwIfAborted();
       return location ? this.shared.publish(location, key, result) : result;
     };
     const promise = resolve()
@@ -387,8 +409,27 @@ export class FramedArtifactCache {
       .finally(() => {
         this.pending.delete(key);
       });
-    this.pending.set(key, promise);
-    return promise;
+    const pending = { promise, controller, subscribers: 0 };
+    this.pending.set(key, pending);
+    return this.subscribe(pending, signal);
+  }
+  private subscribe(pending: { promise: Promise<FramedArtifact>; controller: AbortController; subscribers: number }, signal?: AbortSignal): Promise<FramedArtifact> {
+    pending.subscribers++;
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (action: () => void) => {
+        if (settled) return;
+        settled = true;
+        signal?.removeEventListener("abort", aborted);
+        pending.subscribers--;
+        if (!pending.subscribers) pending.controller.abort();
+        action();
+      };
+      const aborted = () => finish(() => reject(signal!.reason));
+      if (signal?.aborted) { aborted(); return; }
+      signal?.addEventListener("abort", aborted, { once: true });
+      pending.promise.then((result) => finish(() => resolve(result)), (error) => finish(() => reject(error)));
+    });
   }
   private remove(key: string) {
     const entry = this.entries.get(key);

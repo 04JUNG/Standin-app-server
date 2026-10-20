@@ -84,7 +84,7 @@ function setup(kind: string, semantic: boolean, bodyMode: boolean, handsMode: bo
       assert.deepEqual(input.hands ?? null, scopeIncludesHands(state.scope) ? hands : null);
       if (bodyMode) { assert.equal(input.characterId, "chosen"); assert.deepEqual(input.shape, state.shape); }
       const bytes = Buffer.from("FBX exact registered asset " + input.scope);
-      const artifact = { fbx: bytes, preview: Buffer.from(input.previewFormat === "model" ? "GLB" : "PNG"),
+      const artifact = { ...(input.previewFormat === "none" ? { artifactContract: "verified-fbx-v1" as const } : {}), fbx: bytes, preview: Buffer.from(input.previewFormat === "model" ? "GLB" : "PNG"),
         conversionId: "test", sourceBvhSha256: sha256Hex(f.source), artifactSha256: sha256Hex(bytes),
         characterSha256: state.character, previewRevision: state.badLineage ? "0".repeat(64) : state.runtime };
       if (state.late === "shape" && state.shape) state.shape = { ...state.shape, shapeSha256: "8".repeat(64) };
@@ -442,3 +442,20 @@ for (const failure of ["missing", "changed", "checks"])
       (e: unknown) => (e as { code: string }).code === ({ missing: "GENERATED_SOURCE_UNAVAILABLE", changed: "PREVIEW_SOURCE_CHANGED", checks: "GENERATED_CHECKS_FAILED" }[failure]));
     assert.equal(libraryCalls, 0);
   });
+
+for (const [kind, semantic] of [["near_match", true], ["generated_review", false], ["library_match", false]] as const)
+for (const bodyMode of [false, true]) test(`verified ${kind} receipt preserves manual authority, body=${bodyMode}`, async () => {
+  const f = setup(kind, semantic, bodyMode, true);
+  assert.equal((await f.request({ format: "ready" })).status, 409);
+  f.state.confirmed = true;
+  const ready = await f.request({ format: "ready" });
+  assert.equal(ready.status, 200, await ready.clone().text());
+  const key = ready.headers.get("X-Standin-Review-Key")!;
+  const download = await f.request({ format: "fbx", artifactReceipt: key, reviewKey: key });
+  assert.equal(download.status, 200, await download.clone().text());
+  assert.equal(f.state.calls, 1);
+  assert.equal(f.c.actualMeshValidated, false);
+  assert.equal(f.c.releaseAllowed, false);
+  f.state.confirmed = false;
+  assert.equal((await f.request({ format: "fbx", artifactReceipt: key, reviewKey: key })).status, 409);
+});

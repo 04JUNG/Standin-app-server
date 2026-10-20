@@ -20,6 +20,7 @@ export interface SceneRef {
   sha256: string;
 }
 export interface RefinedScene {
+  artifactContract?: "verified-scene-fbx-v1";
   bytes: Uint8Array;
   sha256: string;
   preview: string;
@@ -41,6 +42,7 @@ export async function prepareRefinedScene(
   refs: SceneRef[],
   sources: SceneSource[],
   overrides: Partial<typeof defaults> = {},
+  artifactOnly = false,
 ): Promise<RefinedScene> {
   const deps = { ...defaults, ...overrides };
   if (!job.inputS3Key || !job.result)
@@ -127,7 +129,8 @@ export async function prepareRefinedScene(
       if (artifact.variant === "refined") bytes = artifact.bytes;
     }
     const full = await deps.convertFramed({
-      purpose: "preview",
+      purpose: artifactOnly ? "export" : "preview",
+      ...(artifactOnly ? { previewFormat: "none" as const } : {}),
       bvhBytes: bytes,
       scope: "full",
       characterId:
@@ -155,9 +158,11 @@ export async function prepareRefinedScene(
   }
   const result = await deps.request("build", {
     plan_id: plan.plan_id,
+    ...(artifactOnly ? { artifact_only: true } : {}),
     persons: prepared,
   });
   if (
+    (artifactOnly && result.artifact_contract !== "verified-scene-fbx-v1") ||
     result.version !== plan.version ||
     result.plan_id !== plan.plan_id ||
     result.image_sha256 !== sha256Hex(image) ||
@@ -172,11 +177,8 @@ export async function prepareRefinedScene(
       .subarray(0, 23)
       .equals(Buffer.from("Kaydara FBX Binary  \0\x1a\0")) ||
     sha256Hex(bytes) !== result.artifact_sha256 ||
-    preview.length > 8 * 1024 * 1024 ||
-    !preview
-      .subarray(0, 8)
-      .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ||
-    sha256Hex(preview) !== result.preview_sha256
+    (artifactOnly ? preview.length !== 0 : preview.length > 8 * 1024 * 1024 ||
+      !preview.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) || sha256Hex(preview) !== result.preview_sha256)
   )
     throw new ConverterError("CONVERTER_INTEGRITY", "scene artifact mismatch");
   // Public review includes no operator paths, prompts or model instructions.
@@ -190,6 +192,7 @@ export async function prepareRefinedScene(
     armGoalCount: Array.isArray(p.arm_goals) ? p.arm_goals.length : 0,
   }));
   return {
+    ...(artifactOnly ? { artifactContract: "verified-scene-fbx-v1" as const } : {}),
     bytes,
     sha256: sha256Hex(bytes),
     preview: preview.toString("base64"),

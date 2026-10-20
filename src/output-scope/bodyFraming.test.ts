@@ -27,6 +27,9 @@ function setup(
     confirmed: true,
     late: "",
     calls: 0,
+    renders: 0,
+    previewFails: false,
+    fbxFails: false,
     source,
     quarantine: false,
   };
@@ -151,7 +154,14 @@ function setup(
         getPreviewModel: async () => {
           throw new Error("body review must use the verified artifact pair");
         },
+        renderFinalPreview: async (artifact) => {
+          state.renders++;
+          if (state.previewFails) throw new Error("render failed");
+          assert.ok(artifact.artifactSha256);
+          return Buffer.from([137,80,78,71,13,10,26,10]);
+        },
         convertFramed: async (input) => {
+          if (state.fbxFails) throw new Error("verification failed");
           state.calls++;
           assert.equal(input.characterId, "chosen");
           assert.deepEqual(input.shape ?? null, state.shape);
@@ -160,6 +170,7 @@ function setup(
             "FBX:" + new TextDecoder().decode(input.bvhBytes),
           );
           const result = {
+            ...(input.previewFormat === "none" ? { artifactContract: "verified-fbx-v1" as const } : {}),
             fbx,
             preview: new Uint8Array([1, 2]),
             conversionId: "c",
@@ -328,4 +339,54 @@ test("manual library numeric body uses one verified preview/export pair and reje
   late.state.manual = true;
   late.state.late = "camera";
   assert.equal((await late.request()).status, 409);
+});
+
+// Final artifact receipts carry all of the old selection/lineage guards without
+// requiring the PNG job to finish (or even to start).
+test("verified FBX ready/download/cache never schedule an image; preview failure is isolated", async () => {
+  const { state, request } = setup();
+  const ready = await request({ format: "ready" });
+  assert.equal(ready.status, 200, await ready.clone().text());
+  assert.equal(ready.headers.get("X-Standin-Artifact-Contract"), "verified-fbx-v1");
+  assert.equal(state.renders, 0);
+  const key = ready.headers.get("X-Standin-Review-Key")!;
+  const params = { artifactReceipt: key, reviewKey: key };
+  const download = await request({ ...params, format: "fbx" });
+  assert.equal(download.status, 200);
+  assert.equal(state.calls, 1);
+  assert.equal(state.renders, 0);
+  state.previewFails = true;
+  assert.equal((await request({ ...params, format: "preview" })).status, 503);
+  assert.equal((await request({ ...params, format: "fbx" })).status, 200);
+  assert.equal((await request({ format: "ready" })).headers.get("X-Standin-Review-Key"), key);
+  assert.equal(state.calls, 1);
+  state.previewFails = false;
+  const image = await request({ ...params, format: "preview" });
+  assert.equal(image.status, 200);
+  assert.equal(image.headers.get("X-Standin-Artifact-SHA256"), download.headers.get("X-Standin-Artifact-SHA256"));
+  assert.notEqual(image.headers.get("X-Standin-Preview-Artifact-SHA256"), null);
+});
+test("artifact verification failure never grants readiness", async () => {
+  const { state, request } = setup(); state.fbxFails = true;
+  assert.equal((await request({ format: "ready" })).status, 503);
+  assert.equal(state.renders, 0);
+});
+for (const kind of ["body", "runtime", "refine", "owner"]) test("ready rejects late " + kind + " changes", async () => {
+  const { state, request } = setup(); state.late = kind;
+  assert.equal((await request({ format: "ready" })).status, 409);
+});
+for (const kind of ["revision", "hash", "runtime", "refine", "scope", "owner", "confirmed", "quarantine"]) test("artifact receipt rejects changed " + kind, async () => {
+  const { state, request } = setup();
+  const ready = await request({ format: "ready" });
+  assert.equal(ready.status, 200);
+  const key = ready.headers.get("X-Standin-Review-Key")!;
+  if (kind === "revision") state.revision++;
+  else if (kind === "hash") state.hash = "e".repeat(64);
+  else if (kind === "runtime") state.runtime = "e".repeat(64);
+  else if (kind === "scope") state.scope = "head";
+  else if (kind === "refine") state.refined = true;
+  else if (kind === "quarantine") state.quarantine = true;
+  else state[kind as "owner" | "confirmed"] = false;
+  assert.notEqual((await request({ format: "fbx", artifactReceipt: key, reviewKey: key })).status, 200);
+  assert.equal(state.renders, 0);
 });
