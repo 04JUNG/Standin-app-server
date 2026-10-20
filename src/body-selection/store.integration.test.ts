@@ -54,12 +54,13 @@ test(
       VALUES ($1,'hash','test','2026-10-08','2026-10-08','2026-10-08','test','test','test','test','ko')`,
         [owner],
       );
-      const c = catalog(),
+      const c = catalog();
+      c.assets[0].characterId = "male-base-v0-7-2";
+      const
         deps = { catalog: () => c, check: async () => "ok" as const };
       assert.deepEqual(await readPreferences(db, owner), defaultPreferences());
       const fixed = {
-        mode: "fixed_default" as const,
-        defaultCharacterId: "character-0",
+        mode: "last_used" as const,
         expectedRevision: 0,
         mutationId: "pref-initial",
       };
@@ -89,7 +90,6 @@ test(
           owner,
           {
             mode: "auto",
-            defaultCharacterId: "character-2",
             expectedRevision: 1,
             mutationId: "pref-changed",
           },
@@ -98,7 +98,7 @@ test(
       );
       assert.equal(
         (await readSelection(db, owner, analysis.jobId, 0, c)).resolvedSource,
-        "fixed_default",
+        "catalog_default_fallback",
       );
       const attempts = await Promise.allSettled(
         ["character-1", "character-2"].map((characterId, i) =>

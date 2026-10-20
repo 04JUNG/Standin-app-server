@@ -27,15 +27,14 @@ capabilities:
 
 개인 설정은 기존 인증 경계에 맞춰 installation 단위다. 계정 간 동기화나 다음 컷의 동일 인물 인식은 제공하지 않는다.
 
-- `auto`: 유효 추천 → 개인 기본 캐릭터 → 승인 카탈로그 기본 캐릭터 순으로 선택한다.
-- `fixed_default`: 개인 기본 캐릭터 우선. 없거나 사용할 수 없으면 unavailable이다.
-- 새 Job 생성 트랜잭션에서 설정과 기본 자산을 snapshot으로 저장한다. 이후 설정 변경은 과거 작업에 영향을 주지 않는다.
-- 인물별 `manual`: 직접 선택이 가장 우선한다.
-- 인물별 `auto`: 그 인물만 fixed_default를 건너뛰고 추천을 사용한다.
-- 인물별 `inherit`: 작업 시작 시의 기본 정책을 따른다.
-- 추천이 없을 때 명시적 auto 요청은 거절하고 기존 선택을 유지한다.
-- 선택한 자산이 manifest에서 제거되거나 hash/버전이 달라지면 기존 참조를 유지한 채 unavailable로 표시한다. 임의 대체하지 않는다.
-- 후보가 없는 인물은 not_applicable이다.
+- 지원 모드는 `last_used`(새 설치 기본)와 `auto`다. `last_used`는 마지막 수동 선택의 체형·수치가 유효하면 그대로 쓰고, 최초 사용·삭제된 체형·무효 수치는 공통 남성 기본형으로 시작한다.
+- `auto` 및 인물별 명시적 `auto`는 정상 추천을 사용한다. 추천 없음·실패·disabled·not_applicable·지원 불가이면 같은 남성 기본형을 사용한다. 유효하지만 그림과 다른 추천을 실패로 임의 판단하지 않는다.
+- `manual`은 언제나 직접 고른 체형·수치를 유지한다. 자산 소실·해시 변경·변환 실패를 다른 체형으로 숨기지 않는다.
+- 남성 기본형은 승인 카탈로그의 현행 `male-base-*` 자산이다. 작업 시작에 자산·버전·해시·리그를 고정한다. 구 snapshot에 이 정보가 없을 때만 현재 카탈로그에서 찾는다. 자산이 없거나 출력 조건을 만족하지 못하면 unavailable로 저장을 막는다. 후보가 없으면 not_applicable이다.
+
+과거 저장 경계에서만 legacy를 읽는다. `fixed_default`는 `last_used`로 정규화하고 기존 `auto`/`last_used`, 카드, 마지막 선택을 보존한다. `shapeDefault`의 체형·수치는 `my-default` 개인 카드로 합치고, 현재 응답/다음 설정 쓰기에는 `defaultCharacterId`·`shapeDefault`를 넣지 않는다. 카드 삭제 후 다시 생기지 않는다. `catalog.defaultCharacterId`와 일반 모델 카탈로그 계약은 유지한다.
+
+과거 작업의 `fixed_default`/`user_default_fallback`, 자동 기본형, 미확정 자동 선택은 작업 snapshot을 기준으로 읽기 때 다시 결정한다. 유효한 수동/마지막 선택과 정상 추천은 유지한다. GET은 DB·revision을 바꾸지 않고 다음 명시적 변경은 현재 계약으로 저장한다. 이전 mutation 응답도 반환 경계에서 정규화한다.
 
 ## HTTP 계약
 
@@ -55,16 +54,15 @@ capabilities:
 
 ```json
 {
-  "mode": "fixed_default",
-  "defaultCharacterId": "registered-character-id",
+  "mode": "auto",
   "expectedRevision": 0,
   "mutationId": "settings-change-001"
 }
 ```
 
-mode는 auto/fixed_default만 허용한다. auto의 defaultCharacterId는 null 또는 사용 가능한 ID다. fixed_default에는 사용 가능한 ID가 필수다. 기본 ID 저장만으로 고정 모드를 추정하지 않는다.
+mode는 auto/last_used만 허용한다. 사용자 기본값 필드는 받지 않는다.
 
-응답은 `version=body-preferences.v1`, `scope=installation`, mode, defaultCharacterId, revision이다.
+응답은 `version=body-preferences.v1`, `scope=installation`, mode, cards, lastUsed, revision이다.
 
 ### 인물별 변경
 
@@ -84,7 +82,7 @@ intent=auto/inherit에서는 characterId를 생략한다. 서버 소유 resolved
 - schemaVersion, personIndex, intent, manualCharacterId
 - recommendation: status, body, reasonCodes, 가능하면 input/catalog hash 및 selectionSource
 - resolvedBody: bodyId/bodyVersion/assetSha256/rigVersion/measurementVersion/characterId 또는 null
-- resolvedSource: manual/fixed_default/auto_recommendation/user_default_fallback/catalog_default_fallback 또는 null
+- resolvedSource: manual/last_used/auto_recommendation/catalog_default_fallback 또는 null
 - resolutionStatus: ready/needs_selection/unavailable/not_applicable
 - selectionRevision, renderingExecuted=false
 
@@ -139,7 +137,6 @@ expectedRevision은 0 이상의 안전한 정수다. mutationId는 영숫자·�
 ```json
 {
   "version": "your-approved-catalog-version",
-  "defaultCharacterId": null,
   "assets": []
 }
 ```

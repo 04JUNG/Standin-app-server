@@ -1,9 +1,8 @@
 /** Body choices are independent of pose selection. No inference is performed here. */
-import { automaticRecommendation, isChildBody } from "./childPolicy.js";
+import { automaticRecommendation } from "./childPolicy.js";
 import {
   bodyShape,
   type BodyShape,
-  type ShapeDefault,
   type ShapeSource,
   type ShapeSpec,
 } from "./shape.js";
@@ -69,14 +68,8 @@ export interface LastUsedBody {
 export interface BodyPreferences {
   version: "body-preferences.v1";
   scope: "installation";
-  /**
-   * `last_used` (default): new jobs start with the last hand-picked body, else the
-   * male base body when nothing has been picked yet. `fixed_default` is kept for older clients.
-   */
-  mode: "auto" | "fixed_default" | "last_used";
-  defaultCharacterId: string | null;
-  /** "내 기본값": saved controls for one shape-capable character. Optional for old rows. */
-  shapeDefault?: ShapeDefault | null;
+  /** Last hand-picked body, or the common male base when none is usable. */
+  mode: "auto" | "last_used";
   /** Absent on rows written before cards existed (see `cardsOf`). */
   cards?: BodyCard[];
   /** Written by manual body selections, not by preference writes. Never bumps `revision`. */
@@ -85,8 +78,6 @@ export interface BodyPreferences {
 }
 export interface BodyPolicy {
   preferences: BodyPreferences;
-  userDefault: BodyRef | null;
-  catalogDefault: BodyRef | null;
   /** Resolved at capture time so a later catalog change cannot reshape a running job. */
   lastUsed?: { body: BodyRef; shape: BodyShape | null } | null;
   /** Catalog identity captured for the first-use male base, independent of recommendations. */
@@ -100,9 +91,7 @@ export interface BodyRecommendation {
   catalogSha256?: string;
   inputSha256?: string;
   selectionSource?:
-    | "auto_best_effort"
-    | "auto_default"
-    | "auto_presentation_default";
+    "auto_best_effort" | "auto_default" | "auto_presentation_default";
 }
 export type BodyIntent = "inherit" | "manual" | "auto";
 export interface BodySelection {
@@ -121,17 +110,12 @@ export interface BodySelection {
   resolvedBody: BodyRef | null;
   resolvedSource:
     | "manual"
-    | "fixed_default"
     | "last_used"
     | "auto_recommendation"
-    | "user_default_fallback"
     | "catalog_default_fallback"
     | null;
   resolutionStatus:
-    | "ready"
-    | "needs_selection"
-    | "unavailable"
-    | "not_applicable";
+    "ready" | "needs_selection" | "unavailable" | "not_applicable";
   selectionRevision: number;
   /** Lookup-only mesh preview; never authorizes release/export. */
   previewOnly?: true;
@@ -141,7 +125,8 @@ export const defaultPreferences = (): BodyPreferences => ({
   version: "body-preferences.v1",
   scope: "installation",
   mode: "last_used",
-  defaultCharacterId: null,
+  cards: [],
+  lastUsed: null,
   revision: 0,
 });
 export const bodyRef = (a: BodyRef): BodyRef => ({
@@ -191,21 +176,18 @@ export function snapshot(
   preferences: BodyPreferences,
   catalog: BodyCatalog,
 ): BodyPolicy {
-  const find = (id: string | null) => {
-    const a = catalog.assets.find((a) => a.characterId === id);
-    return a ? bodyRef(a) : null;
-  };
+  preferences = normalizePreferences(preferences);
   return {
-    preferences: { ...preferences },
-    userDefault: find(preferences.defaultCharacterId),
-    catalogDefault: find(catalog.defaultCharacterId),
+    preferences: structuredClone(preferences),
     lastUsed: lastUsedBody(preferences, catalog),
     firstUseDefault: firstUseBody(catalog),
   };
 }
 /** Use only a registered current male BASE asset; never invent a fallback identity. */
-function firstUseBody(catalog: BodyCatalog): BodyRef | null {
-  const asset = catalog.assets.find((a) => /^male-base(?:-|$)/.test(a.characterId));
+export function firstUseBody(catalog: BodyCatalog): BodyRef | null {
+  const asset = catalog.assets.find((a) =>
+    /^male-base(?:-|$)/.test(a.characterId),
+  );
   return asset ? bodyRef(asset) : null;
 }
 /**
@@ -269,40 +251,66 @@ export function resolveBody(
       : "unavailable",
   });
   if (intent === "manual") return use(manual, "manual");
-  if (intent === "inherit" && policy.preferences.mode === "fixed_default")
-    return use(policy.userDefault, "fixed_default");
-  // Last used body: only when it fits these poses; otherwise fall through to the recommendation.
-  const last = policy.lastUsed;
-  if (
-    intent === "inherit" &&
-    policy.preferences.mode === "last_used" &&
-    last &&
-    bodyEligible(last.body, catalog, poses, previewOnly)
-  )
-    return { ...use(last.body, "last_used"), shape: last.shape };
-  if (
-    intent === "inherit" &&
-    policy.preferences.mode === "last_used" &&
-    !policy.preferences.lastUsed
-  ) {
-    // Old policy snapshots predate firstUseDefault; still require today's catalog identity.
-    const first =
-      policy.firstUseDefault === undefined
-        ? firstUseBody(catalog)
-        : policy.firstUseDefault;
-    if (bodyEligible(first, catalog, poses, previewOnly))
-      return use(first, "catalog_default_fallback");
+  const preferences = normalizePreferences(policy.preferences);
+  const last =
+    policy.lastUsed === undefined
+      ? lastUsedBody(preferences, catalog)
+      : policy.lastUsed;
+  if (intent === "inherit" && preferences.mode === "last_used") {
+    if (last && bodyEligible(last.body, catalog, poses, previewOnly)) {
+      try {
+        const asset = catalog.assets.find((a) => sameBody(a, last.body))!;
+        const shape = last.shape ? bodyShape(asset, last.shape.controls) : null;
+        return { ...use(last.body, "last_used"), shape };
+      } catch {
+        /* Invalid remembered controls use the common base, never the plain old body. */
+      }
+    }
+    return useMaleBase();
   }
   if (
     recommendation.status === "available" &&
     bodyEligible(recommendation.body, catalog, poses, previewOnly)
   )
     return use(recommendation.body, "auto_recommendation");
-  // An explicit auto action never silently becomes a default.
-  if (intent === "auto") return { ...state, resolutionStatus: "unavailable" };
-  if (bodyEligible(policy.userDefault, catalog, poses, previewOnly))
-    return use(policy.userDefault, "user_default_fallback");
-  if (!isChildBody(policy.catalogDefault, catalog) && bodyEligible(policy.catalogDefault, catalog, poses, previewOnly))
-    return use(policy.catalogDefault, "catalog_default_fallback");
-  return state;
+  return useMaleBase();
+
+  // Old snapshots have no captured identity; current catalog is the migration boundary.
+  // A captured null or changed hash must stay unavailable, never become another asset.
+  function useMaleBase(): BodySelection {
+    const ref =
+      policy.firstUseDefault === undefined
+        ? firstUseBody(catalog)
+        : policy.firstUseDefault;
+    return use(ref, "catalog_default_fallback");
+  }
+}
+
+/** Upgrade persisted installation rows and job snapshots without losing personal cards. */
+export function normalizePreferences(value: BodyPreferences): BodyPreferences {
+  const old = value as BodyPreferences & {
+    mode: string;
+    shapeDefault?: {
+      characterId: string;
+      controls: Record<string, number>;
+    } | null;
+  };
+  const cards = [...(value.cards ?? [])];
+  if (old.shapeDefault && !cards.some((c) => c.cardId === "my-default")) {
+    cards.push({
+      cardId: "my-default",
+      name: "내 기본 체형",
+      ...old.shapeDefault,
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+    });
+  }
+  return {
+    version: "body-preferences.v1",
+    scope: "installation",
+    mode: old.mode === "auto" ? "auto" : "last_used",
+    cards,
+    lastUsed: value.lastUsed ?? null,
+    revision: value.revision,
+  };
 }

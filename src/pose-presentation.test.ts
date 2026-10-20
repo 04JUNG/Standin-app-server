@@ -292,6 +292,7 @@ test("selected-body preview binds private library/generated sources, shape, scop
   const context = personBodyContext(result.candidatesByPerson[0]);
   assert.equal(context.previewOnly, true);
   const cat = catalog();
+  cat.assets[0].characterId = "male-base-v0-7-2";
   let selection = resolveBody(
     0,
     snapshot(defaultPreferences(), cat),
@@ -314,7 +315,7 @@ test("selected-body preview binds private library/generated sources, shape, scop
       cat,
       ["unvalidated-pose"],
     ).resolutionStatus,
-    "needs_selection",
+    "unavailable",
   );
   let libraryCalls = 0,
     renders = 0,
