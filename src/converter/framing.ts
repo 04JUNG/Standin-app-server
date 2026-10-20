@@ -176,6 +176,7 @@ export async function convertFramed(
           hands.library_version !== input.hands.library_version || hands.version !== "hand-bake-v1")
         throw new Error("hand lineage");
     }
+    const validation = value.artifact_validation as Record<string, unknown> | undefined;
     const fbx = decode("fbx_base64"),
       preview = input.previewFormat === "none" ? Buffer.alloc(0) : decode("preview_base64");
     if (
@@ -201,6 +202,9 @@ export async function convertFramed(
         .equals(Buffer.from("Kaydara FBX Binary" + String.fromCharCode(32))) ||
       (input.previewFormat === "none"
         ? value.preview_format !== "none" || value.artifact_contract !== "verified-fbx-v1" ||
+          validation?.version !== "final-fbx-v1" || validation?.artifact_sha256 !== sha256Hex(fbx) ||
+          validation?.scope !== input.scope || validation?.skin_verified !== true ||
+          !["bones", "meshes", "vertices", "polygons"].every((k) => Number.isSafeInteger(validation?.[k]) && Number(validation?.[k]) > 0) ||
           !fbx.subarray(0, 23).equals(Buffer.from("Kaydara FBX Binary  \0\x1a\0"))
         : input.previewFormat === "model"
         ? !validFinalModel(preview, input, digest, sha256Hex(fbx), value)

@@ -390,14 +390,16 @@ test("manual export requires the already reviewed file and never renders on a mi
 });
 
 test("artifact-only contract validates FBX lineage and persists without any image", async () => {
-  const value = { ...payload(), artifact_contract: "verified-fbx-v1", preview_format: "none" };
+  const value = { ...payload(), artifact_contract: "verified-fbx-v1", preview_format: "none",
+    artifact_validation: { version: "final-fbx-v1", artifact_sha256: sha256Hex(fbx), scope: "half", skin_verified: true,
+      bones: 22, meshes: 1, vertices: 8, polygons: 6 } };
   delete (value as Partial<typeof value>).preview_base64;
   delete (value as Partial<typeof value>).preview_sha256;
   const result = await convertFramed({ ...input, previewFormat: "none" }, deps(value));
   assert.equal(result.preview.length, 0);
   assert.equal(result.artifactContract, "verified-fbx-v1");
   assert.deepEqual(decodeFramedPair("ready", encodeFramedPair("ready", result)), result);
-  for (const change of [{ artifact_contract: "old" }, { fbx_sha256: "a".repeat(64) }, { output_scope: "head" }, { source_bvh_sha256: "b".repeat(64) }])
+  for (const change of [{ artifact_validation: null }, { artifact_validation: { ...value.artifact_validation, skin_verified: false } }, { artifact_contract: "old" }, { fbx_sha256: "a".repeat(64) }, { output_scope: "head" }, { source_bvh_sha256: "b".repeat(64) }])
     await assert.rejects(convertFramed({ ...input, previewFormat: "none" }, deps({ ...value, ...change })), { code: "CONVERTER_INTEGRITY" });
 });
 

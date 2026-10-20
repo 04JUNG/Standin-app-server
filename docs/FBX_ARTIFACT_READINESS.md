@@ -2,7 +2,7 @@
 
 `GET /v1/pose-candidates/:id/framed?format=ready` prepares a `verified-fbx-v1` artifact without PNG/GLB work. The response has an empty body and `X-Standin-Artifact-Contract`, review key, FBX SHA256, source SHA256, character SHA256, scope, and applicable body/hand revision headers. This is an artifact receipt, not evidence that a user saw an image.
 
-The BFF checks ownership, current selected/confirmed candidate, manual/generated permissions, registered/quarantined source, refined BVH, character/runtime, shape authoring source, both hands and scope before and after preparation. Existing manual release exceptions remain manual exceptions: no candidate is promoted and no failed screen status is rewritten.
+The BFF checks ownership, current selected/confirmed candidate, manual/generated permissions, registered/quarantined source, refined BVH, character/runtime, shape authoring source, both hands and scope before and after preparation. The converter must also return a hash-bound `final-fbx-v1` receipt proving final-FBX reimport, skeleton, mesh and skin validation without rendering. Existing manual release exceptions remain manual exceptions: no candidate is promoted and no failed screen status is rewritten.
 
 Downloads and follow-up PNGs send `artifactReceipt=<review key>` and `reviewKey=<review key>` with the original selection parameters. Downloads use existing-only cache lookup. PNGs render the persisted FBX through `/render-final-preview`; they never re-convert BVH. A missing receipt fails closed; no download falls back to a new render. Old paired PNG/GLB endpoints remain supported.
 
