@@ -42,7 +42,8 @@ function setup() {
     pinnedSemanticSource: undefined as string | undefined,
     owner: true,
     confirmed: true,
-    scope: "half" as "half" | "head" | "full",
+    scope: "half" as "half" | "head" | "full" | "bust" | "shoulder_head",
+    handCalls: 0,
     available: true,
     changeDuringConversion: false,
     calls: 0,
@@ -120,7 +121,7 @@ function setup() {
         state.libraryReads++;
         return libraryModel(state.libraryCharacter);
       },
-      handBakeFor: async () => state.hands,
+      handBakeFor: async () => { state.handCalls++; return state.hands; },
       converterEnabled: () => true,
       modelPreviewIdentity: async () => ({
         modelRevision: state.revision,
@@ -442,4 +443,39 @@ test("cold final FBX with model review uses protected export and preserves paire
     409,
   );
   assert.equal(state.calls, 1);
+});
+
+
+for (const scope of ["head", "shoulder_head", "bust"] as const) {
+  test(`${scope} PNG and FBX skip hand library, revision and review waits; cache is independent of saved hands`, async () => {
+    const { state, request } = setup();
+    state.scope = scope;
+    state.hands = { left: "fist", right: "relaxed", revision: 2, library_version: "old", library_sha256: "e".repeat(64) };
+    const query = { jobId: `no-hands-${scope}`, outputScope: scope };
+    const png = await request(query);
+    assert.equal(png.status, 200);
+    assert.equal(png.headers.get("X-Standin-Output-Scope"), scope);
+    assert.equal(png.headers.get("X-Standin-Hand-Revision"), null);
+    assert.equal(state.handCalls, 0);
+    assert.equal(state.sentHands, null);
+    state.hands.revision++;
+    const fbx = await request({ ...query, format: "fbx" });
+    assert.equal(fbx.status, 200);
+    assert.equal(fbx.headers.get("X-Standin-Hand-Library-SHA256"), null);
+    assert.equal(state.calls, 1);
+    assert.equal(state.handCalls, 0);
+    // Going back to a hand-bearing mesh restores its existing review gate.
+    state.scope = "half";
+    const stale = await request({ ...query, outputScope: "half" });
+    assert.equal(stale.status, 409);
+    assert.equal((await stale.json() as { error: { code: string } }).error.code, "HANDS_CHANGED");
+  });
+}
+test("no-hand conversion still discards an output scope changed while rendering", async () => {
+  const { state, request } = setup();
+  state.scope = "bust";
+  state.changeDuringConversion = true;
+  const r = await request({ outputScope: "bust" });
+  assert.equal(r.status, 409);
+  assert.equal((await r.json() as { error: { code: string } }).error.code, "OUTPUT_SCOPE_CHANGED");
 });

@@ -1,3 +1,4 @@
+import { resolvePersonOutputScope, scopeIncludesHands } from "../output-scope/model.js";
 import { transaction } from "../db.js";
 import type { AnalysisResult } from "../types.js";
 import { readyHandCatalog } from "./service.js";
@@ -24,25 +25,6 @@ export function createHandStore(deps = defaults) {
     personIndex: number,
     change?: HandChange,
   ): Promise<HandSelection> {
-    const catalog: HandCatalog = await deps.catalog();
-    const ids = new Set(
-      catalog.categories.flatMap((c) => c.presets.map((p) => p.id)),
-    );
-    if (change && change.library_sha256 !== catalog.library_sha256)
-      throw new HandError(
-        "HAND_LIBRARY_CHANGED",
-        409,
-        "손 목록이 변경되었습니다. 다시 확인해 주세요.",
-      );
-    if (
-      change &&
-      SIDES.some((s) => change[s] !== undefined && !ids.has(change[s]!))
-    )
-      throw new HandError(
-        "INVALID_HAND_PRESET",
-        400,
-        "손 모양을 다시 선택해 주세요.",
-      );
     return deps.transaction(async (client) => {
       const { rows } = await client.query<{
         status: string;
@@ -72,6 +54,27 @@ export function createHandStore(deps = defaults) {
           !person.posePresentation?.generated_candidates.length)
       )
         throw new HandError("NOT_FOUND", 404, "인물을 찾을 수 없습니다.");
+      if (!scopeIncludesHands(resolvePersonOutputScope(person).resolved))
+        throw new HandError("HANDS_NOT_APPLICABLE", 409, "이 출력 범위에는 손이 포함되지 않습니다.");
+      const catalog: HandCatalog = await deps.catalog();
+      const ids = new Set(
+        catalog.categories.flatMap((c) => c.presets.map((p) => p.id)),
+      );
+      if (change && change.library_sha256 !== catalog.library_sha256)
+        throw new HandError(
+          "HAND_LIBRARY_CHANGED",
+          409,
+          "손 목록이 변경되었습니다. 다시 확인해 주세요.",
+        );
+      if (
+        change &&
+        SIDES.some((s) => change[s] !== undefined && !ids.has(change[s]!))
+      )
+        throw new HandError(
+          "INVALID_HAND_PRESET",
+          400,
+          "손 모양을 다시 선택해 주세요.",
+        );
       const observation = readHands(person.hands);
       const valid = (id: string) => (ids.has(id) ? id : catalog.default_preset);
       let current: HandSelection = person.handSelection ?? {

@@ -177,10 +177,10 @@ test("stored scope wins over presentation for hand preview; late scope changes a
   const { app, state, url, result } = fixture();
   const person = result.result!.candidatesByPerson[0];
   person.outputScope = resolveOutputScope({
-    selection: "bust",
-    detected: "half",
+    selection: "half",
+    detected: "head",
   });
-  state.expectedScope = "bust";
+  state.expectedScope = "half";
   state.after = () => {
     person.outputScope = resolveOutputScope({ selection: "head" });
   };
@@ -200,3 +200,15 @@ test("hand lookup cannot be switched to a release format", async () => {
   assert.equal((await app.request(url + "&format=fbx")).status, 400);
   assert.equal(state.calls, 0);
 });
+
+for (const scope of ["head", "shoulder_head", "bust"] as const) {
+  test(`${scope} rejects hand-only previews before any BVH or conversion work`, async () => {
+    const { app, state, url, result } = fixture();
+    result.result!.candidatesByPerson[0].outputScope = resolveOutputScope({ selection: scope });
+    const r = await app.request(url);
+    assert.equal(r.status, 409);
+    assert.equal((await r.json() as { error: { code: string } }).error.code, "HANDS_NOT_APPLICABLE");
+    assert.equal(state.reads, 0);
+    assert.equal(state.calls, 0);
+  });
+}
