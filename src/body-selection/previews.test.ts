@@ -8,7 +8,7 @@ import type { CandidateCamera } from "../types.js";
 import type { PreviewRuntime } from "../converter/previewRuntime.js";
 import { EXPECTED_SOLVER_VERSION, sha256Hex } from "../converter/client.js";
 import { FRAMING_VERSION, type FramedInput } from "../converter/framing.js";
-import { resolveOutputScope } from "../output-scope/model.js";
+import { resolveOutputScope, scopeIncludesHands } from "../output-scope/model.js";
 import {
   createBodyPreviewRoutes,
   validCamera,
@@ -80,6 +80,7 @@ function setup(count = 5) {
     inputs: [] as FramedInput[],
     framedAvailable: true,
     afterRender: () => {},
+    handCalls: 0,
     hands: null as import("../hands/model.js").HandBake | null,
     runtime: {
       schemaVersion: "body-preview-runtime.v1",
@@ -112,7 +113,7 @@ function setup(count = 5) {
         structuredClone(state.selections[i]),
       checkCharacter: async () => (state.available ? "ok" : "unavailable"),
       getPreviewRuntime: async () => structuredClone(state.runtime),
-      handBakeFor: async () => structuredClone(state.hands),
+      handBakeFor: async () => { state.handCalls++; return structuredClone(state.hands); },
       modelPreviewIdentity: async () =>
         state.framedAvailable
           ? {
@@ -136,7 +137,7 @@ function setup(count = 5) {
       },
       convertFramed: async (input) => {
         state.convertCalls++;
-        assert.deepEqual(input.hands ?? null, state.hands);
+        assert.deepEqual(input.hands ?? null, scopeIncludesHands(input.scope) ? state.hands : null);
         assert.deepEqual(input.cameraRotation, rotation);
         assert.deepEqual(input.bvhBytes, new Uint8Array(bvh));
         state.inputs.push(input);
@@ -678,3 +679,27 @@ test("selected hands bind PNG and a late change invalidates the entire body grou
   assert.equal(response.status, 409);
   assert.equal(await code(response), "BODY_PREVIEW_STALE");
 });
+
+for (const scope of ["head", "shoulder_head", "bust"] as const) {
+  test(`${scope} manifest, PNG and cache omit stale hand selection while another person retains hands`, async () => {
+    const s = setup();
+    s.analysis.candidatesByPerson[0].outputScope = resolveOutputScope({ selection: scope });
+    s.state.hands = { left: "fist", right: "relaxed", revision: 2, library_version: "old", library_sha256: "f".repeat(64) };
+    const m = await s.manifest();
+    assert.equal(m.hands, null);
+    assert.equal(s.state.handCalls, 0);
+    const r = await s.app.request(m.candidates[0].thumbnailUrl);
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get("X-Standin-Hand-Revision"), null);
+    assert.equal(s.state.inputs[0].hands, undefined);
+    s.state.hands.revision++;
+    assert.equal((await s.manifest()).renderKey, m.renderKey);
+    assert.equal(s.state.handCalls, 0);
+    const other = await s.manifest(1);
+    assert.equal(other.hands?.revision, 3);
+    s.analysis.candidatesByPerson[0].outputScope = resolveOutputScope({ selection: "half", detected: "head" });
+    const restored = await s.manifest();
+    assert.equal(restored.hands?.revision, 3);
+    assert.notEqual(restored.renderKey, m.renderKey);
+  });
+}

@@ -1,3 +1,5 @@
+import { resolveOutputScope } from "../output-scope/model.js";
+import { handBakeFor } from "./service.js";
 import { readyHandCatalog } from "./service.js";
 import { EXPECTED_SOLVER_VERSION } from "../converter/client.js";
 import { FRAMING_VERSION } from "../converter/framing.js";
@@ -88,10 +90,17 @@ function fixture() {
       unlock();
     }
   };
-  const deps = { transaction: tx, catalog: async () => catalog };
+  let catalogCalls = 0;
+  const deps = { transaction: tx, catalog: async () => { catalogCalls++; return catalog; } };
   return {
     store: createHandStore(deps),
     deps,
+    catalogCalls: () => catalogCalls,
+    scope: (selection: "full" | "half" | "head" | "shoulder_head" | "bust") => {
+      const value = JSON.parse(encoded) as AnalysisResult;
+      value.candidatesByPerson[0].outputScope = resolveOutputScope({ selection, detected: "head" });
+      encoded = JSON.stringify(value);
+    },
     json: () => JSON.parse(encoded) as AnalysisResult,
   };
 }
@@ -345,3 +354,21 @@ test("unavailable or invalid thumbnail is explicit and never a successful icon r
     503,
   );
 });
+
+for (const scope of ["head", "shoulder_head", "bust"] as const) {
+  test(`${scope} hand lookup/write returns not-applicable without library access; saved hands survive the scope round trip`, async () => {
+    const f = fixture();
+    const saved = await f.store.selection("owner", "job", 0, { left: "fist", library_sha256: catalog.library_sha256, expectedRevision: 0 });
+    f.scope(scope);
+    const before = f.catalogCalls();
+    await assert.rejects(f.store.selection("owner", "job", 0), { code: "HANDS_NOT_APPLICABLE" });
+    await assert.rejects(f.store.selection("owner", "job", 0, { left: "open", library_sha256: catalog.library_sha256, expectedRevision: saved.revision }), { code: "HANDS_NOT_APPLICABLE" });
+    assert.equal(f.catalogCalls(), before);
+    assert.deepEqual(f.json().candidatesByPerson[0].handSelection, saved);
+    assert.equal(await handBakeFor(f.json().candidatesByPerson[0]), null);
+    f.scope("half");
+    const restored = await f.store.selection("owner", "job", 0);
+    assert.deepEqual(restored, saved);
+    assert.equal((await f.store.selection("owner", "job", 1)).personIndex, 1);
+  });
+}

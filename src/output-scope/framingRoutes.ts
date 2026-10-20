@@ -34,7 +34,7 @@ import {
   FRAMING_VERSION,
   modelPreviewIdentity,
 } from "../converter/framing.js";
-import { isBodyScope, resolvePersonOutputScope } from "./model.js";
+import { isBodyScope, resolvePersonOutputScope, scopeIncludesHands } from "./model.js";
 
 const cache = new FramedArtifactCache();
 const defaults = {
@@ -155,7 +155,7 @@ export function createFramingRoutes(
           })
         : Promise.resolve();
     try {
-      const hands = await deps.handBakeFor(person);
+      const hands = scopeIncludesHands(scope) ? await deps.handBakeFor(person) : null;
       if (
         hands &&
         c.req.query("handSelectionRevision") !== String(hands.revision)
@@ -469,7 +469,7 @@ export function createFramingRoutes(
         );
       }
       if (
-        JSON.stringify(await deps.handBakeFor(currentPerson)) !==
+        JSON.stringify(scopeIncludesHands(scope) ? await deps.handBakeFor(currentPerson) : null) !==
         JSON.stringify(hands)
       )
         return fail(
