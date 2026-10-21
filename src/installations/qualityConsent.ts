@@ -162,7 +162,7 @@ export async function lockQualityConsent(
 /**
  * 관리자 열람 범위를 정하는 뷰. 관리자 SQL은 모두 이 뷰만 읽는다.
  *
- * withoutConsent(staging 전용, `config.reviewWithoutQualityConsent`)이면 동의 조건을 빼고
+ * withoutConsent(`config.reviewWithoutQualityConsent`, 환경 변수로 켜고 끔)이면 동의 조건을 빼고
  * 철회·삭제 요청만 거른다. 뷰는 배포마다 다시 만들어지므로 스위치를 끄고 재배포하면
  * 원래 범위로 돌아간다.
  */

@@ -5,9 +5,6 @@ function env(key: string, def = ""): string {
   return process.env[key] ?? def;
 }
 
-/** 프로덕션 BFF 주소. staging 전용 스위치가 여기서 켜지지 않게 막는 데 쓴다. */
-const PRODUCTION_PUBLIC_URL = "https://api.standinpose.com";
-
 export const config = {
   poseThumbnailRevision: env(
     "POSE_THUMBNAIL_REVISION",
@@ -38,18 +35,18 @@ export const config = {
   publicUrl: env("PUBLIC_URL", "http://localhost:8080"),
 
   /**
-   * 관리자 열람을 품질 검토 동의와 떼어 놓는 스위치. **staging 전용.**
+   * 관리자 열람을 품질 검토 동의와 떼어 놓는 스위치. 기본값은 꺼짐.
    *
-   * staging은 팀원만 쓴다. 동의 화면을 거치지 않은 설치도 원본·설치별 상세·결과를
-   * 대시보드에서 볼 수 있게 한다(2026-10-19 사용자 결정, 품질 개선에는 쓰지 않음).
-   * 철회·삭제 요청한 설치는 여전히 뺀다. 수집 쪽(이벤트·피드백)은 바꾸지 않는다 —
-   * 동의 없는 설치에서는 애초에 그 기록이 오지 않는다.
+   * 켜면 동의 화면을 거치지 않은 설치도 원본·설치별 상세·결과를 대시보드에서 볼 수 있다
+   * (staging 2026-10-19, 프로덕션 2026-10-21 사용자 결정: 지금은 팀원만 쓴다, 품질 개선에는
+   * 쓰지 않음). 철회·삭제 요청한 설치는 여전히 뺀다. 수집 쪽(이벤트·피드백)은 바꾸지 않는다.
    *
-   * 프로덕션 주소에서는 값과 상관없이 꺼진다. 배포 워크플로도 main에서는 false로 고정한다.
+   * 환경마다 GitHub 환경 변수 REVIEW_WITHOUT_QUALITY_CONSENT로 켜고 끈다(배포 후 반영).
+   * ⚠ 게시된 개인정보처리방침은 "동의한 자료만 열람"을 약속한다. 외부 이용자가 쓰기 시작하면
+   *   프로덕션에서는 끄거나 고지를 먼저 바꿔야 한다. 켜고 끄는 결정은 운영자가 한다.
    */
   reviewWithoutQualityConsent:
-    env("REVIEW_WITHOUT_QUALITY_CONSENT", "false") === "true" &&
-    env("PUBLIC_URL", "http://localhost:8080") !== PRODUCTION_PUBLIC_URL,
+    env("REVIEW_WITHOUT_QUALITY_CONSENT", "false") === "true",
 
   /**
    * CORS 허용 출처. 콤마로 구분해 CORS_ORIGINS로 덮어쓴다.
