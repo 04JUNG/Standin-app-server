@@ -2,35 +2,49 @@
 
 Default off. Requires `FBX_EXPORT_ENABLED=true`, `SCENE_EXPORT_ENABLED=true`,
 `SCENE_REFINEMENT_ENABLED=true`, and a private `SCENE_REFINEMENT_BASE_URL` plus
-`SCENE_REFINEMENT_TOKEN` (32+ characters). The separate upstream worker is
-`Standin-server/src/scene_refinement`. Keep its API internal. Its own request
-budget is `SCENE_REFINEMENT_TIMEOUT_MS` (default 900000); `/analyze` is unchanged.
-A job without a retained original input does not advertise scene refinement.
+`SCENE_REFINEMENT_TOKEN` (32+ characters). No flag defaults are changed here.
+The separate worker is `Standin-server/src/scene_refinement`; keep it internal.
+Its BFF HTTP request budget is `SCENE_REFINEMENT_TIMEOUT_MS` (default 900000);
+`/analyze` is unchanged. Capability eligibility does not claim worker readiness.
 
-1. The client supplies the same reviewed per-person references used by basic
-   scene export, plus `prepare: true` to `POST /v1/analysis/jobs/:id/scene`.
-2. Existing ownership, confirmed selection, export route and file SHA checks run.
-   The BFF loads only the owned job's original input. Inference freshly proposes
-   directions, scope, registered base poses and owned arm/interaction goals.
-3. Every proposed BVH passes the existing library gate. Full sources are converted
-   with the selected body, shape and hands, then the scene worker crops and fits
-   the final scene. A different uncalibrated body fails; no master substitution.
-4. The BFF revalidates the original job/reviews and pins the final FBX and its PNG
-   under an owner/job/source bound 15-minute `reviewKey`. The preparation response
-   includes `version`, `artifactSha256`, `previewSha256`, `previewBase64`,
-   `personCount`, and a path-free change summary.
-5. The client shows the scene and requires explicit confirmation. Download posts
-   the same original references and `reviewKey`. Source/body/hand checks run again,
-   and exactly the pinned file is returned with version `scene-refinement-v4`.
-   The client verifies its SHA against the reviewed artifact before native save.
+The public contract is [scene-save-v1](scene-save-contract.md). Legacy `{persons}`
+and explicit `original-selection` always compose the existing rough integrated
+FBX. Only negotiated `auto-correct-v4` enters prepare/review/save. Missing worker,
+original, or review never silently falls back to the original-selection mode.
 
-Expired receipts, changed selections, changed bytes or process restarts require
-another review. The public client cannot provide yaw, joint coordinates, paths,
-new pose IDs, body overrides or a scene placement manifest. The original scope
-and candidate export gates remain intact; preparation is an isolated derived
-scene review. Disabling refinement preserves the existing `rough-layout-v1` path.
+Preparation reuses ownership, confirmed selection, per-person export routes,
+body/hand revisions, registered BVH gates and SHA checks. It reads the owned
+original, asks the worker for a plan, converts authorized full sources with the
+selected body/shape/hands, and builds the final scene. Unsupported calibration
+fails; no master-body substitution. Public summary is derived from the owned
+baseline and validated worker results, strips private notes and paths, and never
+invents a baseline direction. Final source checks still run after preparation.
 
-The local 3-cut comparison exercises real scene inference, Converter and this
-route with fixed owned-job/confirmed-review fixtures. It does not establish that
-the installed staging app or CSP adopts the embedded camera. Exact CSP framing
-and deployment remain separate validation steps.
+The pinned final FBX/summary is published under a random 15-minute scene review
+key. `sceneStorage.ts` uses immutable S3 objects at
+`installations/:owner/jobs/:job/scene-receipts/:key.json`. This is separate from
+`converter/framedStorage.ts` per-person shared receipts. Current develop already
+had scene S3 publication; this change scopes the memory cache to a route instance,
+persists the review contract version, and tests a second instance loading the
+stored file. S3 publication must finish before the key reaches the client.
+Production without a bucket fails preparation. Development without a bucket can
+use memory but loses reviews on replica changes/restarts and requests preparation
+again. Memory eviction never regenerates an acknowledged file.
+
+Save and optional preview require the exact review version and artifact SHA as
+well as the same owner/job/source binding. The BFF rechecks person guards and
+returns the stored bytes; it never repeats worker preparation after confirmation.
+The client must hash downloaded bytes before native save. Optional preview failure
+does not invalidate the final file. Existing per-person guard errors propagate.
+Receipt schema v2 rejects earlier or corrupted stored receipts; prepare again.
+
+HTTP cancellation stops client waiting; no API promises worker/Blender operation
+cancellation. Timeout/disconnect may leave computation running. A discarded review
+expires naturally. Treat user cancellation as a separate UX state, not export
+failure. Worker generic 422 errors and private plan affinity/readiness remain
+explicit integration gaps described in the public contract.
+
+Validation in this change uses local job/export/worker/storage fixtures. It is not
+an installed-app or Staging E2E result. Real three-cut integration with a prepared
+worker, app and floating bar, native save and matching SHA remains pending. CSP
+camera adoption and exact absolute screen framing are separate validation steps.

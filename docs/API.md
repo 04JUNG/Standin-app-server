@@ -45,24 +45,39 @@ tools/basic-closeup-fixture.mjs`로 loopback fixture를 실행한다. 서버의 
 main 기반 로컬 재검증: 타입 검사 통과, 전체 테스트 701개 통과/2개 기존 skip/실패 0.
 기본 계획의 과거 결과 조회 보완·범위 변경 시 무효화·권한 유지 테스트를 포함한다.
 
-## v4 장면 보정과 최종 장면 확인
+## v4 장면 보정과 최종 장면 확인 (scene-save-v1)
 
-기본 꺼짐입니다. 기존 scene export 조건에 더해 `SCENE_REFINEMENT_ENABLED=true`,
-내부 `SCENE_REFINEMENT_BASE_URL`·토큰, 작업 원본 이미지가 있을 때만
-`capabilities.sceneRefinement=true`를 제공합니다. 추론의 `/analyze` 제한 시간은 변경하지 않습니다.
+기본 꺼짐입니다. 기존 `{persons}` 요청은 v4 flag가 켜져도 항상 기본 통합
+`rough-layout-v1` FBX를 저장합니다. 자동 보정은 `contractVersion: "scene-save-v1"`와
+`saveMode: "auto-correct-v4"`를 모두 명시한 요청에만 적용됩니다. 새 클라이언트의
+기본 저장 값은 `saveMode: "original-selection"`입니다. 보정 실패 시 자동 모드 전환은 없습니다.
 
-같은 scene endpoint에 `{ persons, prepare: true }`를 보내면 원본을 새로 분석하고 방향·범위·팔·관계·배치를
-보정합니다. `persons`는 위의 확인한 FBX 참조 형식 그대로이며 클라가 좌표·관절·새 pose ID를 지정하지 않습니다.
-응답은 `{ version: "scene-refinement-v4", reviewKey, artifactSha256, previewSha256, previewBase64,
-personCount, summary }`입니다. PNG를 확인한 사용자가 저장을 누르면 같은 `persons`와
-`reviewKey`로 POST합니다. 응답은 검수한 것과 동일한 SHA의 binary FBX입니다.
-검수 키는 소유자·작업·원본 참조에 묶이고 15분 후 또는 서버 재시작 시 사라집니다.
-만료·선택 변경 시 409 `SCENE_REVIEW_REQUIRED`이며 새 확인이 필요합니다.
+Job 결과의 `capabilities.sceneSaveContract`는 지원 버전·가용 모드·확인 버전·900초 TTL·취소
+범위를 제공합니다. 기존 `sceneExport`, `sceneRefinement`도 유지합니다. 보정 capability는
+flag/URL/토큰/보관 원본 등의 자격 조건이며 worker live readiness를 보장하지 않습니다.
 
-선택 체형·손·출력 범위와 후보 확정·등록 라이브러리·원본 SHA 검증은 유지합니다.
-지원하지 않는 체형 calibration이나 보정 실패는 오류로 표시합니다. 기능 꺼짐 또는 원본 미보관 작업은
-기존 기본 장면 경로를 사용합니다. CSP의 카메라 채택과 원본 절대 화면 크기 일치는 이 계약으로 보장하지 않습니다.
-설정·내부 호출·검증 경계는 [v4 장면 저장](scene-refinement-v4.md)을 참고하세요.
+prepare에는 명시 계약·보정 모드와 `prepare:true`, 기존 reviewed `persons`를 보냅니다.
+응답은 `reviewVersion:"scene-review-v1"`, `expiresAt`, `reviewKey`, `artifactSha256`,
+인물별 before/after summary, `personCount`, `fileCount:1`을 포함합니다.
+기존 paired PNG 및 `artifactOnly:true`의 `verified-scene-fbx-v1` 경로를 모두 지원합니다.
+확인·미리보기에는 동일한 `persons`, 계약·모드, `reviewVersion`, `reviewKey`, `artifactSha256`가
+필요합니다. 사용자 확인 후에도 소유권·후보 확정·체형/손 revision·원본 SHA를 다시 검사하고
+준비한 동일 바이트만 반환하며 새로 보정하지 않습니다. 실제 다운로드 SHA도 확인해야 합니다.
+
+scene 영수증은 기존 인물별 shared receipt와 별도의 owner/job `scene-receipts/` S3 객체로
+공유합니다. 저장 성공 전 키를 반환하지 않으며 다른 BFF 인스턴스도 같은 파일을 읽습니다.
+개발 환경에서 공유 버킷이 없으면 인스턴스별 메모리만 사용하며 다른 인스턴스·재시작은
+`SCENE_REVIEW_REQUIRED` 재준비로 복구합니다. production에서 버킷이 없으면 준비를 실패시킵니다.
+
+만료 `SCENE_REVIEW_EXPIRED`, 원본 변경 `SCENE_SOURCE_CHANGED`, 지원 불가 체형
+`SCENE_UNSUPPORTED_BODY`, 사용 불가 `SCENE_UNAVAILABLE`, busy `SCENE_BUSY`,
+제한 시간 `SCENE_TIMEOUT`, 무결성 `SCENE_INTEGRITY`를 구분합니다. 오류별
+`details.recovery`/`allowedActions`를 사용하고 임의 원인·진행률을 생성하지 않습니다.
+HTTP 요청 취소는 대기 중단이며 worker 연산 중단 보장이 없습니다. 서버 취소 API는 없습니다.
+
+정확한 JSON·오류/복구·summary·취소·앱/바 상태 계약과 worker 미해결 범위는
+[장면 저장 계약](scene-save-contract.md), 내부 경계는 [v4 장면 저장](scene-refinement-v4.md)을 참고하세요.
+실제 최신 Staging 설치 앱의 3컷 검증은 worker 준비 후 별도로 필요합니다.
 
 ## 선택 품질 검토 동의 (2026-10-19)
 

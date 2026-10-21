@@ -1,3 +1,5 @@
+import { sceneReceiptStorageAvailable } from "../pose/sceneStorage.js";
+import { sceneSaveContract } from "../pose/sceneContract.js";
 import { createSemanticModelRoutes } from "../semantic/model-preview.js";
 import { createHandPreviewRoutes } from "../hands/preview.js";
 import { semanticCapabilities } from "../semantic/contract.js";
@@ -326,7 +328,14 @@ jobsRoutes.get("/:id/result", async (c) => {
       })),
     })),
     capabilities: {
+      sceneSaveContract: sceneSaveContract(
+        !result.candidatesByPerson.some(p => p.candidates.some(c => c.source === "generation")) &&
+        config.sceneExportEnabled && converterEnabled() && result.source !== "semantic" && !!result.image,
+        !!job.inputS3Key && sceneReceiptStorageAvailable() && config.sceneRefinementEnabled &&
+        !!config.sceneRefinementBaseUrl && !!config.sceneRefinementToken,
+      ),
       sceneRefinement:
+        sceneReceiptStorageAvailable() &&
         !!job.inputS3Key &&
         config.sceneRefinementEnabled &&
         !!config.sceneRefinementBaseUrl &&
