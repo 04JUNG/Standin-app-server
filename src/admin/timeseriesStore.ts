@@ -9,6 +9,9 @@ import { KST_OFFSET_SECONDS, type TimeseriesQuery, type TimeseriesRow } from "./
  * 어제 왔다가 오늘 다시 온 사람이 어제 칸에서 사라진다. 그래서 그 구간에 앱 이벤트나
  * Job을 하나라도 남긴 설치를 센다. 이벤트 시각은 기기가 보낸 `occurred_at`이다.
  *
+ * 설치·Job 수는 품질 동의와 상관없이 전체를 센다(ops_count_jobs). 앱 이벤트와 다운로드는
+ * 동의한 설치에서만 수집되므로 그쪽 뷰를 쓴다.
+ *
  * 구간 시작은 KST 자정에 맞춘다(`bucketStart`와 같은 식). 합산은 전부 SQL에서 끝낸다.
  */
 export async function activityTimeseries(params: TimeseriesQuery, nowMs = Date.now()): Promise<TimeseriesRow[]> {
@@ -20,8 +23,7 @@ export async function activityTimeseries(params: TimeseriesQuery, nowMs = Date.n
     `WITH seen AS (
        SELECT installation_id, occurred_at AS at FROM quality_review_analytics_events WHERE occurred_at >= $1
        UNION ALL
-       SELECT installation_id, created_at FROM quality_review_jobs
-        WHERE created_at >= $1 AND installation_id IS NOT NULL
+       SELECT installation_id, created_at FROM ops_count_jobs WHERE created_at >= $1
      ),
      active AS (
        SELECT ${bucketExpr("at")} AS bucket, count(DISTINCT installation_id)::int AS active_installations
@@ -32,7 +34,7 @@ export async function activityTimeseries(params: TimeseriesQuery, nowMs = Date.n
               count(*)::int AS jobs_started,
               count(*) FILTER (WHERE status = 'completed')::int AS jobs_completed,
               count(*) FILTER (WHERE status = 'failed')::int AS jobs_failed
-         FROM quality_review_jobs WHERE created_at >= $1 AND installation_id IS NOT NULL GROUP BY 1
+         FROM ops_count_jobs WHERE created_at >= $1 GROUP BY 1
      ),
      download_counts AS (
        SELECT ${bucketExpr("occurred_at")} AS bucket, count(*)::int AS downloads
