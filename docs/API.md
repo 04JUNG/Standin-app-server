@@ -11,6 +11,40 @@
 variant 없는 요청은 기존 PNG 계약입니다. opt-in 응답은 승인된 native 512 JPEG 또는 동일 source·scope의 검증된 기존 정면 PNG입니다. 자산 누락 시 사유를 기록하며 손상을 다른 그림으로 숨기지 않습니다. 상세 자산/좌표 규칙은 Standin-server의 `docs/ROUGH_YAW8_PREVIEWS.md`를 참조합니다. 회귀는 `src/poster-yaw.test.ts` 및 기존 poster/presentation/CORS 테스트에 포함합니다.
 
 
+
+## 머리·어깨~머리 기본 미리보기 일시 중단 (2026-10-21)
+
+추가 실험 전까지 `BASIC_CLOSEUP_PREVIEW_ENABLED=false`로 아래 기본 모델 연결을 끈다.
+신규 응답·과거 작업 결과 GET 모두 `basic_model.preview`를 제공하지 않고 저장된 stale preview도
+응답에서 제거한다. DB의 원본 계획·후보·기존 권한은 변경하지 않는다. 클라이언트 수정·재설치 없이
+새 결과 조회부터 적용하며, 이미 열려 있는 화면은 결과를 다시 조회해야 한다.
+공유 template API와 일반 포즈·체형·반신·수동 범위 크롭은 유지한다.
+추론 서버의 기본 모델 자동 분기도 별도 PR로 끈다. 미완성 수동 기본 모델 저장 기능은 포함하지 않는다.
+
+## 기본 클로즈업 미리보기 연결 (로컬 구현, 2026-10-21)
+
+정상 `dynamic-pose-presentation-v1`의 `route=basic_model`, `status=basic_reference`,
+`search_status=ok`, `basic_model.status=planned`이고 후보/오류가 없을 때만
+`basic_model.preview`를 응답에 추가한다. 과거 작업의 결과 GET도 같은 순수 변환을
+적용하며 DB·원본 판단·권한은 변경하지 않는다. 현재 resolved 범위가 계획 범위와
+같은 `head` 또는 `shoulder_head`여야 한다. 수동 범위 변경 시 stale preview를 제거한다.
+
+```json
+{"version":"basic-closeup-preview-v1","template_url":"/v1/pose-candidates/default-body-template/shoulder_head","scope":"shoulder_head","pose":"neutral","preview_only":true}
+```
+
+기존 인증된 template API와 Converter `crop_meshes`로 미리 잘라 둔 승인 기본 모델을
+재사용한다. 표시 시점의 추가 추론/검색/생성/Converter 호출은 없다. 계획의
+`preview_status=not_requested`를 준비 완료로 바꾸지 않는다. 앱이 메시를 검증·렌더한
+뒤 이미지 준비를 표시한다. 고개 방향·기울기·선택 체형·손 적용 또는 검색 성공을
+의미하지 않는다. 후보 추가와 선택·refine·export 권한 변경은 없다.
+
+로컬 시각 검증: 빌드 후 `BASIC_CLOSEUP_TEMPLATE_DIR=/approved/human-templates node
+tools/basic-closeup-fixture.mjs`로 loopback fixture를 실행한다. 서버의 기존 자산과
+계약을 사용하지만 합성 Job이며 실제 설치 앱/클라우드 배포 검증을 대신하지 않는다.
+main 기반 로컬 재검증: 타입 검사 통과, 전체 테스트 701개 통과/2개 기존 skip/실패 0.
+기본 계획의 과거 결과 조회 보완·범위 변경 시 무효화·권한 유지 테스트를 포함한다.
+
 ## v4 장면 보정과 최종 장면 확인
 
 기본 꺼짐입니다. 기존 scene export 조건에 더해 `SCENE_REFINEMENT_ENABLED=true`,
@@ -341,7 +375,7 @@ Retry-After: 41230
       "personCount": 2,
       "selectionCount": 2,
       "hasSelection": true,
-      "thumbnailUrl": "/v1/pose-candidates/{poseId}/thumbnail?view=front",
+      "thumbnailUrl": "/v1/pose-candidates/{poseId}/reference-thumbnail?revision=human-poster-v1",
       "inputAvailable": true,
       "inputWidth": 1920,
       "inputHeight": 1080
@@ -355,7 +389,9 @@ Retry-After: 41230
 
 > ⚠ `thumbnailUrl`은 **입력 러프가 아니라 매칭된 포즈 후보**의 썸네일 경로다. 확정 선택한
 > 후보를 우선 쓰고, 없으면 첫 인물의 1순위로 폴백한다. 후보가 없는 Job(실패 등)은 `null`.
-> 원본을 20건 내려보내면 수십 MB가 되지만 후보 썸네일은 이미 하루 캐시되는 작은 PNG다.
+> 기본 인체의 정면·전신 참고 PNG를 사용한다. 새 표현 URL과 `revision=human-poster-v1`로 구형 JPEG 캐시와 분리한다.
+> `POSE_THUMBNAIL_REVISION`(기본값 `DEPLOYMENT_VERSION`)이 있으면 `assetRevision`도 URL에 붙는다.
+> 원본/인체/이미지 해시를 확인한 정적 포스터만 반환하고 `private, no-store`를 적용한다. 누락·손상 시 404이며 구형 관절 그림으로 대체하지 않는다.
 > 인증 헤더가 필요하므로 절대 URL이 아닌 상대 경로를 준다.
 
 > ⚠ `inputAvailable`은 입력 원본이 S3에 남아 있는지다. **DB의 Job은 365일, S3 객체는
@@ -1517,3 +1553,13 @@ fallbackMode를 high/none으로 승격하지 않는다. preview 객체 자체의
 유지되므로 활성화 배포에서는 true로 설정해야 한다. 추론의 REFINE_ENABLED도 1이어야 한다.
 배포 순서는 추론 → BFF → 클라이언트다. 과거 Job은 소급 승격하지 않으며 새로 분석해야 한다.
 Converter 코드·모델·라이브러리 자산 변경은 필요 없다.
+
+
+### 작업 기록·대시보드용 기본 인체 썸네일
+
+- `GET /v1/pose-candidates/{poseId}/reference-thumbnail` — 기존 설치 인증 필요.
+- `GET /v1/admin/review/pose-candidates/{poseId}/reference-thumbnail` — 기존 관리자 인증·검토 guard 적용.
+
+공용 포즈 라이브러리 자산만 읽는다. 등록/격리 검사를 통과한 BVH의 SHA를 서버가 직접 계산하고, `scope=full` 인체 포스터의 source·character·revision·PNG 해시를 검증한다. `pose-only` 폴백은 거절한다. 성공·실패 모두 캐시를 저장하지 않으며 Converter·선택 변경·렌더 작업을 실행하지 않는다.
+
+이 썸네일은 정면·전신의 기본 인체 참고이며 선택 체형/손/최종 출력 범위 또는 검색 시점을 표현하지 않는다. 대시보드의 후보·갤러리 목록/확대도 이 경로를 사용하며, 갤러리 확대는 정면 참고 한 장을 표시한다. 종전 시점별 `/thumbnail?view=...` API는 호환성을 위해 유지한다.
