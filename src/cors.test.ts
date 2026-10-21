@@ -7,6 +7,15 @@ import { appCors } from "./cors.js";
 for (const origin of ["tauri://localhost", "http://tauri.localhost", "http://localhost:1420"]) {
   test(`preview integrity headers are readable from ${origin}`, async () => {
     const headers = {
+      "X-Standin-Poster-Variant": "rough-yaw8-v1",
+      "X-Standin-Poster-Yaw": "45",
+      "X-Standin-Poster-Fallback": "none",
+      "X-Standin-Poster-Camera-Source": "fixed_117",
+      "X-Standin-Poster-Requested-Yaw": "30",
+      "X-Standin-Projection-Matches-Search": "false",
+      "X-Standin-Poster-Asset-Version": "scope8-v1",
+      "X-Standin-Asset-Library-Version": "lib-20261021-12345678",
+      "X-Standin-Preview-View": "yaw_315",
       "Content-Type": "image/png",
       "X-Standin-Body-Revision": "4",
       "X-Standin-Character-SHA256": "a".repeat(64),

@@ -558,8 +558,13 @@ export function getPosePoster(
   poseId: string,
   sourceSha256: string,
   scope = "full",
+  options?: import("./poster-yaw.js").PosterOptions,
 ): Promise<Response> {
   const params = new URLSearchParams({ source_sha256: sourceSha256, scope });
+  if (options) {
+    params.set("variant", options.variant);
+    params.set("view", options.view);
+  }
   return fetch(
     `${config.inferenceBaseUrl}/pose/${encodeURIComponent(poseId)}/poster?${params}`,
     {
