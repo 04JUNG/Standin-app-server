@@ -91,18 +91,14 @@ function raw() {
     export_allowed: false,
   };
 }
-test("close-up plan uses the existing cropped neutral template without adding candidates", () => {
+test("head and shoulder-head basic previews stay paused for new and persisted jobs", () => {
   for (const scope of ["head", "shoulder_head"]) {
     const value = { ...raw(), route: "basic_model", status: "basic_reference", search_status: "ok",
       output_scope: scope, library_candidates: [], generated_candidates: [],
       generation_status: "not_requested", preview_status: "not_requested",
       basic_model: { status: "planned", output_scope: scope } };
     const mapped = mapPosePresentation(value, 0, "job")!;
-    assert.deepEqual(mapped.presentation.basic_model?.preview, {
-      version: "basic-closeup-preview-v1", scope,
-      template_url: `/v1/pose-candidates/default-body-template/${scope}`,
-      pose: "neutral", preview_only: true,
-    });
+    assert.equal(mapped.presentation.basic_model?.preview, undefined);
     assert.deepEqual(mapped.assets, {});
     assert.equal(mapped.presentation.library_candidates.length, 0);
     assert.equal(mapped.presentation.export_allowed, false);
@@ -110,6 +106,12 @@ test("close-up plan uses the existing cropped neutral template without adding ca
     // Reading a persisted old result upgrades only the response, not stored data.
     const old: typeof mapped.presentation = { ...mapped.presentation, basic_model: value.basic_model };
     assert.equal(old.basic_model?.preview, undefined);
+    const cached = { ...mapped.presentation, basic_model: { ...mapped.presentation.basic_model!,
+      preview: { version: "basic-closeup-preview-v1" as const, scope: scope as "head" | "shoulder_head",
+        template_url: `/v1/pose-candidates/default-body-template/${scope}`, pose: "neutral" as const,
+        preview_only: true as const } } };
+    assert.deepEqual(withBasicCloseupPreview(cached), mapped.presentation);
+    assert.ok(cached.basic_model.preview, "stored data is not mutated");
     assert.deepEqual(withBasicCloseupPreview(old), mapped.presentation);
     assert.equal(old.basic_model?.preview, undefined);
     for (const invalid of [

@@ -1,5 +1,14 @@
 # API 계약 — BFF가 클라(Tauri)에 노출하는 `/v1`
 
+## 머리·어깨~머리 기본 미리보기 일시 중단 (2026-10-21)
+
+추가 실험 전까지 `BASIC_CLOSEUP_PREVIEW_ENABLED=false`로 아래 기본 모델 연결을 끈다.
+신규 응답·과거 작업 결과 GET 모두 `basic_model.preview`를 제공하지 않고 저장된 stale preview도
+응답에서 제거한다. DB의 원본 계획·후보·기존 권한은 변경하지 않는다. 클라이언트 수정·재설치 없이
+새 결과 조회부터 적용하며, 이미 열려 있는 화면은 결과를 다시 조회해야 한다.
+공유 template API와 일반 포즈·체형·반신·수동 범위 크롭은 유지한다.
+추론 서버의 기본 모델 자동 분기도 별도 PR로 끈다. 미완성 수동 기본 모델 저장 기능은 포함하지 않는다.
+
 ## 기본 클로즈업 미리보기 연결 (로컬 구현, 2026-10-21)
 
 정상 `dynamic-pose-presentation-v1`의 `route=basic_model`, `status=basic_reference`,
