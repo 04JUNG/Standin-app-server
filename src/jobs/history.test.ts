@@ -108,9 +108,9 @@ test("실패한 job은 집계가 비어 있어도 0으로 매핑된다", () => {
   assert.equal(item.inputAvailable, false);
 });
 
-test("썸네일은 후보의 상대 경로로 만든다", () => {
-  const item = toHistoryItem(row({ thumb_pose_id: "pose/1 a", thumb_view: "3/4" }));
-  assert.equal(item.thumbnailUrl, "/v1/pose-candidates/pose%2F1%20a/thumbnail?view=3%2F4");
+test("작업 기록은 view 없이도 새 인체 포스터 상대 경로를 만든다", () => {
+  const item = toHistoryItem(row({ thumb_pose_id: "pose/1 a", thumb_view: null }));
+  assert.equal(item.thumbnailUrl, "/v1/pose-candidates/pose%2F1%20a/reference-thumbnail?revision=human-poster-v1");
 });
 
 test("limit+1건이 오면 초과분은 버리고 nextCursor를 낸다", () => {

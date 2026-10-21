@@ -4,7 +4,7 @@
 // 테스트가 없으므로, 페이지 경계와 입력 검증처럼 틀리기 쉬운 부분을 순수 함수로 빼야
 // `node --test`로 확인할 수 있다.
 import type { JobStatus } from "./store.js";
-import { poseThumbnailUrl } from "../pose-thumbnail.js";
+import { humanThumbnailUrl } from "../pose-thumbnail.js";
 
 /**
  * 커서는 `(created_at, id)` 복합 키다.
@@ -142,9 +142,9 @@ export interface JobHistoryItem {
   selectionCount: number;
   hasSelection: boolean;
   /**
-   * 목록 썸네일은 **원본 러프가 아니라 매칭된 포즈 후보**다. 원본을 20건 내려보내면
-   * 수십 MB가 되지만, 후보 썸네일은 이미 `private, max-age=86400`으로 캐시되는 작은
-   * PNG다. 인증 헤더가 필요하므로 절대 URL이 아닌 상대 경로를 준다(mapping.ts와 동일).
+   * 목록은 매칭된 포즈 후보의 기본 인체 포스터를 사용한다.
+   * 정면·전신 참고 PNG이며 최종 체형/손/출력 범위를 뜻하지 않는다.
+   * 원본 러프나 구형 관절 그림을 반환하지 않는다. 인증 헤더가 필요하므로 상대 경로다.
    */
   thumbnailUrl: string | null;
   /** 입력 원본이 S3에 남아 있는가. 버킷 lifecycle이 90일이라 오래된 job은 false다. */
@@ -166,8 +166,8 @@ export function toHistoryItem(row: JobHistoryRow): JobHistoryItem {
     selectionCount,
     hasSelection: selectionCount > 0,
     thumbnailUrl:
-      row.thumb_pose_id && row.thumb_view
-        ? poseThumbnailUrl(row.thumb_pose_id, row.thumb_view)
+      row.thumb_pose_id
+        ? humanThumbnailUrl(row.thumb_pose_id)
         : null,
     inputAvailable: row.has_input,
     inputWidth: row.input_width,
