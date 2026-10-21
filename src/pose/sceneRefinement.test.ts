@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { Job } from "../jobs/store.js";
 import { prepareRefinedScene } from "./sceneRefinement.js";
-import { sha256Hex } from "../converter/client.js";
+import { ConverterError, sha256Hex } from "../converter/client.js";
 import type { FramedInput } from "../converter/framing.js";
 const fbx = Buffer.from("Kaydara FBX Binary  \0\x1a\0full"),
   png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -18,7 +18,7 @@ function fixture(replace = false) {
       candidatesByPerson: [
         {
           personIndex: 4,
-          outputScope: { resolved: "half" },
+          outputScope: { selection: "half", resolved: "half" },
           candidates: [
             {
               id: "pick",
@@ -167,4 +167,66 @@ test("older clients retain the paired scene preview contract until they opt into
   assert.equal(scene.artifactContract, undefined);
   assert.equal(scene.preview, png.toString("base64"));
   assert.equal(f.calls[0]!.previewFormat, undefined);
+});
+
+test("summary compares owned selection with validated final results and strips private worker fields", async () => {
+  const f = fixture(true);
+  const original = f.deps.request;
+  f.deps.request = async (stage, input) => {
+    const result = await original(stage, input);
+    if (stage === "build") Object.assign(result.people[0], {
+      baseline_pose_id: "original", interaction: "reaching",
+      direction: { torso_camera_yaw: 45, torso_label: "front_right", head_label: "front",
+        head_camera_yaw: 0, head_relative_yaw: -45, head_pitch_degrees: null,
+        notes: ["private model reasoning"], path: "/operator/private" },
+    });
+    return result;
+  };
+  const result = await prepareRefinedScene("owner", f.job, f.refs, f.sources, f.deps, true);
+  assert.deepEqual(result.summary, [{
+    personIndex: 4, previousPoseId: "original", poseId: "new_pose",
+    previousOutputScope: "half", outputScope: "full", poseChanged: true, outputScopeChanged: true,
+    previousDirection: null, directionChanged: null,
+    direction: { torso_camera_yaw: 45, torso_label: "front_right", head_label: "front",
+      head_camera_yaw: 0, head_relative_yaw: -45, head_pitch_degrees: null },
+    interaction: "reaching", armGoalCount: 0,
+  }]);
+  assert.ok(!JSON.stringify(result.summary).includes("private"));
+});
+test("unreported direction and interaction stay unknown, not unchanged", async () => {
+  const f = fixture();
+  const result = await prepareRefinedScene("owner", f.job, f.refs, f.sources, f.deps, true);
+  assert.equal(result.summary[0].direction, null);
+  assert.equal(result.summary[0].previousDirection, null);
+  assert.equal(result.summary[0].directionChanged, null);
+  assert.equal(result.summary[0].interaction, null);
+  assert.equal(result.summary[0].poseChanged, false);
+});
+for (const change of ["identity", "duplicate", "pose", "baseline", "scope", "direction", "missing", "previewHash"] as const)
+  test(`malformed final ${change} cannot produce a scene review`, async () => {
+    const f = fixture();
+    const original = f.deps.request;
+    f.deps.request = async (stage, input) => {
+      const result = await original(stage, input);
+      if (stage !== "build") return result;
+      const people = result.people as Record<string, unknown>[];
+      if (change === "identity") people[0].person_index = 9;
+      if (change === "duplicate") people.push(people[0]);
+      if (change === "pose") people[0].pose_id = "not_planned";
+      if (change === "baseline") people[0].baseline_pose_id = "not_selected";
+      if (change === "scope") people[0].output_scope = "invented";
+      if (change === "direction") people[0].direction = { head_relative_yaw: "invalid" };
+      if (change === "missing") people.splice(0);
+      if (change === "previewHash") result.preview_sha256 = "b".repeat(64);
+      return result;
+    };
+    await assert.rejects(prepareRefinedScene("owner", f.job, f.refs, f.sources, f.deps, true),
+      (error: unknown) => ["SCENE_INTEGRITY", "CONVERTER_INTEGRITY"].includes((error as { code: string }).code));
+  });
+test("explicit converter calibration mismatch is unsupported body; other 409 errors are not guessed", async () => {
+  const f = fixture();
+  f.deps.convertFramed = async () => { throw new ConverterError("CONVERTER_REJECTED", "private", null, 409, "CHARACTER_SHA256_MISMATCH"); };
+  await assert.rejects(prepareRefinedScene("owner", f.job, f.refs, f.sources, f.deps, true), { code: "SCENE_UNSUPPORTED_BODY" });
+  f.deps.convertFramed = async () => { throw new ConverterError("CONVERTER_REJECTED", "private", null, 409, "SOURCE_BVH_SHA256_MISMATCH"); };
+  await assert.rejects(prepareRefinedScene("owner", f.job, f.refs, f.sources, f.deps, true), { code: "CONVERTER_REJECTED" });
 });

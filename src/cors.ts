@@ -54,6 +54,8 @@ export function appCors(origins: string[]) {
       "X-Standin-Artifact-Contract",
       "X-Standin-Person-Count",
       "X-Standin-Scene-Version",
+      "X-Standin-Scene-Contract",
+      "X-Standin-Scene-Save-Mode",
       "X-Standin-Preview-Artifact-SHA256",
     ],
     credentials: true,
