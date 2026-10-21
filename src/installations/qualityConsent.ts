@@ -162,7 +162,7 @@ export async function lockQualityConsent(
 /**
  * 관리자 열람 범위를 정하는 뷰. 관리자 SQL은 모두 이 뷰만 읽는다.
  *
- * withoutConsent(staging 전용, `config.reviewWithoutQualityConsent`)이면 동의 조건을 빼고
+ * withoutConsent(`config.reviewWithoutQualityConsent`, 환경 변수로 켜고 끔)이면 동의 조건을 빼고
  * 철회·삭제 요청만 거른다. 뷰는 배포마다 다시 만들어지므로 스위치를 끄고 재배포하면
  * 원래 범위로 돌아간다.
  */
@@ -213,6 +213,21 @@ const JOB_SCOPED_VIEWS = [
   )
   .join("\n");
 
+/**
+ * 집계 전용 뷰. 품질 동의와 상관없이 "몇 곳이 몇 건 돌렸나"를 세는 데만 쓴다.
+ *
+ * 열이 세는 데 필요한 것뿐이다 — 원본 키·결과·작업 상세가 없어 이 뷰로는 내용을 볼 수 없다.
+ * 철회·삭제 요청 설치는 뺀다. 개별 설치를 화면에 늘어놓는 SQL은 이 뷰를 쓰지 않는다.
+ */
+const OPS_COUNT_VIEWS = `
+  CREATE OR REPLACE VIEW ops_count_installations AS
+    SELECT id, created_at, last_seen_at FROM installations
+    WHERE revoked_at IS NULL AND deletion_requested_at IS NULL;
+  CREATE OR REPLACE VIEW ops_count_jobs AS
+    SELECT j.id, j.installation_id, j.status, j.created_at
+    FROM jobs j JOIN ops_count_installations i ON i.id = j.installation_id;
+`;
+
 export const QUALITY_CONSENT_SCHEMA = `
   ALTER TABLE installations ADD COLUMN IF NOT EXISTS quality_personal_data BOOLEAN NOT NULL DEFAULT FALSE;
   ALTER TABLE installations ADD COLUMN IF NOT EXISTS quality_content_license BOOLEAN NOT NULL DEFAULT FALSE;
@@ -240,4 +255,5 @@ export const QUALITY_CONSENT_SCHEMA = `
   CREATE INDEX IF NOT EXISTS quality_receipts_subject ON quality_consent_receipts(subject_hash);
 
   ${qualityReviewViews(config.reviewWithoutQualityConsent)}
+  ${OPS_COUNT_VIEWS}
 `;

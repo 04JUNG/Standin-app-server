@@ -1693,10 +1693,10 @@ function overviewRender(data) {
   const k = data.kpis;
   const n = (value) => (value === null || value === undefined ? "—" : value);
   $("kpis").innerHTML =
-    kpiCard("활성 설치", n(k.activeInstallations), "기간 중 접속 · 전체 " + k.totalInstallations + "곳") +
-    kpiCard("오늘 활성", n(k.activeToday), "최근 24시간 접속") +
-    kpiCard("분석", n(k.jobsStarted), "완료 " + k.jobsCompleted + "건") +
-    kpiCard("선택률", pct(k.selectionRate), "완료 중 고른 Job " + k.jobsSelected + "건") +
+    kpiCard("활성 설치", n(k.activeInstallations), "기간 중 접속 · 전체 " + k.totalInstallations + "곳 · 동의 무관") +
+    kpiCard("오늘 활성", n(k.activeToday), "최근 24시간 접속 · 동의 무관") +
+    kpiCard("분석", n(k.jobsStarted), "완료 " + k.jobsCompleted + "건 · 동의 무관") +
+    kpiCard("선택률", pct(k.selectionRate), "품질 동의 Job 중 고른 " + k.jobsSelected + "건") +
     kpiCard("다운로드", n(k.downloads), "내보낸 Job " + k.jobsExported + "건 · 전환 " + pct(k.exportRate)) +
     kpiCard("실패율", pct(k.failureRate), "실패 " + k.jobsFailed + "건",
       k.failureRate !== null && k.failureRate >= 10 ? "bad" : k.failureRate !== null && k.failureRate >= 5 ? "warn" : "") +
