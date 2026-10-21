@@ -1,4 +1,5 @@
-import { loadSceneReceipt, saveSceneReceipt } from "./sceneStorage.js";
+import { SCENE_SAVE_CONTRACT, SCENE_REVIEW_VERSION, SCENE_REVIEW_TTL_MS, SceneError, sceneErrorDetails } from "./sceneContract.js";
+import { loadSceneReceipt, saveSceneReceipt, sceneReceiptStorageAvailable, type SceneReceipt } from "./sceneStorage.js";
 import { renderFinalPreview } from "../converter/finalPreview.js";
 import { randomBytes } from "node:crypto";
 import { prepareRefinedScene, type RefinedScene } from "./sceneRefinement.js";
@@ -23,18 +24,22 @@ const defaults = {
   composeRoughScene,
   prepareRefinedScene,
   refinementEnabled: () =>
+    sceneReceiptStorageAvailable() &&
     config.sceneRefinementEnabled &&
     !!config.sceneRefinementBaseUrl &&
     !!config.sceneRefinementToken,
   enabled: () => config.sceneExportEnabled && converterEnabled(),
 };
-// Bounded process-local receipts: never regenerate a file after scene confirmation.
-const receipts = new Map<
-  string,
-  { binding: string; expires: number; scene: RefinedScene }
->();
+// Bounded development/cache receipts. Shared publication completes before a key is returned.
+const receiptCacheKey = (owner: string, job: string, key: string) => `${owner}/${job}/${key}`;
 const MAX_RECEIPT_BYTES = 256 * 1024 * 1024;
-async function remember(binding: string, scene: RefinedScene, owner: string, job: string, save: typeof saveSceneReceipt) {
+async function remember(
+  receipts: Map<string, SceneReceipt>, binding: string, scene: RefinedScene,
+  owner: string, job: string, save: typeof saveSceneReceipt,
+) {
+  const key = randomBytes(24).toString("hex");
+  const receipt: SceneReceipt = { reviewVersion: SCENE_REVIEW_VERSION, binding, scene, expires: Date.now() + SCENE_REVIEW_TTL_MS };
+  await save(owner, job, key, receipt);
   for (const [k, v] of receipts) if (v.expires < Date.now()) receipts.delete(k);
   let size = scene.bytes.length + scene.preview.length;
   for (const v of receipts.values())
@@ -46,12 +51,9 @@ async function remember(binding: string, scene: RefinedScene, owner: string, job
     receipts.delete(key);
   }
   if (size > MAX_RECEIPT_BYTES)
-    throw new Error("scene review exceeds memory budget");
-  const key = randomBytes(24).toString("hex");
-  const receipt = { binding, scene, expires: Date.now() + 15 * 60_000 };
-  await save(owner, job, key, receipt);
-  receipts.set(key, receipt);
-  return key;
+    throw new SceneError("SCENE_UNAVAILABLE", "scene review exceeds memory budget");
+  receipts.set(receiptCacheKey(owner, job, key), receipt);
+  return { key, receipt };
 }
 export function createSceneRoutes(
   dispatch: (request: Request) => Response | Promise<Response>,
@@ -59,12 +61,19 @@ export function createSceneRoutes(
 ) {
   const deps = { ...defaults, ...overrides };
   const routes = new Hono<AppEnv>();
+  // Per application, never a module-global cross-owner/replica registry.
+  const receipts = new Map<string, SceneReceipt>();
   routes.post("/:jobId/scene", async (c) => {
+    let allowOriginal = false;
+    let serverOperationMayContinue: boolean | undefined;
     const fail = (
       status: 400 | 409 | 502 | 503 | 504,
       code: string,
       message: string,
-    ) => c.json(errorEnvelope(code, message, c.get("requestId")), status);
+    ) => {
+      c.header("Cache-Control", "private, no-store");
+      return c.json(errorEnvelope(code, message, c.get("requestId"), sceneErrorDetails(code, allowOriginal, serverOperationMayContinue)), status);
+    };
     if (!deps.enabled())
       return fail(
         503,
@@ -80,6 +89,10 @@ export function createSceneRoutes(
       return fail(400, "INVALID_INPUT", "저장할 인물을 다시 선택해 주세요.");
     }
     const input = value as {
+      contractVersion?: unknown;
+      saveMode?: unknown;
+      reviewVersion?: unknown;
+      artifactSha256?: unknown;
       persons?: unknown;
       prepare?: unknown;
       reviewKey?: unknown;
@@ -98,17 +111,45 @@ export function createSceneRoutes(
         "INVALID_INPUT",
         "한 장면에는 1~8명을 저장할 수 있습니다.",
       );
+    const explicit = input.contractVersion !== undefined || input.saveMode !== undefined;
+    const reviewRequest = [input.prepare, input.reviewKey, input.preview, input.artifactOnly,
+      input.reviewVersion, input.artifactSha256].some(v => v !== undefined);
+    if ((explicit && (input.contractVersion !== SCENE_SAVE_CONTRACT ||
+        (input.saveMode !== "original-selection" && input.saveMode !== "auto-correct-v4"))) ||
+        (!explicit && reviewRequest))
+      return fail(409, "SCENE_CONTRACT_UNSUPPORTED", "저장 방식을 다시 확인해 주세요.");
+    const refined = explicit && input.saveMode === "auto-correct-v4";
+    if (!refined && reviewRequest)
+      return fail(400, "INVALID_INPUT", "기본 통합 저장에는 보정 검수 정보를 보낼 수 없습니다.");
+    if (refined && ((input.prepare !== undefined && input.prepare !== true) ||
+        (input.preview !== undefined && input.preview !== true) ||
+        (input.prepare === true && (input.reviewKey !== undefined || input.preview !== undefined ||
+          input.reviewVersion !== undefined || input.artifactSha256 !== undefined)) ||
+        (input.prepare !== true && input.artifactOnly !== undefined)))
+      return fail(400, "INVALID_INPUT", "장면 준비와 확인 요청을 구분해 주세요.");
+    if (refined && input.prepare !== true && input.reviewVersion !== SCENE_REVIEW_VERSION)
+      return fail(409, "SCENE_CONTRACT_UNSUPPORTED", "최종 장면 확인 버전을 다시 확인해 주세요.");
+    if (refined && input.prepare !== true &&
+        (typeof input.artifactSha256 !== "string" || !/^[a-f0-9]{64}$/.test(input.artifactSha256)))
+      return fail(400, "INVALID_INPUT", "확인한 장면의 SHA가 필요합니다.");
+    allowOriginal = refined;
+    if (refined && !deps.refinementEnabled())
+      return fail(503, "SCENE_UNAVAILABLE", "장면 보정을 사용할 수 없습니다.");
     const job = await deps.getOwnedJob(jobId, owner);
     if (
       !job?.result?.image ||
       job.status !== "completed" ||
       job.result.source === "semantic"
-    )
+    ) {
+      allowOriginal = false;
       return fail(
         409,
         "SCENE_OBSERVATION_MISSING",
         "러프의 인물 위치를 찾지 못했습니다. 다시 분석해 주세요.",
       );
+    }
+    if (refined && !job.inputS3Key)
+      return fail(503, "SCENE_UNAVAILABLE", "원본이 보관된 작업에서 장면 보정을 다시 요청해 주세요.");
     if (job.result.candidatesByPerson.some(p => p.candidates.some(c => c.source === "generation")))
       return fail(409, "GENERATED_INDIVIDUAL_ONLY", "새로 만든 포즈는 인물별로 저장해 주세요.");
     const image = job.result.image;
@@ -213,14 +254,15 @@ export function createSceneRoutes(
             scores: person.skeleton?.scores ?? (Array(17).fill(0) as number[]),
           },
         });
-        refs.push(row);
+        refs.push({ personIndex: row.personIndex, candidateId: row.candidateId,
+          exportPath: row.exportPath, sha256: row.sha256 });
       }
       const binding = sha256Hex(
         Buffer.from(JSON.stringify([owner, jobId, job.updatedAt, refs])),
       );
-      const refined = deps.refinementEnabled() && !!job.inputS3Key;
       let scene: { bytes: Uint8Array; sha256: string };
       let prepared: RefinedScene | undefined;
+      let reviewed: SceneReceipt | undefined;
       if (refined) {
         if (input.prepare === true) {
           prepared = await deps.prepareRefinedScene(owner, job, refs, sources, {}, input.artifactOnly === true);
@@ -228,27 +270,27 @@ export function createSceneRoutes(
         } else {
           const receipt =
             typeof input.reviewKey === "string" && /^[a-f0-9]{48}$/.test(input.reviewKey)
-              ? receipts.get(input.reviewKey) ?? await deps.loadSceneReceipt(owner, jobId, input.reviewKey)
+              ? receipts.get(receiptCacheKey(owner, jobId, input.reviewKey)) ?? await deps.loadSceneReceipt(owner, jobId, input.reviewKey)
               : undefined;
-          if (
-            !receipt ||
-            receipt.binding !== binding ||
-            receipt.expires < Date.now()
-          )
+          if (!receipt)
             return fail(
               409,
               "SCENE_REVIEW_REQUIRED",
               "보정된 장면을 다시 확인한 뒤 저장해 주세요.",
             );
+          if (receipt.reviewVersion !== SCENE_REVIEW_VERSION)
+            return fail(409, "SCENE_REVIEW_REQUIRED", "장면 확인 계약이 바뀌었습니다. 다시 준비해 주세요.");
+          if (receipt.expires <= Date.now())
+            return fail(409, "SCENE_REVIEW_EXPIRED", "확인 시간이 지났습니다. 장면을 다시 준비해 주세요.");
+          if (receipt.binding !== binding)
+            return fail(409, "SCENE_SOURCE_CHANGED", "선택이 바뀌었습니다. 인물별 확인으로 돌아가 주세요.");
+          if (receipt.scene.sha256 !== input.artifactSha256 ||
+              sha256Hex(receipt.scene.bytes) !== receipt.scene.sha256)
+            return fail(502, "SCENE_INTEGRITY", "확인한 장면과 파일이 일치하지 않습니다. 다시 준비해 주세요.");
+          reviewed = receipt;
           scene = receipt.scene;
         }
       } else {
-        if (input.prepare !== undefined || input.reviewKey !== undefined)
-          return fail(
-            409,
-            "SCENE_UNAVAILABLE",
-            "장면 보정을 사용할 수 없습니다.",
-          );
         scene = await deps.composeRoughScene(jobId, image, sources);
       }
       const current = await deps.getOwnedJob(jobId, owner);
@@ -299,18 +341,26 @@ export function createSceneRoutes(
             "확인한 체형이나 손이 바뀌었습니다. 다시 확인해 주세요.",
           );
       }
-      if (input.preview !== undefined && input.preview !== true)
-        return fail(400, "INVALID_INPUT", "미리보기 요청을 확인해 주세요.");
+      // Reauthorization/preview can be slow; never release an expired review.
+      if (reviewed && reviewed.expires <= Date.now())
+        return fail(409, "SCENE_REVIEW_EXPIRED", "확인 시간이 지났습니다. 장면을 다시 준비해 주세요.");
       if (input.preview === true) {
         if (prepared || !refined) return fail(400, "INVALID_INPUT", "준비한 장면을 다시 선택해 주세요.");
         const png = await deps.renderFinalPreview({ fbx: scene.bytes, artifactSha256: scene.sha256 }, true, {}, true, c.req.raw.signal);
+        if (reviewed && reviewed.expires <= Date.now())
+          return fail(409, "SCENE_REVIEW_EXPIRED", "확인 시간이 지났습니다. 장면을 다시 준비해 주세요.");
         return new Response(png, { headers: { "Content-Type": "image/png", "Cache-Control": "private, no-store",
           "X-Standin-Artifact-SHA256": scene.sha256, "X-Standin-Preview-Artifact-SHA256": sha256Hex(png) } });
       }
       if (prepared) {
-        const reviewKey = await remember(binding, prepared, owner, jobId, deps.saveSceneReceipt);
+        const { key: reviewKey, receipt } = await remember(receipts, binding, prepared, owner, jobId, deps.saveSceneReceipt);
         c.header("Cache-Control", "private, no-store");
         return c.json({
+          contractVersion: SCENE_SAVE_CONTRACT,
+          saveMode: "auto-correct-v4",
+          reviewVersion: SCENE_REVIEW_VERSION,
+          expiresAt: new Date(receipt.expires).toISOString(),
+          fileCount: 1,
           version: "scene-refinement-v4",
           ...(prepared.artifactContract ? { artifactContract: prepared.artifactContract } : {}),
           reviewKey,
@@ -323,6 +373,8 @@ export function createSceneRoutes(
       }
       return new Response(scene.bytes, {
         headers: {
+          "X-Standin-Scene-Contract": SCENE_SAVE_CONTRACT,
+          "X-Standin-Scene-Save-Mode": refined ? "auto-correct-v4" : "original-selection",
           "Content-Type": "application/octet-stream",
           "Cache-Control": "private, no-store",
           "X-Standin-Artifact-SHA256": scene.sha256,
@@ -334,16 +386,16 @@ export function createSceneRoutes(
         },
       });
     } catch (e) {
-      const code = e instanceof ConverterError ? e.code : "SCENE_FAILED";
-      return fail(
-        code === "CONVERTER_TIMEOUT"
-          ? 504
-          : code === "CONVERTER_UNAVAILABLE"
-            ? 503
-            : 502,
-        code,
-        "장면 FBX를 만들지 못했습니다. 다시 시도해 주세요.",
-      );
+      if (e instanceof SceneError) serverOperationMayContinue = e.serverOperationMayContinue;
+      const code = e instanceof SceneError ? e.code : e instanceof ConverterError
+        ? e.code === "CONVERTER_TIMEOUT" ? "SCENE_TIMEOUT"
+          : ["CONVERTER_UNAVAILABLE", "CONVERTER_DISABLED", "BODY_PREVIEW_UNAVAILABLE"].includes(e.code) ? "SCENE_UNAVAILABLE"
+          : e.code === "CONVERTER_INTEGRITY" ? "SCENE_INTEGRITY" : "SCENE_FAILED"
+        : "SCENE_FAILED";
+      return fail(code === "SCENE_TIMEOUT" ? 504
+        : ["SCENE_UNAVAILABLE", "SCENE_BUSY"].includes(code) ? 503
+        : ["SCENE_UNSUPPORTED_BODY", "SCENE_SOURCE_CHANGED"].includes(code) ? 409 : 502,
+        code, "장면 FBX를 만들지 못했습니다. 복구 안내에 따라 다시 시도해 주세요.");
     }
   });
   return routes;

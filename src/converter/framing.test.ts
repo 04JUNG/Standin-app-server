@@ -426,3 +426,17 @@ test("shared preparation cancels only when every subscriber leaves, then retries
   finish({ fbx, preview, conversionId: "new", artifactSha256: sha256Hex(fbx), sourceBvhSha256: sha256Hex(bvhBytes) });
   assert.equal((await next).conversionId, "new");
 });
+
+test("converter rejection preserves only a bounded private protocol code for scene calibration", async () => {
+  await assert.rejects(convertFramed(input, deps({ error: { code: "CHARACTER_SHA256_MISMATCH", message: "/operator/private" } }, 409)),
+    (error: unknown) => {
+      assert.ok(error instanceof ConverterError);
+      assert.equal(error.code, "CONVERTER_REJECTED");
+      assert.equal(error.upstreamStatus, 409);
+      assert.equal(error.upstreamCode, "CHARACTER_SHA256_MISMATCH");
+      assert.ok(!error.message.includes("private"));
+      return true;
+    });
+  await assert.rejects(convertFramed(input, deps({ error: { code: "/operator/private" } }, 409)),
+    (error: unknown) => error instanceof ConverterError && error.upstreamCode === undefined);
+});

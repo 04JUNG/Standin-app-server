@@ -1,3 +1,4 @@
+import { SCENE_REVIEW_VERSION, SceneError } from "./sceneContract.js";
 /** Immutable scene receipts survive a BFF replica change, like person receipts. */
 import {
   GetObjectCommand,
@@ -8,6 +9,7 @@ import { config } from "../config.js";
 import { ConverterError, sha256Hex } from "../converter/client.js";
 import type { RefinedScene } from "./sceneRefinement.js";
 export interface SceneReceipt {
+  reviewVersion: typeof SCENE_REVIEW_VERSION;
   binding: string;
   expires: number;
   scene: RefinedScene;
@@ -28,7 +30,7 @@ function objectKey(owner: string, job: string, key: string) {
 export function encodeSceneReceipt(receipt: SceneReceipt) {
   const bytes = Buffer.from(
     JSON.stringify({
-      version: 1,
+      version: 2,
       ...receipt,
       scene: {
         ...receipt.scene,
@@ -48,9 +50,11 @@ export function decodeSceneReceipt(data: Uint8Array): SceneReceipt {
     const bytes = Buffer.from(scene.bytes, "base64");
     const preview = Buffer.from(scene.preview, "base64");
     if (
-      value.version !== 1 ||
+      value.version !== 2 ||
+      value.reviewVersion !== SCENE_REVIEW_VERSION ||
       !/^[a-f0-9]{64}$/.test(value.binding) ||
-      !Number.isSafeInteger(value.expires) ||
+      !Number.isSafeInteger(value.expires) || value.expires <= 0 ||
+      bytes.toString("base64") !== scene.bytes || preview.toString("base64") !== scene.preview ||
       !Array.isArray(scene.summary) ||
       scene.summary.length > 8 ||
       !bytes
@@ -64,6 +68,7 @@ export function decodeSceneReceipt(data: Uint8Array): SceneReceipt {
     )
       throw new Error("lineage");
     return {
+      reviewVersion: value.reviewVersion,
       binding: value.binding,
       expires: value.expires,
       scene: { ...scene, bytes },
@@ -74,6 +79,10 @@ export function decodeSceneReceipt(data: Uint8Array): SceneReceipt {
       "stored scene receipt mismatch",
     );
   }
+}
+/** Local development may re-prepare on replica change; production must share. */
+export function sceneReceiptStorageAvailable() {
+  return !!config.betaDataBucket || process.env.NODE_ENV !== "production";
 }
 export async function saveSceneReceipt(
   owner: string,
@@ -89,15 +98,18 @@ export async function saveSceneReceipt(
       );
     return;
   }
-  await client.send(
-    new PutObjectCommand({
+  try {
+    await client.send(new PutObjectCommand({
       Bucket: config.betaDataBucket,
       Key: objectKey(owner, job, key),
       Body: encodeSceneReceipt(receipt),
       ContentType: "application/json",
       IfNoneMatch: "*",
-    }),
-  );
+    }));
+  } catch (error) {
+    if (error instanceof ConverterError) throw error;
+    throw new SceneError("SCENE_UNAVAILABLE", "scene receipt publication failed");
+  }
 }
 export async function loadSceneReceipt(
   owner: string,
@@ -121,6 +133,7 @@ export async function loadSceneReceipt(
         ?.httpStatusCode === 404
     )
       return undefined;
-    throw error;
+    if (error instanceof ConverterError) throw error;
+    throw new SceneError("SCENE_UNAVAILABLE", "scene receipt load failed");
   }
 }

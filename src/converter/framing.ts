@@ -145,7 +145,13 @@ export async function convertFramed(
     );
   }
   if (!response.ok) {
-    await response.body?.cancel();
+    let upstreamCode: string | undefined;
+    try {
+      const value = await boundedJson(response);
+      const error = value.error as { code?: unknown } | undefined;
+      if (typeof error?.code === "string" && /^[A-Z0-9_]{1,64}$/.test(error.code))
+        upstreamCode = error.code;
+    } catch { /* Uncontracted error bodies retain the existing HTTP mapping. */ }
     const code =
       response.status === 504
         ? "CONVERTER_TIMEOUT"
@@ -154,7 +160,7 @@ export async function convertFramed(
           : [400, 409, 413, 422].includes(response.status)
             ? "CONVERTER_REJECTED"
             : "CONVERTER_FAILED";
-    throw new ConverterError(code, "framing failed", null, response.status);
+    throw new ConverterError(code, "framing failed", null, response.status, upstreamCode);
   }
   try {
     const value = await boundedJson(response);

@@ -1,3 +1,4 @@
+import { SceneError } from "./pose/sceneContract.js";
 import { SemanticError } from "./semantic/contract.js";
 // 도원 추론 서버 호출을 한 곳에 격리한다(계약이 바뀌어도 여기만 수정).
 // 계약 원본: Standin-server/docs/API_CONTRACT.md
@@ -558,8 +559,13 @@ export function getPosePoster(
   poseId: string,
   sourceSha256: string,
   scope = "full",
+  options?: import("./poster-yaw.js").PosterOptions,
 ): Promise<Response> {
   const params = new URLSearchParams({ source_sha256: sourceSha256, scope });
+  if (options) {
+    params.set("variant", options.variant);
+    params.set("view", options.view);
+  }
   return fetch(
     `${config.inferenceBaseUrl}/pose/${encodeURIComponent(poseId)}/poster?${params}`,
     {
@@ -584,28 +590,65 @@ export function getDefaultBodyTemplate(scope: string): Promise<Response> {
 export async function sceneRefinementRequest(
   stage: "plan" | "build",
   value: unknown,
-): Promise<Record<string, any>> {
-  if (!config.sceneRefinementBaseUrl || !config.sceneRefinementToken)
-    throw new Error("scene worker disabled");
-  const response = await fetch(
-    `${config.sceneRefinementBaseUrl.replace(/\/+$/, "")}/scene/${stage}`,
-    {
-      method: "POST",
-      redirect: "error",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${config.sceneRefinementToken}`,
+  overrides: Partial<{ baseUrl: string; token: string; timeoutMs: number; fetch: typeof fetch }> = {},
+): Promise<Record<string, unknown>> {
+  const deps = { baseUrl: config.sceneRefinementBaseUrl, token: config.sceneRefinementToken,
+    timeoutMs: config.sceneRefinementTimeoutMs, fetch, ...overrides };
+  if (!deps.baseUrl || !deps.token)
+    throw new SceneError("SCENE_UNAVAILABLE", "scene worker disabled");
+  const deadline = AbortSignal.timeout(deps.timeoutMs);
+  let response: Response;
+  try {
+    response = await deps.fetch(
+      `${deps.baseUrl.replace(/\/+$/, "")}/scene/${stage}`,
+      {
+        method: "POST",
+        redirect: "error",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${deps.token}`,
+        },
+        body: JSON.stringify(value),
+        signal: deadline,
       },
-      body: JSON.stringify(value),
-      signal: AbortSignal.timeout(config.sceneRefinementTimeoutMs),
-    },
-  );
+    );
+  } catch {
+    throw new SceneError(deadline.aborted ? "SCENE_TIMEOUT" : "SCENE_UNAVAILABLE", "scene worker request failed", true);
+  }
   if (!response.ok) {
-    await response.body?.cancel();
-    throw new Error(`scene worker rejected (${response.status})`);
+    let busy = response.status === 429;
+    // api.py currently reports its lock with this exact bounded 503 detail.
+    // Other 503/422 responses do not identify queue/body/plan-expiry causes.
+    const reader = response.body?.getReader();
+    if (reader) {
+      try {
+        const chunks: Uint8Array[] = [];
+        let size = 0;
+        for (;;) {
+          const part = await reader.read();
+          if (part.done) break;
+          size += part.value.length;
+          if (size > 4096) break;
+          chunks.push(part.value);
+        }
+        if (response.status === 503 && size <= 4096) {
+          const value: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+          busy = !!value && typeof value === "object" &&
+            (value as { detail?: unknown }).detail === "scene worker busy";
+        }
+      } catch {
+        if (deadline.aborted) throw new SceneError("SCENE_TIMEOUT", "scene response deadline");
+      } finally {
+        await reader.cancel().catch(() => {});
+        reader.releaseLock();
+      }
+    }
+    throw new SceneError(busy ? "SCENE_BUSY"
+      : response.status === 504 ? "SCENE_TIMEOUT"
+      : response.status === 503 ? "SCENE_UNAVAILABLE" : "SCENE_FAILED", "scene worker rejected");
   }
   const reader = response.body?.getReader();
-  if (!reader) throw new Error("empty scene result");
+  if (!reader) throw new SceneError("SCENE_INTEGRITY", "empty scene result");
   const chunks: Uint8Array[] = [];
   let size = 0;
   try {
@@ -613,10 +656,16 @@ export async function sceneRefinementRequest(
       const v = await reader.read();
       if (v.done) break;
       size += v.value.length;
-      if (size > 192 * 1024 * 1024) throw new Error("scene response too large");
+      if (size > 192 * 1024 * 1024) throw new SceneError("SCENE_INTEGRITY", "scene response too large");
       chunks.push(v.value);
     }
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    const result: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if (!result || typeof result !== "object" || Array.isArray(result))
+      throw new SceneError("SCENE_INTEGRITY", "invalid scene result");
+    return result as Record<string, unknown>;
+  } catch (error) {
+    if (error instanceof SceneError) throw error;
+    throw new SceneError(deadline.aborted ? "SCENE_TIMEOUT" : "SCENE_INTEGRITY", "invalid scene response");
   } finally {
     await reader.cancel().catch(() => {});
     reader.releaseLock();

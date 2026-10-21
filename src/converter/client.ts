@@ -48,6 +48,8 @@ export class ConverterError extends Error {
     readonly conversionId: string | null = null,
     /** converter가 돌려준 HTTP 상태. 도달 실패는 0이다. */
     readonly upstreamStatus = 0,
+    /** Bounded private protocol code, never a raw upstream message. */
+    readonly upstreamCode?: string,
   ) {
     super(message);
     this.name = "ConverterError";
