@@ -1,3 +1,4 @@
+import { createHumanThumbnailRoutes } from "../human-thumbnail.js";
 import { createHumanReferenceRoutes } from "../human-reference.js";
 import { refinableLibraryCandidate } from "../refine/eligibility.js";
 import { exportCandidateAllowed, manualExportCandidate } from "../routed-search.js";
@@ -36,6 +37,7 @@ export function createPoseRoutes(overrides: Partial<typeof defaults> = {}) {
 const deps = { ...defaults, ...overrides };
 const poseRoutes = new Hono<AppEnv>();
 poseRoutes.route("/", createDefaultPosterRoutes(deps));
+poseRoutes.route("/", createHumanThumbnailRoutes(deps));
 poseRoutes.route("/", createHumanReferenceRoutes(deps));
 poseRoutes.use("/:id/export", createReleaseGuard(deps.getOwnedJob, deps.validateConfirmedSelection));
 poseRoutes.route("/", createRoutedPreviewRoutes());

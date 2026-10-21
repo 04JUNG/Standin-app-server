@@ -330,7 +330,7 @@ Retry-After: 41230
       "personCount": 2,
       "selectionCount": 2,
       "hasSelection": true,
-      "thumbnailUrl": "/v1/pose-candidates/{poseId}/thumbnail?view=front",
+      "thumbnailUrl": "/v1/pose-candidates/{poseId}/reference-thumbnail?revision=human-poster-v1",
       "inputAvailable": true,
       "inputWidth": 1920,
       "inputHeight": 1080
@@ -344,7 +344,9 @@ Retry-After: 41230
 
 > ⚠ `thumbnailUrl`은 **입력 러프가 아니라 매칭된 포즈 후보**의 썸네일 경로다. 확정 선택한
 > 후보를 우선 쓰고, 없으면 첫 인물의 1순위로 폴백한다. 후보가 없는 Job(실패 등)은 `null`.
-> 원본을 20건 내려보내면 수십 MB가 되지만 후보 썸네일은 이미 하루 캐시되는 작은 PNG다.
+> 기본 인체의 정면·전신 참고 PNG를 사용한다. 새 표현 URL과 `revision=human-poster-v1`로 구형 JPEG 캐시와 분리한다.
+> `POSE_THUMBNAIL_REVISION`(기본값 `DEPLOYMENT_VERSION`)이 있으면 `assetRevision`도 URL에 붙는다.
+> 원본/인체/이미지 해시를 확인한 정적 포스터만 반환하고 `private, no-store`를 적용한다. 누락·손상 시 404이며 구형 관절 그림으로 대체하지 않는다.
 > 인증 헤더가 필요하므로 절대 URL이 아닌 상대 경로를 준다.
 
 > ⚠ `inputAvailable`은 입력 원본이 S3에 남아 있는지다. **DB의 Job은 365일, S3 객체는
@@ -1506,3 +1508,13 @@ fallbackMode를 high/none으로 승격하지 않는다. preview 객체 자체의
 유지되므로 활성화 배포에서는 true로 설정해야 한다. 추론의 REFINE_ENABLED도 1이어야 한다.
 배포 순서는 추론 → BFF → 클라이언트다. 과거 Job은 소급 승격하지 않으며 새로 분석해야 한다.
 Converter 코드·모델·라이브러리 자산 변경은 필요 없다.
+
+
+### 작업 기록·대시보드용 기본 인체 썸네일
+
+- `GET /v1/pose-candidates/{poseId}/reference-thumbnail` — 기존 설치 인증 필요.
+- `GET /v1/admin/review/pose-candidates/{poseId}/reference-thumbnail` — 기존 관리자 인증·검토 guard 적용.
+
+공용 포즈 라이브러리 자산만 읽는다. 등록/격리 검사를 통과한 BVH의 SHA를 서버가 직접 계산하고, `scope=full` 인체 포스터의 source·character·revision·PNG 해시를 검증한다. `pose-only` 폴백은 거절한다. 성공·실패 모두 캐시를 저장하지 않으며 Converter·선택 변경·렌더 작업을 실행하지 않는다.
+
+이 썸네일은 정면·전신의 기본 인체 참고이며 선택 체형/손/최종 출력 범위 또는 검색 시점을 표현하지 않는다. 대시보드의 후보·갤러리 목록/확대도 이 경로를 사용하며, 갤러리 확대는 정면 참고 한 장을 표시한다. 종전 시점별 `/thumbnail?view=...` API는 호환성을 위해 유지한다.

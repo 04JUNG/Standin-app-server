@@ -1,3 +1,4 @@
+import { createHumanThumbnailRoutes } from "../human-thumbnail.js";
 import { randomUUID } from "node:crypto";
 import { Hono, type Context } from "hono";
 import { config } from "../config.js";
@@ -111,6 +112,7 @@ adminRoutes.use("*", async (c, next) => {
 });
 
 adminRoutes.use("*", qualityReviewGuard());
+adminRoutes.route("/review/pose-candidates", createHumanThumbnailRoutes());
 
 /**
  * 관리자 접근을 남긴다.
