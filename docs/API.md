@@ -1,5 +1,29 @@
 # API 계약 — BFF가 클라(Tauri)에 노출하는 `/v1`
 
+## 기본 클로즈업 미리보기 연결 (로컬 구현, 2026-10-21)
+
+정상 `dynamic-pose-presentation-v1`의 `route=basic_model`, `status=basic_reference`,
+`search_status=ok`, `basic_model.status=planned`이고 후보/오류가 없을 때만
+`basic_model.preview`를 응답에 추가한다. 과거 작업의 결과 GET도 같은 순수 변환을
+적용하며 DB·원본 판단·권한은 변경하지 않는다. 현재 resolved 범위가 계획 범위와
+같은 `head` 또는 `shoulder_head`여야 한다. 수동 범위 변경 시 stale preview를 제거한다.
+
+```json
+{"version":"basic-closeup-preview-v1","template_url":"/v1/pose-candidates/default-body-template/shoulder_head","scope":"shoulder_head","pose":"neutral","preview_only":true}
+```
+
+기존 인증된 template API와 Converter `crop_meshes`로 미리 잘라 둔 승인 기본 모델을
+재사용한다. 표시 시점의 추가 추론/검색/생성/Converter 호출은 없다. 계획의
+`preview_status=not_requested`를 준비 완료로 바꾸지 않는다. 앱이 메시를 검증·렌더한
+뒤 이미지 준비를 표시한다. 고개 방향·기울기·선택 체형·손 적용 또는 검색 성공을
+의미하지 않는다. 후보 추가와 선택·refine·export 권한 변경은 없다.
+
+로컬 시각 검증: 빌드 후 `BASIC_CLOSEUP_TEMPLATE_DIR=/approved/human-templates node
+tools/basic-closeup-fixture.mjs`로 loopback fixture를 실행한다. 서버의 기존 자산과
+계약을 사용하지만 합성 Job이며 실제 설치 앱/클라우드 배포 검증을 대신하지 않는다.
+main 기반 로컬 재검증: 타입 검사 통과, 전체 테스트 701개 통과/2개 기존 skip/실패 0.
+기본 계획의 과거 결과 조회 보완·범위 변경 시 무효화·권한 유지 테스트를 포함한다.
+
 ## v4 장면 보정과 최종 장면 확인
 
 기본 꺼짐입니다. 기존 scene export 조건에 더해 `SCENE_REFINEMENT_ENABLED=true`,
