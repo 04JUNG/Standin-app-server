@@ -377,3 +377,12 @@ test("production requires shared scene storage; development may explicitly repre
     else process.env.NODE_ENV = originalEnv;
   }
 });
+
+test("worker network loss cannot imply the server stopped computing", async () => {
+  const f = setup(true);
+  f.state.failPrepare = new SceneError("SCENE_UNAVAILABLE", "fixture network lost after dispatch", true);
+  const r = await f.send({ ...correction, prepare: true });
+  assert.equal(r.status, 503);
+  const body = await r.json() as { error: { details: { serverOperationMayContinue: boolean } } };
+  assert.equal(body.error.details.serverOperationMayContinue, true);
+});

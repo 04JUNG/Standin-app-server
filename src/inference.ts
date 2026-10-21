@@ -613,7 +613,7 @@ export async function sceneRefinementRequest(
       },
     );
   } catch {
-    throw new SceneError(deadline.aborted ? "SCENE_TIMEOUT" : "SCENE_UNAVAILABLE", "scene worker request failed");
+    throw new SceneError(deadline.aborted ? "SCENE_TIMEOUT" : "SCENE_UNAVAILABLE", "scene worker request failed", true);
   }
   if (!response.ok) {
     let busy = response.status === 429;

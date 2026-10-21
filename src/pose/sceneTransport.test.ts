@@ -29,7 +29,7 @@ test("scene transport maps only observed status/domain evidence and never forwar
     });
   });
   deps.fetch = async () => { throw new Error("network private URL"); };
-  await assert.rejects(sceneRefinementRequest("plan", {}, deps), { code: "SCENE_UNAVAILABLE" });
+  await assert.rejects(sceneRefinementRequest("plan", {}, deps), { code: "SCENE_UNAVAILABLE", serverOperationMayContinue: true });
   deps.timeoutMs = 5;
   deps.fetch = async (_url, options) => new Promise<Response>((_resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("fixture watchdog")), 100);

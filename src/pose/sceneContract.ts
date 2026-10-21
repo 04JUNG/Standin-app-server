@@ -30,16 +30,19 @@ export const sceneRecovery = {
 } as const;
 export type SceneErrorCode = keyof typeof sceneRecovery;
 export class SceneError extends Error {
-  constructor(readonly code: SceneErrorCode, message: string) {
+  constructor(
+    readonly code: SceneErrorCode, message: string,
+    readonly serverOperationMayContinue = code === "SCENE_TIMEOUT",
+  ) {
     super(message);
     this.name = "SceneError";
   }
 }
-export function sceneErrorDetails(code: string, allowOriginal = false) {
+export function sceneErrorDetails(code: string, allowOriginal = false, serverOperationMayContinue = code === "SCENE_TIMEOUT") {
   if (!Object.hasOwn(sceneRecovery, code)) return undefined;
   return {
     recovery: sceneRecovery[code as SceneErrorCode],
     allowedActions: [sceneRecovery[code as SceneErrorCode], ...(allowOriginal ? ["use_original_selection"] : [])],
-    serverOperationMayContinue: code === "SCENE_TIMEOUT",
+    serverOperationMayContinue,
   };
 }

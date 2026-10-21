@@ -65,13 +65,14 @@ export function createSceneRoutes(
   const receipts = new Map<string, SceneReceipt>();
   routes.post("/:jobId/scene", async (c) => {
     let allowOriginal = false;
+    let serverOperationMayContinue: boolean | undefined;
     const fail = (
       status: 400 | 409 | 502 | 503 | 504,
       code: string,
       message: string,
     ) => {
       c.header("Cache-Control", "private, no-store");
-      return c.json(errorEnvelope(code, message, c.get("requestId"), sceneErrorDetails(code, allowOriginal)), status);
+      return c.json(errorEnvelope(code, message, c.get("requestId"), sceneErrorDetails(code, allowOriginal, serverOperationMayContinue)), status);
     };
     if (!deps.enabled())
       return fail(
@@ -385,6 +386,7 @@ export function createSceneRoutes(
         },
       });
     } catch (e) {
+      if (e instanceof SceneError) serverOperationMayContinue = e.serverOperationMayContinue;
       const code = e instanceof SceneError ? e.code : e instanceof ConverterError
         ? e.code === "CONVERTER_TIMEOUT" ? "SCENE_TIMEOUT"
           : ["CONVERTER_UNAVAILABLE", "CONVERTER_DISABLED", "BODY_PREVIEW_UNAVAILABLE"].includes(e.code) ? "SCENE_UNAVAILABLE"
