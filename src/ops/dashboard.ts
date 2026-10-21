@@ -548,11 +548,11 @@ function releaseDetailBlobs() {
 }
 
 async function fillCandidateThumb(img) {
-  const poseId = img.dataset.pose, view = img.dataset.view;
+  const poseId = img.dataset.pose;
   try {
     const res = await fetch(
-      "/v1/admin/review/pose-candidates/" + encodeURIComponent(poseId) + "/thumbnail?view=" + encodeURIComponent(view),
-      { headers: { "X-Beta-Admin-Token": token } },
+      "/v1/admin/review/pose-candidates/" + encodeURIComponent(poseId) + "/reference-thumbnail?revision=human-poster-v1",
+      { headers: { "X-Beta-Admin-Token": token }, cache: "no-store" },
     );
     if (!res.ok) throw new Error(String(res.status));
     const url = URL.createObjectURL(await res.blob());
@@ -2019,10 +2019,9 @@ function roughTile(item) {
 }
 
 function poseTile(item) {
-  const view = item.views.includes("three_quarter") ? "three_quarter" : item.views[0];
   return '<button class="tile" data-pose-open="' + esc(item.pose_id) + '" data-views="' + esc(item.views.join(",")) +
     '" data-meta="' + esc(item.source_label + " · " + item.category + " · " + item.action + (item.review_status ? " · " + item.review_status : "")) + '">' +
-    '<div class="img"><img data-gal-pose="' + esc(item.pose_id) + '" data-view="' + esc(view) + '" alt=""></div>' +
+    '<div class="img"><img data-gal-pose="' + esc(item.pose_id) + '" alt="기본 인체 · 정면 참고"></div>' +
     '<div class="cap"><div class="mono" title="' + esc(item.pose_id) + '">' + esc(item.pose_id.slice(0, 22)) + "</div>" +
     '<div class="sub">' + esc(item.category) + " · " + esc(item.action) + "</div></div></button>";
 }
@@ -2030,7 +2029,7 @@ function poseTile(item) {
 async function galleryPoseThumb(img) {
   try {
     const res = await fetch("/v1/admin/review/pose-candidates/" + encodeURIComponent(img.dataset.galPose) +
-      "/thumbnail?view=" + encodeURIComponent(img.dataset.view), { headers: { "X-Beta-Admin-Token": token } });
+      "/reference-thumbnail?revision=human-poster-v1", { headers: { "X-Beta-Admin-Token": token }, cache: "no-store" });
     if (!res.ok) return;
     const url = URL.createObjectURL(await res.blob());
     gallery.blobs.push(url);
@@ -2053,14 +2052,12 @@ function bindTiles() {
 function openPose(button) {
   releaseDetailBlobs();
   const poseId = button.dataset.poseOpen;
-  const views = button.dataset.views.split(",");
   $("lookupOut").innerHTML = "";
   $("activityOut").innerHTML = "";
   $("detailOut").innerHTML = '<div class="detail"><h3 class="mono">' + esc(poseId) + "</h3>" +
     '<p class="sub">' + esc(button.dataset.meta) + "</p>" +
-    '<div class="cands">' + views.map((view) =>
-      '<div class="cand"><img data-pose="' + esc(poseId) + '" data-view="' + esc(view) + '" alt="">' +
-      '<div class="sub" style="margin-top:6px">' + esc(view) + "</div></div>").join("") + "</div></div>";
+    '<div class="cands"><div class="cand"><img data-pose="' + esc(poseId) + '" alt="">' +
+    '<div class="sub" style="margin-top:6px">기본 인체 · 정면 참고</div></div></div></div>';
   $("detailOut").querySelectorAll(".cand img[data-pose]").forEach(fillCandidateThumb);
   showDrawer("detail");
   $("drawerTitle").textContent = "포즈";

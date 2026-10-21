@@ -7,3 +7,10 @@ export function poseThumbnailUrl(poseId: string, view: string): string {
     ? `${path}&revision=${encodeURIComponent(config.poseThumbnailRevision)}`
     : path;
 }
+
+/** Distinct representation URL bypasses cached legacy JPEGs even without env revision. */
+export function humanThumbnailUrl(poseId: string): string {
+  const params = new URLSearchParams({ revision: "human-poster-v1" });
+  if (config.poseThumbnailRevision) params.set("assetRevision", config.poseThumbnailRevision);
+  return `/v1/pose-candidates/${encodeURIComponent(poseId)}/reference-thumbnail?${params}`;
+}
