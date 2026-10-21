@@ -113,11 +113,13 @@ export interface PosePresentation {
 /** Connect a close-up plan to the existing, anatomically cropped default mesh.
  * Also used when reading old jobs; never invent a candidate or export authority.
  */
+// Temporarily paused pending further experiments; deployment env cannot re-enable it.
+const BASIC_CLOSEUP_PREVIEW_ENABLED = false;
 export function withBasicCloseupPreview(p: PosePresentation): PosePresentation {
   if (!p.basic_model) return p;
   const { preview: _previous, ...basic } = p.basic_model;
   const scope = p.output_scope;
-  const eligible = p.version === "dynamic-pose-presentation-v1" &&
+  const eligible = BASIC_CLOSEUP_PREVIEW_ENABLED && p.version === "dynamic-pose-presentation-v1" &&
     p.route === "basic_model" && p.status === "basic_reference" &&
     p.search_status === "ok" && p.issues.length === 0 &&
     p.auto_apply_allowed === false && p.refine_allowed === false && p.export_allowed === false &&
