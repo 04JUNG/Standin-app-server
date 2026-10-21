@@ -1,5 +1,16 @@
 # API 계약 — BFF가 클라(Tauri)에 노출하는 `/v1`
 
+## Top5 수평 8방향 미리보기 2026-10-21
+
+기존 일반 후보와 동적 `pose-previews`의 `/poster` URL에 `variant=rough-yaw8-v1`을 추가하면, BFF가 저장된 후보별 `render_camera`에서 가장 가까운 45도 방향을 고릅니다. 중간값은 증가 방향으로 선택하며 원본 검색·내보내기 카메라는 보존합니다. 임의 query `view`는 저장된 선택과 불일치하면 409입니다. legacy 카메라는 검증된 변환이 없으면 정면 참고로 둡니다.
+
+자산은 기존 S3 라이브러리를 로드한 추론 서버에서 읽습니다. BFF는 source·scope·served yaw·native azimuth·모델·revision·이미지 SHA를 검증합니다. 두 poster route 모두 기존 소유권·원본 SHA·범위·응답 전후 후보 검사를 유지합니다. 새 S3 prefix 직접 조회와 IAM 변경은 포함하지 않습니다.
+
+새 응답 헤더: `X-Standin-Poster-Variant`, `X-Standin-Poster-Yaw`, `X-Standin-Poster-Fallback`, `X-Standin-Poster-Requested-Yaw`, `X-Standin-Poster-Camera-Source`, `X-Standin-Projection-Matches-Search`. CORS expose에도 추가했습니다. camera source는 `fixed_117`, `semantic_preview`, `unavailable`입니다. 없으면 requested yaw=`none`, served yaw=0, fallback=`camera_unavailable`입니다. 투영 일치 헤더는 항상 false입니다.
+
+variant 없는 요청은 기존 PNG 계약입니다. opt-in 응답은 승인된 native 512 JPEG 또는 동일 source·scope의 검증된 기존 정면 PNG입니다. 자산 누락 시 사유를 기록하며 손상을 다른 그림으로 숨기지 않습니다. 상세 자산/좌표 규칙은 Standin-server의 `docs/ROUGH_YAW8_PREVIEWS.md`를 참조합니다. 회귀는 `src/poster-yaw.test.ts` 및 기존 poster/presentation/CORS 테스트에 포함합니다.
+
+
 ## v4 장면 보정과 최종 장면 확인
 
 기본 꺼짐입니다. 기존 scene export 조건에 더해 `SCENE_REFINEMENT_ENABLED=true`,

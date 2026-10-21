@@ -1,5 +1,6 @@
 import { manualExportCandidate } from "./routed-search.js";
 import { verifiedPoster } from "./pose-posters.js";
+import { POSTER_VARIANT, posterCamera, posterOptions, annotatePoster } from "./poster-yaw.js";
 import { getPosePoster } from "./inference.js";
 import { isBodyScope, resolvePersonOutputScope } from "./output-scope/model.js";
 /** Versioned, lookup-only presentation. Assets stay in the private per-person context. */
@@ -706,16 +707,38 @@ export function createPresentationRoutes(overrides: Partial<PreviewDeps> = {}) {
   });
   // This PNG is reference-only. It never grants release/refine/export to presentation candidates.
   routes.get(`${prefix}/poster`, async (c) => {
-    const owner = c.get("installationId")!, job = c.req.param("jobId"),
-      index = Number(c.req.param("personIndex")), id = c.req.param("candidateId"), hash = c.req.param("hash");
+    const owner = c.get("installationId")!,
+      job = c.req.param("jobId"),
+      index = Number(c.req.param("personIndex")),
+      id = c.req.param("candidateId"),
+      hash = c.req.param("hash");
     const preview = await readPreview(deps, owner, job, index, id, hash);
-    if (!preview.candidate.pose_id || preview.candidate.asset.transport !== "library_bvh")
+    if (
+      !preview.candidate.pose_id ||
+      preview.candidate.asset.transport !== "library_bvh"
+    )
       throw new BodyError("PREVIEW_UNAVAILABLE", 404);
-    const response = await verifiedPoster(preview.candidate.pose_id, hash, deps.getPosePoster, preview.scope);
-    const current = await readPreview(deps, owner, job, index, id, hash);
-    if (current.scope !== preview.scope || JSON.stringify(current.candidate) !== JSON.stringify(preview.candidate))
+    const variant = c.req.query("variant");
+    if (variant && variant !== POSTER_VARIANT)
+      throw new BodyError("PREVIEW_UNAVAILABLE", 400);
+    const camera = posterCamera(preview.candidate);
+    const options = variant ? posterOptions(camera) : undefined;
+    if (c.req.query("view") && c.req.query("view") !== options?.view)
       throw new BodyError("PREVIEW_SOURCE_CHANGED", 409);
-    return response;
+    const response = await verifiedPoster(
+      preview.candidate.pose_id,
+      hash,
+      deps.getPosePoster,
+      preview.scope,
+      options,
+    );
+    const current = await readPreview(deps, owner, job, index, id, hash);
+    if (
+      current.scope !== preview.scope ||
+      JSON.stringify(current.candidate) !== JSON.stringify(preview.candidate)
+    )
+      throw new BodyError("PREVIEW_SOURCE_CHANGED", 409);
+    return options ? annotatePoster(response, camera) : response;
   });
   routes.get(`${prefix}/body/:revision`, async (c) => {
     if (!deps.enabled()) throw new BodyError("BODY_SELECTION_DISABLED", 503);

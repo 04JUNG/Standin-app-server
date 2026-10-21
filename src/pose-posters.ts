@@ -7,14 +7,22 @@ import { getPoseBvh, getPosePoster } from "./inference.js";
 import { sha256Hex } from "./converter/client.js";
 import { BodyError } from "./body-selection/store.js";
 import { errorEnvelope } from "./mapping.js";
+import {
+  POSTER_VARIANT,
+  posterCamera,
+  posterOptions,
+  annotatePoster,
+  type PosterOptions,
+} from "./poster-yaw.js";
 
 export async function verifiedPoster(
   poseId: string,
   source: string,
   get = getPosePoster,
   scope = "full",
+  options?: PosterOptions,
 ): Promise<Response> {
-  const response = await get(poseId, source, scope);
+  const response = await get(poseId, source, scope, options);
   const fail = () => new BodyError("PREVIEW_UNAVAILABLE", 404);
   if (!response.ok) {
     await response.body?.cancel();
@@ -23,8 +31,12 @@ export async function verifiedPoster(
   const kind = response.headers.get("X-Standin-Poster-Kind");
   const character = response.headers.get("X-Standin-Character-Id");
   const sha = response.headers.get("X-Standin-Character-SHA256");
+  const native =
+    response.headers.get("X-Standin-Preview-Method") ===
+    "frozen-native-scope8-v1";
+  const media = native ? "image/jpeg" : "image/png";
   if (
-    response.headers.get("Content-Type") !== "image/png" ||
+    response.headers.get("Content-Type") !== media ||
     response.headers.get("X-Standin-Poster-Version") !==
       "default-body-poster-v1" ||
     response.headers.get("X-Standin-Source-BVH-SHA256") !== source ||
@@ -47,9 +59,12 @@ export async function verifiedPoster(
   const method = response.headers.get("X-Standin-Preview-Method");
   if (
     (method &&
-      !["frozen-retarget-v1", "pose-only", "reference-skinning-v1"].includes(
-        method,
-      )) ||
+      ![
+        "frozen-retarget-v1",
+        "pose-only",
+        "reference-skinning-v1",
+        "frozen-native-scope8-v1",
+      ].includes(method)) ||
     (method === "pose-only" && kind !== "pose-only") ||
     (method === "frozen-retarget-v1" && kind !== "default-body") ||
     (method === "reference-skinning-v1" &&
@@ -60,6 +75,39 @@ export async function verifiedPoster(
           response.headers.get("X-Standin-Template-SHA256") ?? "",
         )))
   ) {
+    await response.body?.cancel();
+    throw fail();
+  }
+  if (options) {
+    const served = response.headers.get("X-Standin-Poster-Yaw");
+    const reason = response.headers.get("X-Standin-Poster-Fallback");
+    const expected = String(Number(options.view.slice(4)));
+    if (
+      response.headers.get("X-Standin-Poster-Variant") !== POSTER_VARIANT ||
+      response.headers.get("X-Standin-Projection-Matches-Search") !== "false" ||
+      kind !== "default-body" ||
+      ![
+        "none",
+        "missing_angle",
+        "missing_directional_asset",
+        "unsupported_scope",
+      ].includes(reason ?? "") ||
+      (reason === "none" ? served !== expected : served !== "0") ||
+      (native &&
+        (sha !==
+          "7c648b97a24a3bb4914b6e5d515708c33727979881d92ef916d5726e22301f3d" ||
+          response.headers.get("X-Standin-Preview-View") !==
+            `yaw_${String((360 - Number(served)) % 360).padStart(3, "0")}` ||
+          response.headers.get("X-Standin-Poster-Asset-Version") !==
+            "scope8-v1" ||
+          !/^lib-\d{8}-[a-f0-9]{8}$/.test(
+            response.headers.get("X-Standin-Asset-Library-Version") ?? "",
+          )))
+    ) {
+      await response.body?.cancel();
+      throw fail();
+    }
+  } else if (native) {
     await response.body?.cancel();
     throw fail();
   }
@@ -81,14 +129,16 @@ export async function verifiedPoster(
   }
   const image = Buffer.concat(chunks);
   if (
-    !image
-      .subarray(0, 8)
-      .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ||
+    !(native
+      ? image.subarray(0, 3).equals(Buffer.from([255, 216, 255]))
+      : image
+          .subarray(0, 8)
+          .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) ||
     sha256Hex(image) !== response.headers.get("X-Standin-Artifact-SHA256")
   )
     throw fail();
   const headers = new Headers({
-    "Content-Type": "image/png",
+    "Content-Type": media,
     "Cache-Control": "private, no-store",
   });
   for (const [name, value] of response.headers)
@@ -137,10 +187,33 @@ export function createDefaultPosterRoutes(
       (p) => p.personIndex === Number(raw),
     );
     const candidate = find(job);
-    if (!person || !candidate || !candidate.poseId || candidate.lookupAllowed === false)
+    if (
+      !person ||
+      !candidate ||
+      !candidate.poseId ||
+      candidate.lookupAllowed === false
+    )
       return fail();
     const candidateSnapshot = JSON.stringify(candidate);
     const scope = previewScope(person);
+    const variant = c.req.query("variant");
+    if (variant && variant !== POSTER_VARIANT) return fail();
+    const p = person.posePresentation;
+    const row =
+      p &&
+      [
+        ...p.library_candidates,
+        ...p.review_candidates,
+        ...p.generated_candidates,
+      ].find(
+        (x) =>
+          x.candidate_id === candidate.id &&
+          x.asset.bvh_sha256 === candidate.sourceBvhSha256,
+      );
+    const camera = posterCamera(row);
+    const options = variant ? posterOptions(camera) : undefined;
+    if (c.req.query("view") && c.req.query("view") !== options?.view)
+      return fail("PREVIEW_SOURCE_CHANGED", 409);
     if (c.req.query("scope") && c.req.query("scope") !== scope)
       return fail("PREVIEW_SOURCE_CHANGED", 409);
     const sourceResponse = await deps.getPoseBvh(candidate.poseId);
@@ -176,6 +249,7 @@ export function createDefaultPosterRoutes(
         hash,
         deps.getPosePoster,
         scope,
+        options,
       );
       const currentJob = await read();
       const currentPerson = currentJob?.result?.candidatesByPerson.find(
@@ -183,10 +257,27 @@ export function createDefaultPosterRoutes(
       );
       if (!currentPerson || previewScope(currentPerson) !== scope)
         return fail("PREVIEW_SOURCE_CHANGED", 409);
+      const currentPresentation = currentPerson.posePresentation;
+      const currentRow =
+        currentPresentation &&
+        [
+          ...currentPresentation.library_candidates,
+          ...currentPresentation.review_candidates,
+          ...currentPresentation.generated_candidates,
+        ].find(
+          (x) =>
+            x.candidate_id === candidate.id &&
+            x.asset.bvh_sha256 === candidate.sourceBvhSha256,
+        );
+      if (
+        options &&
+        JSON.stringify(posterCamera(currentRow)) !== JSON.stringify(camera)
+      )
+        return fail("PREVIEW_SOURCE_CHANGED", 409);
       const current = find(currentJob);
       if (!current || JSON.stringify(current) !== candidateSnapshot)
         return fail("PREVIEW_SOURCE_CHANGED", 409);
-      return response;
+      return options ? annotatePoster(response, camera) : response;
     } catch {
       return fail();
     }
