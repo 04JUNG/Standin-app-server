@@ -18,6 +18,7 @@ import { resolvePersonOutputScope } from "../output-scope/model.js";
 import {
   createPresentationRoutes,
   manualPresentationCamera,
+  withBasicCloseupPreview,
 } from "../pose-presentation.js";
 import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
@@ -306,10 +307,10 @@ jobsRoutes.get("/:id/result", async (c) => {
       outputScope: resolvePersonOutputScope(person),
       ...(person.posePresentation
         ? {
-            posePresentation: {
+            posePresentation: withBasicCloseupPreview({
               ...person.posePresentation,
               output_scope: resolvePersonOutputScope(person).resolved,
-            },
+            }),
           }
         : {}),
       candidates: person.candidates.map((candidate) => ({

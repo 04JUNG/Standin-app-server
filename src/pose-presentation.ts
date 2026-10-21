@@ -93,12 +93,52 @@ export interface PosePresentation {
     status: "ready" | "unavailable" | "not_requested";
     reason: string | null;
   } | null;
-  basic_model: { status: string; output_scope: string | null } | null;
+  basic_model: {
+    status: string;
+    output_scope: string | null;
+    preview?: {
+      version: "basic-closeup-preview-v1";
+      template_url: string;
+      scope: "head" | "shoulder_head";
+      pose: "neutral";
+      preview_only: true;
+    };
+  } | null;
   issues: string[];
   preview_status: string;
   auto_apply_allowed: false;
   refine_allowed: false;
   export_allowed: false;
+}
+/** Connect a close-up plan to the existing, anatomically cropped default mesh.
+ * Also used when reading old jobs; never invent a candidate or export authority.
+ */
+// Temporarily paused pending further experiments; deployment env cannot re-enable it.
+const BASIC_CLOSEUP_PREVIEW_ENABLED = false;
+export function withBasicCloseupPreview(p: PosePresentation): PosePresentation {
+  if (!p.basic_model) return p;
+  const { preview: _previous, ...basic } = p.basic_model;
+  const scope = p.output_scope;
+  const eligible = BASIC_CLOSEUP_PREVIEW_ENABLED && p.version === "dynamic-pose-presentation-v1" &&
+    p.route === "basic_model" && p.status === "basic_reference" &&
+    p.search_status === "ok" && p.issues.length === 0 &&
+    p.auto_apply_allowed === false && p.refine_allowed === false && p.export_allowed === false &&
+    basic.status === "planned" && basic.output_scope === scope &&
+    (scope === "head" || scope === "shoulder_head") &&
+    [p.library_candidates, p.review_candidates, p.generated_candidates].every(g => g.length === 0);
+  return {
+    ...p,
+    basic_model: {
+      ...basic,
+      ...(eligible ? { preview: {
+        version: "basic-closeup-preview-v1" as const,
+        template_url: `/v1/pose-candidates/default-body-template/${scope}`,
+        scope,
+        pose: "neutral" as const,
+        preview_only: true as const,
+      } } : {}),
+    },
+  };
 }
 /** Only an explicitly selectable, owned asset can use its stored presentation camera.
  * This does not fabricate a fitted camera contract or grant automatic approval.
@@ -532,7 +572,7 @@ export function mapPosePresentation(
         reason: code(m.reason),
       };
     }
-    return { presentation, assets };
+    return { presentation: withBasicCloseupPreview(presentation), assets };
   } catch (error) {
     return {
       presentation: {
