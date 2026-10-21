@@ -6,10 +6,22 @@
 
 import type { FunnelRow } from "./product.js";
 
-/** KPI 띠가 퍼널 말고 따로 세는 값들. */
+/**
+ * KPI 띠가 퍼널 말고 따로 세는 값들.
+ *
+ * 설치 수와 분석 건수는 품질 동의와 상관없이 **전체**를 센다(2026-10-21 결정). 세기만 하고
+ * 개별 설치·원본은 보여 주지 않는다. 선택·내보내기·피드백은 동의한 Job에서만 수집되므로
+ * 퍼널(동의 범위)을 그대로 쓴다.
+ */
 export interface OverviewExtraRow {
+  /** 기간 안에 접속한 설치(전체). */
+  active_period: number;
   active_today: number;
   total_installations: number;
+  /** 기간 안에 시작·완료·실패한 분석(전체). */
+  jobs_started: number;
+  jobs_completed: number;
+  jobs_failed: number;
   downloads: number;
   feedback_count: number;
   irrelevant_count: number;
@@ -48,13 +60,13 @@ function rate(numerator: number, denominator: number): number | null {
 
 export function toOverviewKpis(funnel: FunnelRow, extra: OverviewExtraRow): OverviewKpis {
   return {
-    activeInstallations: funnel.active_installations,
+    activeInstallations: extra.active_period,
     activeToday: extra.active_today,
     totalInstallations: extra.total_installations,
-    jobsStarted: funnel.jobs_started,
-    jobsCompleted: funnel.jobs_completed,
-    jobsFailed: funnel.jobs_failed,
-    failureRate: rate(funnel.jobs_failed, funnel.jobs_started),
+    jobsStarted: extra.jobs_started,
+    jobsCompleted: extra.jobs_completed,
+    jobsFailed: extra.jobs_failed,
+    failureRate: rate(extra.jobs_failed, extra.jobs_started),
     selectionRate: rate(funnel.jobs_selected, funnel.jobs_completed),
     jobsSelected: funnel.jobs_selected,
     downloads: extra.downloads,

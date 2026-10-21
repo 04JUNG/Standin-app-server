@@ -390,3 +390,29 @@ test("staging switch: review views ignore consent but still hide revoked install
   await db.exec(qualityReviewViews(false));
   assert.deepEqual(await visible(), [], "turning the switch off restores the consent scope");
 });
+
+test("count views include unconsented installations but expose no content columns", async (t) => {
+  const db = new PGlite();
+  t.after(() => db.close());
+  await db.exec(SCHEMA);
+  const now = new Date().toISOString();
+  for (const [id, revoked] of [["inst_plain", null], ["inst_gone", now]] as const) {
+    await db.query(
+      `INSERT INTO installations (id, token_hash, consent_version, consented_at, created_at, last_seen_at,
+         app_version, os_name, os_version, architecture, locale, revoked_at)
+       VALUES ($1, 'h', 'v', $2, $2, $2, '0', 'windows', '11', 'x64', 'ko', $3)`,
+      [id, now, revoked],
+    );
+    await db.query(
+      "INSERT INTO jobs (id, installation_id, status, created_at, updated_at, input_s3_key) VALUES ($1, $2, 'completed', $3, $3, 'k')",
+      ["job_" + id, id, now],
+    );
+  }
+  assert.equal((await db.query("SELECT 1 FROM quality_review_jobs")).rows.length, 0, "review scope is unchanged");
+  assert.deepEqual((await db.query<{ id: string }>("SELECT id FROM ops_count_installations")).rows.map((r) => r.id), ["inst_plain"]);
+  assert.deepEqual((await db.query<{ id: string }>("SELECT id FROM ops_count_jobs")).rows.map((r) => r.id), ["job_inst_plain"]);
+  const columns = (await db.query<{ column_name: string }>(
+    "SELECT column_name FROM information_schema.columns WHERE table_name = 'ops_count_jobs' ORDER BY column_name",
+  )).rows.map((r) => r.column_name);
+  assert.deepEqual(columns, ["created_at", "id", "installation_id", "status"]);
+});
