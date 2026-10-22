@@ -214,6 +214,7 @@ export async function runRefine(
     upstream = await deps.refineUpstream({
       // 미리보기는 refine 밖에서 그린다. 안에서 그리면 5초 상한을 넘겨 조정 결과까지 잃는다.
       ...(input.deferPreview || !config.refineInlineThumbnail ? { render_thumbnail: false } : {}),
+      ...(config.refineV3Shadow && context.refineV3 ? { refine_v3: context.refineV3 } : {}),
       pose_id: candidate.poseId,
       view: candidate.view,
       ...(candidate.camera ? { camera: candidate.camera } : {}),

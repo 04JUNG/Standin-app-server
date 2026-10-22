@@ -1578,3 +1578,7 @@ Converter 코드·모델·라이브러리 자산 변경은 필요 없다.
 공용 포즈 라이브러리 자산만 읽는다. 등록/격리 검사를 통과한 BVH의 SHA를 서버가 직접 계산하고, `scope=full` 인체 포스터의 source·character·revision·PNG 해시를 검증한다. `pose-only` 폴백은 거절한다. 성공·실패 모두 캐시를 저장하지 않으며 Converter·선택 변경·렌더 작업을 실행하지 않는다.
 
 이 썸네일은 정면·전신의 기본 인체 참고이며 선택 체형/손/최종 출력 범위 또는 검색 시점을 표현하지 않는다. 대시보드의 후보·갤러리 목록/확대도 이 경로를 사용하며, 갤러리 확대는 정면 참고 한 장을 표시한다. 종전 시점별 `/thumbnail?view=...` API는 호환성을 위해 유지한다.
+
+### Refine v3 private shadow (default off)
+
+`REFINE_V3_SHADOW=false` gates a server-only, bounded `refine-shadow-v1` envelope relay from inference analysis through private stored refine context back to inference `/refine`. It adds no public client request fields or refine permission. See [REFINE_V3_SHADOW.md](REFINE_V3_SHADOW.md) for limits and unsupported product integration.
