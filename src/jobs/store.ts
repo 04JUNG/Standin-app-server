@@ -670,6 +670,7 @@ export async function persistAnalysisRecords(
           // refine 입력은 서버측에만 둔다(BFF-04). 클라가 되돌려 보낸 값은 신뢰하지 않는다.
           ctx
             ? JSON.stringify({
+                ...(ctx.refineV3 ? { refineV3: ctx.refineV3 } : {}),
                 keypoints: ctx.keypoints,
                 scores: ctx.scores,
                 qualityReasons: ctx.qualityReasons,

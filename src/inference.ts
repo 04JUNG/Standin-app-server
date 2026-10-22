@@ -14,6 +14,7 @@ import { currentContext } from "./requestContext.js";
  * 실패시키는 대신 `mapping.ts`가 low/refine-off 쪽으로 안전하게 해석한다.
  */
 export interface UpstreamPerson {
+  refine_v3?: unknown;
   refine_candidates?: UpstreamPerson["candidates"];
   pose_presentation?: unknown;
   dynamic_search?: unknown;
@@ -262,6 +263,7 @@ export async function analyze(file: Blob, hint = ""): Promise<CutResult> {
  *   전부 `/analyze` 때 DB에 넣어 둔 값이며 클라이언트가 되돌려 보내는 값이 아니다(BFF-04).
  */
 export interface RefineUpstreamRequest {
+  refine_v3?: import("./refine/shadow.js").RefineShadowEnvelope;
   render_thumbnail?: boolean;
   camera?: CandidateCamera;
   pose_id: string;
