@@ -293,6 +293,22 @@ export function createSceneRoutes(
       } else {
         scene = await deps.composeRoughScene(jobId, image, sources);
       }
+      // Preview rendering can outlast a body/hand/selection change. The final
+      // authorization below must run after every asynchronous artifact operation.
+      let png: Uint8Array | undefined;
+      let previewFailure: { error: unknown } | undefined;
+      if (input.preview === true) {
+        if (prepared || !refined)
+          return fail(400, "INVALID_INPUT", "준비한 장면을 다시 선택해 주세요.");
+        try {
+          png = await deps.renderFinalPreview(
+            { fbx: scene.bytes, artifactSha256: scene.sha256 }, true, {}, true, c.req.raw.signal,
+          );
+        } catch (error) {
+          // A render-only failure cannot hide concurrent review invalidation.
+          previewFailure = { error };
+        }
+      }
       const current = await deps.getOwnedJob(jobId, owner);
       if (
         !current ||
@@ -344,11 +360,8 @@ export function createSceneRoutes(
       // Reauthorization/preview can be slow; never release an expired review.
       if (reviewed && reviewed.expires <= Date.now())
         return fail(409, "SCENE_REVIEW_EXPIRED", "확인 시간이 지났습니다. 장면을 다시 준비해 주세요.");
-      if (input.preview === true) {
-        if (prepared || !refined) return fail(400, "INVALID_INPUT", "준비한 장면을 다시 선택해 주세요.");
-        const png = await deps.renderFinalPreview({ fbx: scene.bytes, artifactSha256: scene.sha256 }, true, {}, true, c.req.raw.signal);
-        if (reviewed && reviewed.expires <= Date.now())
-          return fail(409, "SCENE_REVIEW_EXPIRED", "확인 시간이 지났습니다. 장면을 다시 준비해 주세요.");
+      if (previewFailure) throw previewFailure.error;
+      if (png) {
         return new Response(png, { headers: { "Content-Type": "image/png", "Cache-Control": "private, no-store",
           "X-Standin-Artifact-SHA256": scene.sha256, "X-Standin-Preview-Artifact-SHA256": sha256Hex(png) } });
       }
