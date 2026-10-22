@@ -29,6 +29,7 @@ function setup(refinement = false, shared = new Map<string, Uint8Array>()) {
     tamper: false,
     previewFails: false,
     renders: 0,
+    onRender: undefined as (() => void) | undefined,
     sent: [] as number[],
   };
   const job = {
@@ -79,6 +80,7 @@ function setup(refinement = false, shared = new Map<string, Uint8Array>()) {
         },
         renderFinalPreview: async () => {
           state.renders++;
+          state.onRender?.();
           if (state.previewFails) throw new Error("render unavailable");
           return Buffer.from([137,80,78,71,13,10,26,10]);
         },
@@ -385,4 +387,20 @@ test("worker network loss cannot imply the server stopped computing", async () =
   assert.equal(r.status, 503);
   const body = await r.json() as { error: { details: { serverOperationMayContinue: boolean } } };
   assert.equal(body.error.details.serverOperationMayContinue, true);
+});
+
+test("scene preview rechecks job and source revisions after a slow render", async () => {
+  for (const change of ["job", "hands"] as const) for (const previewFails of [false, true]) {
+    const f = setup(true);
+    f.state.previewFails = previewFails;
+    const review = await (await f.send({ ...correction, prepare: true })).json() as { reviewKey: string };
+    f.state.onRender = () => {
+      if (change === "job") f.job.updatedAt = "v2";
+      else f.state.changeHands = true;
+    };
+    const response = await f.send({ ...confirmation, reviewKey: review.reviewKey, preview: true });
+    assert.equal(response.status, 409, `stale ${change} preview must not be published`);
+    assert.notEqual(response.headers.get("Content-Type"), "image/png");
+    assert.equal(f.state.preparations, 1, "rechecking never rebuilds the reviewed file");
+  }
 });

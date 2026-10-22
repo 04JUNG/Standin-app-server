@@ -75,6 +75,12 @@ scene 영수증은 기존 인물별 shared receipt와 별도의 owner/job `scene
 `details.recovery`/`allowedActions`를 사용하고 임의 원인·진행률을 생성하지 않습니다.
 HTTP 요청 취소는 대기 중단이며 worker 연산 중단 보장이 없습니다. 서버 취소 API는 없습니다.
 
+2026-10-22 연동 보강: 장면 PNG 렌더 후에도 job/확정 후보·체형·손·범위·원본 SHA를
+재검증하여 렌더 중 바뀐 선택의 이미지를 반환하지 않습니다. 기존 인물별 guard 오류는
+그대로 전달합니다. 장면 endpoint의 `PREVIEW_NOT_READY`(503)는 기존 source 영수증을
+찾지 못한 경우이므로 인물별 결과를 다시 확인해야 합니다. 선택을 유지한 채 PNG 실패로만
+취급하지 않습니다. 이 코드는 worker의 live readiness를 뜻하지 않습니다.
+
 정확한 JSON·오류/복구·summary·취소·앱/바 상태 계약과 worker 미해결 범위는
 [장면 저장 계약](scene-save-contract.md), 내부 경계는 [v4 장면 저장](scene-refinement-v4.md)을 참고하세요.
 실제 최신 Staging 설치 앱의 3컷 검증은 worker 준비 후 별도로 필요합니다.

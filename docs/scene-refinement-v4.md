@@ -32,8 +32,8 @@ use memory but loses reviews on replica changes/restarts and requests preparatio
 again. Memory eviction never regenerates an acknowledged file.
 
 Save and optional preview require the exact review version and artifact SHA as
-well as the same owner/job/source binding. The BFF rechecks person guards and
-returns the stored bytes; it never repeats worker preparation after confirmation.
+well as the same owner/job/source binding. The BFF rechecks person guards after asynchronous preview rendering as well as
+preparation/download, and returns the stored bytes; it never repeats worker preparation after confirmation.
 The client must hash downloaded bytes before native save. Optional preview failure
 does not invalidate the final file. Existing per-person guard errors propagate.
 Receipt schema v2 rejects earlier or corrupted stored receipts; prepare again.
@@ -48,3 +48,16 @@ Validation in this change uses local job/export/worker/storage fixtures. It is n
 an installed-app or Staging E2E result. Real three-cut integration with a prepared
 worker, app and floating bar, native save and matching SHA remains pending. CSP
 camera adoption and exact absolute screen framing are separate validation steps.
+
+
+For the joined handler regression, run `npm run test:scene`. The test starts with
+actual per-person ready/download routes (body/hand/runtime-pinned references),
+then scene composition, preparation, PNG and exact shared-receipt download. It
+rejects late selection changes and retains the original typed person errors.
+`PREVIEW_NOT_READY` on a scene request means its existing-only source receipt
+needs a new person review, rather than an optional PNG failure. To export safe
+wire data for client replay, build and use `tools/export-scene-wire-fixture.mjs`
+with an explicit output path. These are local synthetic service/storage fixtures;
+no real worker, S3, installed application or native FBX import was exercised.
+
+See [2026-10-22 validation and real-runtime prerequisites](scene-integration-validation-2026-10-22.md).
