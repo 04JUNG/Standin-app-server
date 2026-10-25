@@ -416,3 +416,48 @@ test("count views include unconsented installations but expose no content column
   )).rows.map((r) => r.column_name);
   assert.deepEqual(columns, ["created_at", "id", "installation_id", "status"]);
 });
+
+test("internal installations are hidden from review and count views while the switch is on", async (t) => {
+  const { qualityReviewViews } = await import("./qualityConsent.js");
+  const db = new PGlite();
+  t.after(() => db.close());
+  await db.exec(SCHEMA);
+  await db.exec(qualityReviewViews(true));
+  const now = new Date().toISOString();
+  for (const id of ["inst_dev", "inst_user"]) {
+    await db.query(
+      `INSERT INTO installations (id, token_hash, consent_version, consented_at, created_at, last_seen_at,
+         app_version, os_name, os_version, architecture, locale)
+       VALUES ($1, 'h', 'v', $2, $2, $2, '0', 'windows', '11', 'x64', 'ko')`,
+      [id, now],
+    );
+    await db.query(
+      "INSERT INTO jobs (id, installation_id, status, created_at, updated_at) VALUES ($1, $2, 'completed', $3, $3)",
+      ["job_" + id, id, now],
+    );
+  }
+  const ids = async (sql: string) => (await db.query<{ id: string }>(sql)).rows.map((r) => r.id).sort();
+  await db.query("INSERT INTO internal_installations (id, label, added_at) VALUES ('inst_dev', NULL, $1)", [now]);
+
+  // 스위치 행이 없으면 켜진 것: 개발자를 뺀다.
+  assert.deepEqual(await ids("SELECT id FROM quality_review_jobs"), ["job_inst_user"]);
+  assert.deepEqual(await ids("SELECT id FROM ops_count_installations"), ["inst_user"]);
+
+  await db.query(
+    "INSERT INTO service_flags (key, value, updated_at) VALUES ('hide_internal_installations', 'false', $1)",
+    [now],
+  );
+  assert.deepEqual(await ids("SELECT id FROM quality_review_jobs"), ["job_inst_dev", "job_inst_user"], "switch off shows developers again");
+  assert.deepEqual(await ids("SELECT id FROM ops_count_jobs"), ["job_inst_dev", "job_inst_user"]);
+});
+
+test("the operator-provided developer seed is inserted only once", async (t) => {
+  const db = new PGlite();
+  t.after(() => db.close());
+  await db.exec(SCHEMA);
+  const count = async () => (await db.query("SELECT 1 FROM internal_installations")).rows.length;
+  assert.equal(await count(), 3);
+  await db.query("DELETE FROM internal_installations WHERE id = 'inst_cc6832df-05a9-450f-9fb5-1e5f69b1e38c'");
+  await db.exec(SCHEMA); // 다음 배포
+  assert.equal(await count(), 2, "an unmarked developer must not come back on redeploy");
+});
