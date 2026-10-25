@@ -56,6 +56,7 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
   .pill.ok { background:color-mix(in srgb,var(--ok) 18%,transparent); color:var(--ok); }
   .pill.warn { background:color-mix(in srgb,var(--warn) 18%,transparent); color:var(--warn); }
   .pill.bad { background:color-mix(in srgb,var(--bad) 18%,transparent); color:var(--bad); }
+  #internalToggle.on { border-color:var(--c-users); color:var(--c-users); font-weight:700; }
   .pill.search { background:color-mix(in srgb,var(--c-down) 16%,transparent); color:var(--c-down); }
   .searchq { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:4px; font-family:inherit; }
   .searchq .q { color:var(--text); font-size:12.5px; word-break:break-all; }
@@ -215,6 +216,7 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
         <option value="90">90일</option>
       </select>
     </label>
+    <button class="ghost" id="internalToggle" title="개발자로 표시한 설치를 목록·숫자·모아 보기에서 빼거나 넣는다">개발자 —</button>
     <span class="sub" title="열람 기록이 이 이름으로 남는다">
       <span id="reviewer">—</span> · 갱신 <span id="updated">—</span>
     </span>
@@ -456,6 +458,54 @@ async function tick() {
     $("gateError").textContent = error.message;
   }
 }
+
+// ── 개발자 설치 ──────────────────────────────────────────────
+// 표시한 설치는 "개발자 제외"가 켜져 있으면 서버의 관리자 뷰가 통째로 뺀다. 화면이 따로
+// 거르지 않으므로, 바꾼 뒤에는 새로고침해서 모든 숫자를 같은 기준으로 다시 받는다.
+let internal = { hide: true, ids: new Set() };
+
+async function internalLoad() {
+  try {
+    const res = await fetch("/v1/admin/internal-installations", { headers: { "X-Beta-Admin-Token": token } });
+    if (!res.ok) return;
+    const data = await res.json();
+    internal = { hide: data.hide, ids: new Set(data.items.map((item) => item.installationId)) };
+  } catch (error) { /* 스위치를 못 읽어도 나머지 화면은 그대로 쓴다 */ }
+  internalRender();
+}
+
+function internalRender() {
+  $("internalToggle").textContent = "개발자 " + (internal.hide ? "제외 중" : "포함 중") + " · " + internal.ids.size + "곳";
+  $("internalToggle").classList.toggle("on", internal.hide);
+}
+
+async function internalPut(path, body) {
+  const res = await fetch("/v1/admin/internal-installations/" + path, {
+    method: "PUT",
+    headers: { "X-Beta-Admin-Token": token, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) { alert("바꾸지 못했습니다 (" + res.status + ")"); return; }
+  location.reload();
+}
+
+$("internalToggle").addEventListener("click", () => {
+  const next = !internal.hide;
+  if (confirm(next ? "개발자 설치 " + internal.ids.size + "곳을 목록·숫자·모아 보기에서 뺄까요?" : "개발자 설치도 다시 보이게 할까요?")) {
+    internalPut("hide", { hide: next });
+  }
+});
+
+// 설치 조회 머리말의 버튼. 그 영역은 다시 그려지므로 위임으로 받는다.
+document.addEventListener("click", (event) => {
+  const button = event.target.closest && event.target.closest("button[data-internal]");
+  if (!button) return;
+  const on = button.dataset.on === "1";
+  const note = on && internal.hide ? " 지금은 개발자 제외가 켜져 있어 이 설치가 바로 화면에서 사라집니다." : "";
+  if (confirm((on ? "개발자 설치로 표시할까요?" : "개발자 표시를 해제할까요?") + note)) {
+    internalPut(encodeURIComponent(button.dataset.internal), { internal: on });
+  }
+});
 
 // ── 설치 조회 ────────────────────────────────────────────────
 //
@@ -1071,6 +1121,10 @@ function lookupRender() {
       " · 마지막 접속 " + when(install.lastSeenAt) +
       (install.revokedAt ? " · " + pill("철회됨", "bad") : "") +
       (install.deletionRequestedAt ? " · " + pill("삭제 요청", "warn") : "") +
+      (internal.ids.has(install.installationId) ? " · " + pill("개발자", "search") : "") +
+      ' <button class="ghost" data-internal="' + esc(install.installationId) + '" data-on="' +
+      (internal.ids.has(install.installationId) ? "0" : "1") + '">' +
+      (internal.ids.has(install.installationId) ? "개발자 표시 해제" : "개발자로 표시") + "</button>" +
       "</div>"
     : "";
 
@@ -2125,6 +2179,7 @@ async function boot() {
   await tick();
   if (overviewLoaded || $("app").classList.contains("hide")) return;
   overviewLoaded = true;
+  internalLoad();
   overviewGo();
   activityGo();
   let saved = null;

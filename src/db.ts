@@ -320,6 +320,26 @@ export const SCHEMA = `
     updated_at TEXT NOT NULL
   );
 
+  -- 개발자(팀원) 설치. 대시보드의 "개발자 제외" 스위치가 켜져 있으면 관리자 뷰에서 빠진다.
+  -- 데이터 처리에는 영향이 없다 — 관리자 화면에서 보이느냐만 정한다.
+  CREATE TABLE IF NOT EXISTS internal_installations (
+    id         TEXT PRIMARY KEY,
+    label      TEXT,
+    added_at   TEXT NOT NULL
+  );
+  -- 2026-10-24 운영자가 지정한 개발자 설치(프로덕션). 처음 한 번만 넣는다 — 표시를 남겨,
+  -- 나중에 대시보드에서 해제해도 배포 때마다 다시 생기지 않게 한다.
+  INSERT INTO internal_installations (id, label, added_at)
+    SELECT v.id, '개발자', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+    FROM (VALUES ('inst_1aed1085-2727-4e68-b589-88db0de97c05'),
+                 ('inst_afec2e61-1f5f-4875-8b69-3a99b7f8a4c9'),
+                 ('inst_cc6832df-05a9-450f-9fb5-1e5f69b1e38c')) AS v(id)
+    WHERE NOT EXISTS (SELECT 1 FROM service_flags WHERE key = 'internal_seed_20261024')
+  ON CONFLICT (id) DO NOTHING;
+  INSERT INTO service_flags (key, value, reason, updated_at)
+    VALUES ('internal_seed_20261024', 'done', NULL, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
+  ON CONFLICT (key) DO NOTHING;
+
   -- 운영 지표 1분 롤업(계획 3단계). 태스크마다 자기 행을 쓰고, 합치는 것은 조회 시점에 한다.
   -- 지연시간은 p50/p95가 아니라 히스토그램으로 둔다 — 태스크별 p95를 평균 내는 것은
   -- 통계적으로 의미가 없지만(p95의 평균은 p95가 아니다), 버킷 카운트는 더할 수 있다.
