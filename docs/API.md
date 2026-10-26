@@ -1037,6 +1037,17 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
         "view": "three_quarter",
         "source": "vlm_person"
       },
+      "poseDescription": {
+        "status": "valid",
+        "reasons": [],
+        "searchText": "서서 오른팔을 머리 위로 올린 자세",
+        "bodyDetails": "오른팔을 올리고 왼팔은 몸 옆으로 내리고 있다.",
+        "certainty": "high",
+        "visibleScope": "full",
+        "postures": ["standing"],
+        "actions": ["reaching"],
+        "objects": []
+      },
       "searchSignals": {
         "rankDistance": 0.182,
         "distanceMetric": "pos",
@@ -1087,6 +1098,7 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 - `skeleton.scores`를 그대로 쓰면 안 된다. 추론이 refine을 막은 인물은 그 배열을 0으로 덮어쓴다(Standin-server `pipeline.py::_apply_refine_policy`). `jointScores`가 그 경우 마스킹 전 `raw_scores`로 갈아 끼우고 `source`로 어느 쪽인지 알려 준다(`effective` | `raw` | `none`).
 - `tags`는 **컷 단위** VLM 태그다(shot·action·view·relationship). 같은 컷의 모든 인물이 같은 값을 받는다.
 - `personTags`는 **인물별** 태그다(P2). `null`이면 그 Job은 인물별로 물어본 적이 없다(프롬프트 `p1-scope` 또는 구 추론). `source`가 `unknown`이면 물었는데 VLM이 모른다고 답한 것이다 — 이 둘은 다른 상태라 화면도 다르게 적는다.
+- `poseDescription`은 러프에서 추출한 **인물별 자연어**다. 검색 문장(`searchText`)과 자세 설명(`bodyDetails`)은 각각 최대 4,000자이며, 문자열이 없으면 `null`이다. 태그와 판정 근거 배열은 최대 20개, 각 값은 최대 80자다. `status`는 추론의 `valid`, `too_generic`, `empty`, `not_visible`, `low_certainty`, `vlm_error`, `not_requested` 값을 보존하며, 알 수 없으면 `null`이다. 기록 자체가 없는 과거 작업은 `poseDescription: null`로 반환하여 추출 오류와 구분한다. 기존 품질 검토용 `person_tags_json`에 함께 저장하므로 동의 철회 시 삭제되며, 공개 분석 응답에는 포함하지 않는다. 이 변경은 이후 분석부터 기록하며 과거 작업을 재추론하지 않는다.
 - `cutSummary.vlmTags`는 VLM이 **실제로 말한** 컷 태그라 `tags`와 다를 수 있다. `tags`는 추론이 `other`·`front`로 좁힌 뒤의 값이다.
 - `outputScope`는 `jobs.result_json`을 먼저 쓰고(사용자가 고른 구도가 거기 있다), 없을 때만 `analysis_people.output_scope_json`으로 메운다. 어느 쪽이든 저장된 파생 필드를 믿지 않고 다시 계산한다.
 
