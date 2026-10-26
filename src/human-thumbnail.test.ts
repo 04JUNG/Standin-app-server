@@ -100,61 +100,47 @@ test("dashboard candidate and library loaders both request human references with
   }
 });
 
-test("dashboard frames each person's cards using its own resolved output scope", () => {
+test("dashboard uses only the rough-detected scope, independently of user output choices", () => {
   const context = vm.createContext({ PREVIEW_SCOPE_LABELS: {
     full: "전신", half: "상반신", bust: "가슴 위", shoulder_head: "어깨 위", head: "두상",
   } });
-  for (const name of ["esc", "pill", "candidatePreviewScope", "candidateFramingControls", "candidateCard"]) {
+  for (const name of ["esc", "pill", "candidatePreviewScope", "candidateCard"]) {
     const start = DASHBOARD_HTML.indexOf("function " + name + "(");
     const end = DASHBOARD_HTML.indexOf("\n}", start) + 2;
     assert.ok(start >= 0 && end > start);
     vm.runInContext(DASHBOARD_HTML.slice(start, end), context);
   }
-  assert.equal(vm.runInContext("candidatePreviewScope({outputScope:{resolved:'half'}})", context), "half");
-  assert.equal(vm.runInContext("candidatePreviewScope({outputScope:{resolved:'head'}})", context), "head");
+  assert.equal(vm.runInContext("candidatePreviewScope({outputScope:{detected:'half',selection:'full',resolved:'full'}})", context), "half");
+  assert.equal(vm.runInContext("candidatePreviewScope({outputScope:{detected:'full',selection:'half',resolved:'half'}})", context), "full");
+  assert.equal(vm.runInContext("candidatePreviewScope({outputScope:{detected:null,selection:'half',resolved:'half'}})", context), "full");
+  assert.equal(vm.runInContext("candidatePreviewScope({outputScope:{detected:'bust'}})", context), "half");
+  assert.equal(vm.runInContext("candidatePreviewScope({outputScope:{detected:'head'}})", context), "head");
+  assert.equal(vm.runInContext("candidatePreviewScope({outputScope:{detected:'shoulder_head'}})", context), "shoulder_head");
   assert.equal(vm.runInContext("candidatePreviewScope({})", context), "full");
-  assert.equal(vm.runInContext("candidatePreviewScope({outputScope:{resolved:'__proto__'}})", context), "full");
+  assert.equal(vm.runInContext("candidatePreviewScope({outputScope:{detected:'__proto__'}})", context), "full");
   context.row = { pose_id: "pose", candidate_id: "c", view: "front", rank: 1 };
   assert.match(vm.runInContext("candidateCard(row, null, 'half')", context), /data-scope="half"/);
-  assert.match(vm.runInContext("candidateFramingControls('half')", context), /상반신만/);
-  assert.match(vm.runInContext("candidateFramingControls('half')", context), /전신 참고/);
-  assert.equal(vm.runInContext("candidateFramingControls('full')", context), "");
+  assert.ok(!DASHBOARD_HTML.includes("data-preview-scope"), "there is no manual scope switch");
 });
 
-test("switching preview scope ignores stale responses and can recover after a missing partial poster", async () => {
-  const pending: Array<(value: Response) => void> = [];
+test("missing detected-scope previews show an unavailable message without requesting a full-body replacement", async () => {
   const calls: string[] = [];
-  const note = { hidden: true, textContent: "" };
-  const img = { dataset: { pose: "pose", scope: "half" }, src: "", hidden: false,
-    isConnected: true, parentElement: { querySelector: () => note } };
-  let blobs = 0;
+  let note = "", removed = false;
+  const img = { dataset: { pose: "pose", scope: "half" }, isConnected: true,
+    insertAdjacentHTML: (_where: string, html: string) => { note = html; },
+    remove: () => { removed = true; },
+  };
   const context = vm.createContext({ token: "admin-test", detailBlobUrls: [], img,
-    URL: { createObjectURL: () => "blob:" + ++blobs },
-    fetch: (url: string) => { calls.push(url); return new Promise<Response>((resolve) => pending.push(resolve)); },
+    fetch: async (url: string) => { calls.push(url); return new Response(null, { status: 404 }); },
   });
   const start = DASHBOARD_HTML.indexOf("async function fillCandidateThumb(");
   vm.runInContext(DASHBOARD_HTML.slice(start, DASHBOARD_HTML.indexOf("\n}\n", start) + 2), context);
-  const partial = vm.runInContext("fillCandidateThumb(img)", context);
-  img.dataset.scope = "full";
-  const full = vm.runInContext("fillCandidateThumb(img)", context);
-  pending[1](new Response(image)); await full;
-  pending[0](new Response(null, { status: 404 })); await partial;
-  assert.equal(img.src, "blob:1");
-  assert.equal(img.hidden, false);
-  assert.equal(note.hidden, true);
+  await vm.runInContext("fillCandidateThumb(img)", context);
+  assert.equal(calls.length, 1);
   assert.match(calls[0], /scope=half/);
-  assert.ok(!calls[1].includes("scope="));
-  img.dataset.scope = "half";
-  const missing = vm.runInContext("fillCandidateThumb(img)", context);
-  pending[2](new Response(null, { status: 404 })); await missing;
-  assert.equal(img.hidden, true);
-  assert.equal(note.hidden, false);
-  assert.match(note.textContent, /전신 참고/);
-  img.dataset.scope = "full";
-  const retry = vm.runInContext("fillCandidateThumb(img)", context);
-  pending[3](new Response(image)); await retry;
-  assert.equal(img.hidden, false);
-  assert.equal(note.hidden, true);
+  assert.equal(removed, true);
+  assert.match(note, /감지 범위의 미리보기 없음/);
+  assert.ok(!note.includes("전환"));
 });
 
 test("new user and admin endpoints retain the existing authentication boundaries",async()=>{

@@ -88,8 +88,6 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
   .cand.sel { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset; }
   .cand img { width:100%; aspect-ratio:3/4; object-fit:contain; background:var(--panel); border-radius:6px; }
   .cand .sub { font-size:11px; }
-  .preview-scope { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:10px 0; }
-  .preview-scope button[aria-pressed="true"] { color:var(--text); border-color:var(--accent); }
   .side { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); align-items:start; }
   .bar { height:6px; background:var(--accent); border-radius:3px; min-width:2px; }
   .cohort { background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
@@ -604,8 +602,6 @@ function releaseDetailBlobs() {
 
 async function fillCandidateThumb(img) {
   const poseId = img.dataset.pose;
-  const request = String(Number(img.dataset.thumbRequest || 0) + 1);
-  img.dataset.thumbRequest = request;
   const scope = img.dataset.scope || "full";
   const query = "?revision=human-poster-v1" + (scope !== "full" ? "&scope=" + encodeURIComponent(scope) : "");
   try {
@@ -615,60 +611,24 @@ async function fillCandidateThumb(img) {
     );
     if (!res.ok) throw new Error(String(res.status));
     const blob = await res.blob();
-    if (img.dataset.thumbRequest !== request || img.isConnected === false) return;
+    if (img.isConnected === false) return;
     const url = URL.createObjectURL(blob);
     detailBlobUrls.push(url);
     img.src = url;
-    img.hidden = false;
-    const note = img.parentElement.querySelector("[data-thumb-error]");
-    if (note) note.hidden = true;
   } catch {
-    if (img.dataset.thumbRequest !== request || img.isConnected === false) return;
-    img.hidden = true;
-    let note = img.parentElement.querySelector("[data-thumb-error]");
-    if (!note) {
-      img.insertAdjacentHTML("afterend", '<div class="sub" data-thumb-error></div>');
-      note = img.parentElement.querySelector("[data-thumb-error]");
-    }
-    note.textContent = scope === "full" ? "전신 미리보기 없음" : "이 범위의 미리보기가 없습니다. 전신 참고로 전환할 수 있습니다.";
-    note.hidden = false;
+    if (img.isConnected === false) return;
+    img.insertAdjacentHTML("afterend", '<div class="sub">' +
+      (scope === "full" ? "전신 미리보기 없음" : "감지 범위의 미리보기 없음") + '</div>');
+    img.remove();
   }
 }
 
 const PREVIEW_SCOPE_LABELS = { full: "전신", half: "상반신", bust: "가슴 위", shoulder_head: "어깨 위", head: "두상" };
 function candidatePreviewScope(person) {
-  const scope = person.outputScope && person.outputScope.resolved;
+  const scope = person.outputScope && person.outputScope.detected;
+  // 자동 bust는 기존 출력 정책과 같이 팔을 포함하는 half로 보여 준다.
+  if (scope === "bust") return "half";
   return Object.hasOwn(PREVIEW_SCOPE_LABELS, scope) ? scope : "full";
-}
-
-function candidateFramingControls(scope) {
-  if (scope === "full") return "";
-  return '<div class="preview-scope"><span class="sub">후보 미리보기</span>' +
-    '<button class="ghost" data-preview-scope="' + scope + '" aria-pressed="true">' + PREVIEW_SCOPE_LABELS[scope] + '만</button>' +
-    '<button class="ghost" data-preview-scope="full" aria-pressed="false">전신 참고</button>' +
-    '<span class="sub">저장 범위는 바뀌지 않습니다.</span></div>';
-}
-
-function bindCandidateFraming() {
-  $("detailOut").querySelectorAll("[data-person-preview]").forEach((panel) => {
-    panel.querySelectorAll("button[data-preview-scope]").forEach((button) => {
-      button.addEventListener("click", () => {
-        if (button.getAttribute("aria-pressed") === "true") return;
-        panel.querySelectorAll("button[data-preview-scope]").forEach((other) => {
-          other.setAttribute("aria-pressed", String(other === button));
-        });
-        panel.querySelectorAll("img[data-pose]").forEach((img) => {
-          img.dataset.scope = button.dataset.previewScope;
-          img.alt = PREVIEW_SCOPE_LABELS[button.dataset.previewScope] + " 포즈 참고";
-          img.removeAttribute("src");
-          img.hidden = false;
-          const note = img.parentElement.querySelector("[data-thumb-error]");
-          if (note) note.hidden = true;
-          fillCandidateThumb(img);
-        });
-      });
-    });
-  });
 }
 
 function groupBy(rows, key) {
@@ -1049,8 +1009,8 @@ function detailRender(detail) {
           person.skeleton.keypoints.length + "개" + (note ? " · " + esc(note) : "") + "</p>"
         : '<p class="sub">뼈대 없음</p>') +
       (candidates.length
-        ? '<div data-person-preview="' + index + '">' + candidateFramingControls(previewScope) +
-          '<div class="cands">' + candidates.map((row) => candidateCard(row, selectedId, previewScope)).join("") + "</div></div>"
+        ? '<div class="cands" data-person-preview="' + index + '">' +
+          candidates.map((row) => candidateCard(row, selectedId, previewScope)).join("") + "</div>"
         : '<p class="empty">후보가 없습니다.</p>') +
       (refined.length
         ? "<h3>refine 결과</h3><div class=\"cands\">" + refined.map(refineCard).join("") + "</div>"
@@ -1089,7 +1049,6 @@ function detailRender(detail) {
     "</div></div>" + people + "</div>";
 
   $("detailOut").querySelectorAll(".cand img[data-pose]").forEach(fillCandidateThumb);
-  bindCandidateFraming();
   $("detailOut").querySelectorAll(".cand img[data-refined]").forEach(fillRefinedThumb);
   $("detailOut").querySelectorAll("button[data-fbx]").forEach((button) => {
     button.addEventListener("click", () => downloadFbx(button));
