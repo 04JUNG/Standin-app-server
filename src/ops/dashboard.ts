@@ -114,6 +114,9 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
   .tagline { display:flex; gap:6px; flex-wrap:wrap; margin:4px 0 8px; }
   .tag { border:1px solid var(--line); border-radius:6px; padding:2px 8px; font-size:12px; color:var(--muted); }
   .tag b { color:var(--text); font-weight:600; }
+  .description { border:1px solid var(--line); border-left:3px solid var(--c-down); border-radius:8px; padding:12px 14px; margin:10px 0 14px; background:var(--panel); }
+  .description p { margin:6px 0; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .description .heading { display:flex; align-items:center; flex-wrap:wrap; gap:8px; font-size:13px; font-weight:600; }
   /* ── v2: 머리글·탭·KPI·서랍 ─────────────────────────────── */
   header { position:sticky; top:0; z-index:20; background:var(--bg); }
   header .spacer { margin-left:auto; }
@@ -943,6 +946,26 @@ function metadataPills(meta) {
     "</div>";
 }
 
+function poseDescriptionBlock(person) {
+  const d = person.poseDescription;
+  const labels = { valid: "추출 완료", too_generic: "설명 구체성 부족", empty: "설명 없음", not_visible: "인물 확인 어려움",
+    low_certainty: "추출 확신 낮음", vlm_error: "추출 오류", not_requested: "추출 미요청" };
+  const tone = !d ? "warn" : d.status === "valid" ? "ok" : d.status === "vlm_error" ? "bad" : "warn";
+  const state = !d ? "저장된 설명 없음" : labels[d.status] || "상태 미확인";
+  const meta = d ? [d.certainty ? '확신: ' + d.certainty : '', d.visibleScope ? '보이는 범위: ' + d.visibleScope : ''].filter(Boolean).join(' · ') : '';
+  const tags = d ? [["자세", d.postures], ["동작", d.actions], ["사물", d.objects]]
+    .filter((entry) => entry[1] && entry[1].length)
+    .map((entry) => '<span class="tag">' + esc(entry[0]) + ' <b>' + esc(entry[1].join(", ")) + '</b></span>').join("") : "";
+  return '<div class="description"><div class="heading">러프 → 자연어 ' + pill(state, tone) + '</div>' +
+    (d ? (d.searchText ? '<div class="sub">검색 문장</div><p>' + esc(d.searchText) + '</p>' : '') +
+      (d.bodyDetails ? '<div class="sub">자세 설명</div><p>' + esc(d.bodyDetails) + '</p>' : '') +
+      (tags ? '<div class="tagline">' + tags + '</div>' : '') +
+      (meta ? '<p class="sub">' + esc(meta) + '</p>' : '') +
+      (!d.searchText && !d.bodyDetails ? '<p class="sub">저장된 자연어 문장이 없습니다.</p>' : '') +
+      (d.reasons && d.reasons.length ? '<details><summary class="sub">판정 근거</summary><p class="mono">' + esc(d.reasons.join(' · ')) + '</p></details>' : '')
+      : '<p class="sub">이 작업에는 자연어 추출 기록이 저장되어 있지 않습니다.</p>') + '</div>';
+}
+
 function detailRender(detail) {
   releaseDetailBlobs();
   currentDetailJobId = detail.jobId;
@@ -963,6 +986,7 @@ function detailRender(detail) {
       "</h3>" +
       '<div class="tagline">' + personBadges(person) + "</div>" +
       personTagLine(person) +
+      (!isSearch(detail) ? poseDescriptionBlock(person) : "") +
       tagLine(person.tags, "컷 단위") +
       searchSignalLine(person.searchSignals) +
       (person.skeleton
@@ -1005,7 +1029,7 @@ function detailRender(detail) {
     cutSummaryBlock(detail.cutSummary) +
     ((detail.people || []).some((person) => person.personTags)
       ? '<p class="sub">인물별 <b>action·view</b>는 사람마다 따로 판단한 값이다. 아래 "컷 단위" 줄은 컷 하나에서 뽑아 전원에게 복사한 값이라 둘이 다를 수 있다.</p>'
-      : '<p class="sub">이 Job은 VLM에 <b>컷 단위</b>로만 물었다. 같은 컷의 모든 인물이 같은 action·view를 받는다. 인물별 태그는 프롬프트를 p2-person-tags로 바꾼 뒤부터 쌓인다.</p>') +
+      : '<p class="sub">인물별 action·view 태그는 저장되어 있지 않습니다. 아래 "컷 단위" 줄은 컷 전체에서 추출한 값입니다.</p>') +
     "</div></div>" + people + "</div>";
 
   $("detailOut").querySelectorAll(".cand img[data-pose]").forEach(fillCandidateThumb);
