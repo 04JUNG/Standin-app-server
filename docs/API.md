@@ -1593,6 +1593,6 @@ Converter 코드·모델·라이브러리 자산 변경은 필요 없다.
 - `GET /v1/pose-candidates/{poseId}/reference-thumbnail` — 기존 설치 인증 필요.
 - `GET /v1/admin/review/pose-candidates/{poseId}/reference-thumbnail` — 기존 관리자 인증·검토 guard 적용.
 
-공용 포즈 라이브러리 자산만 읽는다. 등록/격리 검사를 통과한 BVH의 SHA를 서버가 직접 계산하고, `scope=full` 인체 포스터의 source·character·revision·PNG 해시를 검증한다. `pose-only` 폴백은 거절한다. 성공·실패 모두 캐시를 저장하지 않으며 Converter·선택 변경·렌더 작업을 실행하지 않는다.
+선택 쿼리 `scope=full|half|bust|shoulder_head|head`로 미리보기 범위를 지정한다. 생략하면 기존과 같이 `full`이며, 잘못된 값은 400이다. 공용 포즈 라이브러리 자산만 읽는다. 등록/격리 검사를 통과한 BVH의 SHA를 서버가 직접 계산하고, 요청 범위와 일치하는 인체 포스터의 source·character·revision·PNG 해시를 검증한다. 다른 범위의 포스터나 `pose-only` 폴백은 거절한다. 성공·실패 모두 캐시를 저장하지 않으며 Converter·선택 변경·렌더 작업을 실행하지 않는다.
 
-이 썸네일은 정면·전신의 기본 인체 참고이며 선택 체형/손/최종 출력 범위 또는 검색 시점을 표현하지 않는다. 대시보드의 후보·갤러리 목록/확대도 이 경로를 사용하며, 갤러리 확대는 정면 참고 한 장을 표시한다. 종전 시점별 `/thumbnail?view=...` API는 호환성을 위해 유지한다.
+이 썸네일은 정면의 기본 인체 참고이며 선택 체형/손 또는 검색 시점을 표현하지 않는다. 대시보드 Job 상세의 후보는 인물별 `outputScope.resolved` 범위로 기본 표시하며, 부분 컷은 해당 범위와 전신 참고를 전환할 수 있다. 전환은 후보 미리보기에만 적용하며 저장 범위나 확정 선택을 변경하지 않는다. 부분 범위 자산이 없으면 안내를 표시하고 전신으로 자동 대체하지 않는다. 범위가 없는 과거 작업과 갤러리 목록/확대는 전신 참고를 유지한다. 종전 시점별 `/thumbnail?view=...` API는 호환성을 위해 유지한다.

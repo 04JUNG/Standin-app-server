@@ -47,6 +47,30 @@ test("quarantined, missing, oversized and empty BVH never reach poster lookup", 
     assert.equal(r.status,404);assert.equal(calls,0);assert.equal(r.headers.get('cache-control'),'private, no-store');
   }
 });
+test("reference thumbnails use the requested body scope and reject mismatched full-body posters", async () => {
+  for (const scope of ["full", "half", "bust", "shoulder_head", "head"]) {
+    const r = await app({ getPosePoster: async (_id, _sha, requested) => {
+      assert.equal(requested, scope);
+      return poster({ "X-Standin-Output-Scope": scope });
+    } }).request("/pose/reference-thumbnail?scope=" + scope);
+    assert.equal(r.status, 200, scope);
+  }
+  const mismatch = await app().request("/pose/reference-thumbnail?scope=half");
+  assert.equal(mismatch.status, 404, "a full-body poster must not stand in for an upper-body preview");
+  const missing = await app({ getPosePoster: async () => new Response(null, { status: 404 }) })
+    .request("/pose/reference-thumbnail?scope=half");
+  assert.equal(missing.status, 404);
+});
+test("invalid scope is rejected before any library read", async () => {
+  let reads = 0;
+  for (const scope of ["", "upper", "../full"]) {
+    const r = await app({ getPoseBvh: async () => { reads++; return new Response(source); } })
+      .request("/pose/reference-thumbnail?scope=" + encodeURIComponent(scope));
+    assert.equal(r.status, 400);
+    assert.equal(r.headers.get("Cache-Control"), "private, no-store");
+  }
+  assert.equal(reads, 0);
+});
 test("missing or corrupt poster and pose-only drawing fail closed instead of showing a paper figure",async()=>{
   for(const response of [new Response(null,{status:404}),poster({"X-Standin-Artifact-SHA256":"0".repeat(64)}),
     poster({"X-Standin-Poster-Kind":"pose-only","X-Standin-Preview-Method":"pose-only","X-Standin-Character-Id":"none","X-Standin-Character-SHA256":"none"})]){
@@ -66,7 +90,7 @@ test("dashboard candidate and library loaders both request human references with
     const start=DASHBOARD_HTML.indexOf('async function '+name+'(');
     const end=DASHBOARD_HTML.indexOf('\n}\n',start)+2;
     assert.ok(start>=0&&end>start);vm.runInContext(DASHBOARD_HTML.slice(start,end),context);
-    context.img={dataset:{pose:'pose/a b',galPose:'pose/a b',view:'side'}};
+    context.img={dataset:{pose:'pose/a b',galPose:'pose/a b',view:'side'},parentElement:{querySelector:()=>null}};
     await vm.runInContext(name+'(img)',context);
   }
   assert.equal(calls.length,2);
@@ -74,6 +98,63 @@ test("dashboard candidate and library loaders both request human references with
     assert.equal(url,'/v1/admin/review/pose-candidates/pose%2Fa%20b/reference-thumbnail?revision=human-poster-v1');
     assert.equal(init.cache,'no-store');assert.equal((init.headers as Record<string,string>)['X-Beta-Admin-Token'],'admin-test');
   }
+});
+
+test("dashboard frames each person's cards using its own resolved output scope", () => {
+  const context = vm.createContext({ PREVIEW_SCOPE_LABELS: {
+    full: "전신", half: "상반신", bust: "가슴 위", shoulder_head: "어깨 위", head: "두상",
+  } });
+  for (const name of ["esc", "pill", "candidatePreviewScope", "candidateFramingControls", "candidateCard"]) {
+    const start = DASHBOARD_HTML.indexOf("function " + name + "(");
+    const end = DASHBOARD_HTML.indexOf("\n}", start) + 2;
+    assert.ok(start >= 0 && end > start);
+    vm.runInContext(DASHBOARD_HTML.slice(start, end), context);
+  }
+  assert.equal(vm.runInContext("candidatePreviewScope({outputScope:{resolved:'half'}})", context), "half");
+  assert.equal(vm.runInContext("candidatePreviewScope({outputScope:{resolved:'head'}})", context), "head");
+  assert.equal(vm.runInContext("candidatePreviewScope({})", context), "full");
+  assert.equal(vm.runInContext("candidatePreviewScope({outputScope:{resolved:'__proto__'}})", context), "full");
+  context.row = { pose_id: "pose", candidate_id: "c", view: "front", rank: 1 };
+  assert.match(vm.runInContext("candidateCard(row, null, 'half')", context), /data-scope="half"/);
+  assert.match(vm.runInContext("candidateFramingControls('half')", context), /상반신만/);
+  assert.match(vm.runInContext("candidateFramingControls('half')", context), /전신 참고/);
+  assert.equal(vm.runInContext("candidateFramingControls('full')", context), "");
+});
+
+test("switching preview scope ignores stale responses and can recover after a missing partial poster", async () => {
+  const pending: Array<(value: Response) => void> = [];
+  const calls: string[] = [];
+  const note = { hidden: true, textContent: "" };
+  const img = { dataset: { pose: "pose", scope: "half" }, src: "", hidden: false,
+    isConnected: true, parentElement: { querySelector: () => note } };
+  let blobs = 0;
+  const context = vm.createContext({ token: "admin-test", detailBlobUrls: [], img,
+    URL: { createObjectURL: () => "blob:" + ++blobs },
+    fetch: (url: string) => { calls.push(url); return new Promise<Response>((resolve) => pending.push(resolve)); },
+  });
+  const start = DASHBOARD_HTML.indexOf("async function fillCandidateThumb(");
+  vm.runInContext(DASHBOARD_HTML.slice(start, DASHBOARD_HTML.indexOf("\n}\n", start) + 2), context);
+  const partial = vm.runInContext("fillCandidateThumb(img)", context);
+  img.dataset.scope = "full";
+  const full = vm.runInContext("fillCandidateThumb(img)", context);
+  pending[1](new Response(image)); await full;
+  pending[0](new Response(null, { status: 404 })); await partial;
+  assert.equal(img.src, "blob:1");
+  assert.equal(img.hidden, false);
+  assert.equal(note.hidden, true);
+  assert.match(calls[0], /scope=half/);
+  assert.ok(!calls[1].includes("scope="));
+  img.dataset.scope = "half";
+  const missing = vm.runInContext("fillCandidateThumb(img)", context);
+  pending[2](new Response(null, { status: 404 })); await missing;
+  assert.equal(img.hidden, true);
+  assert.equal(note.hidden, false);
+  assert.match(note.textContent, /전신 참고/);
+  img.dataset.scope = "full";
+  const retry = vm.runInContext("fillCandidateThumb(img)", context);
+  pending[3](new Response(image)); await retry;
+  assert.equal(img.hidden, false);
+  assert.equal(note.hidden, true);
 });
 
 test("new user and admin endpoints retain the existing authentication boundaries",async()=>{
