@@ -1037,6 +1037,17 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
         "view": "three_quarter",
         "source": "vlm_person"
       },
+      "poseDescription": {
+        "status": "valid",
+        "reasons": [],
+        "searchText": "서서 오른팔을 머리 위로 올린 자세",
+        "bodyDetails": "오른팔을 올리고 왼팔은 몸 옆으로 내리고 있다.",
+        "certainty": "high",
+        "visibleScope": "full",
+        "postures": ["standing"],
+        "actions": ["reaching"],
+        "objects": []
+      },
       "searchSignals": {
         "rankDistance": 0.182,
         "distanceMetric": "pos",
@@ -1087,6 +1098,7 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 - `skeleton.scores`를 그대로 쓰면 안 된다. 추론이 refine을 막은 인물은 그 배열을 0으로 덮어쓴다(Standin-server `pipeline.py::_apply_refine_policy`). `jointScores`가 그 경우 마스킹 전 `raw_scores`로 갈아 끼우고 `source`로 어느 쪽인지 알려 준다(`effective` | `raw` | `none`).
 - `tags`는 **컷 단위** VLM 태그다(shot·action·view·relationship). 같은 컷의 모든 인물이 같은 값을 받는다.
 - `personTags`는 **인물별** 태그다(P2). `null`이면 그 Job은 인물별로 물어본 적이 없다(프롬프트 `p1-scope` 또는 구 추론). `source`가 `unknown`이면 물었는데 VLM이 모른다고 답한 것이다 — 이 둘은 다른 상태라 화면도 다르게 적는다.
+- `poseDescription`은 러프에서 추출한 **인물별 자연어**다. 검색 문장(`searchText`)과 자세 설명(`bodyDetails`)은 각각 최대 4,000자이며, 문자열이 없으면 `null`이다. 태그와 판정 근거 배열은 최대 20개, 각 값은 최대 80자다. `status`는 추론의 `valid`, `too_generic`, `empty`, `not_visible`, `low_certainty`, `vlm_error`, `not_requested` 값을 보존하며, 알 수 없으면 `null`이다. 기록 자체가 없는 과거 작업은 `poseDescription: null`로 반환하여 추출 오류와 구분한다. 기존 품질 검토용 `person_tags_json`에 함께 저장하므로 동의 철회 시 삭제되며, 공개 분석 응답에는 포함하지 않는다. 이 변경은 이후 분석부터 기록하며 과거 작업을 재추론하지 않는다.
 - `cutSummary.vlmTags`는 VLM이 **실제로 말한** 컷 태그라 `tags`와 다를 수 있다. `tags`는 추론이 `other`·`front`로 좁힌 뒤의 값이다.
 - `outputScope`는 `jobs.result_json`을 먼저 쓰고(사용자가 고른 구도가 거기 있다), 없을 때만 `analysis_people.output_scope_json`으로 메운다. 어느 쪽이든 저장된 파생 필드를 믿지 않고 다시 계산한다.
 
@@ -1581,9 +1593,9 @@ Converter 코드·모델·라이브러리 자산 변경은 필요 없다.
 - `GET /v1/pose-candidates/{poseId}/reference-thumbnail` — 기존 설치 인증 필요.
 - `GET /v1/admin/review/pose-candidates/{poseId}/reference-thumbnail` — 기존 관리자 인증·검토 guard 적용.
 
-공용 포즈 라이브러리 자산만 읽는다. 등록/격리 검사를 통과한 BVH의 SHA를 서버가 직접 계산하고, `scope=full` 인체 포스터의 source·character·revision·PNG 해시를 검증한다. `pose-only` 폴백은 거절한다. 성공·실패 모두 캐시를 저장하지 않으며 Converter·선택 변경·렌더 작업을 실행하지 않는다.
+선택 쿼리 `scope=full|half|bust|shoulder_head|head`로 미리보기 범위를 지정한다. 생략하면 기존과 같이 `full`이며, 잘못된 값은 400이다. 공용 포즈 라이브러리 자산만 읽는다. 등록/격리 검사를 통과한 BVH의 SHA를 서버가 직접 계산하고, 요청 범위와 일치하는 인체 포스터의 source·character·revision·PNG 해시를 검증한다. 다른 범위의 포스터나 `pose-only` 폴백은 거절한다. 성공·실패 모두 캐시를 저장하지 않으며 Converter·선택 변경·렌더 작업을 실행하지 않는다.
 
-이 썸네일은 정면·전신의 기본 인체 참고이며 선택 체형/손/최종 출력 범위 또는 검색 시점을 표현하지 않는다. 대시보드의 후보·갤러리 목록/확대도 이 경로를 사용하며, 갤러리 확대는 정면 참고 한 장을 표시한다. 종전 시점별 `/thumbnail?view=...` API는 호환성을 위해 유지한다.
+이 썸네일은 정면의 기본 인체 참고이며 선택 체형/손 또는 검색 시점을 표현하지 않는다. 대시보드 Job 상세의 후보는 러프에서 인식한 인물별 `outputScope.detected`에 맞춰 자동 표시한다. `half`와 `bust`는 기존 자동 출력 정책과 같이 팔을 포함하는 상반신(`half`), `shoulder_head`와 `head`는 해당 범위를 사용한다. 전신으로 인식했거나 감지 범위가 없으면 전신이다. 사용자가 고른 `selection`·`resolved`는 이 검토용 표시 범위를 바꾸지 않으며 수동 전환 버튼은 없다. 부분 범위 자산이 없으면 안내를 표시하고 전신으로 자동 대체하지 않는다. 갤러리 목록/확대는 전신 참고를 유지한다. 종전 시점별 `/thumbnail?view=...` API는 호환성을 위해 유지한다.
 
 ## 사용자 흐름 관측 (클라이언트 계측 v2, 운영 배포 전)
 

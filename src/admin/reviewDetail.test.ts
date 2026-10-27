@@ -162,6 +162,24 @@ test("refine 입력과 원본 점수 배열은 응답에 넣지 않는다", () =
   assert.equal("rawScores" in person, false);
 });
 
+test("review exposes only the stored description for the matching person", () => {
+  const people = toReviewPeople([
+    row({ person_index: 2, person_tags_json: JSON.stringify({
+      action: "standing", poseDescription: {
+        status: "valid", searchText: "오른팔을 올린 자세", bodyDetails: "왼팔은 내림",
+        actions: ["raising_arm"], provider_secret: "do not expose",
+      },
+    }) }),
+    row({ person_index: 0 }),
+    row({ person_index: 1, person_tags_json: "broken JSON" }),
+  ], null);
+  assert.equal(people[0].poseDescription?.searchText, "오른팔을 올린 자세");
+  assert.equal(people[0].personTags?.action, "standing");
+  assert.equal(people[1].poseDescription, null);
+  assert.equal(people[2].poseDescription, null);
+  assert.ok(!JSON.stringify(people).includes("do not expose"));
+});
+
 test("불리언 컬럼이 비어 있으면 거짓으로 좁힌다", () => {
   const person = toReviewPerson(
     row({ refine_allowed: null, lower_body_observed: null }),
