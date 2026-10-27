@@ -1623,3 +1623,52 @@ Converter 코드·모델·라이브러리 자산 변경은 필요 없다.
 - 코호트가 10,000개 작업을 넘으면 조용히 일부만 집계하지 않고 400과 조회 기간 축소 안내를 반환한다.
 
 검증: `src/admin/journey.test.ts`(관측 누락·상태 분리·분모·중앙값), `src/admin/journeyStore.test.ts`(PostgreSQL SQL·동일 시도 시간·내부 구분·실제 저장), `src/analytics/store.test.ts`(이벤트 허용 목록), 기존 `src/installations/qualityConsent.test.ts`(동의·철회·내부 제외 회귀), `src/ops/journeyDashboard.test.ts`(표시·요청·오류 처리).
+
+### 기능 사용·구간 시간·재사용 확장 (`featureUsageVersion: 1`)
+
+`GET /v1/events/capabilities`는 `{ journeyVersion: 2, featureUsageVersion: 1 }`를 반환한다. `feature_action`, `journey_exit`, `selection_failed`는 **featureUsageVersion 지원을 확인한 경우에만** 전송한다. 구형 journeyVersion 2 서버도 이 이름을 모를 수 있으므로 journeyVersion만으로 활성화하면 안 된다. 지원 확인이 네트워크 오류로 실패하면 미지원으로 단정하지 않는다.
+
+허용 계약:
+
+- `feature`: `hand_library|semantic_search|body_selection|body_custom|history|capture|file_input|clipboard|analysis|pose_selection|export`.
+- `feature_action.action`: `exposure|open|search_started|search_completed|search_failed|cancelled|selected|applied|adjusted|reset|creation_started|saved|reused|failed|upload_started|upload_completed|upload_failed|preview_started|preview_completed|preview_failed`.
+- 노출은 실제 표시된 사용 가능한 진입점에 기록한다. 선택·적용은 명시적 사용자 행동에만 기록한다. 자동 손 기본값이나 화면 재렌더를 수동 사용으로 세지 않는다. 조절 이벤트는 커밋된 조작 단위로 제한한다.
+- `journey_exit.reason`: `back|home|close|cancel`. 실제 연결된 UI 동작만 기록하며 프로세스 종료·강제 종료를 추정하지 않는다. 명시적 뒤로가기 뒤 저장에 성공할 수 있으므로 이동 이벤트를 최종 이탈로 부르지 않는다.
+- 공통 `errorCategory`: `server|network|permission|validation|client|unknown`, `httpStatus`: 정수 400~599, `osName`: `macos|windows|linux|unknown`, `source`: `capture|file|semantic|clipboard|history|unknown`. 취소는 실패 원인과 분리한다. 기존 서버 작업 source가 있으면 클라이언트의 unknown 값보다 우선한다.
+- `searchOrdinal`: 1~100,000 정수. 재검색 여부는 `search_started.searchOrdinal > 1`로 관측한다. `search_completed.resultCount=0`은 성공 응답에 후보가 없는 경우이며 요청 실패와 다르다.
+- 내보내기에 `usedHandLibrary|usedBodySelection|usedBodyCustom|fromHistory|fromSemanticSearch` 불리언을 허용한다. 실제 해당 작업의 기능 적용·재사용 이력이 있을 때만 true로 보고한다. 원본·검색어·사용자 체형 이름·수치·파일 경로·이미지 URL은 허용하지 않는다.
+- 준비/저장/검색/업로드/미리보기의 시작·종료는 동일 `attemptId`와 `sessionId`를 유지한다. 업로드 및 문장 검색은 시작 시 jobId가 없어도 종료 때 서버 jobId가 생길 수 있으므로 이 두 종류의 시간 연결은 작업 ID 대신 설치·세션·시도를 사용한다.
+- `preview_*`는 실제 이미지/모델 주소가 준비되어 로드를 시작한 시점부터 표시까지다. 파일 생성 전체 시간이 아니다. `phase=candidate_image|review_image|review_model`을 구분한다.
+
+`/v1/admin/journey`의 기존 필드를 유지하고 `advanced`를 추가한다.
+
+| 필드 | 집계 기준 |
+|---|---|
+| `featureUsage` | 기능·행동별 이벤트 수, 중복 제거 설치·작업 수 |
+| `featureSummary` | 기능별 노출 설치, 사용 설치, 노출∩사용 설치, 적용 설치, 같은 작업에서 적용 후 저장한 설치, 화면별 관측. 전체 설치 수는 app/bar 합계가 아니라 다시 중복 제거한다 |
+| `featureSummary.savedWithFeatureInstallations/Jobs` | 실제 네이티브 저장 보고의 기능 사용 플래그가 true인 설치·작업 수. 시간 연결 기반 `savedAfterApplyInstallations`와 구분한다 |
+| `featureSegments` | 기능·행동·화면·OS·입력 방식·실행 버전별 비교. 동일 설치가 여러 행에 포함될 수 있다 |
+| `failures` | 카테고리·코드·HTTP 상태·기능·단계·화면·OS·입력·버전. `origin=client_report`는 이벤트 시각, `origin=server_job`은 작업 코호트. 서버 ABANDONED는 사용자 이탈로 해석하지 않는다. 두 출처를 합하면 같은 오류를 중복 셀 수 있다 |
+| `recovery` | 동일 시도 실패→성공, 시도 식별자가 없어 연결 불가인 실패, 실패 작업 수, 새 시도를 관측한 작업 수, 실패 이후 같은 작업에서 성공한 작업 수를 분리. 마지막 값은 같은 설정 복구의 증거가 아니다 |
+| `stageOutcomes` | 작업의 가장 뒤 관측 단계와 저장 도달/실패/취소/대기/무후속/관측 불가를 화면·기능 맥락별로 집계. 맥락이 확인되지 않으면 unknown |
+| `durationSegments` | 단계 또는 동일 시도 처리의 화면별 표본 수·누락 표본·중앙값·p90(ms). 분모 없는 화면은 0ms 대신 null |
+| `activation` | 조회 기간의 새 설치 중 현재 동의가 유효하고 v2 활동이 관측된 설치 → 첫 관측 실제 저장 → 이후 다른 작업 시작/다른 작업 저장/같은 작업 재저장 구분 |
+| `retention` | 같은 신규 관측 코호트의 최초 v2 활동일(KST) 기준 D1·D7. 해당 날짜가 완전히 지난 설치만 eligible. 앱 이벤트 재방문·분석 요청·실제 저장을 별도 집계 |
+| `searchOutcomes` | 문장 검색 시도의 시작·완료·결과 0건·실패·취소·재검색. 동일 설치·세션·시도 중복 제거, 결과 수 누락 별도 표시 |
+| `results` | 작업 코호트의 결과 표시 작업, 후보 0건이 관측된 작업, 후보 수 누락 작업, 썸네일 실패 작업, 후보 변경 행동 수 |
+| `exits` | 실제 뒤로가기·홈·닫기·취소 행동. 최종 이탈이나 원인 확정이 아닌 이벤트 건수 |
+
+시간 배열 `durations`에는 분석 및 첫 저장까지의 기존 시간, 모든 인접 단계 시간, 동일 시도 업로드·문장 검색·파일 준비·저장·미리보기 시간이 중복 없이 포함된다. `scope=job_cohort|consented_job_cohort|consented_event_time`을 함께 반환한다. 인접 단계는 실제 관측된 순서를 연결하며 재방문·설정 변경 시간이 포함될 수 있다. 서버 처리 구간의 화면 구분은 해당 작업의 `input_confirmed` 또는 실제 작업 접수를 기록한 `upload_completed`가 있는 경우에만 붙인다. 병렬 준비가 먼저 끝나거나 중간 이벤트가 없으면 누락 표본으로 남긴다.
+
+`advanced`의 클라이언트·기능·재방문 집계는 기존 관리자 광역 열람 설정과 무관하게 **현재 유효한 동의의 이벤트·작업만** 대상으로 한다. 설치·이벤트·작업의 consent ID를 일치시키므로 철회 전 기록이 새 동의 코호트에 들어가지 않는다. 과거 미수집 기간을 채우지 않으며 첫 관측 저장을 생애 첫 저장으로 단정하지 않는다. 서버 기본 단계 표와 표본 수가 다를 수 있다.
+
+이벤트 시각 기능 집계와 작업 생성 시각 코호트, 신규 설치 코호트는 서로 다른 분모이다. 자동으로 전체 사용자 사용률로 합치지 않는다. 현재 새 설치 관측 코호트의 전체 수집 가능 이력은 선택 기간 안에 있으므로 그 기간을 조회한다. 50,000개 이벤트 또는 이력 작업 한도를 넘으면 명시적으로 오류를 반환하고 기간을 줄이도록 안내한다. 일부 행만 반환하여 백분율을 왜곡하지 않는다.
+
+추가 검증: `journeyAdvanced.test.ts`는 표면 중복 제거·노출 교집합·서버/클라 오류 분리·시도 및 재시도·새 설치 활성화·KST 완전 날짜·구간 누락·검색 0건을 검증한다. `journeyAdvancedStore.test.ts`는 실제 PostgreSQL SQL에서 동의 ID 교차·미동의·내부 범위·속성 최소 투영·조회 상한의 명시적 실패를 검증한다.
+
+
+추가 의미 규칙:
+
+- `results`는 작업별 가장 최근에 관측한 결과 화면을 사용한다. `partialZeroCandidateJobs`는 인물 중 일부만 후보가 0개인 작업, `zeroCandidateJobs`는 전체 후보 수가 0인 작업이다. 인물별 수가 없는 구형 이벤트는 `personCandidateCountMissingJobs`로 분리한다. `zeroCandidatePeople/observedPeople`는 이 인물별 수가 확인된 작업만의 합계다.
+- `recovery.feature/surface`는 실패가 관측된 맥락이다. 이후 다른 화면에서 같은 작업을 성공해도 원래 실패 화면 기준에 표시한다. 분석 실패의 작업·시도 식별자가 없으면 연결 불가로 표시하며 다른 작업의 재분석을 복구라고 추정하지 않는다.
+- `export_completed.writingElapsedMs`는 이미 다운로드·검증한 데이터를 base64로 직렬화하고 IPC를 거쳐 로컬 파일을 저장하는 클라이언트 처리 시간이다. 순수 디스크 I/O 시간이라고 부르지 않는다. 동일 설치·작업·세션·시도 중복 보고는 표본 한 개이며 시도 식별자가 없는 보고는 누락 표본으로 분리한다.

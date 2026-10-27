@@ -341,7 +341,7 @@ adminRoutes.get("/overview", async (c) => {
     dailyAggregates(days),
   ]);
   const accuracy = toAccuracy(daily);
-  const usage = toUsage(daily, funnelRow.active_installations);
+  const usage = toUsage(daily, funnelRow.active_installations, days);
   await audit(c, "review_overview", {});
   return c.json({
     windowDays: days,
@@ -371,7 +371,7 @@ adminRoutes.get("/journey", async (c) => {
     await audit(c, "review_journey_metrics", {});
     return c.json(result);
   } catch (error) {
-    if (error instanceof Error && error.message === "JOURNEY_WINDOW_TOO_LARGE") {
+    if (error instanceof Error && ["JOURNEY_WINDOW_TOO_LARGE","JOURNEY_HISTORY_TOO_LARGE"].includes(error.message)) {
       return c.json(errorEnvelope("INVALID_INPUT", "작업이 많습니다. 조회 기간을 줄여 주세요.", c.get("requestId")), 400);
     }
     throw error;
@@ -421,7 +421,7 @@ adminRoutes.get("/product", async (c) => {
     since: new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString(),
     // 정확도·사용률은 일별 집계에서 온다. 그 표에는 **오늘이 없다**(하루가 끝나야 넣는다).
     accuracy: toAccuracy(daily),
-    usage: toUsage(daily, funnelRow.active_installations),
+    usage: toUsage(daily, funnelRow.active_installations, days),
     funnel: toFunnel(funnelRow),
     jobsFailed: funnelRow.jobs_failed,
     clientStages: clientStages.map((stage) => ({

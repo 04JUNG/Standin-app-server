@@ -51,19 +51,27 @@ export const CLIENT_EVENT_PROPERTIES: Record<string, readonly string[]> = {
   update_failed: ["phase", "reason"],
 } as const;
 
-const JOURNEY_COMMON = ["telemetryVersion", "sessionId", "appVersion", "surface", "attemptId"];
+export const FEATURE_NAMES = ["hand_library", "semantic_search", "body_selection", "body_custom", "history", "capture", "file_input", "clipboard", "analysis", "pose_selection", "export"] as const;
+export const FEATURE_ACTIONS = ["exposure", "open", "search_started", "search_completed", "search_failed", "cancelled", "selected", "applied", "adjusted", "reset", "creation_started", "saved", "reused", "failed", "upload_started", "upload_completed", "upload_failed", "preview_started", "preview_completed", "preview_failed"] as const;
+const JOURNEY_COMMON = ["telemetryVersion", "sessionId", "appVersion", "surface", "attemptId", "osName", "feature", "errorCategory", "httpStatus", "source", "code", "elapsedMs"];
+const ATTRIBUTION = ["usedHandLibrary", "usedBodySelection", "usedBodyCustom", "fromHistory", "fromSemanticSearch"];
 for (const name of Object.keys(CLIENT_EVENT_PROPERTIES)) {
   CLIENT_EVENT_PROPERTIES[name] = [...CLIENT_EVENT_PROPERTIES[name], ...JOURNEY_COMMON];
 }
-for (const name of ["input_started", "input_cancelled", "input_failed", "review_viewed", "preparation_started", "preparation_ready", "preparation_failed", "export_requested", "export_cancelled", "thumbnail_failed"]) {
+for (const name of ["input_started", "input_cancelled", "input_failed", "review_viewed", "preparation_started", "preparation_ready", "preparation_failed", "export_requested", "export_cancelled", "thumbnail_failed", "selection_failed"]) {
   CLIENT_EVENT_PROPERTIES[name] = [...JOURNEY_COMMON, "source", "format", "phase", "code", "elapsedMs", "selectionCount"];
 }
-CLIENT_EVENT_PROPERTIES.results_viewed = [...CLIENT_EVENT_PROPERTIES.results_viewed, "entryPoint", "inputId", "source"];
+CLIENT_EVENT_PROPERTIES.results_viewed = [...CLIENT_EVENT_PROPERTIES.results_viewed, "entryPoint", "inputId", "source", "zeroCandidatePeople", "peopleWithCandidates"];
 CLIENT_EVENT_PROPERTIES.input_confirmed = [...CLIENT_EVENT_PROPERTIES.input_confirmed, "inputAttemptId", "inputId"];
 CLIENT_EVENT_PROPERTIES.export_requested = [...CLIENT_EVENT_PROPERTIES.export_requested, "trigger"];
 CLIENT_EVENT_PROPERTIES.thumbnail_failed = [...CLIENT_EVENT_PROPERTIES.thumbnail_failed, "candidateId"];
-CLIENT_EVENT_PROPERTIES.export_completed = [...CLIENT_EVENT_PROPERTIES.export_completed, "nativeDiskWrite", "elapsedMs", "phase"];
+CLIENT_EVENT_PROPERTIES.export_completed = [...CLIENT_EVENT_PROPERTIES.export_completed, "nativeDiskWrite", "elapsedMs", "writingElapsedMs", "phase"];
 CLIENT_EVENT_PROPERTIES.export_failed = [...CLIENT_EVENT_PROPERTIES.export_failed, "elapsedMs", "phase"];
+
+CLIENT_EVENT_PROPERTIES.feature_action = [...JOURNEY_COMMON, "action", "resultCount", "selectionCount", "personIndex", "rank", "format", "entryPoint", "bodyKind", "searchOrdinal", "inputId", "phase"];
+CLIENT_EVENT_PROPERTIES.analysis_failed = [...CLIENT_EVENT_PROPERTIES.analysis_failed, "inputId"];
+CLIENT_EVENT_PROPERTIES.journey_exit = [...JOURNEY_COMMON, "phase", "reason"];
+for (const name of ["export_requested", "export_completed", "export_failed"]) CLIENT_EVENT_PROPERTIES[name] = [...CLIENT_EVENT_PROPERTIES[name], ...ATTRIBUTION];
 
 export function sanitizeEventProperties(
   eventName: string,
@@ -81,10 +89,21 @@ export function sanitizeEventProperties(
   const output: Record<string, string | number | boolean | null> = {};
   for (const key of allowed) {
     const value = source[key];
+    if (key === "feature" && !(FEATURE_NAMES as readonly unknown[]).includes(value)) continue;
+    if (key === "action" && !(FEATURE_ACTIONS as readonly unknown[]).includes(value)) continue;
+    if (key === "errorCategory" && !["server","network","permission","validation","client","unknown"].includes(String(value))) continue;
+    if (key === "osName" && !["macos","windows","linux","unknown"].includes(String(value))) continue;
+    if (key === "source" && !["capture","file","semantic","clipboard","history","unknown"].includes(String(value))) continue;
+    if (key === "httpStatus" && (typeof value !== "number" || !Number.isInteger(value) || value < 400 || value > 599)) continue;
+    if (key === "searchOrdinal" && (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1 || value > 100000)) continue;
+    if (["resultCount","selectionCount","personIndex","rank","zeroCandidatePeople","peopleWithCandidates","peopleCount","candidateCount","selectedCount"].includes(key) && (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 || value > 100000)) continue;
+    if (ATTRIBUTION.includes(key) && typeof value !== "boolean") continue;
+    if (eventName === "journey_exit" && key === "reason" && !["back","home","close","cancel"].includes(String(value))) continue;
+    if (key === "bodyKind" && !["preset","custom","male","female","child","unknown"].includes(String(value))) continue;
     if (key === "telemetryVersion" && value !== 2) continue;
     if ((key === "sessionId" || key === "attemptId" || key === "inputId" || key === "inputAttemptId") && (typeof value !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(value))) continue;
     if (key === "nativeDiskWrite" && typeof value !== "boolean") continue;
-    if (key === "elapsedMs" && (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 86400000)) continue;
+    if ((key === "elapsedMs" || key === "writingElapsedMs") && (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 86400000)) continue;
     if (key === "surface" && value !== "app" && value !== "bar") continue;
     if ((key === "phase" || key === "code") && typeof value === "string" && !/^[a-zA-Z0-9_-]{1,80}$/.test(value)) continue;
     if (

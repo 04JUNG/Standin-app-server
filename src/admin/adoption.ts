@@ -53,9 +53,9 @@ export function toFirstRunFunnel(row: FirstRunRow): FirstRunFunnel {
       { bucket: "그 이후", count: row.later },
     ].map((item) => ({ ...item, share: share(item.count, reached) })),
     idle: [
-      { bucket: "하루 이내 설치", count: row.idle_fresh, hint: "아직 기회가 있다" },
-      { bucket: "마지막 접속 7일 이내", count: row.idle_week, hint: "돌아올 수 있다" },
-      { bucket: "7일 넘게 조용함", count: row.idle_stale, hint: "사실상 이탈" },
+      { bucket: "하루 이내 설치", count: row.idle_fresh, hint: "분석 요청 기록 없음 · 관찰 기간이 짧음" },
+      { bucket: "마지막 접속 7일 이내", count: row.idle_week, hint: "분석 요청 기록 없음 · 중단 이유는 미확인" },
+      { bucket: "7일 넘게 접속 기록 없음", count: row.idle_stale, hint: "미접속 상태 · 이탈 확정이나 원인 판정은 불가" },
     ],
   };
 }
@@ -105,6 +105,8 @@ export interface FirstSelectionRow {
 }
 
 export interface Retry {
+  attemptScope: "selected_window";
+  note: string;
   curve: AttemptCurve[];
   /** 처음 고르기까지 몇 번을 돌렸나. 1회차가 낮으면 첫인상이 나쁘다는 뜻이다. */
   firstSelection: Array<{ attempt: string; installations: number; share: number | null }>;
@@ -121,6 +123,8 @@ export function toRetry(
 ): Retry {
   const installs = firstSelection.reduce((sum, row) => sum + row.installations, 0);
   return {
+    attemptScope: "selected_window",
+    note: "선택 기간 안에서 설치별 작업 순번을 다시 계산합니다. 생애 첫 시도·재시도 원인을 의미하지 않습니다.",
     curve: toAttemptCurve(curve),
     firstSelection: firstSelection
       .slice()

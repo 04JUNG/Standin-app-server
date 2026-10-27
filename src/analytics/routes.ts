@@ -9,7 +9,7 @@ import {
 
 export const analyticsRoutes = new Hono<AppEnv>();
 
-analyticsRoutes.get("/capabilities", (c) => c.json({ journeyVersion: 2 }));
+analyticsRoutes.get("/capabilities", (c) => c.json({ journeyVersion: 2, featureUsageVersion: 1 }));
 
 analyticsRoutes.post("/batch", async (c) => {
   const body = (await c.req.json().catch(() => null)) as { events?: unknown[]; qualityConsentId?: unknown } | null;

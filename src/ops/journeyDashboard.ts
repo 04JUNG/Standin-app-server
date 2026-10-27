@@ -1,3 +1,4 @@
+import { JOURNEY_ADVANCED_HTML, JOURNEY_ADVANCED_SCRIPT } from "./journeyAdvancedDashboard.js";
 /** Read-only product journey panel. Uses the dashboard's esc/ms/when/token helpers. */
 export const JOURNEY_PANEL_HTML = String.raw`
     <div class="card" id="journeyPanel">
@@ -21,6 +22,7 @@ export const JOURNEY_PANEL_HTML = String.raw`
         <span id="journeyMsg" class="sub" role="status" aria-live="polite"></span>
       </div>
       <p class="sub">상단 기간과 개발자 제외 설정이 함께 적용됩니다. 미분류 설치에는 내부 테스트가 섞일 수 있으며, 설치 수는 사람 수와 다릅니다.</p>
+      ${JOURNEY_ADVANCED_HTML}
       <div id="journeyOut" aria-busy="false"></div>
     </div>`;
 
@@ -34,7 +36,10 @@ function journeyTable(headers, rows) {
     '</tr></thead><tbody>' + rows.map((cells) => '<tr>' + cells.map((c, i) => '<td' + (i ? ' class="num"' : '') + '>' + esc(c) + '</td>').join('') + '</tr>').join('') +
     '</tbody></table></div>';
 }
+${JOURNEY_ADVANCED_SCRIPT}
+let journeyLatestData;
 function journeyRender(data) {
+  journeyLatestData = data;
   const t = data.totals, c = data.coverage;
   const names = Object.fromEntries(data.stages.map((s) => [s.key, s.label]));
   const cards = [
@@ -70,8 +75,9 @@ function journeyRender(data) {
     '<p class="sub">한 번이라도 실제 저장에 성공한 작업은 성공으로 유지합니다. 이후 재저장 오류는 아래 오류 기록에 따로 표시됩니다.</p>' +
     journeyTable(['상태', '작업'], outcomes.map(([label, n]) => [label, journeyNum(n)])) +
     '<h3>구간별 소요 시간</h3>' +
-    '<p class="sub">시작과 끝이 연결된 기록만 포함합니다. 표본 수를 함께 보고, 준비·저장 재시도는 같은 시도끼리 비교합니다.</p>' +
-    journeyTable(['구간', '표본', '중앙값', '상위 90% 지점'], data.durations.map((d) => [d.label, journeyNum(d.samples), ms(d.medianMs), ms(d.p90Ms)])) +
+    '<p class="sub">시작과 끝이 연결된 기록만 포함합니다. 표본 수를 함께 보고, 준비·저장 재시도는 같은 시도끼리 비교합니다. 초 단위 경과 시간이며 대기·화면을 떠나 있던 시간이 포함될 수 있습니다. 시작·끝 누락이나 시간 순서 역전은 0초로 채우지 않습니다.</p>' +
+    journeyTable(['구간', '측정 범위', '유효 표본', '미측정', '중앙값', '상위 90% 지점'], data.durations.map((d) => [d.label, ({job_cohort:'작업 코호트',consented_job_cohort:'현재 동의·작업 코호트',consented_event_time:'현재 동의·이벤트 시각'})[d.scope]||d.scope||'범위 미확인', journeyNum(d.samples), journeyNum(d.missingSamples), journeySeconds(d.medianMs), journeySeconds(d.p90Ms)])) +
+    journeyAdvancedRender(data) +
     '<h3>발생한 오류·취소</h3>' +
     '<p class="sub">재시도 후 성공한 작업도 포함하는 발생 기록입니다. 위의 작업 상태와 합산하지 않습니다.</p>' +
     journeyTable(['종류', '작업', '이벤트'], (data.diagnostics || []).map((d) => [d.label, journeyNum(d.jobs), journeyNum(d.events)])) +
@@ -110,4 +116,9 @@ async function journeyGo() {
 $('journeyGo').addEventListener('click', journeyGo);
 $('journeyAudience').addEventListener('change', journeyGo);
 $('journeyIdle').addEventListener('change', journeyGo);
+for (const id of ['journeyDetailSurface','journeyDetailFeature','journeyDetailCategory']) {
+  $(id).addEventListener('change', () => {
+    if (journeyLatestData) $('journeyOut').innerHTML = journeyRender(journeyLatestData);
+  });
+}
 `;

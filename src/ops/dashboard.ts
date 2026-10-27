@@ -1201,7 +1201,7 @@ ${JOURNEY_PANEL_SCRIPT}
 function funnelTable(stages) {
   const first = stages[0] ? stages[0].installations : 0;
   return '<div class="scroll"><table><thead><tr><th>단계</th><th class="num">설치</th>' +
-    '<th class="num">건수</th><th class="num">직전 대비</th><th class="num">투입 대비</th><th></th>' +
+    '<th class="num">건수</th><th class="num">설치 · 직전 대비</th><th class="num">설치 · 투입 대비</th><th class="num">작업 · 직전 대비</th><th class="num">작업 · 투입 대비</th><th></th>' +
     "</tr></thead><tbody>" +
     stages.map((stage, index) => {
       // 직전 대비가 크게 꺾이는 칸이 곧 새는 자리다. 60% 미만이면 눈에 띄게 둔다.
@@ -1213,6 +1213,8 @@ function funnelTable(stages) {
         '<td class="num">' + (stage.jobs === null ? "—" : stage.jobs) + "</td>" +
         '<td class="num' + (leaky ? " gap" : "") + '">' + pct(stage.fromPrevious) + "</td>" +
         '<td class="num">' + pct(stage.fromStarted) + "</td>" +
+        '<td class="num">' + pct(stage.jobFromPrevious) + "</td>" +
+        '<td class="num">' + pct(stage.jobFromStarted) + "</td>" +
         '<td style="width:38%"><div class="bar" style="width:' + width + '%"></div></td></tr>';
     }).join("") +
     "</tbody></table></div>";
@@ -1232,7 +1234,8 @@ function signalRows(dropoff) {
     ["완료된 Job", dropoff.selected.jobs, dropoff.notSelected.jobs],
     ["인물 0명 비율", pct(dropoff.selected.zeroPeopleRate), pct(dropoff.notSelected.zeroPeopleRate)],
     ["후보 부족 비율", pct(dropoff.selected.shortfallRate), pct(dropoff.notSelected.shortfallRate)],
-    ["최고 후보 거리(평균, 낮을수록 좋음)", dropoff.selected.avgBestDistance === null ? "—" : dropoff.selected.avgBestDistance,
+    ["거리 유효 표본 / 완료 작업", (dropoff.selected.distanceSamples ?? "—") + " / " + dropoff.selected.jobs, (dropoff.notSelected.distanceSamples ?? "—") + " / " + dropoff.notSelected.jobs],
+    ["최고 후보 거리(유효 표본 평균, 낮을수록 좋음)", dropoff.selected.avgBestDistance === null ? "—" : dropoff.selected.avgBestDistance,
       dropoff.notSelected.avgBestDistance === null ? "—" : dropoff.notSelected.avgBestDistance],
     ["인물 수(평균)", dropoff.selected.avgPeople === null ? "—" : dropoff.selected.avgPeople,
       dropoff.notSelected.avgPeople === null ? "—" : dropoff.notSelected.avgPeople],
@@ -1258,40 +1261,40 @@ function levelList(title, levels) {
  */
 function instrumentationBlock(inst) {
   if (!inst) return "";
-  const empty = inst.columns.filter((column) => column.empty);
+  const empty = inst.columns.filter((column) => column.empty && column.applicability !== "unused");
   const gaps = inst.stageGaps.filter((gap) => gap.gap !== 0);
 
   const warn = empty.length
     ? '<p class="sub"><span class="gap">비어 있는 컬럼 ' + empty.length + "개</span> — " +
-      empty.map((column) => esc(column.label)).join(", ") + ". 이 컬럼에 기대는 지표는 지금 의미가 없다.</p>"
+      empty.map((column) => esc(column.label)).join(", ") + ". 해당 지표는 유효 표본 수를 함께 확인하세요.</p>"
     : '<p class="sub">비어 있는 컬럼 없음.</p>';
 
   const columnTable = '<div class="scroll"><table><thead><tr><th>컬럼</th><th class="num">행</th>' +
-    '<th class="num">빈 값</th><th class="num">비율</th></tr></thead><tbody>' +
+    '<th class="num">빈 값</th><th class="num">비율</th><th>용도·해석</th></tr></thead><tbody>' +
     inst.columns.map((column) =>
-      "<tr><td" + (column.empty ? ' class="gap"' : "") + ">" + esc(column.label) + "</td>" +
+      "<tr><td" + (column.empty && column.applicability !== "unused" ? ' class="gap"' : "") + ">" + esc(column.label) + "</td>" +
       '<td class="num">' + column.rows + '</td><td class="num">' + column.nulls + "</td>" +
-      '<td class="num' + (column.empty ? " gap" : "") + '">' + pct(column.nullRate) + "</td></tr>"
+      '<td class="num' + (column.empty && column.applicability !== "unused" ? " gap" : "") + '">' + pct(column.nullRate) + '</td><td>' + esc(column.note || (column.applicability === "unused" ? "현재 경로에서 사용하지 않음" : "지표 유효 표본 확인")) + "</td></tr>"
     ).join("") + "</tbody></table></div>";
 
   const gapTable = '<div class="scroll"><table><thead><tr><th>단계</th><th class="num">서버</th>' +
-    '<th class="num">클라</th><th class="num">차이</th><th>해석</th></tr></thead><tbody>' +
+    '<th class="num">클라</th><th class="num">차이</th><th>단위・해석</th></tr></thead><tbody>' +
     inst.stageGaps.map((gap) =>
       "<tr><td>" + esc(gap.stage) + '</td><td class="num">' + gap.server + '</td><td class="num">' + gap.client + "</td>" +
       '<td class="num' + (gap.gap !== 0 ? " gap" : "") + '">' + (gap.gap > 0 ? "+" : "") + gap.gap + "</td>" +
-      '<td class="sub">' + esc(gap.note) + "</td></tr>"
+      '<td class="sub">' + esc((gap.serverUnit ? "서버: " + gap.serverUnit + " / 클라: " + gap.clientUnit + " · " : "") + gap.note) + "</td></tr>"
     ).join("") + "</tbody></table></div>";
 
   return "<h3>⓪ 계측 건강도 — 지표를 믿어도 되는가</h3>" + warn +
     '<div class="side">' + columnTable + gapTable + "</div>" +
-    (gaps.length ? '<p class="sub">서버와 클라이언트가 어긋난 단계가 ' + gaps.length + "개다. 음수는 이벤트 유실, 양수는 서버에 닿지 못한 시도를 뜻한다.</p>" : "");
+    (gaps.length ? '<p class="sub">서버와 클라이언트가 어긋난 단계가 ' + gaps.length + "개입니다. 동의 범위·관측 시점·집계 단위가 달라 차이만으로 유실이나 접수 실패를 확정할 수 없습니다.</p>" : "");
 }
 
 /** 거리 구간별 선택률 — matchLevel 임계값(0.25/0.45)을 보정할 근거다. */
 function distanceTable(buckets) {
   if (!buckets || !buckets.length) return "";
   const peak = Math.max(1, ...buckets.map((bucket) => bucket.jobs));
-  return "<h3>거리 구간별 선택률 — 어디서 고르기를 멈추나</h3>" +
+  return "<h3>거리 구간별 사용 확정률 — 유효 표본 비교</h3>" +
     '<div class="scroll"><table><thead><tr><th>최단 거리</th><th class="num">Job</th>' +
     '<th class="num">선택</th><th class="num">선택률</th><th></th></tr></thead><tbody>' +
     buckets.map((bucket) =>
@@ -1299,7 +1302,7 @@ function distanceTable(buckets) {
       '<td class="num">' + bucket.selected + '</td><td class="num">' + pct(bucket.selectionRate) + "</td>" +
       '<td style="width:30%"><div class="bar" style="width:' + Math.round((bucket.jobs / peak) * 100) + '%"></div></td></tr>'
     ).join("") + "</tbody></table></div>" +
-    '<p class="sub">현재 matchLevel 임계값은 0.25(high) · 0.45(medium)이고 코드에 "실데이터로 보정할 것"이라 적혀 있다. 선택률이 꺾이는 구간이 곧 보정할 자리다.</p>';
+    '<p class="sub">거리 값이 있는 표본만 비교합니다. 거리 누락과 입력 방식 차이가 있어 이 표만으로 임계값을 조정하거나 이탈 원인을 확정하지 않습니다.</p>';
 }
 
 /** ① 설치하고 첫 러프까지. 퍼널의 가장 큰 구멍이 여기라 따로 해부한다. */
@@ -1356,7 +1359,7 @@ function retryBlock(retry) {
     ).join("") + "</tbody></table></div>";
 
   const first = retry.firstSelection.length
-    ? '<div class="scroll"><table><thead><tr><th>처음 고르기까지</th><th class="num">설치</th>' +
+    ? '<div class="scroll"><table><thead><tr><th>조회 기간 내 첫 사용 확정까지</th><th class="num">설치</th>' +
       '<th class="num">비중</th></tr></thead><tbody>' +
       retry.firstSelection.map((row) =>
         "<tr><td>" + esc(row.attempt) + '</td><td class="num">' + row.installations + "</td>" +
@@ -1364,9 +1367,9 @@ function retryBlock(retry) {
       ).join("") + "</tbody></table></div>"
     : '<p class="empty">아직 아무도 고르지 않았다.</p>';
 
-  return "<h3>④ 재시도 — 몇 번째에 건지나</h3>" +
+  return "<h3>④ 조회 기간 내 분석 순번과 사용 확정</h3>" +
     '<div class="side">' + curve + first + "</div>" +
-    '<p class="sub">명시적 재실행(rerun_of) ' + retry.rerunJobs + "건 / 전체 " + retry.totalJobs +
+    '<p class="sub">순번은 설치별 조회 기간 안의 분석 순서입니다. 첫 사용이나 같은 그림 재시도를 의미하지 않습니다. 명시적 재실행(rerun_of) ' + retry.rerunJobs + "건 / 전체 " + retry.totalJobs +
     "건 (" + pct(retry.rerunRate) + ").</p>";
 }
 
@@ -1567,7 +1570,7 @@ function trendBars(points, options) {
 
 function accuracyBlock(accuracy) {
   if (!accuracy || !accuracy.days) {
-    return "<h3>정확도</h3><p class=\"empty\">아직 마감된 날이 없습니다. 집계는 하루가 끝난 뒤에 들어옵니다.</p>";
+    return "<h3>검색 결과 활용</h3><p class=\"empty\">아직 마감된 날이 없습니다. 집계는 하루가 끝난 뒤에 들어옵니다.</p>";
   }
   const feedback = accuracy.feedback.length
     ? '<div class="scroll"><table><thead><tr><th>피드백 사유</th><th class="num">건수</th>' +
@@ -1577,16 +1580,16 @@ function accuracyBlock(accuracy) {
         '</td><td class="num' + (row.reason === "candidates_irrelevant" ? " gap" : "") + '">' +
         pct(row.share) + "</td></tr>").join("") + "</tbody></table></div>"
     : '<p class="empty">피드백이 없습니다.</p>';
-  return "<h3>정확도 — 어제까지 " + accuracy.days + "일</h3>" +
+  return "<h3>검색 결과 활용 — 마감된 기록 " + accuracy.days + "일</h3>" +
     metricCards([
-      { label: "선택률", value: pct(accuracy.selectionRate),
-        hint: "완료 " + accuracy.jobsCompleted + "건 중 고른 Job" },
+      { label: "작업 사용 확정률", value: pct(accuracy.selectionRate),
+        hint: "작업 기준 · 완료 " + accuracy.jobsCompleted + "건 중 사용 확정" },
       { label: "Top-1 비율", value: pct(accuracy.top1Rate),
-        hint: "고른 것 중 첫 번째였던 비율" },
+        hint: "유효 순위 " + (accuracy.rankSamples ?? "미확인") + "개 / 선택 인물 " + (accuracy.rankSelectionSamples ?? "미확인") + "명" },
       { label: "평균 역순위", value: accuracy.meanReciprocalRank === null ? "—" : accuracy.meanReciprocalRank,
-        hint: "1에 가까울수록 위에서 고른다" },
-      { label: "내보내기 전환", value: pct(accuracy.exportRate),
-        hint: "고른 뒤 실제로 받아 간 비율" },
+        hint: "유효 순위 표본만 계산 · 1에 가까울수록 상위 후보" },
+      { label: "서버 내보내기 전환", value: pct(accuracy.exportRate),
+        hint: "서버 파일 제공 기록 · 실제 디스크 저장과 다름" },
     ]) +
     '<p class="sub">피드백을 남긴 Job은 ' + pct(accuracy.feedbackRate) +
     "다. 아래 비중은 그 안에서의 비율이라 표본이 작으면 크게 흔들린다.</p>" + feedback +
@@ -1601,10 +1604,12 @@ function usageBlock(usage) {
   if (!usage || !usage.days) return "";
   return "<h3>사용률</h3>" +
     metricCards([
-      { label: "하루 평균 분석", value: usage.jobsPerDay === null ? "—" : usage.jobsPerDay,
-        hint: "총 " + usage.jobsStarted + "건 / " + usage.days + "일" },
+      { label: "기록이 있는 날 평균 분석", value: usage.jobsPerDay === null ? "—" : usage.jobsPerDay,
+        hint: "마감 기록 " + usage.jobsStarted + "건 / 기록이 있는 " + usage.days + "일 · 선택 기간 전체 평균과 다름" },
+      { label: "선택 기간 일수 대비 분석", value: usage.jobsPerSelectedCalendarDay ?? "—",
+        hint: "마감 기록 " + usage.jobsStarted + "건 / 선택 기간 " + (usage.selectedCalendarDays ?? "미확인") + "일 · 오늘 미마감 기록 제외" },
       { label: "설치당 분석", value: usage.jobsPerActiveInstallation === null ? "—" : usage.jobsPerActiveInstallation,
-        hint: "활성 설치 " + usage.activeInstallations + "곳 기준" },
+        hint: "마감 분석 / 최근 접속 활성 설치 " + usage.activeInstallations + "곳 · 관측 시점 차이 있음" },
       { label: "실패율", value: pct(usage.failureRate),
         hint: "시작 " + usage.jobsStarted + "건 중 실패 " + usage.jobsFailed + "건" },
     ]) +
@@ -1621,9 +1626,9 @@ function productRender(data) {
     '<h3>① 퍼널 — 어디서 새는가</h3>' + funnelTable(data.funnel) +
     '<p class="sub">실패한 작업 ' + data.jobsFailed + "건. 설치 수는 고유 사람 수가 아닙니다. 이 요약의 내보내기는 서버 기록이며, 디스크 저장 성공은 위의 세부 흐름에서 확인하세요.</p>" +
     firstRunBlock(data.firstRun) +
-    '<h3>③ 코호트 — 누가 어디서 멈췄나</h3>' + cohortCards(data.cohorts) +
+    '<h3>③ 설치별 관측 상태 — 원인은 별도 확인</h3>' + cohortCards(data.cohorts) +
     retryBlock(data.retry) +
-    '<h3>⑤ 이탈 신호 — 선택한 쪽과 무엇이 달랐나</h3>' +
+    '<h3>⑤ 사용 확정 여부에 따른 관측 차이 — 원인으로 단정하지 않음</h3>' +
     '<div class="side"><div class="scroll">' + signalRows(drop) + "</div>" +
     '<div class="scroll">' + levelList("1순위 후보 match_level · 선택함", drop.selected.matchLevels) +
     levelList("1순위 후보 match_level · 선택 안 함", drop.notSelected.matchLevels) + "</div></div>" +
@@ -1634,7 +1639,7 @@ function productRender(data) {
       : " 선택하지 않은 Job에 달린 피드백은 없다.") + "</p>" +
     libraryBlock(data.library) +
     vlmBlock(data.vlm) +
-    '<details style="margin-top:10px"><summary class="sub">클라이언트 이벤트 대조 — 서버 기록과 어긋나면 계측 유실이다</summary>' +
+    '<details style="margin-top:10px"><summary class="sub">클라이언트 이벤트 대조 — 집계 범위와 단위를 함께 확인</summary>' +
     '<div class="scroll" style="margin-top:8px"><table><thead><tr><th>이벤트</th><th class="num">건수</th><th class="num">설치</th></tr></thead><tbody>' +
     data.clientStages.map((stage) =>
       "<tr><td>" + esc(stage.event) + '</td><td class="num">' + stage.events + '</td><td class="num">' + stage.installations + "</td></tr>"
@@ -1756,8 +1761,8 @@ function overviewRender(data) {
     kpiCard("활성 설치", n(k.activeInstallations), "기간 중 접속 · 전체 " + k.totalInstallations + "곳 · 동의 무관") +
     kpiCard("오늘 활성", n(k.activeToday), "최근 24시간 접속 · 동의 무관") +
     kpiCard("분석", n(k.jobsStarted), "완료 " + k.jobsCompleted + "건 · 동의 무관") +
-    kpiCard("선택률", pct(k.selectionRate), "품질 동의 Job 중 고른 " + k.jobsSelected + "건") +
-    kpiCard("다운로드", n(k.downloads), "내보낸 Job " + k.jobsExported + "건 · 전환 " + pct(k.exportRate)) +
+    kpiCard("작업 사용 확정률", pct(k.selectionRate), "품질 동의 작업 기준 · 확정 " + k.jobsSelected + "건") +
+    kpiCard("서버 파일 제공", n(k.downloads), "서버 기록 " + k.jobsExported + "작업 · 실제 저장 성공은 지표 탭에서 확인") +
     kpiCard("실패율", pct(k.failureRate), "실패 " + k.jobsFailed + "건",
       k.failureRate !== null && k.failureRate >= 10 ? "bad" : k.failureRate !== null && k.failureRate >= 5 ? "warn" : "") +
     kpiCard("피드백", n(k.feedbackCount), "관련 없음 " + pct(k.irrelevantRate),
@@ -1843,7 +1848,7 @@ function activityRender(data) {
   });
   const sum = (key) => points.reduce((total, point) => total + point[key], 0);
   const idle = '<span class="sub">총 분석 ' + sum("jobsStarted") + "건(완료 " + sum("jobsCompleted") +
-    " · 실패 " + sum("jobsFailed") + ") · 다운로드 " + sum("downloads") +
+    " · 실패 " + sum("jobsFailed") + ") · 서버 파일 제공 " + sum("downloads") +
     "건. 들어온 설치는 구간마다 따로 세므로 더하지 않는다. 점에 마우스를 올리면 구간별 숫자가 보인다.</span>";
   const summarize = (i) => {
     const point = points[i];
@@ -1853,12 +1858,12 @@ function activityRender(data) {
       " · 들어온 설치 <b>" + point.activeInstallations + "명</b>" +
       " · 분석 Job <b>" + point.jobsStarted + "건</b> (완료 " + point.jobsCompleted + " · 실패 " +
       '<span class="' + (point.jobsFailed ? "err" : "") + '">' + point.jobsFailed + "</span>)" +
-      " · 다운로드 <b>" + point.downloads + "건</b>" + (partial ? ' <span class="sub">· 진행 중인 구간</span>' : "");
+      " · 서버 파일 제공 <b>" + point.downloads + "건</b>" + (partial ? ' <span class="sub">· 진행 중인 구간</span>' : "");
   };
   $("actOut").innerHTML = chartGroup(axis, [
     { label: "들어온 설치", values: points.map((point) => point.activeInstallations), unit: "명", color: "--c-users", dash: "1 5" },
     { label: "분석 Job", values: points.map((point) => point.jobsStarted), unit: "건", color: "--c-jobs", dash: "6 4" },
-    { label: "다운로드", values: points.map((point) => point.downloads), unit: "건", color: "--c-down", dash: "3 3" },
+    { label: "서버 파일 제공", values: points.map((point) => point.downloads), unit: "건", color: "--c-down", dash: "3 3" },
   ], summarize, idle, { partialLast: true });
 }
 

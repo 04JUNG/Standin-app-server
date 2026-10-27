@@ -1,3 +1,4 @@
+import { advancedMetrics } from "./journeyAdvancedStore.js";
 import { query } from "../db.js";
 import { buildJourney, type JourneyRow, type JourneyWindow } from "./journey.js";
 
@@ -38,7 +39,7 @@ LEFT JOIN LATERAL (
  AND e.properties_json::jsonb->>'sessionId' ~ '^[a-zA-Z0-9_-]{1,128}$'
  AND (e.event_name <> 'export_completed' OR e.properties_json::jsonb->>'nativeDiskWrite'='true')
  AND e.event_name IN ('preparation_started','preparation_ready','preparation_failed',
- 'export_requested','export_completed','export_failed','export_cancelled')
+ 'export_requested','export_completed','export_failed','export_cancelled','selection_failed','candidate_selected','selection_confirmed')
  ORDER BY e.occurred_at DESC,e.sequence_number DESC,e.event_id DESC LIMIT 1
 ) terminal ON TRUE
 ORDER BY j.created_at DESC LIMIT 10001`;
@@ -47,13 +48,13 @@ export async function journeyMetrics(window:JourneyWindow) {
  // Fail explicitly instead of silently changing the cohort denominator at high volume.
  if(rows.length>10000) throw new Error("JOURNEY_WINDOW_TOO_LARGE");
  const result=buildJourney(rows,window);
- const [inputs,durations]=await Promise.all([
+ const [inputs,advanced]=await Promise.all([
    query<{key:string;events:number;installations:number}>(JOURNEY_INPUT_SQL,[window.from,window.to,window.audience]),
-   query<{key:string;samples:number;medianMs:number|null;p90Ms:number|null}>(JOURNEY_DURATION_SQL,[window.from,window.to,window.audience]),
+   advancedMetrics(rows,window),
  ]);
- return {...result,
+ return {...result,advanced,
    inputs: ([['input_started','입력 시작'],['input_cancelled','입력 취소'],['input_failed','입력 실패']] as const).map(([key,label])=>({key,label,events:inputs.find(r=>r.key===key)?.events??0,installations:inputs.find(r=>r.key===key)?.installations??0})),
-   durations:[...result.durations,...durations.map(d=>({...d,label:d.key==='preparation'?'파일 준비 (동일 시도)':'저장 요청 → 실제 저장 (동일 시도)'}))],
+   durations:[...result.durations.map(d=>({...d,scope:'job_cohort',missingSamples:result.totals.jobs-d.samples})),...advanced.stageDurations.filter(d=>d.key!=='requested_to_completed'),...advanced.attemptDurations],
  };
 }
 

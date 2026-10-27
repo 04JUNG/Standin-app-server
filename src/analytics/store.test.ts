@@ -125,3 +125,13 @@ test("journey metadata is bounded and private payloads are discarded", () => {
     assert.notEqual(sanitizeEventProperties(name,{telemetryVersion:2,sessionId:"session-123"}),null);
   }
 });
+
+test('feature contract validates bounded categories, actions, attribution and error metadata',()=>{
+ const props=sanitizeEventProperties('feature_action',{telemetryVersion:2,sessionId:'s1',feature:'semantic_search',action:'upload_completed',searchOrdinal:2,source:'semantic',osName:'windows',httpStatus:503,errorCategory:'server',resultCount:0,inputId:'local-1',privateSearch:'raw user words'});
+ assert.equal(props?.feature,'semantic_search');assert.equal(props?.searchOrdinal,2);assert.equal(props?.httpStatus,503);assert.equal(props?.resultCount,0);assert.equal(props?.privateSearch,undefined);
+ const bad=sanitizeEventProperties('feature_action',{feature:'private feature name',action:'raw words',searchOrdinal:-1,resultCount:Infinity,errorCategory:'PII',httpStatus:600,osName:'user computer name'});
+ assert.deepEqual(bad,{});
+ assert.equal(sanitizeEventProperties('export_completed',{usedHandLibrary:true,usedBodyCustom:true,fromSemanticSearch:true})?.usedHandLibrary,true);
+ assert.equal(sanitizeEventProperties('selection_failed',{code:'INVALID_INPUT',selectionCount:1})?.code,'INVALID_INPUT');
+ assert.deepEqual(sanitizeEventProperties('journey_exit',{reason:'private details',phase:'review',feature:'export'}),{feature:'export',phase:'review'});
+});

@@ -41,7 +41,7 @@ export function buildJourney(rows: JourneyRow[], window: JourneyWindow) {
       : row.status === "failed" ? "failed"
       : row.status === "queued" || row.status === "running" ? "waiting"
       : !observable ? "unobservable"
-      : row.last_outcome === "export_failed" || row.last_outcome === "preparation_failed" ? "failed"
+      : row.last_outcome === "export_failed" || row.last_outcome === "preparation_failed" || row.last_outcome === "selection_failed" ? "failed"
       : row.last_outcome === "export_cancelled" ? "cancelled"
       : now - last < idle ? "waiting" : "noNextEvent";
     return { row, events, v2, times, last, observable, outcome };
@@ -93,7 +93,7 @@ export function buildJourney(rows: JourneyRow[], window: JourneyWindow) {
     segmentMap.set(key,segment);
   }
   const segments = [...segmentMap.values()].map(s=>({appVersion:s.appVersion,surface:s.surface,jobs:s.jobs.size,installations:s.installations.size,savedJobs:s.savedJobs.size}));
-  const diagnostics = ([['thumbnail_failed','썸네일 실패'],['analysis_failed','분석 실패 보고'],['preparation_failed','파일 준비 실패'],['export_failed','저장 실패'],['export_cancelled','저장 취소']] as const).map(([key,label])=>({key,label,jobs:jobs.filter(j=>j.v2.some(e=>e.name===key)).length,events:jobs.reduce((n,j)=>n+j.v2.filter(e=>e.name===key).reduce((sum,e)=>sum+e.count,0),0)}));
+  const diagnostics = ([['selection_failed','사용 확정 실패'],['thumbnail_failed','썸네일 실패'],['analysis_failed','분석 실패 보고'],['preparation_failed','파일 준비 실패'],['export_failed','저장 실패'],['export_cancelled','저장 취소']] as const).map(([key,label])=>({key,label,jobs:jobs.filter(j=>j.v2.some(e=>e.name===key)).length,events:jobs.reduce((n,j)=>n+j.v2.filter(e=>e.name===key).reduce((sum,e)=>sum+e.count,0),0)}));
   return {window,segments,diagnostics,totals:{jobs:jobs.length,installations:new Set(rows.map(r=>r.installation_id)).size,
     observableJobs:jobs.filter(j=>j.observable).length,unobservableJobs:jobs.filter(j=>!j.observable).length},
     stages,transitions,outcomes,durations,
