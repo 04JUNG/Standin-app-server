@@ -2,7 +2,7 @@
   "repository": "04JUNG/Standin-client",
   "commit": "2b5294efefc51b7cde8dee3694c83eb9c5cec0af",
   "path": "src/features/body-selection/shapeRuntime",
-  "transform": "relative TypeScript imports suffixed .js for NodeNext; computation unchanged",
+  "transform": "relative TypeScript imports suffixed .js for NodeNext; Zod 4 record schemas add explicit string keys; numerical computation unchanged",
   "sha256": {
     "format.ts": "ae19fbdc58f1677027ed0b0e675443899f87dff0bbc54c8a7b15c08937b3b342",
     "common.ts": "ee1a6c28bd9d4facaa5dbded9b32a7b16ab9320b7196bca4f13e997450bd6e63",

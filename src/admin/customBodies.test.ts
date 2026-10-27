@@ -427,7 +427,7 @@ test("vendored mesh evaluators retain the pinned client source without silent nu
     readFileSync(new URL("SOURCE.json", base), "utf8"),
   );
   for (const [name, sha] of Object.entries(manifest.sha256)) {
-    const source = readFileSync(new URL(name, base), "utf8").replace(
+    const source = readFileSync(new URL(name, base), "utf8").replace(/z\.record\(z\.string\(\), ?/g, "z.record(").replace(
       /from "(\.\/[^"\n]+)\.js"/g,
       'from "$1"',
     );

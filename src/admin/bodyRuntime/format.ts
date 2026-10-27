@@ -46,11 +46,11 @@ const headerSchema = z.object({
     })
     .passthrough(),
   baseHeads: finite,
-  controls: z.record(z.object({ min: finite, max: finite, default: finite })),
-  aliases: z.record(z.string()),
-  presets: z.record(z.record(finite)),
+  controls: z.record(z.string(), z.object({ min: finite, max: finite, default: finite })),
+  aliases: z.record(z.string(), z.string()),
+  presets: z.record(z.string(), z.record(z.string(), finite)),
   /** 규칙마다 다른 상수. 각 규칙의 계산 모듈이 필요한 값을 다시 검사한다. */
-  constants: z.object({ gains: z.record(finite) }).catchall(z.union([finite, z.record(finite)])),
+  constants: z.object({ gains: z.record(z.string(), finite) }).catchall(z.union([finite, z.record(z.string(), finite)])),
   fields: z.array(
     z.object({
       name: z.string().min(1),
@@ -185,10 +185,10 @@ const sampledHeaderSchema = z.object({
   faceCount: z.number().int().nonnegative(),
   basisCount: z.number().int().positive().max(MAX_BASIS),
   coefCount: z.number().int().positive(),
-  controls: z.record(z.object({ min: finite, max: finite, default: finite })),
-  aliases: z.record(z.string()),
-  presets: z.record(z.record(finite)),
-  models: z.record(
+  controls: z.record(z.string(), z.object({ min: finite, max: finite, default: finite })),
+  aliases: z.record(z.string(), z.string()),
+  presets: z.record(z.string(), z.record(z.string(), finite)),
+  models: z.record(z.string(),
     z.object({
       base: z.number().int().nonnegative(),
       axes: z.array(axisSchema),
@@ -202,7 +202,7 @@ const sampledHeaderSchema = z.object({
    */
   selection: z.object({ mode: z.literal("idw2"), cutRatio: finite.min(1).max(16) }).optional(),
   /** 굽을 때 잰 오차(mm). 앱은 쓰지 않고 기록용으로만 둔다. */
-  quality: z.record(z.unknown()).optional(),
+  quality: z.record(z.string(), z.unknown()).optional(),
   arrays: z.array(arraySchema),
 });
 export type SampledHeader = z.infer<typeof sampledHeaderSchema>;
