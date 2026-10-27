@@ -51,6 +51,20 @@ export const CLIENT_EVENT_PROPERTIES: Record<string, readonly string[]> = {
   update_failed: ["phase", "reason"],
 } as const;
 
+const JOURNEY_COMMON = ["telemetryVersion", "sessionId", "appVersion", "surface", "attemptId"];
+for (const name of Object.keys(CLIENT_EVENT_PROPERTIES)) {
+  CLIENT_EVENT_PROPERTIES[name] = [...CLIENT_EVENT_PROPERTIES[name], ...JOURNEY_COMMON];
+}
+for (const name of ["input_started", "input_cancelled", "input_failed", "review_viewed", "preparation_started", "preparation_ready", "preparation_failed", "export_requested", "export_cancelled", "thumbnail_failed"]) {
+  CLIENT_EVENT_PROPERTIES[name] = [...JOURNEY_COMMON, "source", "format", "phase", "code", "elapsedMs", "selectionCount"];
+}
+CLIENT_EVENT_PROPERTIES.results_viewed = [...CLIENT_EVENT_PROPERTIES.results_viewed, "entryPoint", "inputId", "source"];
+CLIENT_EVENT_PROPERTIES.input_confirmed = [...CLIENT_EVENT_PROPERTIES.input_confirmed, "inputAttemptId", "inputId"];
+CLIENT_EVENT_PROPERTIES.export_requested = [...CLIENT_EVENT_PROPERTIES.export_requested, "trigger"];
+CLIENT_EVENT_PROPERTIES.thumbnail_failed = [...CLIENT_EVENT_PROPERTIES.thumbnail_failed, "candidateId"];
+CLIENT_EVENT_PROPERTIES.export_completed = [...CLIENT_EVENT_PROPERTIES.export_completed, "nativeDiskWrite", "elapsedMs", "phase"];
+CLIENT_EVENT_PROPERTIES.export_failed = [...CLIENT_EVENT_PROPERTIES.export_failed, "elapsedMs", "phase"];
+
 export function sanitizeEventProperties(
   eventName: string,
   input: unknown,
@@ -67,6 +81,12 @@ export function sanitizeEventProperties(
   const output: Record<string, string | number | boolean | null> = {};
   for (const key of allowed) {
     const value = source[key];
+    if (key === "telemetryVersion" && value !== 2) continue;
+    if ((key === "sessionId" || key === "attemptId" || key === "inputId" || key === "inputAttemptId") && (typeof value !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(value))) continue;
+    if (key === "nativeDiskWrite" && typeof value !== "boolean") continue;
+    if (key === "elapsedMs" && (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 86400000)) continue;
+    if (key === "surface" && value !== "app" && value !== "bar") continue;
+    if ((key === "phase" || key === "code") && typeof value === "string" && !/^[a-zA-Z0-9_-]{1,80}$/.test(value)) continue;
     if (
       value === null ||
       typeof value === "number" ||

@@ -13,6 +13,7 @@ import {
   JOINT_SCORE_FAINT,
   PERSON_COLORS,
 } from "./skeleton.js";
+import { JOURNEY_PANEL_HTML, JOURNEY_PANEL_SCRIPT } from "./journeyDashboard.js";
 
 // 뼈대 상수는 TypeScript 모듈 하나에만 둔다. 화면용 사본을 따로 적으면 관절 순서가
 // 조용히 어긋나므로, 여기서 JSON으로 심어 브라우저와 테스트가 같은 값을 쓰게 한다.
@@ -314,6 +315,7 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
     </div>
     </section>
     <section class="tab" id="tab-metrics">
+    ${JOURNEY_PANEL_HTML}
     <div class="card">
       <h2>제품 지표 — 퍼널 · 코호트 · 이탈 신호</h2>
       <div class="lookup">
@@ -1194,6 +1196,8 @@ async function lookupGo(cursor) {
 
 function pct(value) { return value === null || value === undefined ? "—" : value + "%"; }
 
+${JOURNEY_PANEL_SCRIPT}
+
 function funnelTable(stages) {
   const first = stages[0] ? stages[0].installations : 0;
   return '<div class="scroll"><table><thead><tr><th>단계</th><th class="num">설치</th>' +
@@ -1203,7 +1207,8 @@ function funnelTable(stages) {
       // 직전 대비가 크게 꺾이는 칸이 곧 새는 자리다. 60% 미만이면 눈에 띄게 둔다.
       const leaky = stage.fromPrevious !== null && stage.fromPrevious < 60;
       const width = first ? Math.max(1, Math.round((stage.installations / first) * 100)) : 0;
-      return "<tr><td>" + esc(stage.label) + "</td>" +
+      const label = stage.key === "exported" ? "서버 내보내기 기록" : stage.key === "selected" ? "포즈 사용 확정" : stage.label;
+      return "<tr><td>" + esc(label) + "</td>" +
         '<td class="num">' + stage.installations + "</td>" +
         '<td class="num">' + (stage.jobs === null ? "—" : stage.jobs) + "</td>" +
         '<td class="num' + (leaky ? " gap" : "") + '">' + pct(stage.fromPrevious) + "</td>" +
@@ -1614,7 +1619,7 @@ function productRender(data) {
   $("productOut").innerHTML = accuracyBlock(data.accuracy) + usageBlock(data.usage) +
     instrumentationBlock(data.instrumentation) +
     '<h3>① 퍼널 — 어디서 새는가</h3>' + funnelTable(data.funnel) +
-    '<p class="sub">실패한 Job ' + data.jobsFailed + "건. 설치 수는 사람, 건수는 부하다 — 한 사람이 열 번 돌린 것과 열 사람이 한 번씩 돌린 것을 같게 보지 않으려고 함께 센다.</p>" +
+    '<p class="sub">실패한 작업 ' + data.jobsFailed + "건. 설치 수는 고유 사람 수가 아닙니다. 이 요약의 내보내기는 서버 기록이며, 디스크 저장 성공은 위의 세부 흐름에서 확인하세요.</p>" +
     firstRunBlock(data.firstRun) +
     '<h3>③ 코호트 — 누가 어디서 멈췄나</h3>' + cohortCards(data.cohorts) +
     retryBlock(data.retry) +
@@ -1646,6 +1651,7 @@ function productRender(data) {
 }
 
 async function productGo() {
+  void journeyGo();
   $("productMsg").textContent = "불러오는 중…";
   try {
     const res = await fetch("/v1/admin/product?days=" + encodeURIComponent($("period").value), {

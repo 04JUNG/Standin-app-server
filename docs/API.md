@@ -1584,3 +1584,42 @@ Converter 코드·모델·라이브러리 자산 변경은 필요 없다.
 공용 포즈 라이브러리 자산만 읽는다. 등록/격리 검사를 통과한 BVH의 SHA를 서버가 직접 계산하고, `scope=full` 인체 포스터의 source·character·revision·PNG 해시를 검증한다. `pose-only` 폴백은 거절한다. 성공·실패 모두 캐시를 저장하지 않으며 Converter·선택 변경·렌더 작업을 실행하지 않는다.
 
 이 썸네일은 정면·전신의 기본 인체 참고이며 선택 체형/손/최종 출력 범위 또는 검색 시점을 표현하지 않는다. 대시보드의 후보·갤러리 목록/확대도 이 경로를 사용하며, 갤러리 확대는 정면 참고 한 장을 표시한다. 종전 시점별 `/thumbnail?view=...` API는 호환성을 위해 유지한다.
+
+## 사용자 흐름 관측 (클라이언트 계측 v2, 운영 배포 전)
+
+### 호환성 확인 및 전송
+
+- 설치 인증으로 `GET /v1/events/capabilities` → `{ "journeyVersion": 2 }`.
+- 현재 분석 응답의 `capabilities.analyticsJourney: true`도 같은 지원을 표시한다.
+- 클라이언트는 capabilities가 확인된 서버에만 새 이벤트를 보낸다. 기존 서버는 모르는 이벤트 이름이 포함된 배치를 거절하므로, 실제 배포 시 **BFF를 먼저**, 호환성 확인 후 클라이언트를 배포한다. 이 변경 자체로 운영 배포를 실행하지 않는다.
+- 전송은 기존 `POST /v1/events/batch`를 재사용한다. 기존 동의·소유권 검사, `eventId` 중복 방지, 철회 처리를 그대로 적용한다. 동의하지 않은 사용자에게 새 추적을 강제하지 않는다.
+- 공통 허용 속성: `telemetryVersion: 2`, `sessionId`, 실행 중인 `appVersion`, `surface: app|bar`, 선택적 `attemptId`. 식별자는 최대 128자의 영숫자·하이픈·밑줄만 허용한다. 원본 이미지, 검색 문장, 로컬 경로, 자유 형식 오류 메시지를 전송하지 않는다.
+- 기존 `results_viewed`, `candidate_selected`, `selection_confirmed`, `export_completed`, `export_failed`를 재사용한다.
+- 추가 이벤트: `input_started`, `input_cancelled`, `input_failed`, `review_viewed`, `preparation_started`, `preparation_ready`, `preparation_failed`, `export_requested`, `export_cancelled`, `thumbnail_failed`.
+- `export_completed.nativeDiskWrite: true`는 실제 네이티브 디스크 쓰기가 끝난 경우에만 설정한다. 서버 FBX 생성, 브라우저 모의 저장, 저장 창 열기는 해당하지 않는다.
+- 파일 준비와 저장 시도는 각각 고유 `attemptId`를 쓴다. 같은 시도의 시작·종료는 동일 작업·세션·시도 식별자를 유지한다. `elapsedMs`는 0~86,400,000의 유한 숫자, 오류 `code`·`phase`는 코드형 문자열만 허용한다.
+- `input_confirmed.inputAttemptId/inputId`, `results_viewed.inputId/source/entryPoint`는 입력 연결용이다. 현재 입력 집계는 연결 전환율이 아닌 이벤트 건수이며, 작업 코호트 분모와 섞지 않는다.
+
+### 관리자 집계
+
+`GET /v1/admin/journey?days=7&audience=all&idleMinutes=30`
+
+기존 관리자 인증·접근 감사 및 `Cache-Control: private, no-store`를 따른다.
+
+- `days`: 기존 제품 지표와 동일한 1~90일 정수.
+- `audience`: `all|internal|unclassified`. 내부 표시가 없다는 이유만으로 외부 사용자로 분류하지 않는다. 기존 전체 대시보드의 개발자 제외 설정도 적용되므로 제외 중인 내부 설치는 이 API에서도 보이지 않는다.
+- `idleMinutes`: 5~1440분 정수, 기본 30분. 이 값은 후속 기록 관찰 대기 시간이며 실제 이탈을 판정하는 값이 아니다.
+- 기준 코호트: 응답 `window.from`~`window.to` 사이에 분석 요청이 생성된 작업. 이후 행동도 동일 종료 시점까지만 관측한다. 설치 수는 사람 수가 아니다.
+- 반환: `window`, `totals`, `stages`, `transitions`, `outcomes`, `coverage`, `durations`, `audiences`, `inputs`, `segments`, `diagnostics`, `notes`.
+- `stages`: 분석 요청·완료 → 결과 표시 → 후보 선택 → 사용 확정 → 저장 전 화면 → 파일 준비 완료 → 저장 요청 → 실제 파일 저장의 **독립 관측 건수**와 설치 수. 누락 단계가 있어도 뒤 단계 관측을 지우거나 앞 단계가 있었다고 추정하지 않는다.
+- `transitions`: `reached`를 `advanced|waiting|noNextEvent|unobservable|failed|cancelled`로 분리한다. 병렬 준비 등으로 순서가 역전되거나 중간 계측이 누락된 경우 `unobservable`이다. `noNextEvent`는 관찰 시간이 지났지만 후속 기록이 없다는 의미이며 원인을 단정하지 않는다.
+- `outcomes.saved`는 해당 작업에서 실제 저장에 한 번 이상 도달했음을 뜻한다. 이후 재저장 실패가 첫 성공을 취소하지 않는다. 그 외 작업은 마지막 관련 준비·저장 행동을 기준으로 실패·취소·대기·무후속 기록·관측 불가로 구분한다.
+- `coverage`: 새 계측 버전 작업, 구형 이벤트만 있는 작업, 클라이언트 기록 없는 작업을 구분한다. 과거 기록을 소급 채우지 않으며 동의·전송 누락·구형 버전은 실제 이탈과 같지 않다.
+- `durations`: 분석 시간과 첫 실제 저장까지의 시간, 동일 작업·세션·시도를 연결한 준비 및 저장 시간의 표본 수·중앙값·p90(ms). 대응 시작 이벤트가 없으면 시도 시간 표본에서 제외한다.
+- `inputs`: 기간 내 입력 시작·취소·실패 이벤트 수와 설치 수. **이벤트 시각 기준 별도 분모**이며 작업 생성 코호트와 전환율로 비교하지 않는다.
+- `segments`: 실제 이벤트의 앱 버전·전체 화면/플로팅 바별 작업·설치·저장 도달 작업 수. 여러 화면·버전에서 같은 작업을 열면 중복 포함될 수 있다.
+- `diagnostics`: 썸네일·분석·준비·저장 실패 및 저장 취소 관측 작업 수와 이벤트 수.
+- SQL은 기존 품질 열람 뷰를 사용하여 철회·삭제·관리자 범위 규칙을 유지한다. 원본이나 개별 설치/작업/세션 식별자는 집계 응답에 포함하지 않는다.
+- 코호트가 10,000개 작업을 넘으면 조용히 일부만 집계하지 않고 400과 조회 기간 축소 안내를 반환한다.
+
+검증: `src/admin/journey.test.ts`(관측 누락·상태 분리·분모·중앙값), `src/admin/journeyStore.test.ts`(PostgreSQL SQL·동일 시도 시간·내부 구분·실제 저장), `src/analytics/store.test.ts`(이벤트 허용 목록), 기존 `src/installations/qualityConsent.test.ts`(동의·철회·내부 제외 회귀), `src/ops/journeyDashboard.test.ts`(표시·요청·오류 처리).

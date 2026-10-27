@@ -1,3 +1,4 @@
+import { journeyMetrics } from "./journeyStore.js";
 import { createHumanThumbnailRoutes } from "../human-thumbnail.js";
 import { randomUUID } from "node:crypto";
 import { Hono, type Context } from "hono";
@@ -352,6 +353,29 @@ adminRoutes.get("/overview", async (c) => {
       days: accuracy.days,
     },
   });
+});
+
+adminRoutes.get("/journey", async (c) => {
+  const parsed = parseWindowDays(c.req.query("days"));
+  const audience = c.req.query("audience") ?? "all";
+  const rawIdle = c.req.query("idleMinutes") ?? "30";
+  const idleMinutes = Number(rawIdle);
+  if (!parsed.ok || !["all", "internal", "unclassified"].includes(audience) ||
+      !/^\d+$/.test(rawIdle) || !Number.isInteger(idleMinutes) || idleMinutes < 5 || idleMinutes > 1440) {
+    return c.json(errorEnvelope("INVALID_INPUT", "기간·대상·관찰 대기 시간을 확인해 주세요.", c.get("requestId")), 400);
+  }
+  const to = new Date().toISOString();
+  const from = new Date(Date.parse(to) - parsed.days * 86400000).toISOString();
+  try {
+    const result = await journeyMetrics({from,to,days:parsed.days,idleMinutes,audience});
+    await audit(c, "review_journey_metrics", {});
+    return c.json(result);
+  } catch (error) {
+    if (error instanceof Error && error.message === "JOURNEY_WINDOW_TOO_LARGE") {
+      return c.json(errorEnvelope("INVALID_INPUT", "작업이 많습니다. 조회 기간을 줄여 주세요.", c.get("requestId")), 400);
+    }
+    throw error;
+  }
 });
 
 adminRoutes.get("/product", async (c) => {

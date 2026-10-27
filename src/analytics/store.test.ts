@@ -113,3 +113,15 @@ test("input confirmation records which surface started the flow", () => {
     },
   );
 });
+
+test("journey metadata is bounded and private payloads are discarded", () => {
+  assert.deepEqual(sanitizeEventProperties("export_completed", {
+    telemetryVersion:2, sessionId:"session-123", attemptId:"attempt-456", appVersion:"0.2.5",
+    nativeDiskWrite:true,elapsedMs:1400,surface:"bar",localPath:"/private/user.fbx",error:"private details",
+  }), {surface:"bar",telemetryVersion:2,sessionId:"session-123",appVersion:"0.2.5",attemptId:"attempt-456",nativeDiskWrite:true,elapsedMs:1400});
+  const value=sanitizeEventProperties("preparation_failed",{telemetryVersion:2,sessionId:"/private/file",elapsedMs:Infinity,code:"raw error with private path",surface:"app"});
+  assert.deepEqual(value,{telemetryVersion:2,surface:"app"});
+  for(const name of ["input_started","input_cancelled","input_failed","review_viewed","preparation_started","preparation_ready","preparation_failed","export_requested","export_cancelled","thumbnail_failed"]) {
+    assert.notEqual(sanitizeEventProperties(name,{telemetryVersion:2,sessionId:"session-123"}),null);
+  }
+});
