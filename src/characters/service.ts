@@ -177,6 +177,7 @@ export async function characterSelectionEnabled(
 export async function currentCapabilities(
   overrides: Partial<CharacterDeps> = {},
 ): Promise<{
+  analyticsJourney?: boolean;
   handSelection: boolean;
   bodySelection: boolean;
   bodyRecommendation: boolean;
@@ -190,6 +191,7 @@ export async function currentCapabilities(
   modelPreview: boolean;
 }> {
   return {
+    analyticsJourney: true,
     handSelection: await handSelectionAvailable(),
     bodySelection: config.bodySelectionEnabled,
     bodyRecommendation: config.bodySelectionEnabled,

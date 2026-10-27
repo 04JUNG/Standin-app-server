@@ -1,3 +1,5 @@
+import { createCustomBodyRoutes } from "./customBodyRoutes.js";
+import { journeyMetrics } from "./journeyStore.js";
 import { createHumanThumbnailRoutes } from "../human-thumbnail.js";
 import { randomUUID } from "node:crypto";
 import { Hono, type Context } from "hono";
@@ -119,6 +121,7 @@ adminRoutes.use("*", async (c, next) => {
 
 adminRoutes.use("*", qualityReviewGuard());
 adminRoutes.route("/review/pose-candidates", createHumanThumbnailRoutes());
+adminRoutes.route("/review/custom-bodies", createCustomBodyRoutes((c, action, installationId) => audit(c, action, { installationId })));
 
 /**
  * 관리자 접근을 남긴다.
@@ -340,7 +343,7 @@ adminRoutes.get("/overview", async (c) => {
     dailyAggregates(days),
   ]);
   const accuracy = toAccuracy(daily);
-  const usage = toUsage(daily, funnelRow.active_installations);
+  const usage = toUsage(daily, funnelRow.active_installations, days);
   await audit(c, "review_overview", {});
   return c.json({
     windowDays: days,
@@ -352,6 +355,29 @@ adminRoutes.get("/overview", async (c) => {
       days: accuracy.days,
     },
   });
+});
+
+adminRoutes.get("/journey", async (c) => {
+  const parsed = parseWindowDays(c.req.query("days"));
+  const audience = c.req.query("audience") ?? "all";
+  const rawIdle = c.req.query("idleMinutes") ?? "30";
+  const idleMinutes = Number(rawIdle);
+  if (!parsed.ok || !["all", "internal", "unclassified"].includes(audience) ||
+      !/^\d+$/.test(rawIdle) || !Number.isInteger(idleMinutes) || idleMinutes < 5 || idleMinutes > 1440) {
+    return c.json(errorEnvelope("INVALID_INPUT", "기간·대상·관찰 대기 시간을 확인해 주세요.", c.get("requestId")), 400);
+  }
+  const to = new Date().toISOString();
+  const from = new Date(Date.parse(to) - parsed.days * 86400000).toISOString();
+  try {
+    const result = await journeyMetrics({from,to,days:parsed.days,idleMinutes,audience});
+    await audit(c, "review_journey_metrics", {});
+    return c.json(result);
+  } catch (error) {
+    if (error instanceof Error && ["JOURNEY_WINDOW_TOO_LARGE","JOURNEY_HISTORY_TOO_LARGE"].includes(error.message)) {
+      return c.json(errorEnvelope("INVALID_INPUT", "작업이 많습니다. 조회 기간을 줄여 주세요.", c.get("requestId")), 400);
+    }
+    throw error;
+  }
 });
 
 adminRoutes.get("/product", async (c) => {
@@ -397,7 +423,7 @@ adminRoutes.get("/product", async (c) => {
     since: new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString(),
     // 정확도·사용률은 일별 집계에서 온다. 그 표에는 **오늘이 없다**(하루가 끝나야 넣는다).
     accuracy: toAccuracy(daily),
-    usage: toUsage(daily, funnelRow.active_installations),
+    usage: toUsage(daily, funnelRow.active_installations, days),
     funnel: toFunnel(funnelRow),
     jobsFailed: funnelRow.jobs_failed,
     clientStages: clientStages.map((stage) => ({

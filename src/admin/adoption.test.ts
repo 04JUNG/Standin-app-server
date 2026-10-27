@@ -13,6 +13,7 @@ test("첫 실행 도달률과 시간 분포를 낸다", () => {
   assert.equal(funnel.timeToFirst[0].share, 50);
   assert.equal(funnel.timeToFirst.reduce((sum, item) => sum + item.count, 0), 18);
   assert.equal(funnel.idle[2].count, 6);
+  assert.match(funnel.idle[2].hint,/이탈 확정이나 원인 판정은 불가/);
 });
 
 test("설치가 없으면 비율은 null이다", () => {
@@ -49,6 +50,8 @@ test("처음 고르기까지의 분포는 설치 기준 비중을 낸다", () =>
   assert.equal(retry.firstSelection[0].share, 80);
   assert.equal(retry.firstSelection[1].attempt, "3회차");
   assert.equal(retry.rerunRate, 17.5);
+  assert.equal(retry.attemptScope,"selected_window");
+  assert.match(retry.note,/생애 첫 시도/);
 });
 
 test("Job이 없으면 재실행 비율은 null이다", () => {

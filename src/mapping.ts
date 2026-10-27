@@ -1,3 +1,4 @@
+import { readRefineShadow, type RefineShadowEnvelope } from "./refine/shadow.js";
 import { upgradeManualResult } from "./manual-export.js";
 import { extractPoseDescription, type PoseDescription } from "./pose-description.js";
 import { dynamicRefineBinding, refinableLibraryCandidate } from "./refine/eligibility.js";
@@ -318,6 +319,7 @@ export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
  * 있다. `/analyze` 시점에 여기서 뽑아 DB에 넣고, refine 호출 때 DB에서만 읽는다.
  */
 export interface RefineContext {
+  refineV3?: RefineShadowEnvelope;
   posePresentationAssets?: Record<string, PrivatePreviewAsset>;
   personIndex: number;
   keypoints: number[][] | null;
@@ -339,6 +341,8 @@ export interface RefineContext {
 export function extractRefineContexts(cut: CutResult): RefineContext[] {
   return (cut.people ?? []).map((p) => ({
     personIndex: p.index,
+    ...(config.refineV3Shadow && readRefineShadow(p.refine_v3)
+      ? { refineV3: readRefineShadow(p.refine_v3) } : {}),
     posePresentationAssets: mapPosePresentation(
       p.pose_presentation,
       p.index,

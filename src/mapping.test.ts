@@ -305,3 +305,18 @@ test("display camera preserves search identity and builds an owned preview URL",
   assert.match(result.thumbnailUrl!,/aligned\?jobId=owned-job&personIndex=0&candidateId=pose-1%3A%3Aback/);
   assert.equal(result.quickThumbnailUrl,"/v1/pose-candidates/pose-1/thumbnail?view=back");
 });
+
+test("v3 envelope remains private and does not make upper-only people refinable", async () => {
+  const { config } = await import("./config.js");
+  const prior = config.refineV3Shadow;
+  Object.assign(config, { refineV3Shadow: true });
+  try {
+    const input = cut([{ refine_v3: { payload: { version: "refine-shadow-v1", person_id: "private-person" }, signature: "a".repeat(64) },
+      coverage_class: "upper_only", refine_allowed: false, refinable_limbs: [] }]);
+    const privateContexts = (await import("./mapping.js")).extractRefineContexts(input);
+    assert.equal(privateContexts[0]?.refineV3?.payload.person_id, "private-person");
+    const publicResult = mapCutResult("job", input);
+    assert.equal(JSON.stringify(publicResult).includes("private-person"), false);
+    assert.equal(publicResult.candidatesByPerson[0]?.refineAllowed, false);
+  } finally { Object.assign(config, { refineV3Shadow: prior }); }
+});
