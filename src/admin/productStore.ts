@@ -19,8 +19,7 @@ function since(days: number): string {
 /**
  * ① 퍼널. 건수와 **설치 수**를 함께 센다.
  *
- * 건수만 보면 한 사람이 열 번 돌린 것과 열 사람이 한 번씩 돌린 것이 같아 보인다.
- * 이탈을 이야기하려면 사람 기준이 필요하고, 부하를 이야기하려면 건수가 필요하다.
+ * 설치 수와 작업 수는 단위가 다르며, 설치를 실제 사람 수로 간주하지 않는다.
  */
 export async function funnelCounts(days: number): Promise<FunnelRow> {
   const from = since(days);
@@ -64,7 +63,7 @@ export async function funnelCounts(days: number): Promise<FunnelRow> {
   );
 }
 
-/** 클라이언트 이벤트 쪽 단계 수. 서버 기록과 나란히 놓아 계측 유실을 드러낸다. */
+/** 클라이언트 이벤트 쪽 단계 수. 서버 기록과 범위·단위가 달라 직접 차감으로 유실을 판정하지 않는다. */
 export async function clientStageCounts(days: number): Promise<
   Array<{ event_name: string; events: number; installations: number }>
 > {
@@ -88,6 +87,7 @@ export async function clientStageCounts(days: number): Promise<
 export async function cohortCounts(days: number): Promise<{
   installed_only: number;
   failed_only: number;
+  pending: number;
   completed_no_selection: number;
   selected_no_export: number;
   exported: number;
@@ -95,42 +95,48 @@ export async function cohortCounts(days: number): Promise<{
 }> {
   const from = since(days);
   const row = await queryOne<{
-    installed_only: number; failed_only: number; completed_no_selection: number;
+    installed_only: number; failed_only: number; pending: number; completed_no_selection: number;
     selected_no_export: number; exported: number; total: number;
   }>(
-    `SELECT
-       count(*) FILTER (WHERE a.jobs = 0)::int AS installed_only,
-       count(*) FILTER (WHERE a.jobs > 0 AND a.completed = 0)::int AS failed_only,
-       count(*) FILTER (WHERE a.completed > 0 AND a.selected = 0)::int AS completed_no_selection,
-       count(*) FILTER (WHERE a.selected > 0 AND a.exported = 0)::int AS selected_no_export,
-       count(*) FILTER (WHERE a.exported > 0)::int AS exported,
-       count(*)::int AS total
-     FROM quality_review_installations i
-     LEFT JOIN LATERAL (
-       SELECT
-         count(DISTINCT j.id)::int AS jobs,
-         count(DISTINCT j.id) FILTER (WHERE j.status = 'completed')::int AS completed,
-         count(DISTINCT cs.job_id)::int AS selected,
-         count(DISTINCT ee.job_id)::int AS exported
-       FROM quality_review_jobs j
-       LEFT JOIN quality_review_confirmed_selections cs ON cs.job_id = j.id
-       LEFT JOIN quality_review_export_events ee ON ee.job_id = j.id AND ee.status = 'completed'
-       WHERE j.installation_id = i.id AND j.created_at >= $1
-     ) a ON TRUE
-     WHERE i.last_seen_at >= $1 OR a.jobs > 0`,
+    COHORT_SQL,
     [from],
   );
   return row ?? {
-    installed_only: 0, failed_only: 0, completed_no_selection: 0,
+    installed_only: 0, failed_only: 0, pending: 0, completed_no_selection: 0,
     selected_no_export: 0, exported: 0, total: 0,
   };
 }
 
+// 각 설치는 도달한 가장 높은 단계로 한 번만 집계한다. 진행 중인 작업은 실패가 아니다.
+export const COHORT_SQL = `SELECT
+  count(*) FILTER (WHERE a.jobs = 0)::int AS installed_only,
+  count(*) FILTER (WHERE a.jobs > 0 AND a.completed = 0 AND a.pending = 0 AND a.failed = a.jobs
+                         AND a.selected = 0 AND a.exported = 0)::int AS failed_only,
+  count(*) FILTER (WHERE a.completed = 0 AND a.pending > 0 AND a.selected = 0 AND a.exported = 0)::int AS pending,
+  count(*) FILTER (WHERE a.completed > 0 AND a.selected = 0 AND a.exported = 0)::int AS completed_no_selection,
+  count(*) FILTER (WHERE a.selected > 0 AND a.exported = 0)::int AS selected_no_export,
+  count(*) FILTER (WHERE a.exported > 0)::int AS exported,
+  count(*)::int AS total
+FROM quality_review_installations i
+LEFT JOIN LATERAL (
+  SELECT count(DISTINCT j.id)::int AS jobs,
+         count(DISTINCT j.id) FILTER (WHERE j.status = 'completed')::int AS completed,
+         count(DISTINCT j.id) FILTER (WHERE j.status IN ('queued', 'running'))::int AS pending,
+         count(DISTINCT j.id) FILTER (WHERE j.status = 'failed')::int AS failed,
+         count(DISTINCT cs.job_id)::int AS selected,
+         count(DISTINCT ee.job_id)::int AS exported
+  FROM quality_review_jobs j
+  LEFT JOIN quality_review_confirmed_selections cs ON cs.job_id = j.id
+  LEFT JOIN quality_review_export_events ee ON ee.job_id = j.id AND ee.status = 'completed'
+  WHERE j.installation_id = i.id AND j.created_at >= $1
+) a ON TRUE
+WHERE i.last_seen_at >= $1 OR a.jobs > 0`;
+
 /**
  * ③ 이탈 신호. 완료된 Job을 **선택 있음/없음** 두 집단으로 갈라 비교한다.
  *
- * 한 집단만 보면 "점수 0.7"이 높은지 낮은지 알 수 없다. 두 집단의 차이가 곧
- * "어느 선 아래로 내려가면 사용자가 고르지 않는가"의 단서다.
+ * 유효 거리 표본의 분포를 비교한다. 수집 누락과 표본 편향이 있어 선택 여부의
+ * 차이를 검색 품질이나 중단 원인의 증거로 단정하지 않는다.
  */
 export async function dropoffSignals(days: number): Promise<SignalRow[]> {
   return query<SignalRow>(
@@ -146,6 +152,7 @@ export async function dropoffSignals(days: number): Promise<SignalRow[]> {
        count(*) FILTER (WHERE p.person_count = 0)::int AS zero_people_jobs,
        count(*) FILTER (WHERE p.shortfall > 0)::int AS shortfall_jobs,
        avg(c.best_distance) AS avg_best_distance,
+       count(c.best_distance)::int AS distance_samples,
        avg(p.person_count) AS avg_people
      FROM scoped s
      LEFT JOIN LATERAL (
@@ -156,7 +163,7 @@ export async function dropoffSignals(days: number): Promise<SignalRow[]> {
      LEFT JOIN LATERAL (
        -- 점수가 아니라 거리다. 프로덕션 파이프라인은 knn_geometric을 직접 불러
        -- rerank_score를 채우지 않는다(rerank는 쓰이지 않는 선택 경로다).
-       SELECT min(ac.distance) AS best_distance
+       SELECT min(ac.distance) FILTER (WHERE ac.distance >= 0 AND ac.distance < 'Infinity'::double precision) AS best_distance
        FROM quality_review_analysis_candidates ac WHERE ac.job_id = s.id
      ) c ON TRUE
      GROUP BY s.selected`,
@@ -223,9 +230,10 @@ export async function columnHealth(days: number): Promise<ColumnHealthRow[]> {
        WHERE j.created_at >= $1`,
       [from],
     ),
-    queryOne<{ rows: number; size_nulls: number; completed_nulls: number }>(
+    queryOne<{ rows: number; size_nulls: number; completed_rows: number; completed_nulls: number }>(
       `SELECT count(*)::int AS rows,
               count(*) FILTER (WHERE input_width IS NULL)::int AS size_nulls,
+              count(*) FILTER (WHERE status = 'completed')::int AS completed_rows,
               count(*) FILTER (WHERE status = 'completed' AND completed_at IS NULL)::int AS completed_nulls
        FROM quality_review_jobs WHERE created_at >= $1`,
       [from],
@@ -240,12 +248,12 @@ export async function columnHealth(days: number): Promise<ColumnHealthRow[]> {
   ]);
 
   return [
-    { label: "analysis_candidates.rerank_score", rows: candidates?.rows ?? 0, nulls: candidates?.rerank_nulls ?? 0 },
+    { label: "analysis_candidates.rerank_score", rows: candidates?.rows ?? 0, nulls: candidates?.rerank_nulls ?? 0, applicability: "unused", note: "현재 기하 검색 경로에서 사용하지 않는 선택 필드 · 빈 값은 수집 오류가 아님" },
     { label: "analysis_candidates.distance", rows: candidates?.rows ?? 0, nulls: candidates?.distance_nulls ?? 0 },
     { label: "analysis_people.confidence", rows: people?.rows ?? 0, nulls: people?.confidence_nulls ?? 0 },
     { label: "analysis_people.skeleton_json", rows: people?.rows ?? 0, nulls: people?.skeleton_nulls ?? 0 },
     { label: "jobs.input_width", rows: jobs?.rows ?? 0, nulls: jobs?.size_nulls ?? 0 },
-    { label: "jobs.completed_at (완료인데 비어 있음)", rows: jobs?.rows ?? 0, nulls: jobs?.completed_nulls ?? 0 },
+    { label: "jobs.completed_at (완료인데 비어 있음)", rows: jobs?.completed_rows ?? 0, nulls: jobs?.completed_nulls ?? 0 },
     { label: "export_events.format", rows: exports?.rows ?? 0, nulls: exports?.format_nulls ?? 0 },
     { label: "export_events.variant (조정본/베이스)", rows: exports?.rows ?? 0, nulls: exports?.variant_nulls ?? 0 },
   ];
@@ -282,7 +290,7 @@ export async function distanceBuckets(days: number): Promise<DistanceBucketRow[]
        WHERE j.created_at >= $1 AND j.status = 'completed' AND j.installation_id IS NOT NULL
      ),
      best AS (
-       SELECT s.id, s.selected, (SELECT min(ac.distance) FROM quality_review_analysis_candidates ac
+       SELECT s.id, s.selected, (SELECT min(ac.distance) FILTER (WHERE ac.distance >= 0 AND ac.distance < 'Infinity'::double precision) FROM quality_review_analysis_candidates ac
                                   WHERE ac.job_id = s.id) AS best
        FROM scoped s
      )
@@ -388,8 +396,8 @@ export async function topCaptureFailures(days: number): Promise<TopFailingInstal
 /**
  * ② 몇 번째 시도에서 고르나.
  *
- * 설치 안에서 Job의 순번을 매겨 순번별 선택률을 낸다. 1회차 선택률이 낮고 뒤로 갈수록
- * 오른다면 "여러 번 돌려야 건진다"는 뜻이고, 순번과 무관하게 낮다면 매칭 자체 문제다.
+ * 선택 기간 안에서 설치별 작업 순번을 다시 매긴다. 이전 기간의 작업은 포함하지
+ * 않으며, 같은 입력에 대한 재시도인지 별개의 작업인지 이 지표만으로 알 수 없다.
  */
 export async function attemptCurve(days: number): Promise<AttemptRow[]> {
   return query<AttemptRow>(

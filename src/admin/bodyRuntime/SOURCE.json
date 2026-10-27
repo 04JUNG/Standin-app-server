@@ -1,0 +1,19 @@
+{
+  "repository": "04JUNG/Standin-client",
+  "commit": "2b5294efefc51b7cde8dee3694c83eb9c5cec0af",
+  "path": "src/features/body-selection/shapeRuntime",
+  "transform": "relative TypeScript imports suffixed .js for NodeNext; Zod 4 record schemas add explicit string keys; numerical computation unchanged",
+  "sha256": {
+    "format.ts": "ae19fbdc58f1677027ed0b0e675443899f87dff0bbc54c8a7b15c08937b3b342",
+    "common.ts": "ee1a6c28bd9d4facaa5dbded9b32a7b16ab9320b7196bca4f13e997450bd6e63",
+    "anatomy.ts": "99dcb5e2e4bfcb51b8e8efb142120533621feeebb3fce614bf3f2618d863bc62",
+    "mesh.ts": "45440cd9d28124127f7bd59cf0a5874d88f65fa238d6f8e31e575a9d6ee3adac",
+    "male067.ts": "6ccbcdb95ad2e7a7610dcdbf9698b5f2397d82e752d0439cbd22e515c7ec5a2d",
+    "male0610.ts": "637b55557ac7ee1c241822e56f3e48000202d36a6f4ee26a5aa1040774eb9759",
+    "male071.ts": "e510a8d68cf1c0dfee359bc9b769c56989bf1da764ef5589e8f9d48a1b759271",
+    "female022.ts": "99f4f93dba4c7883a9b507c9ca438c31fcf07440dfa6514d275775f6e1f68fdd",
+    "female033.ts": "9483024b70f11ec84d0cbb72ce1648155d19c2b29b0521e89fb2c242394652e2",
+    "sampled.ts": "fc389001819706ee5a49a6e41f0d6f63874abc0401f7ee2b2760ec4905cacb22",
+    "evaluate.ts": "d60d8e63dec647dfdc5df836d6b65aa9156ad2d41467f5582522ee54e84fc5c0"
+  }
+}

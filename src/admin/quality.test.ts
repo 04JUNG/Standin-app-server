@@ -54,8 +54,10 @@ test("역순위가 비어 있는 날은 합계에서 빠진다", () => {
     day({ confirmed_selections: 2, mean_reciprocal_rank: null }),
     day({ day: "2026-10-02", confirmed_selections: 2, mean_reciprocal_rank: 1 }),
   ];
-  // 선택 4건 중 2건만 순위를 안다. 아는 쪽만 더해 전체로 나눈다.
-  assert.equal(toAccuracy(rows).meanReciprocalRank, 0.5);
+  // 순위를 모르는 선택을 0점으로 취급하지 않는다. 유효 표본만 분모다.
+  assert.equal(toAccuracy(rows).meanReciprocalRank, 1);
+  assert.equal(toAccuracy(rows).rankSamples, 2);
+  assert.equal(toAccuracy(rows).rankCoverageRate, 50);
 });
 
 test("피드백은 사유별로 합치고 비중을 낸다", () => {
@@ -116,4 +118,20 @@ test("활성 설치가 0이면 설치당 건수는 null이다", () => {
 test("실패율은 시작한 Job 대비다", () => {
   const usage = toUsage([day({ jobs_started: 10, jobs_failed: 2 })], 1);
   assert.equal(usage.failureRate, 20);
+});
+
+test("일평균의 기록 날짜 분모와 선택 기간 분모를 구분한다", () => {
+  const usage = toUsage([day({jobs_started:14})], 2, 7);
+  assert.equal(usage.jobsPerDay,14);
+  assert.equal(usage.jobsPerDayBasis,"recorded_days");
+  assert.equal(usage.recordedDays,1);
+  assert.equal(usage.selectedCalendarDays,7);
+  assert.equal(usage.jobsPerSelectedCalendarDay,2);
+});
+
+test("유효 순위가 한 건도 없으면 MRR와 Top1은 관찰 불가다", () => {
+  const metric = toAccuracy([day({mean_reciprocal_rank:null, valid_rank_samples:0, selection_samples:4})]);
+  assert.equal(metric.meanReciprocalRank,null);
+  assert.equal(metric.top1Rate,null);
+  assert.equal(metric.rankCoverageRate,0);
 });

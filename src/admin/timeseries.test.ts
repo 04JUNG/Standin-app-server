@@ -59,6 +59,8 @@ test("빈 구간을 0으로 채워 시간축이 끊기지 않는다", () => {
   assert.deepEqual(points.map((p) => p.activeInstallations), [0, 0, 3, 0, 0, 7]);
   assert.equal(points[0].start, "2026-10-09T00:00:00.000Z");
   assert.equal(points[5].end, "2026-10-09T06:00:00.000Z");
+  assert.equal(points[2].serverExportRecords,2);
+  assert.equal(points[0].serverExportRecords,0);
 });
 
 test("지금이 속한 구간까지 들어간다", () => {
@@ -75,6 +77,7 @@ test("SQL이 null을 줘도 0으로 읽는다", () => {
     { rangeSeconds: 3600, bucketSeconds: 3600 },
   );
   assert.equal(points[0].downloads, 0);
+  assert.equal(points[0].serverExportRecords, 0);
   assert.equal(points[0].jobsFailed, 0);
   assert.equal(points[0].jobsStarted, 5);
 });
