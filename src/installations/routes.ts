@@ -1,3 +1,5 @@
+import { CLIENT_VERSION_HEADER, isSupportedClientVersion } from "../client-version/policy.js";
+import { updateRequired } from "../client-version/response.js";
 import { createBodyPreferenceRoutes } from "../body-selection/routes.js";
 import { Hono } from "hono";
 import { pool, transaction } from "../db.js";
@@ -38,6 +40,12 @@ installationRoutes.post("/", async (c) => {
   const consentVersion = shortString(body?.consentVersion);
   const consentedAt = shortString(body?.consentedAt);
   const appVersion = shortString(body?.appVersion);
+  if (
+    !isSupportedClientVersion(appVersion) ||
+    !isSupportedClientVersion(c.req.header(CLIENT_VERSION_HEADER) ?? appVersion)
+  ) {
+    return updateRequired(c);
+  }
   const osName = shortString(body?.osName);
   const osVersion = shortString(body?.osVersion);
   const architecture = shortString(body?.architecture);

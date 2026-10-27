@@ -30,6 +30,7 @@ import { analyticsRoutes } from "./analytics/routes.js";
 import { installationRoutes } from "./installations/routes.js";
 import { requireInstallation } from "./installations/middleware.js";
 import { rateLimitByIp } from "./limits/middleware.js";
+import { clientPolicyRoutes } from "./client-version/routes.js";
 import { adminRoutes } from "./admin/routes.js";
 
 const app = new Hono<AppEnv>();
@@ -132,6 +133,9 @@ app.use("*", appCors(config.corsOrigins));
 app.get("/healthz", async (c) => {
   return c.json({ ok: true, inference: await health() });
 });
+
+// Startup compatibility check does not require an installation.
+app.route("/v1/client-policy", clientPolicyRoutes);
 
 // /v1 계약 (클라 endpoints.ts와 맞물림)
 // 공개: /v1/auth/*  |  보호(requireAuth): users·analysis·pose-candidates
