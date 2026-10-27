@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { extractCutSummary, extractPersonSignals, mapCutResult } from "./mapping.js";
 import type { CutResult, UpstreamPerson } from "./inference.js";
+import { extractPoseDescription, parsePoseDescription } from "./pose-description.js";
 
 const METADATA = {
   deployment_version: "sha",
@@ -219,6 +220,44 @@ test("an older inference response yields empty signals, not guesses", () => {
   const [signals] = extractPersonSignals(cut([{}]));
   assert.deepEqual(signals.personTags, { action: null, view: null, source: null });
   assert.equal(signals.rankDistance, null);
+});
+
+test("image descriptions survive in private review signals across all routing contracts", () => {
+  const evidence = { status: "valid", reasons: [], description: {
+    search_text: "오른손을 머리 위로 올린 자세", body_details: "왼팔은 아래로 내리고 있다.",
+    postures: ["standing"], actions: ["raising_arm"], objects: [], certainty: "high",
+    visible_scope: "full", provider_secret: "must not survive",
+  }, error_reason: "must not survive" };
+  for (const routing of [
+    { dynamic_search: { description_evidence: evidence } },
+    { search_routing: { semantic_evidence: evidence } },
+    { search_routing: { fullbody_search: { description_evidence: evidence } } },
+  ]) {
+    const input = cut([routing, {}]);
+    const signals = extractPersonSignals(input);
+    const description = signals[0].personTags.poseDescription;
+    assert.equal(description?.searchText, evidence.description.search_text);
+    assert.equal(description?.bodyDetails, evidence.description.body_details);
+    assert.equal(description?.status, "valid");
+    assert.equal(signals[1].personTags.poseDescription, undefined);
+    assert.ok(!JSON.stringify(description).includes("must not survive"));
+    assert.ok(!JSON.stringify(mapCutResult("private-description", input)).includes(evidence.description.search_text));
+  }
+});
+
+test("description failures, older servers and malformed payloads stay distinguishable", () => {
+  assert.equal(extractPoseDescription({}), null);
+  assert.equal(extractPoseDescription({ search_routing: [] }), null);
+  assert.equal(parsePoseDescription("broken"), null);
+  const error = extractPoseDescription({ dynamic_search: {
+    description_evidence: { status: "vlm_error", reasons: ["vlm_call_failed"], error_reason: "secret" },
+  } });
+  assert.equal(error?.status, "vlm_error");
+  assert.equal(error?.searchText, null);
+  assert.deepEqual(error?.reasons, ["vlm_call_failed"]);
+  const bounded = parsePoseDescription({ searchText: "x".repeat(5000), actions: [42, " running ", null] });
+  assert.equal(bounded?.searchText?.length, 4000);
+  assert.deepEqual(bounded?.actions, ["running"]);
 });
 
 test("the cut summary records what the VLM actually said", () => {

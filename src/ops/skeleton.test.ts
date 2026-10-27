@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import vm from "node:vm";
 import { DASHBOARD_HTML } from "./dashboard.js";
 import {
   COCO17_EDGES,
@@ -59,4 +60,25 @@ test("대시보드가 그 상수를 그대로 심는다", () => {
 test("대시보드는 토큰을 심지 않는다", () => {
   assert.ok(!DASHBOARD_HTML.includes("X-Beta-Admin-Token: "));
   assert.ok(DASHBOARD_HTML.includes("sessionStorage"));
+});
+
+test("description cards escape model text and distinguish missing records from errors", () => {
+  const context = vm.createContext({});
+  for (const name of ["esc", "pill", "poseDescriptionBlock"]) {
+    const start = DASHBOARD_HTML.indexOf("function " + name + "(");
+    const end = DASHBOARD_HTML.indexOf("\n}", start) + 2;
+    assert.ok(start >= 0 && end > start, name);
+    vm.runInContext(DASHBOARD_HTML.slice(start, end), context);
+  }
+  context.person = { poseDescription: {
+    status: "valid", searchText: '<img src=x onerror="alert(1)">',
+    bodyDetails: "오른팔을 올림", actions: ["raising_arm"],
+  } };
+  const html = vm.runInContext("poseDescriptionBlock(person)", context) as string;
+  assert.match(html, /추출 완료/);
+  assert.match(html, /&lt;img/);
+  assert.ok(!html.includes("<img"));
+  assert.match(html, /오른팔을 올림/);
+  assert.match(vm.runInContext("poseDescriptionBlock({})", context), /저장된 설명 없음/);
+  assert.match(vm.runInContext("poseDescriptionBlock({poseDescription:{status:'vlm_error'}})", context), /추출 오류/);
 });

@@ -10,6 +10,7 @@
 // 쓸 것만 파싱해 내보내고 나머지는 뺀다 — 관절 사본이 두 벌 나가지 않는다.
 
 import { resolveOutputScope, type OutputScope } from "../output-scope/model.js";
+import { parsePoseDescription, type PoseDescription } from "../pose-description.js";
 
 export interface AnalysisPersonRow {
   person_index: number;
@@ -97,6 +98,7 @@ export interface ReviewPerson {
   refinableLimbs: string[];
   outputScope: OutputScope | null;
   personTags: ReviewPersonTags | null;
+  poseDescription: PoseDescription | null;
   searchSignals: ReviewSearchSignals;
 }
 
@@ -273,6 +275,7 @@ export function toReviewPerson(row: AnalysisPersonRow, scope?: OutputScope | nul
     refinableLimbs: parseLimbs(row.refinable_limbs_json),
     outputScope: scope ?? scopeFromColumn(row.output_scope_json),
     personTags: parsePersonTags(row.person_tags_json),
+    poseDescription: descriptionFromTags(row.person_tags_json),
     searchSignals: {
       rankDistance: isFiniteNumber(row.rank_distance) ? row.rank_distance : null,
       distanceMetric: row.distance_metric,
@@ -282,6 +285,12 @@ export function toReviewPerson(row: AnalysisPersonRow, scope?: OutputScope | nul
         : null,
     },
   };
+}
+
+function descriptionFromTags(raw: string | null | undefined): PoseDescription | null {
+  const value = parseJson(raw);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return parsePoseDescription((value as Record<string, unknown>).poseDescription);
 }
 
 /**
