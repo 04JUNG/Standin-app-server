@@ -1691,3 +1691,7 @@ Converter 코드·모델·라이브러리 자산 변경은 필요 없다.
 앱의 수치 계산기를 `src/admin/bodyRuntime`에 고정된 소스와 함께 재사용한다. SOURCE.json에 클라이언트 커밋과 원본 체크섬을 기록하며 Blender 기준 소형 픽스처로 계산 일치를 검증한다. 파서의 record 스키마는 보안 수정된 Zod 4 API에 맞춰 문자열 키를 명시한다. 수치 계산은 변경하지 않는다. 자산 크기·SHA256·형식·원본 해시·규칙·프리셋을 확인한 뒤 메시를 계산한다. 모델 데이터 자체는 코드에 포함하지 않으며 BFF의 기존 카탈로그와 로컬 런타임 자산이 필요하다.
 
 카드/자산 바인딩의 revision이 바뀌면 이전 미리보기를 거부한다. 생성 후에도 소유 카드와 동의 상태를 다시 확인한다. 응답은 private/no-store이고 토큰은 URL에 넣지 않는다. 브라우저는 인증 fetch 이후 Blob URL을 사용하고 닫을 때 해제한다. 서버 캐시는 메모리에만 최대 4개·120초, SVG당 8MiB이며 동시에 최대 2개를 계산한다. 새 DB 마이그레이션·S3 쓰기·운영 배포는 필요하지 않다.
+
+### Refine v3 private shadow (default off)
+
+`REFINE_V3_SHADOW=false` gates a server-only, bounded `refine-shadow-v1` envelope relay from inference analysis through private stored refine context back to inference `/refine`. It adds no public client request fields or refine permission. See [REFINE_V3_SHADOW.md](REFINE_V3_SHADOW.md) for limits and unsupported product integration.
