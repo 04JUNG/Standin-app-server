@@ -6,6 +6,7 @@ function env(key: string, def = ""): string {
 }
 
 export const config = {
+  refineV3Shadow: env("REFINE_V3_SHADOW", "false") === "true",
   poseThumbnailRevision: env(
     "POSE_THUMBNAIL_REVISION",
     env("DEPLOYMENT_VERSION"),

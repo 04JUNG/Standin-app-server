@@ -1,9 +1,11 @@
 // refine 관련 저장소 접근. 공개 AnalysisResult와 내부 refine context를 분리해 둔다(BFF-04).
+import { readRefineShadow, type RefineShadowEnvelope } from "./shadow.js";
 import type { AnalysisResult, CandidateCamera } from "../types.js";
 import { queryOne, transaction } from "../db.js";
 
 /** `/analyze` 때 서버측에 보관해 둔 refine 입력과 안전정책. */
 export interface StoredRefineContext {
+  refineV3?: RefineShadowEnvelope;
   keypoints: number[][];
   scores: number[] | null;
   refineAllowed: boolean;
@@ -46,14 +48,17 @@ export async function loadRefineContext(
   );
   if (!row) return null;
 
+  let refineV3: RefineShadowEnvelope | undefined;
   let keypoints: number[][] | null = null;
   let scores: number[] | null = null;
   if (row.refine_context_json) {
     try {
       const parsed = JSON.parse(row.refine_context_json) as {
+        refineV3?: unknown;
         keypoints?: number[][] | null;
         scores?: number[] | null;
       };
+      refineV3 = readRefineShadow(parsed.refineV3);
       keypoints = parsed.keypoints ?? null;
       scores = parsed.scores ?? null;
     } catch {
@@ -75,6 +80,7 @@ export async function loadRefineContext(
   }
 
   return {
+    ...(refineV3 ? { refineV3 } : {}),
     keypoints,
     scores: scores && scores.length === 17 ? scores : null,
     refineAllowed: row.refine_allowed === true,
