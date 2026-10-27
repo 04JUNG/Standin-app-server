@@ -1,3 +1,4 @@
+import { CUSTOM_BODIES_HTML, CUSTOM_BODIES_DIALOG, CUSTOM_BODIES_SCRIPT } from "./customBodiesDashboard.js";
 // 운영 대시보드 한 장(계획 3단계).
 //
 // 의존성이 없는 정적 HTML이다. 번들러도 CDN도 쓰지 않는 이유는 이 화면이 **장애 때**
@@ -228,6 +229,7 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
     <button data-tab="installs">설치</button>
     <button data-tab="gallery">모아 보기</button>
     <button data-tab="metrics">지표</button>
+    <button data-tab="bodies">커스텀 체형</button>
     <button data-tab="ops">운영</button>
   </nav>
   <main>
@@ -325,6 +327,7 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
       <div id="productOut"></div>
     </div>
     </section>
+    ${CUSTOM_BODIES_HTML}
     <section class="tab" id="tab-ops">
     <div class="row" id="cards"></div>
     <div class="card">
@@ -352,6 +355,7 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
 </div>
 
 <div id="backdrop"></div>
+${CUSTOM_BODIES_DIALOG}
 <aside id="drawer" aria-hidden="true">
   <div class="drawer-head">
     <button class="ghost" id="drawerBack" style="display:none">← 설치 기록</button>
@@ -2139,6 +2143,8 @@ $("galSearch").addEventListener("keydown", (event) => {
   if (event.key === "Enter" && gallery.folder) galleryOpenFolder(gallery.folder);
 });
 
+${CUSTOM_BODIES_SCRIPT}
+
 // ── 탭 ───────────────────────────────────────────────────────
 //
 // 탭을 처음 열 때만 그 탭의 데이터를 가져온다. 열지 않은 탭 때문에 첫 화면이 느려지지
@@ -2160,6 +2166,7 @@ function selectTab(name) {
   if (name === "installs") rosterGo(null);
   if (name === "metrics") productGo();
   if (name === "gallery") galleryGo();
+  if (name === "bodies") customBodiesGo(null);
 }
 
 document.querySelectorAll("#tabs button").forEach((button) => {

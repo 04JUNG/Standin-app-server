@@ -1,3 +1,4 @@
+import { createCustomBodyRoutes } from "./customBodyRoutes.js";
 import { journeyMetrics } from "./journeyStore.js";
 import { createHumanThumbnailRoutes } from "../human-thumbnail.js";
 import { randomUUID } from "node:crypto";
@@ -120,6 +121,7 @@ adminRoutes.use("*", async (c, next) => {
 
 adminRoutes.use("*", qualityReviewGuard());
 adminRoutes.route("/review/pose-candidates", createHumanThumbnailRoutes());
+adminRoutes.route("/review/custom-bodies", createCustomBodyRoutes((c, action, installationId) => audit(c, action, { installationId })));
 
 /**
  * 관리자 접근을 남긴다.
