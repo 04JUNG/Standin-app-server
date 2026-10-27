@@ -28,6 +28,7 @@ interface InstallationRow {
   id: string;
   token_hash: string;
   consent_version: string;
+  app_version: string;
   revoked_at: string | null;
 }
 
@@ -76,9 +77,9 @@ export async function createInstallation(
 export async function authenticateInstallation(
   installationId: string,
   deviceToken: string,
-): Promise<{ id: string; consentVersion: string } | null> {
+): Promise<{ id: string; consentVersion: string; appVersion: string } | null> {
   const row = await queryOne<InstallationRow>(
-    "SELECT id, token_hash, consent_version, revoked_at FROM installations WHERE id = $1",
+    "SELECT id, token_hash, consent_version, app_version, revoked_at FROM installations WHERE id = $1",
     [installationId],
   );
   if (!row || row.revoked_at) return null;
@@ -90,7 +91,7 @@ export async function authenticateInstallation(
     installationId,
     new Date().toISOString(),
   ]);
-  return { id: row.id, consentVersion: row.consent_version };
+  return { id: row.id, consentVersion: row.consent_version, appVersion: row.app_version };
 }
 
 /**

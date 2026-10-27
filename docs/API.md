@@ -1707,3 +1707,22 @@ Converter 코드·모델·라이브러리 자산 변경은 필요 없다.
 ### Refine v3 private shadow (default off)
 
 `REFINE_V3_SHADOW=false` gates a server-only, bounded `refine-shadow-v1` envelope relay from inference analysis through private stored refine context back to inference `/refine`. It adds no public client request fields or refine permission. See [REFINE_V3_SHADOW.md](REFINE_V3_SHADOW.md) for limits and unsupported product integration.
+
+## 최소 데스크톱 버전 (2026-10-27)
+
+Standin **0.2.0 정식 이상**만 지원한다. `0.2.0-beta.*`는 미지원이다.
+클라이언트는 매 요청에 실행 중인 빌드의 `X-App-Version`을 보낸다(CORS 허용).
+설치 인증 후 분석·조회·refine·저장·모델·이벤트·체형 설정을 처리하기 전에 검사한다.
+헤더가 없는 기존 앱은 설치 등록의 `app_version`으로 판정한다. 헤더가 있으면 저장된
+버전보다 우선하므로 업데이트 후 재등록할 필요가 없다. 누락·잘못된 버전은 차단한다.
+신규 `POST /v1/installations`도 본문의 `appVersion`과 제공된 헤더를 검사한다.
+
+미지원 응답: HTTP **426**, `Cache-Control: no-store`.
+```json
+{"error":{"code":"UPDATE_REQUIRED","message":"Standin 0.2.0 이상으로 업데이트해야 사용할 수 있습니다.","details":{"minimumVersion":"0.2.0"},"requestId":"req_..."}}
+```
+`GET /v1/client-policy`는 설치 인증 없이 헤더 버전을 검사하고 지원되면
+`{"minimumVersion":"0.2.0"}`을 반환한다. 기존 앱도 서버에서 차단되지만 이미 배포된
+앱의 화면은 소급 변경되지 않는다. 신규 앱은 426을 받으면 업데이트 화면만 표시한다.
+헬스·관리자·인증/OAuth 및 `DELETE /v1/installations/current/data`는 버전 차단 대상이 아니다.
+업데이트 피드와 0.2.0 이상 설치 파일을 먼저 게시한 뒤 BFF를 배포한다.

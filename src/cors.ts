@@ -1,3 +1,4 @@
+import { CLIENT_VERSION_HEADER } from "./client-version/policy.js";
 import { cors } from "hono/cors";
 
 /** Share the production edge policy with browser/webview regression tests. */
@@ -7,6 +8,7 @@ export function appCors(origins: string[]) {
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowHeaders: [
       "Content-Type",
+      CLIENT_VERSION_HEADER,
       "If-None-Match",
       "Authorization",
       "X-Installation-Id",

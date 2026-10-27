@@ -61,7 +61,7 @@ test("actual PostgreSQL schema/routes: optional consent, future jobs only, withd
     body: JSON.stringify({
       consentVersion: config.consentVersion,
       consentedAt: new Date().toISOString(),
-      appVersion: "test",
+      appVersion: "0.2.0",
       osName: "windows",
       osVersion: "test",
       architecture: "x64",
