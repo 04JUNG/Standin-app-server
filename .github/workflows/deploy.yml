@@ -93,6 +93,29 @@ jobs:
             --task-definition "$TASK_DEFINITION" \
             --query taskDefinition > taskdef.json
 
+      # 통합 저장은 스테이징에서 먼저 검증한다. main의 기존 설정은 변경하지 않는다.
+      - name: Enable integrated FBX export in staging
+        if: github.ref == 'refs/heads/develop'
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from "node:fs";
+          const task = JSON.parse(readFileSync("taskdef.json", "utf8"));
+          const containers = task.containerDefinitions.filter(c => c.name === "bff");
+          if (containers.length !== 1) throw new Error("Expected one BFF container");
+          const bff = containers[0];
+          const values = Object.fromEntries((bff.environment ?? []).map(e => [e.name, e.value]));
+          if (values.FBX_EXPORT_ENABLED !== "true" || !values.CONVERTER_BASE_URL?.trim()) {
+            throw new Error("Integrated FBX export requires enabled FBX export and a Converter URL");
+          }
+          if ((bff.secrets ?? []).some(s => s.name === "SCENE_EXPORT_ENABLED")) {
+            throw new Error("SCENE_EXPORT_ENABLED is already managed as a secret");
+          }
+          bff.environment = (bff.environment ?? []).filter(e => e.name !== "SCENE_EXPORT_ENABLED");
+          bff.environment.push({ name: "SCENE_EXPORT_ENABLED", value: "true" });
+          writeFileSync("taskdef.json", JSON.stringify(task, null, 2) + "\n");
+          console.log("Staging BFF: SCENE_EXPORT_ENABLED=true");
+          NODE
+
       - name: Refresh BFF body initializer runtime
         env:
           DEPLOY_IMAGE: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.image.outputs.digest }}
@@ -166,3 +189,4 @@ jobs:
           service: ${{ env.ECS_WORKER_SERVICE }}
           cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
+
