@@ -121,6 +121,7 @@ export async function deleteInstallationData(
  * 넘긴 작업이 딸린 행은 남긴 채 jobs에서만 지워진다. 그렇게 남은 행은 다음 스윕도 찾지 못한다.
  */
 export async function deleteExpiredRows(client: SqlClient, now = new Date()): Promise<void> {
+  await client.query("UPDATE installations SET acquisition_creative=NULL, acquisition_version=NULL WHERE acquisition_consented_at < $1::timestamptz", [new Date(now.getTime()-90*86_400_000).toISOString()]);
   const cutoff = new Date(now.getTime() - RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
   await deleteJobs(client, {
     ids:
