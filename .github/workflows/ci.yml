@@ -41,8 +41,13 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Verify body initializer deployment regression
+        run: node --test scripts/refresh-body-init-image.test.mjs
+
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
       - name: Validate production image
-        run: docker buildx build --platform linux/arm64 --tag standin-bff:ci --load .
+        run: |
+          docker buildx build --platform linux/arm64 --tag standin-bff:ci --load .
+          docker run --rm --platform linux/arm64 --entrypoint node standin-bff:ci --input-type=module -e "await import('@aws-sdk/client-s3'); console.log('Body initializer S3 runtime available')"

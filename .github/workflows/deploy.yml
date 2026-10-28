@@ -57,6 +57,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
 
       - name: Build and push image
+        id: image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -92,6 +93,11 @@ jobs:
             --task-definition "$TASK_DEFINITION" \
             --query taskDefinition > taskdef.json
 
+      - name: Refresh BFF body initializer runtime
+        env:
+          DEPLOY_IMAGE: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.image.outputs.digest }}
+        run: node scripts/refresh-body-init-image.mjs taskdef.json "$DEPLOY_IMAGE" bff
+
       # REVIEW_WITHOUT_QUALITY_CONSENT: 관리자 열람을 품질 동의와 분리하는 스위치. 환경(staging·beta)의
       #   변수가 'true'일 때만 켜지고, 없거나 다른 값이면 false다. 뷰는 시작할 때마다 다시 만들어지므로
       #   BFF와 worker가 같은 값을 받아야 한다 — 다르면 나중에 뜬 쪽이 범위를 덮어쓴다.
@@ -103,7 +109,7 @@ jobs:
         with:
           task-definition: taskdef.json
           container-name: bff
-          image: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          image: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.image.outputs.digest }}
           environment-variables: |
             HAND_SELECTION_ENABLED=${{ vars.HAND_SELECTION_ENABLED || 'false' }}
             SEMANTIC_SEARCH_ENABLED=${{ vars.SEMANTIC_SEARCH_ENABLED || 'false' }}
@@ -132,13 +138,19 @@ jobs:
             --task-definition "$WORKER_TASK_DEFINITION" \
             --query taskDefinition > worker-taskdef.json
 
+      - name: Refresh worker body initializer runtime
+        if: env.ECS_WORKER_SERVICE != ''
+        env:
+          DEPLOY_IMAGE: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.image.outputs.digest }}
+        run: node scripts/refresh-body-init-image.mjs worker-taskdef.json "$DEPLOY_IMAGE" analysis-worker
+
       - uses: aws-actions/amazon-ecs-render-task-definition@v1
         if: env.ECS_WORKER_SERVICE != ''
         id: render_worker
         with:
           task-definition: worker-taskdef.json
           container-name: analysis-worker
-          image: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          image: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.image.outputs.digest }}
           environment-variables: |
             HAND_SELECTION_ENABLED=${{ vars.HAND_SELECTION_ENABLED || 'false' }}
             SEMANTIC_SEARCH_ENABLED=${{ vars.SEMANTIC_SEARCH_ENABLED || 'false' }}
