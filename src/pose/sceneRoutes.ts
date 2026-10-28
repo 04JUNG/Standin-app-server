@@ -17,6 +17,7 @@ import {
 } from "../converter/client.js";
 import { composeRoughScene, type SceneSource } from "../converter/scene.js";
 import { errorEnvelope } from "../mapping.js";
+import { CLIENT_VERSION_HEADER } from "../client-version/policy.js";
 
 const defaults = {
   loadSceneReceipt, saveSceneReceipt,
@@ -249,7 +250,7 @@ export function createSceneRoutes(
         )
           return fail(400, "INVALID_INPUT", "확인한 FBX 저장 경로가 아닙니다.");
         const headers = new Headers();
-        for (const key of ["X-Installation-Id", "X-Device-Token"])
+        for (const key of ["X-Installation-Id", "X-Device-Token", CLIENT_VERSION_HEADER])
           if (c.req.header(key)) headers.set(key, c.req.header(key)!);
         const response = await dispatch(new Request(url, { headers }));
         if (!response.ok)
@@ -384,7 +385,7 @@ export function createSceneRoutes(
       // downloads after composition as well; stale reviews cannot be released.
       for (const ref of refs) {
         const headers = new Headers();
-        for (const key of ["X-Installation-Id", "X-Device-Token"])
+        for (const key of ["X-Installation-Id", "X-Device-Token", CLIENT_VERSION_HEADER])
           if (c.req.header(key)) headers.set(key, c.req.header(key)!);
         const response = await dispatch(
           new Request(new URL(ref.exportPath, "https://scene.internal"), {
