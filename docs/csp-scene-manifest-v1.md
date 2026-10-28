@@ -45,6 +45,8 @@ The response preserves existing review fields and adds `manifest`. Original prep
 
 Release sends the same refs, saveMode, excludedPersonIds and versions plus `reviewKey`, `reviewVersion`, `artifactSha256`. It returns the exact pinned FBX binary. `metadataOnly:true` on that request returns `{manifest,partialConfirmed,expiresAt}` through the same ownership/revision/expiry/SHA guards. Metadata read does not confirm a save. `partialConfirmed` describes the confirmation submitted on this request, not durable save/download completion.
 
+v4 also checks the loaded original image against the persisted upload SHA before dispatching any worker request; mismatch returns SCENE_SOURCE_CHANGED.
+
 Review TTL is 900 seconds. Both metadata and binary are `private, no-store`. The snapshot includes owner, job revision, complete per-person refs (including pinned body/hand/scope/review parameters and SHA), save mode, and exclusions. Revalidation runs before and after asynchronous artifact work. Receipt bytes and manifest are checked against SHA and current owned source identity; changing body, hand, scope, candidate, confirmation, owner, source SHA, runtime or expiry invalidates access. A new receipt binding invalidates reviews created by the old implementation; prepare again.
 
 Binary headers, exposed by CORS:

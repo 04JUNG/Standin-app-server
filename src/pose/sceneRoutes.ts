@@ -414,13 +414,16 @@ export function createSceneRoutes(
           "X-Standin-Artifact-SHA256": scene.sha256, "X-Standin-Preview-Artifact-SHA256": sha256Hex(png) } });
       }
       const manifest = reviewed?.manifest ?? sceneManifest(job, binding, scene.sha256, saveMode, people);
-      if (input.metadataOnly === true)
-        return c.json({ manifest, partialConfirmed, expiresAt: new Date(reviewed!.expires).toISOString() }, 200, { "Cache-Control": "private, no-store" });
       const observe = () => log.info({ type: "scene_save_result", jobId, requestId: c.get("requestId"),
-        saveMode, operation: prepared ? "prepare" : "release", path: refined ? "scene_refinement" : "compose_scene",
+        saveMode, operation: input.metadataOnly === true ? "metadata" : prepared ? "prepare" : "release",
+        path: reviewed ? "scene_receipt" : refined ? "scene_refinement" : "compose_scene",
         detectedIds: people.detectedIds, requestedIds: people.requestedIds, includedIds: people.includedIds,
         missingIds: people.missing.map(p => p.personIndex), missingReasons: people.missing.map(p => p.reason),
         partial: people.partial, partialConfirmed, fileCount: 1, personCount: refs.length, durationMs: Date.now() - started });
+      if (input.metadataOnly === true) {
+        observe();
+        return c.json({ manifest, partialConfirmed, expiresAt: new Date(reviewed!.expires).toISOString() }, 200, { "Cache-Control": "private, no-store" });
+      }
       if (prepared) {
         const { key: reviewKey, receipt } = await remember(receipts, binding, prepared, owner, jobId, deps.saveSceneReceipt, manifest);
         observe();
