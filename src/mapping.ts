@@ -1,4 +1,5 @@
 import { upgradeManualResult } from "./manual-export.js";
+import { extractPoseDescription, type PoseDescription } from "./pose-description.js";
 import { dynamicRefineBinding, refinableLibraryCandidate } from "./refine/eligibility.js";
 import { poseThumbnailUrl } from "./pose-thumbnail.js";
 // 계약 번역 = BFF가 소유하는 책임.
@@ -369,6 +370,8 @@ export interface PersonSignals {
     action: string | null;
     view: string | null;
     source: string | null;
+    /** Private review description shares the tags' consent and retention lifecycle. */
+    poseDescription?: PoseDescription;
   };
   outputScope: { detected: string | null; source: string | null };
   rankDistance: number | null;
@@ -409,6 +412,7 @@ export function extractPersonSignals(cut: CutResult): PersonSignals[] {
       action: shortText(p.person_tags?.action),
       view: shortText(p.person_tags?.view),
       source: shortText(p.person_tags?.source),
+      ...descriptionSignal(p),
     },
     outputScope: {
       detected: shortText(p.output_scope?.detected),
@@ -419,6 +423,11 @@ export function extractPersonSignals(cut: CutResult): PersonSignals[] {
     searchStability: shortText(p.search_stability),
     confidenceThreshold: finiteNumber(p.confidence_threshold),
   }));
+}
+
+function descriptionSignal(person: UpstreamPerson): { poseDescription?: PoseDescription } {
+  const poseDescription = extractPoseDescription(person);
+  return poseDescription ? { poseDescription } : {};
 }
 
 export function extractCutSummary(cut: CutResult): CutSummary {

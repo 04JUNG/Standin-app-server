@@ -4,8 +4,10 @@ import { PGlite } from "@electric-sql/pglite";
 import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
 import type { QualityConsent } from "./qualityConsent.js";
+import type { CutResult } from "../inference.js";
 
 process.env.BETA_REVIEW_ADMIN_TOKEN = "quality-test-admin";
+const { extractPersonSignals, mapCutResult } = await import("../mapping.js");
 const { config } = await import("../config.js");
 const { qualityReviewGuard } = await import("../admin/qualityAccess.js");
 const { pool, SCHEMA } = await import("../db.js");
@@ -13,7 +15,7 @@ const { installationRoutes } = await import("./routes.js");
 const { adminRoutes } = await import("../admin/routes.js");
 const { analyticsRoutes } = await import("../analytics/routes.js");
 const { requireInstallation } = await import("./middleware.js");
-const { createJob, getOwnedJob, listJobHistory } =
+const { createJob, getOwnedJob, listJobHistory, persistAnalysisRecords } =
   await import("../jobs/store.js");
 const { confirmSelections, recordExport, saveFeedback } =
   await import("../analytics/store.js");
@@ -143,6 +145,28 @@ test("actual PostgreSQL schema/routes: optional consent, future jobs only, withd
   );
   const eligible = await job();
   assert.equal(await count("quality_review_jobs"), 1);
+  const describedCut: CutResult = {
+    route: "core", count_confidence: "high", detector_count: 1, vlm_count: 1,
+    image: { width: 10, height: 10 }, notes: [],
+    inference_metadata: {
+      deployment_version: "test", vlm_provider: "mock", vlm_model: "mock",
+      pose_backend: "mock", pose_model_version: "test", pose_library_version: "test", feature_version: 1,
+    },
+    people: [{ index: 0, box: [0, 0, 10, 10], tags: {}, skeleton: null,
+      confidence: "low", candidates: [], search_routing: { semantic_evidence: {
+        status: "valid", description: { search_text: "오른팔을 머리 위로 올린 자세" },
+      } },
+    }],
+  };
+  for (const target of [before, eligible]) {
+    await persistAnalysisRecords(target.id, mapCutResult(target.id, describedCut), [], extractPersonSignals(describedCut));
+  }
+  const privateTags = await db.query<{ job_id: string; person_tags_json: string | null }>(
+    "SELECT job_id, person_tags_json FROM analysis_people WHERE job_id IN ($1,$2)", [before.id, eligible.id],
+  );
+  assert.equal(privateTags.rows.find((row) => row.job_id === before.id)?.person_tags_json, null);
+  assert.equal(JSON.parse(privateTags.rows.find((row) => row.job_id === eligible.id)!.person_tags_json!)
+    .poseDescription.searchText, "오른팔을 머리 위로 올린 자세");
   const sameGrant = await setConsent(true, true);
   assert.equal(
     sameGrant.consentId,
@@ -241,6 +265,8 @@ test("actual PostgreSQL schema/routes: optional consent, future jobs only, withd
     headers: adminHeaders,
   });
   assert.match(detail.headers.get("cache-control") ?? "", /no-store/);
+  const reviewed = await detail.json() as { people: Array<{ poseDescription: { searchText: string } }> };
+  assert.equal(reviewed.people[0].poseDescription.searchText, "오른팔을 머리 위로 올린 자세");
   const expiredBasic = await job();
   await db.query("UPDATE jobs SET created_at=$2 WHERE id=$1", [
     expiredBasic.id,
@@ -271,6 +297,9 @@ test("actual PostgreSQL schema/routes: optional consent, future jobs only, withd
   ])
     assert.equal(await count(table), 0, table);
   assert.ok(await getOwnedJob(eligible.id, installationId));
+  assert.equal((await db.query<{ person_tags_json: string | null }>(
+    "SELECT person_tags_json FROM analysis_people WHERE job_id=$1", [eligible.id],
+  )).rows[0].person_tags_json, null, "withdrawal clears the stored natural-language description");
   assert.equal(
     await count("confirmed_selections"),
     1,

@@ -5,6 +5,7 @@ import { getPoseBvh, getPosePoster } from "./inference.js";
 import { sha256Hex } from "./converter/client.js";
 import { verifiedPoster } from "./pose-posters.js";
 import { errorEnvelope } from "./mapping.js";
+import { isBodyScope } from "./output-scope/model.js";
 
 const defaults = { getPoseBvh, getPosePoster };
 /** Mount behind installation auth, or admin auth + quality-review guard. */
@@ -12,6 +13,10 @@ export function createHumanThumbnailRoutes(overrides: Partial<typeof defaults> =
   const deps = { ...defaults, ...overrides };
   const routes = new Hono<AppEnv>();
   routes.get("/:id/reference-thumbnail", async (c) => {
+    const scope = c.req.query("scope") ?? "full";
+    if (!isBodyScope(scope)) return c.json(errorEnvelope(
+      "INVALID_INPUT", "지원하지 않는 미리보기 범위입니다.", c.get("requestId"),
+    ), 400, { "Cache-Control": "private, no-store" });
     const unavailable = () => c.json(errorEnvelope(
       "PREVIEW_UNAVAILABLE", "참고 이미지를 불러오지 못했습니다.", c.get("requestId"),
     ), 404, { "Cache-Control": "private, no-store" });
@@ -41,7 +46,7 @@ export function createHumanThumbnailRoutes(overrides: Partial<typeof defaults> =
       }
       if (!size) return unavailable();
       const response = await verifiedPoster(
-        c.req.param("id"), sha256Hex(Buffer.concat(chunks)), deps.getPosePoster, "full",
+        c.req.param("id"), sha256Hex(Buffer.concat(chunks)), deps.getPosePoster, scope,
       );
       if (response.headers.get("X-Standin-Poster-Kind") !== "default-body") {
         await response.body?.cancel();
