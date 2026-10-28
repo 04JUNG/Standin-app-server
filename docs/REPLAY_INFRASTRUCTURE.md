@@ -32,7 +32,7 @@ ReplayBucket:
         - Id: MaximumReplayLifetime
           Status: Enabled
           Prefix: replays/
-          ExpirationInDays: 14
+          ExpirationInDays: 30
           AbortIncompleteMultipartUpload:
             DaysAfterInitiation: 1
 ```
@@ -47,7 +47,7 @@ before use. S3 access/error metrics and bucket alarms should use aggregate dimen
 The existing PostgreSQL startup schema adds replay tables/indexes, a replay-withdrawal
 marker and a transactional object-deletion trigger/outbox. Account for raw-event metadata
 and storage volume during RDS capacity review. A minute BFF sweep handles earlier source
-expiry/withdrawal/object deletion retries. The 14-day bucket lifecycle is a backstop, not
+expiry/withdrawal/object deletion retries. The 30-day bucket lifecycle is a backstop, not
 an implementation of prompt withdrawal or job deletion. Alert on oldest deletion-outbox age
 and repeated object-delete failures; never log object bytes or recorded DOM.
 

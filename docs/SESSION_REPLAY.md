@@ -95,7 +95,7 @@ shown as upload incomplete (not as user abandonment).
 Assets are keyed by exact bytes and accept append-only semantic/version/job bindings, so
 one image may represent multiple immutable snapshots. Same pose ID/new bytes is a different
 asset. CSP assets require an owned job, final FBX hash and selection snapshot version.
-The real export/framed/scene response path records a 14-day server artifact-hash receipt
+The real export/framed/scene response path records a 30-day server artifact-hash receipt
 before a matching CSP asset is accepted; unknown/job-mismatched hashes return
 `REPLAY_ARTIFACT_UNVERIFIED`. A witness write failure never changes a successful FBX response.
 The receipt proves which job produced those bytes, not that the user imported them. The
@@ -105,7 +105,8 @@ assessment is separate metadata; client assessment custom events remain separate
 
 ## Retention and deletion
 
-The maximum is 14 days from server creation. An earlier declared source expiration or
+New recordings expire at most 30 days from server creation. Existing stored `expiresAt`
+values are preserved; retrying session creation does not extend them. An earlier declared source expiration or
 linked original-input 90-day expiration shortens the whole recording. Every read checks
 expiration even before the sweep. A minute sweep deletes expired metadata and retries
 object-prefix deletion from the durable outbox; the trigger queues deletion in the same

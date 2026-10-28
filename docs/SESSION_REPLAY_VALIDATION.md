@@ -8,12 +8,13 @@ or AWS/environment mutation. Feature-branch pushes do not match the deploy workf
 ## Automated checks
 
 - `npm run typecheck`: passed.
-- `npm test`: **871 passed, 0 failed, 2 pre-existing conditional skips** (873 total).
-- Replay-specific **12 integration/security tests**, all passed, execute the actual PostgreSQL
+- `npm test`: **872 passed, 0 failed, 2 pre-existing conditional skips** (874 total).
+- Replay-specific **13 integration/security tests**, all passed, execute the actual PostgreSQL
   schema twice in PGlite and actual Hono routes. They cover installation/admin boundaries,
   unchanged consent/receipts, local byte storage/read/hash, duplicate and conflicting chunks,
   reordered/missing/final chunks, gzip output limits, unsafe content, MIME validation,
-  CSP job/artifact requirements and actual export witness, asset multi-bindings, shorter source expiry, 14-day expiry,
+  CSP job/artifact requirements and actual export witness, asset multi-bindings, shorter source expiry, 30-day expiry (readable through day 30 minus 1 ms, denied at day 30),
+  unchanged stored expiry on create retries, 20-day CSP receipt acceptance and 30-day receipt rejection/purge,
   explicit OFF/production denial, current and legacy withdrawal, job/installation purge,
   durable object-deletion queue, anti-resurrection tombstones, quota survival after deletion, stable equal-time pagination,
   existing admin router/audit request IDs and replay targets, bundle presence and dashboard script parsing.

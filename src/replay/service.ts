@@ -200,7 +200,9 @@ export class ReplayService {
         "UPDATE replay_daily_usage SET sessions=sessions+1 WHERE installation_id=$1 AND day=$2",
         [installationId, day],
       );
-      const expires = new Date(this.now() + 14 * 86400000).toISOString();
+      const expires = new Date(
+        this.now() + LIMITS.retentionDays * 86400000,
+      ).toISOString();
       const row = (
         await db.query<Session>(
           `INSERT INTO replay_sessions(id,installation_id,app_session_id,authorization_mode,consent_id,policy_version,environment,app_version,os,started_at,expires_at)
@@ -471,8 +473,13 @@ export class ReplayService {
       if (v.kind === "csp_result") {
         const receipt = (
           await db.query(
-            "SELECT r.job_id FROM replay_artifact_receipts r JOIN jobs j ON j.id=r.job_id WHERE r.job_id=$1 AND r.artifact_hash=$2 AND j.installation_id=$3 AND r.created_at>now()-interval '14 days'",
-            [v.jobId, v.artifactHash, installationId],
+            "SELECT r.job_id FROM replay_artifact_receipts r JOIN jobs j ON j.id=r.job_id WHERE r.job_id=$1 AND r.artifact_hash=$2 AND j.installation_id=$3 AND r.created_at>$4::timestamptz",
+            [
+              v.jobId,
+              v.artifactHash,
+              installationId,
+              new Date(this.now() - LIMITS.retentionDays * 86400000).toISOString(),
+            ],
           )
         ).rows[0];
         if (!receipt) return fail("REPLAY_ARTIFACT_UNVERIFIED", 409);
@@ -634,8 +641,8 @@ export class ReplayService {
   }
   async sweep() {
     await this.db.query(
-      "DELETE FROM replay_artifact_receipts WHERE created_at < $1",
-      [new Date(this.now() - 14 * 86400000).toISOString()],
+      "DELETE FROM replay_artifact_receipts WHERE created_at <= $1",
+      [new Date(this.now() - LIMITS.retentionDays * 86400000).toISOString()],
     );
     await this.db.query(
       "DELETE FROM replay_tombstones WHERE expires_at <= $1",

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 export const PROTOCOL = "session-replay.v1";
 export const LIMITS = {
+  retentionDays: 30,
   chunkBytes: 1048576,
   assetBytes: 8388608,
   sessionBytes: 67108864,

@@ -37,7 +37,7 @@
     "installationDailyBytes": 268435456,
     "eventsPerChunk": 10000,
     "sessionDurationMs": 14400000,
-    "retentionDays": 14,
+    "retentionDays": 30,
     "maxStreams": 16,
     "maxChunks": 4096,
     "maxAssets": 512,
@@ -119,7 +119,7 @@
         "url": "replay-asset://sha256",
         "expiresAt": "ISO8601"
       },
-      "notes": "Same bytes may have multiple append-only kind/snapshot/job bindings. Upload of another binding does not change original bytes and is not charged twice. CSP result requires an owned-job server export/framed/scene hash receipt from this BFF within 14 days. Snapshot version is client-reported; manifest exposes artifactBinding=server_export_hash and selectionBinding=client_reported."
+      "notes": "Same bytes may have multiple append-only kind/snapshot/job bindings. Upload of another binding does not change original bytes and is not charged twice. CSP result requires an owned-job server export/framed/scene hash receipt from this BFF within 30 days. Snapshot version is client-reported; manifest exposes artifactBinding=server_export_hash and selectionBinding=client_reported."
     },
     "finish": {
       "method": "POST",

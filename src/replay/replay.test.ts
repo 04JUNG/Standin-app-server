@@ -94,8 +94,9 @@ async function fixture() {
         }),
       }),
     );
-  const service = new ReplayService(sql, tx, storage, { ...policy }, () => now);
-  return { db, sql, service, root };
+  const clock = { now };
+  const service = new ReplayService(sql, tx, storage, { ...policy }, () => clock.now);
+  return { db, sql, service, root, clock };
 }
 test("real PostgreSQL schema: assumed preserves consent, idempotency, order gaps, filters, manifest and private storage", async () => {
   const f = await fixture();
@@ -304,11 +305,11 @@ test("explicit withdrawal and installation deletion remove recordings; assumed c
     await f.db.close();
   }
 });
-test("14 days, earlier source expiry, explicit off and production assumed fail closed", async () => {
+test("30 days, earlier source expiry, explicit off and production assumed fail closed", async () => {
   const f = await fixture();
   try {
     const s = await f.service.create(inst, create());
-    assert.equal(Date.parse(s.expiresAt) - now, 14 * 86400000);
+    assert.equal(Date.parse(s.expiresAt) - now, 30 * 86400000);
     f.service.policy.enabled = false;
     await assert.rejects(f.service.manifest(id), /REPLAY_DISABLED/);
     assert.equal((await f.service.remove(inst, id)).deleted, true);
@@ -334,6 +335,68 @@ test("14 days, earlier source expiry, explicit off and production assumed fail c
       (await f.db.query("SELECT * FROM replay_sessions")).rows.length,
       0,
     );
+  } finally {
+    await f.db.close();
+  }
+});
+test("30-day boundaries preserve existing expiry and retain CSP receipts until expiry", async () => {
+  const f = await fixture();
+  const day = 86400000;
+  try {
+    await f.service.create(inst, create());
+    const oldId = randomUUID();
+    await f.service.create(inst, create(oldId, "existing-session"));
+    const oldExpiry = new Date(now + 14 * day).toISOString();
+    await f.db.query("UPDATE replay_sessions SET expires_at=$2 WHERE id=$1", [
+      oldId, oldExpiry,
+    ]);
+    assert.equal(
+      (await f.service.create(inst, create(oldId, "existing-session"))).expiresAt,
+      oldExpiry,
+    );
+    await f.db.query(
+      `INSERT INTO jobs(id,user_id,installation_id,status,source,created_at,updated_at) VALUES('job_retention','',$1,'completed','capture',$2,$2)`,
+      [inst, new Date(now).toISOString()],
+    );
+    const artifactHash = "b".repeat(64);
+    await f.service.witnessArtifact(inst, "job_retention", artifactHash);
+    await f.db.query("UPDATE replay_artifact_receipts SET created_at=$1", [
+      new Date(now).toISOString(),
+    ]);
+    f.clock.now = now + 20 * day;
+    await assert.rejects(f.service.manifest(oldId), /REPLAY_EXPIRED/);
+    await f.service.sweep();
+    assert.equal(
+      (await f.db.query("SELECT * FROM replay_artifact_receipts")).rows.length, 1,
+    );
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const asset = {
+      contentType: "image/png", dataBase64: png.toString("base64"),
+      kind: "csp_result", jobId: "job_retention",
+      snapshotVersion: "retention-v1", artifactHash,
+    };
+    await f.service.asset(inst, id, hash(png), asset);
+    f.clock.now = now + 30 * day - 1;
+    await f.service.manifest(id);
+    f.clock.now += 1;
+    await assert.rejects(f.service.manifest(id), /REPLAY_EXPIRED/);
+    const freshId = randomUUID();
+    await f.service.create(inst, {
+      ...create(freshId, "new-session"), startedAt: f.clock.now,
+    });
+    await assert.rejects(
+      f.service.asset(inst, freshId, hash(png), asset),
+      /REPLAY_ARTIFACT_UNVERIFIED/,
+    );
+    await f.service.sweep();
+    assert.equal(
+      (await f.db.query("SELECT * FROM replay_artifact_receipts")).rows.length, 0,
+    );
+    assert.equal((await f.db.query("SELECT id FROM replay_sessions")).rows.length, 1);
+    await f.service.manifest(freshId);
   } finally {
     await f.db.close();
   }

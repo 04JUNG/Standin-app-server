@@ -1732,7 +1732,9 @@ Standin **0.2.0 정식 이상**만 지원한다. `0.2.0-beta.*`는 미지원이�
 Replay-only defaults are ON and `REPLAY_CONSENT_MODE=assumed` per the 2026-10-28 implementation
 instruction. This does not change quality-consent evidence or historical analytics.
 Production assumed collection/reads fail closed. Installation authentication, admin review
-authentication and explicit withdrawal/deletion remain required.
+authentication and explicit withdrawal/deletion remain required. New recordings have a
+30-day maximum retention; earlier source expiry, withdrawal and deletion take precedence.
+Existing recordings keep their stored `expiresAt`.
 
 - `POST /v1/replays`: versioned/idempotent session creation.
 - `PUT /v1/replays/:id/streams/:window/chunks/:sequence`: SHA-256 validated JSON or bounded gzip/base64 events.
