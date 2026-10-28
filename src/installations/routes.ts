@@ -1,4 +1,5 @@
 import { createBodyPreferenceRoutes } from "../body-selection/routes.js";
+import { acquisitionRoutes } from "./acquisition.js";
 import { Hono } from "hono";
 import { pool, transaction } from "../db.js";
 import {
@@ -17,6 +18,7 @@ import {
 } from "./store.js";
 
 export const installationRoutes = new Hono<AppEnv>();
+installationRoutes.route("/current/acquisition", acquisitionRoutes);
 installationRoutes.use("/current/body-preferences", requireInstallation);
 installationRoutes.use("/current/body-preferences/*", requireInstallation);
 installationRoutes.route(

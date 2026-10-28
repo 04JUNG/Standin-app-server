@@ -147,7 +147,7 @@ test("the retention sweep uses one cutoff for every statement", async () => {
 
   assert.equal(RETENTION_DAYS, 365);
   for (const call of calls) {
-    assert.deepEqual(call.params, [call.text.includes("quality_consent_id IS NULL") ? "2026-07-08T00:00:00.000Z" : "2025-10-06T00:00:00.000Z"]);
+    assert.deepEqual(call.params, [call.text.includes("quality_consent_id IS NULL") || call.text.includes("acquisition_consented_at") ? "2026-07-08T00:00:00.000Z" : "2025-10-06T00:00:00.000Z"]);
     assert.doesNotMatch(call.text, /now\(\)/);
   }
   const deleted = deletedTables(calls);

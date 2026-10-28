@@ -1649,13 +1649,22 @@ function usageBlock(usage) {
     })), { label: "분석 Job", unit: "건", color: "--c-users", dash: "6 4" });
 }
 
+function acquisitionBlock(rows) {
+  if (!rows) return '';
+  const labels = {'meta-poster-a':'포스터 A','meta-hook-a':'영상 A','unknown':'출처 미확인'};
+  const ordered = Object.keys(labels).map(key => rows.find(r => r.creative === key) || {creative:key,installations:0,active:0,analyzed:0,selected:0,exported:0});
+  return '<h3>광고별 신규 설치와 실제 사용</h3><p class="sub">선택 기간에 등록한 설치 기준. 앱에서 광고 연결에 동의한 이후의 이용만 집계합니다. 앱 열기 링크를 통한 선택 연결이며 광고 조회 증명이 아닙니다. 미동의·일반 실행은 출처 미확인입니다. 설치 수는 사람 수와 다릅니다.</p>' +
+    '<div class="scroll"><table><thead><tr><th>광고</th><th>신규 설치</th><th>최근 24시간 활성</th><th>분석 성공</th><th>후보 선택</th><th>저장 완료</th></tr></thead><tbody>' +
+    ordered.map(r => '<tr><td>'+esc(labels[r.creative])+'</td>'+['installations','active','analyzed','selected','exported'].map(k=>'<td>'+(r.creative==='unknown' && k!=='installations' ? '—' : esc(r[k]))+'</td>').join('')+'</tr>').join('')+'</tbody></table></div><p class="sub">출처 미확인의 이용 이력은 광고 연결 집계에 사용하지 않습니다.</p>';
+}
+
 function productRender(data) {
   const drop = data.dropoff;
   $("productOut").innerHTML = accuracyBlock(data.accuracy) + usageBlock(data.usage) +
     instrumentationBlock(data.instrumentation) +
     '<h3>① 퍼널 — 어디서 새는가</h3>' + funnelTable(data.funnel) +
     '<p class="sub">실패한 Job ' + data.jobsFailed + "건. 설치 수는 사람, 건수는 부하다 — 한 사람이 열 번 돌린 것과 열 사람이 한 번씩 돌린 것을 같게 보지 않으려고 함께 센다.</p>" +
-    firstRunBlock(data.firstRun) +
+    acquisitionBlock(data.acquisition) + firstRunBlock(data.firstRun) +
     '<h3>③ 코호트 — 누가 어디서 멈췄나</h3>' + cohortCards(data.cohorts) +
     retryBlock(data.retry) +
     '<h3>⑤ 이탈 신호 — 선택한 쪽과 무엇이 달랐나</h3>' +

@@ -74,6 +74,10 @@ export const SCHEMA = `
     deletion_requested_at TEXT
   );
 
+  ALTER TABLE installations ADD COLUMN IF NOT EXISTS acquisition_creative TEXT;
+  ALTER TABLE installations ADD COLUMN IF NOT EXISTS acquisition_consented_at TIMESTAMPTZ;
+  ALTER TABLE installations ADD COLUMN IF NOT EXISTS acquisition_version TEXT;
+
   CREATE TABLE IF NOT EXISTS users (
     id             TEXT PRIMARY KEY,
     email          TEXT NOT NULL,

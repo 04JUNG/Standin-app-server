@@ -1,5 +1,6 @@
 import { createHumanThumbnailRoutes } from "../human-thumbnail.js";
 import { randomUUID } from "node:crypto";
+import { acquisitionSummary } from "../installations/acquisition.js";
 import { Hono, type Context } from "hono";
 import { config } from "../config.js";
 import { execute, query, queryOne } from "../db.js";
@@ -360,6 +361,7 @@ adminRoutes.get("/product", async (c) => {
     return c.json(errorEnvelope("INVALID_INPUT", parsed.message, c.get("requestId")), 400);
   }
   const { days } = parsed;
+  const acquisition = await acquisitionSummary(days);
   const [
     funnelRow, clientStages, cohortRow, signals, levels, feedback, rerunJobs,
     columns, serverStages, buckets,
@@ -393,6 +395,7 @@ adminRoutes.get("/product", async (c) => {
 
   await audit(c, "review_product_metrics", {});
   return c.json({
+    acquisition,
     windowDays: days,
     since: new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString(),
     // 정확도·사용률은 일별 집계에서 온다. 그 표에는 **오늘이 없다**(하루가 끝나야 넣는다).
