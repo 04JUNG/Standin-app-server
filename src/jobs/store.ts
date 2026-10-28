@@ -40,6 +40,10 @@ export interface Job {
   installationId: string | null;
   inputS3Key: string | null;
   inputMime: string | null;
+  inputOriginalName?: string | null;
+  inputSha256?: string | null;
+  inputWidth?: number | null;
+  inputHeight?: number | null;
 }
 
 interface JobRow {
@@ -54,6 +58,10 @@ interface JobRow {
   installation_id: string | null;
   input_s3_key: string | null;
   input_mime: string | null;
+  input_original_name?: string | null;
+  input_sha256?: string | null;
+  input_width?: number | null;
+  input_height?: number | null;
 }
 
 function toJob(r: JobRow): Job {
@@ -71,6 +79,10 @@ function toJob(r: JobRow): Job {
     installationId: r.installation_id,
     inputS3Key: r.input_s3_key,
     inputMime: r.input_mime,
+    inputOriginalName: r.input_original_name ?? null,
+    inputSha256: r.input_sha256 ?? null,
+    inputWidth: r.input_width ?? null,
+    inputHeight: r.input_height ?? null,
   };
 }
 
@@ -457,15 +469,15 @@ export async function listConfirmedSelections(jobId: string): Promise<
 
 export async function setJobInput(
   id: string,
-  input: { s3Key: string | null; sha256: string },
+  input: { s3Key: string | null; sha256: string; originalName?: string | null },
   enqueue = false,
 ): Promise<void> {
   await transaction(async (client) => {
     const now = new Date().toISOString();
     await client.query(
       `UPDATE jobs SET input_s3_key = $2, input_sha256 = $3,
-         input_stored_at = $4, updated_at = $4 WHERE id = $1`,
-      [id, input.s3Key, input.sha256, now],
+         input_stored_at = $4, updated_at = $4, input_original_name = $5 WHERE id = $1`,
+      [id, input.s3Key, input.sha256, now, input.originalName ?? null],
     );
     if (enqueue) {
       await client.query(

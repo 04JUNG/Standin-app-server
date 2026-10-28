@@ -1,4 +1,7 @@
-import { sceneReceiptStorageAvailable } from "../pose/sceneStorage.js";
+import { safeOriginalName } from "./inputIdentity.js";
+import { analysisFailureDetails } from "./failure.js";
+import { sourceImageIdentity } from "../pose/sceneManifest.js";
+import { sceneAvailability } from "../pose/sceneAvailability.js";
 import { sceneSaveContract } from "../pose/sceneContract.js";
 import { createSemanticModelRoutes } from "../semantic/model-preview.js";
 import { createHandPreviewRoutes } from "../hands/preview.js";
@@ -48,7 +51,6 @@ import {
 import { runAnalysisJob } from "./runner.js";
 import { dispatchPendingJobs } from "./queue.js";
 import { currentCapabilities } from "../characters/service.js";
-import { converterEnabled } from "../converter/client.js";
 import { refineRoutes } from "../refine/routes.js";
 import { isAnalysisEnabled } from "../limits/flags.js";
 import { limitErrorResponse } from "../limits/http.js";
@@ -182,7 +184,7 @@ jobsRoutes.post("/", async (c) => {
     const stored = await storeInput(installationId, job.id, bytes, file.type);
     await setJobInput(
       job.id,
-      { s3Key: stored.key, sha256: stored.sha256 },
+      { s3Key: stored.key, sha256: stored.sha256, originalName: safeOriginalName(file.name) },
       config.jobExecutionMode === "sqs",
     );
   } catch {
@@ -258,6 +260,7 @@ jobsRoutes.get("/:id", async (c) => {
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
     error: job.errorCode,
+    failure: analysisFailureDetails(job.errorCode),
   });
 });
 
@@ -294,8 +297,14 @@ jobsRoutes.get("/:id/result", async (c) => {
     c.get("installationId")!,
     job.result,
   );
+  const availability = sceneAvailability(job);
+  log.info({ type: "scene_capability", jobId: job.id, requestId: c.get("requestId"),
+    sceneExport: availability.originalSelection.available, sceneRefinement: availability.autoCorrectV4.available,
+    originalReasons: availability.originalSelection.reasons, refinementReasons: availability.autoCorrectV4.reasons,
+    saveModes: sceneSaveContract(availability.originalSelection.available, availability.autoCorrectV4.available).saveModes });
   return c.json({
     ...result,
+    sourceImage: sourceImageIdentity(job),
     candidatesByPerson: result.candidatesByPerson.map((person) => ({
       ...person,
       ...(person.bodySelection
@@ -328,29 +337,10 @@ jobsRoutes.get("/:id/result", async (c) => {
       })),
     })),
     capabilities: {
-      sceneSaveContract: sceneSaveContract(
-        !result.candidatesByPerson.some(p => p.candidates.some(c => c.source === "generation")) &&
-        config.sceneExportEnabled && converterEnabled() && result.source !== "semantic" && !!result.image,
-        !!job.inputS3Key && sceneReceiptStorageAvailable() && config.sceneRefinementEnabled &&
-        !!config.sceneRefinementBaseUrl && !!config.sceneRefinementToken,
-      ),
-      sceneRefinement:
-        sceneReceiptStorageAvailable() &&
-        !!job.inputS3Key &&
-        config.sceneRefinementEnabled &&
-        !!config.sceneRefinementBaseUrl &&
-        !!config.sceneRefinementToken &&
-        !result.candidatesByPerson.some(p => p.candidates.some(c => c.source === "generation")) &&
-        config.sceneExportEnabled &&
-        converterEnabled() &&
-        result.source !== "semantic" &&
-        !!result.image,
-      sceneExport:
-        !result.candidatesByPerson.some(p => p.candidates.some(c => c.source === "generation")) &&
-        config.sceneExportEnabled &&
-        converterEnabled() &&
-        result.source !== "semantic" &&
-        !!result.image,
+      sceneAvailability: availability,
+      sceneSaveContract: sceneSaveContract(availability.originalSelection.available, availability.autoCorrectV4.available),
+      sceneRefinement: availability.autoCorrectV4.available,
+      sceneExport: availability.originalSelection.available,
       presentationBodyPreviews:
         (await currentCapabilities()).bodyPreviews === true &&
         result.candidatesByPerson.some(

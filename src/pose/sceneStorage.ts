@@ -1,3 +1,4 @@
+import { SCENE_MANIFEST_VERSION, type SceneManifest } from "./sceneManifest.js";
 import { SCENE_REVIEW_VERSION, SceneError } from "./sceneContract.js";
 /** Immutable scene receipts survive a BFF replica change, like person receipts. */
 import {
@@ -9,6 +10,7 @@ import { config } from "../config.js";
 import { ConverterError, sha256Hex } from "../converter/client.js";
 import type { RefinedScene } from "./sceneRefinement.js";
 export interface SceneReceipt {
+  manifest?: SceneManifest;
   reviewVersion: typeof SCENE_REVIEW_VERSION;
   binding: string;
   expires: number;
@@ -67,7 +69,11 @@ export function decodeSceneReceipt(data: Uint8Array): SceneReceipt {
         : !preview.length)
     )
       throw new Error("lineage");
+    if (value.manifest && (value.manifest.version !== SCENE_MANIFEST_VERSION ||
+        value.manifest.snapshotSha256 !== value.binding || value.manifest.artifact?.sha256 !== scene.sha256 ||
+        value.manifest.artifact?.fileCount !== 1)) throw new Error("manifest lineage");
     return {
+      ...(value.manifest ? { manifest: value.manifest } : {}),
       reviewVersion: value.reviewVersion,
       binding: value.binding,
       expires: value.expires,

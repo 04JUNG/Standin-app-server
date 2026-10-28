@@ -105,7 +105,7 @@ function setup(refinement = false, shared = new Map<string, Uint8Array>()) {
           state.composed++;
           state.sent = sources.map((s) => s.person_index);
           assert.deepEqual(image, job.result!.image);
-          assert.equal(sources[1]!.observation.box[0], 310);
+          if (sources[1]) assert.equal(sources[1].observation.box[0], 310);
           assert.deepEqual(Buffer.from(sources[0]!.bytes), fbx);
           return { bytes: fbx, sha256: sha256Hex(fbx) };
         },
@@ -402,5 +402,113 @@ test("scene preview rechecks job and source revisions after a slow render", asyn
     assert.equal(response.status, 409, `stale ${change} preview must not be published`);
     assert.notEqual(response.headers.get("Content-Type"), "image/png");
     assert.equal(f.state.preparations, 1, "rechecking never rebuilds the reviewed file");
+  }
+});
+
+const manifestMode = { contractVersion: "scene-save-v1", saveMode: "original-selection", manifestVersion: "csp-scene-manifest-v1" };
+type ManifestReview = { reviewKey: string; artifactSha256: string; reviewVersion: string;
+  manifest: import("./sceneManifest.js").SceneManifest };
+function releaseFields(review: ManifestReview) {
+  return { ...manifestMode, reviewKey: review.reviewKey, reviewVersion: review.reviewVersion,
+    artifactSha256: review.artifactSha256 };
+}
+test("unselected generated alternative preserves scene capability and export; selected generation remains blocked", async () => {
+  const f = setup();
+  f.job.result!.candidatesByPerson[0]!.candidates.push({ id: "generated", poseId: "other", source: "generation" } as never);
+  assert.equal((await f.send()).status, 200);
+  f.rows[0]!.candidateId = "generated";
+  await errorCode(await f.send(), "GENERATED_INDIVIDUAL_ONLY", 409, "change_selection");
+  assert.equal(f.state.composed, 1);
+});
+test("original manifest prepare works with v4 off; metadata and replica release share exact source, SHA, and expiry", async () => {
+  const a = setup(false), b = setup(false, a.shared);
+  for (const f of [a, b]) Object.assign(f.job, { inputOriginalName: "T001.png", inputSha256: "a".repeat(64), inputWidth: 765, inputHeight: 714 });
+  const response = await a.send({ ...manifestMode, prepare: true });
+  assert.equal(response.status, 200, await response.clone().text());
+  const review = await response.json() as ManifestReview;
+  assert.equal(review.manifest.sourceImage.originalName, "T001.png");
+  assert.equal(review.manifest.sourceImage.sha256, "a".repeat(64));
+  assert.equal(review.manifest.sourceImage.identity, "job:input");
+  assert.equal(review.manifest.sourceImage.captureMapping.status, "unavailable");
+  assert.equal(review.manifest.camera.recipe, null);
+  assert.equal(review.manifest.camera.cspValidation, "unverified");
+  assert.deepEqual(review.manifest.people.includedIds, [0, 1]);
+  assert.equal(review.manifest.people.partial, false);
+  const metadata = await b.send({ ...releaseFields(review), metadataOnly: true });
+  assert.equal(metadata.status, 200);
+  assert.deepEqual((await metadata.json() as { manifest: unknown }).manifest, review.manifest);
+  const download = await b.send(releaseFields(review));
+  assert.equal(download.status, 200);
+  assert.equal(download.headers.get("X-Standin-Artifact-SHA256"), review.manifest.artifact.sha256);
+  assert.equal(download.headers.get("X-Standin-Scene-Snapshot-SHA256"), review.manifest.snapshotSha256);
+  assert.equal(download.headers.get("X-Standin-File-Count"), "1");
+  assert.deepEqual(Buffer.from(await download.arrayBuffer()), fbx);
+  assert.equal(b.state.composed, 0, "release/metadata do not rebuild");
+});
+for (const reason of ["no_candidates", "user_excluded", "not_requested"] as const)
+  test(`partial ${reason} is explicit and only releases with the prepared snapshot`, async () => {
+    const f = setup();
+    if (reason === "no_candidates") f.job.result!.candidatesByPerson[1]!.candidates = [];
+    const selection = { persons: [f.rows[0]], ...(reason === "user_excluded" ? { excludedPersonIds: [1] } : {}) };
+    await errorCode(await f.send(selection), "SCENE_PARTIAL_CONFIRMATION_REQUIRED", 409);
+    const response = await f.send({ ...manifestMode, ...selection, prepare: true });
+    assert.equal(response.status, 200, await response.clone().text());
+    const review = await response.json() as ManifestReview;
+    assert.deepEqual(review.manifest.people.detectedIds, [0, 1]);
+    assert.deepEqual(review.manifest.people.requestedIds, [0]);
+    assert.deepEqual(review.manifest.people.includedIds, [0]);
+    assert.deepEqual(review.manifest.people.missing, [{ personIndex: 1, reason }]);
+    const release = { ...releaseFields(review), ...selection };
+    await errorCode(await f.send(release), "SCENE_PARTIAL_CONFIRMATION_REQUIRED", 409, "confirm_partial");
+    await errorCode(await f.send({ ...release, partialConfirmation: { snapshotSha256: "0".repeat(64) } }), "SCENE_PARTIAL_CONFIRMATION_REQUIRED", 409);
+    const saved = await f.send({ ...release, partialConfirmation: { snapshotSha256: review.manifest.snapshotSha256 } });
+    assert.equal(saved.status, 200);
+    assert.equal(saved.headers.get("X-Standin-Person-Count"), "1");
+    assert.equal(f.state.composed, 1);
+  });
+for (const change of ["job", "hands", "selection", "exclusion", "owner", "expiry", "sha", "metadata"] as const)
+  test(`original manifest and partial confirmation reject changed ${change}`, async () => {
+    const f = setup();
+    const selection = { persons: [f.rows[0]], excludedPersonIds: [1] };
+    const review = await (await f.send({ ...manifestMode, ...selection, prepare: true })).json() as ManifestReview;
+    const request = { ...releaseFields(review), ...selection, partialConfirmation: { snapshotSha256: review.manifest.snapshotSha256 } };
+    if (change === "job") f.job.updatedAt = "new";
+    if (change === "hands") f.state.changeHands = true;
+    if (change === "selection") f.state.confirmed = false;
+    if (change === "exclusion") request.excludedPersonIds = [];
+    if (change === "owner") f.state.installationId = "other";
+    if (change === "sha") request.artifactSha256 = "b".repeat(64);
+    // New replica forces shared decode and checks metadata integrity too.
+    const b = setup(false, f.shared);
+    b.job.result!.candidatesByPerson = f.job.result!.candidatesByPerson;
+    const key = `owner/job/${review.reviewKey}`;
+    if (change === "expiry" || change === "metadata") {
+      const receipt = decodeSceneReceipt(f.shared.get(key)!);
+      if (change === "expiry") receipt.expires = Date.now() - 1;
+      else receipt.manifest!.people.includedIds = [0, 1];
+      f.shared.set(key, encodeSceneReceipt(receipt));
+    }
+    const result = await (change === "expiry" || change === "metadata" ? b : f).send(request);
+    assert.equal(result.status, change === "sha" || change === "metadata" ? 502 : 409, await result.clone().text());
+    assert.notEqual(result.headers.get("Content-Type"), "application/octet-stream");
+  });
+test("v4 partial prepare cannot bypass confirmation and rejected selections are not counted as saved", async () => {
+  const f = setup(true);
+  f.job.result!.candidatesByPerson[1]!.candidates = [];
+  const persons = [f.rows[0]];
+  const review = await (await f.send({ ...correction, persons, prepare: true })).json() as ManifestReview;
+  await errorCode(await f.send({ ...confirmation, persons, reviewKey: review.reviewKey }), "SCENE_PARTIAL_CONFIRMATION_REQUIRED", 409);
+  const release = { ...confirmation, persons, reviewKey: review.reviewKey, partialConfirmation: { snapshotSha256: review.manifest.snapshotSha256 } };
+  assert.equal((await f.send(release)).status, 200);
+  f.state.reviewStatus = 409;
+  assert.equal((await f.send(release)).status, 409);
+});
+test("manifest contract rejects unknown versions and invalid exclusions", async () => {
+  for (const extra of [{ manifestVersion: "future" }, { excludedPersonIds: [0] }, { excludedPersonIds: [7] },
+    { excludedPersonIds: [1, 1] }, { metadataOnly: true }, { partialConfirmation: true }]) {
+    const f = setup();
+    const response = await f.send({ ...manifestMode, prepare: true, ...extra });
+    assert.ok(response.status >= 400, JSON.stringify(extra));
+    assert.equal(f.state.composed, 0);
   }
 });

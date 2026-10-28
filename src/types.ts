@@ -106,6 +106,7 @@ export interface PoseCandidate {
 }
 
 export interface AnalysisResult {
+  sourceImage?: ReturnType<typeof import("./pose/sceneManifest.js").sourceImageIdentity>;
   manualExportVersion?: 1 | 2;
   jobId: string;
   source?: "image" | "semantic";
@@ -148,6 +149,7 @@ export interface AnalysisResult {
      * 배포에서 전건 실패한다 — 그래서 서버가 알려 준다.
      */
     fbxExport: boolean;
+    sceneAvailability?: ReturnType<typeof import("./pose/sceneAvailability.js").sceneAvailability>;
     sceneExport?: boolean;
     sceneRefinement?: boolean;
     sceneSaveContract?: ReturnType<typeof import("./pose/sceneContract.js").sceneSaveContract>;

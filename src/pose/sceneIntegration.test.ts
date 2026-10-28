@@ -87,3 +87,28 @@ test("optional render failure retains the same valid scene receipt for save", as
   assert.deepEqual(Buffer.from(await saved.arrayBuffer()), f.finalFbx);
   assert.equal(f.state.planCalls, 1); assert.equal(f.state.buildCalls, 1);
 });
+
+for (const change of ["body", "hands", "scope", "candidate", "source", "confirmation", "owner", "runtime"] as const)
+  test(`original manifest metadata and binary both retain actual person-route ${change} guards`, async () => {
+    const f = createSceneIntegrationFixture(), persons = await f.references();
+    const mode = { contractVersion: "scene-save-v1", saveMode: "original-selection", manifestVersion: "csp-scene-manifest-v1" };
+    const response = await f.send({ ...mode, persons, prepare: true });
+    assert.equal(response.status, 200, await response.clone().text());
+    const review = await response.json() as { reviewKey: string; reviewVersion: string; artifactSha256: string };
+    const request = { ...mode, persons, reviewKey: review.reviewKey, reviewVersion: review.reviewVersion, artifactSha256: review.artifactSha256 };
+    if (change === "body") f.state.bodyRevision[0]++;
+    if (change === "hands") f.state.handRevision[0]++;
+    if (change === "scope") f.job.result!.candidatesByPerson[0]!.outputScope = resolveOutputScope({ selection: "full" });
+    if (change === "candidate") f.job.result!.candidatesByPerson[0]!.candidates[0]!.id = "different-pick";
+    if (change === "source") f.state.sourceChanged = true;
+    if (change === "confirmation") f.state.confirmed = false;
+    if (change === "owner") f.state.owned = false;
+    if (change === "runtime") f.state.runtime = "e".repeat(64);
+    for (const metadataOnly of [true, false]) {
+      const result = await f.send({ ...request, ...(metadataOnly ? { metadataOnly: true } : {}) }, f.makeReplica());
+      assert.equal(result.status, change === "runtime" ? 503 : 409, await result.clone().text());
+      assert.ok((await result.json() as { error: { code: string } }).error.code);
+    }
+    assert.equal(f.state.composeCalls, 1);
+    assert.equal(f.state.planCalls, 0, "original mode never calls v4");
+  });

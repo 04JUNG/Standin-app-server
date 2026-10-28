@@ -15,6 +15,8 @@ Job result capabilities adds `sceneSaveContract`:
 ```json
 {"contractVersion":"scene-save-v1","saveMode":"original-selection","persons":[{"personIndex":0,"candidateId":"pick","exportPath":"/v1/pose-candidates/pose/framed?jobId=job&personIndex=0&candidateId=pick&format=fbx&reviewKey=...","sha256":"<64 hex>"}]}
 ```
+For partial scenes and versioned metadata, the [2026-10-28 manifest extension](csp-scene-manifest-v1.md) supersedes the direct-save guidance below: partial release requires a prepared snapshot confirmation. Full legacy requests remain compatible.
+
 Original-selection returns a single binary FBX with `X-Standin-Scene-Version: rough-layout-v1`. No pose correction; existing rough relative layout composition remains. No scene prepare required. To return from correction, discard pending review and deliberately send this request using the original refs (refresh per-person reviews if stale).
 
 Prepare:

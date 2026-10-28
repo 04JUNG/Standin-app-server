@@ -1,3 +1,4 @@
+import { analysisFailureDetails } from "./failure.js";
 // BFF의 핵심 역할: 동기 추론(/analyze)을 백그라운드로 호출해 Job으로 감싼다.
 // ⚠ Phase 0: 프로세스 내 비동기 실행(await 하지 않고 fire-and-forget).
 //    Phase 3: 큐(BullMQ/Redis 등)로 교체 — 이 함수 시그니처는 유지.
@@ -70,6 +71,7 @@ export async function runAnalysisJob(
     );
     await updateJob(jobId, { status: "completed", result });
     logQualityMetrics(jobId, result);
+    log.info({ type: "analysis_job", jobId, phase: "analysis", jobStatus: "completed", durationMs: Date.now() - startedAt });
   } catch (error) {
     // timeout·상류 혼잡·그 외를 구분한다 — "추론이 응답하지 않는다", "상류가 붐빈다",
     // "추론이 거절했다"는 운영 대응이 다르고, 사용자에게 줄 안내도 다르다.
@@ -93,6 +95,7 @@ export async function runAnalysisJob(
       jobStatus: "failed",
       durationMs: Date.now() - startedAt,
       errorCode,
+      ...analysisFailureDetails(errorCode),
       quotaRefunded: refundQuota,
       ...errorFields(error),
     });

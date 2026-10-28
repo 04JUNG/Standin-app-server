@@ -1,3 +1,5 @@
+import { SCENE_MANIFEST_VERSION, sceneManifest, scenePeople, type SceneManifest } from "./sceneManifest.js";
+import { log } from "../log.js";
 import { SCENE_SAVE_CONTRACT, SCENE_REVIEW_VERSION, SCENE_REVIEW_TTL_MS, SceneError, sceneErrorDetails } from "./sceneContract.js";
 import { loadSceneReceipt, saveSceneReceipt, sceneReceiptStorageAvailable, type SceneReceipt } from "./sceneStorage.js";
 import { renderFinalPreview } from "../converter/finalPreview.js";
@@ -18,6 +20,7 @@ import { errorEnvelope } from "../mapping.js";
 
 const defaults = {
   loadSceneReceipt, saveSceneReceipt,
+  receiptStorageAvailable: sceneReceiptStorageAvailable,
   renderFinalPreview,
   getOwnedJob,
   validateConfirmedSelection,
@@ -35,10 +38,10 @@ const receiptCacheKey = (owner: string, job: string, key: string) => `${owner}/$
 const MAX_RECEIPT_BYTES = 256 * 1024 * 1024;
 async function remember(
   receipts: Map<string, SceneReceipt>, binding: string, scene: RefinedScene,
-  owner: string, job: string, save: typeof saveSceneReceipt,
+  owner: string, job: string, save: typeof saveSceneReceipt, manifest: SceneManifest,
 ) {
   const key = randomBytes(24).toString("hex");
-  const receipt: SceneReceipt = { reviewVersion: SCENE_REVIEW_VERSION, binding, scene, expires: Date.now() + SCENE_REVIEW_TTL_MS };
+  const receipt: SceneReceipt = { manifest, reviewVersion: SCENE_REVIEW_VERSION, binding, scene, expires: Date.now() + SCENE_REVIEW_TTL_MS };
   await save(owner, job, key, receipt);
   for (const [k, v] of receipts) if (v.expires < Date.now()) receipts.delete(k);
   let size = scene.bytes.length + scene.preview.length;
@@ -64,6 +67,7 @@ export function createSceneRoutes(
   // Per application, never a module-global cross-owner/replica registry.
   const receipts = new Map<string, SceneReceipt>();
   routes.post("/:jobId/scene", async (c) => {
+    const started = Date.now();
     let allowOriginal = false;
     let serverOperationMayContinue: boolean | undefined;
     const fail = (
@@ -71,6 +75,8 @@ export function createSceneRoutes(
       code: string,
       message: string,
     ) => {
+      log.info({ type: "scene_save_failed", jobId: c.req.param("jobId"), requestId: c.get("requestId"),
+        phase: "scene_prepare", errorCode: code, durationMs: Date.now() - started });
       c.header("Cache-Control", "private, no-store");
       return c.json(errorEnvelope(code, message, c.get("requestId"), sceneErrorDetails(code, allowOriginal, serverOperationMayContinue)), status);
     };
@@ -98,6 +104,10 @@ export function createSceneRoutes(
       reviewKey?: unknown;
       preview?: unknown;
       artifactOnly?: unknown;
+      manifestVersion?: unknown;
+      metadataOnly?: unknown;
+      excludedPersonIds?: unknown;
+      partialConfirmation?: unknown;
     } | null;
     if (
       !input ||
@@ -111,6 +121,15 @@ export function createSceneRoutes(
         "INVALID_INPUT",
         "한 장면에는 1~8명을 저장할 수 있습니다.",
       );
+    const manifestRequest = input.manifestVersion !== undefined;
+    if (manifestRequest && input.manifestVersion !== SCENE_MANIFEST_VERSION)
+      return fail(409, "SCENE_CONTRACT_UNSUPPORTED", "장면 정보 버전을 다시 확인해 주세요.");
+    if (input.metadataOnly !== undefined && (input.metadataOnly !== true || !manifestRequest || input.prepare === true || input.preview !== undefined))
+      return fail(400, "INVALID_INPUT", "장면 정보 조회 요청을 다시 확인해 주세요.");
+    if (input.excludedPersonIds !== undefined && (!Array.isArray(input.excludedPersonIds) ||
+        input.excludedPersonIds.some(v => !Number.isInteger(v)) || new Set(input.excludedPersonIds).size !== input.excludedPersonIds.length))
+      return fail(400, "INVALID_INPUT", "제외할 인물을 다시 확인해 주세요.");
+    const excludedIds = [...(input.excludedPersonIds ?? []) as number[]].sort((a, b) => a - b);
     const explicit = input.contractVersion !== undefined || input.saveMode !== undefined;
     const reviewRequest = [input.prepare, input.reviewKey, input.preview, input.artifactOnly,
       input.reviewVersion, input.artifactSha256].some(v => v !== undefined);
@@ -119,17 +138,23 @@ export function createSceneRoutes(
         (!explicit && reviewRequest))
       return fail(409, "SCENE_CONTRACT_UNSUPPORTED", "저장 방식을 다시 확인해 주세요.");
     const refined = explicit && input.saveMode === "auto-correct-v4";
-    if (!refined && reviewRequest)
+    const saveMode = refined ? "auto-correct-v4" as const : "original-selection" as const;
+    const receiptFlow = refined || manifestRequest;
+    if (manifestRequest && !explicit)
+      return fail(409, "SCENE_CONTRACT_UNSUPPORTED", "저장 방식을 다시 확인해 주세요.");
+    if (manifestRequest && !deps.receiptStorageAvailable())
+      return fail(503, "SCENE_UNAVAILABLE", "장면 정보를 보관할 수 없습니다.");
+    if (!receiptFlow && reviewRequest)
       return fail(400, "INVALID_INPUT", "기본 통합 저장에는 보정 검수 정보를 보낼 수 없습니다.");
-    if (refined && ((input.prepare !== undefined && input.prepare !== true) ||
+    if (receiptFlow && ((input.prepare !== undefined && input.prepare !== true) ||
         (input.preview !== undefined && input.preview !== true) ||
         (input.prepare === true && (input.reviewKey !== undefined || input.preview !== undefined ||
           input.reviewVersion !== undefined || input.artifactSha256 !== undefined)) ||
         (input.prepare !== true && input.artifactOnly !== undefined)))
       return fail(400, "INVALID_INPUT", "장면 준비와 확인 요청을 구분해 주세요.");
-    if (refined && input.prepare !== true && input.reviewVersion !== SCENE_REVIEW_VERSION)
+    if (receiptFlow && input.prepare !== true && input.reviewVersion !== SCENE_REVIEW_VERSION)
       return fail(409, "SCENE_CONTRACT_UNSUPPORTED", "최종 장면 확인 버전을 다시 확인해 주세요.");
-    if (refined && input.prepare !== true &&
+    if (receiptFlow && input.prepare !== true &&
         (typeof input.artifactSha256 !== "string" || !/^[a-f0-9]{64}$/.test(input.artifactSha256)))
       return fail(400, "INVALID_INPUT", "확인한 장면의 SHA가 필요합니다.");
     allowOriginal = refined;
@@ -150,8 +175,7 @@ export function createSceneRoutes(
     }
     if (refined && !job.inputS3Key)
       return fail(503, "SCENE_UNAVAILABLE", "원본이 보관된 작업에서 장면 보정을 다시 요청해 주세요.");
-    if (job.result.candidatesByPerson.some(p => p.candidates.some(c => c.source === "generation")))
-      return fail(409, "GENERATED_INDIVIDUAL_ONLY", "새로 만든 포즈는 인물별로 저장해 주세요.");
+
     const image = job.result.image;
     const seen = new Set<number>();
     const refs: {
@@ -202,6 +226,10 @@ export function createSceneRoutes(
             "INVALID_EXPORT",
             "확정한 인물과 후보를 다시 확인해 주세요.",
           );
+        // Unselected generation alternatives cannot disable library exports.
+        // Generated artifacts still require their own approval/export contract.
+        if (candidate.source === "generation")
+          return fail(409, "GENERATED_INDIVIDUAL_ONLY", "새로 만든 포즈는 인물별로 저장해 주세요.");
         // Local dispatch reuses every existing body/hand/scope/review/lineage guard.
         // This is never a network request to a client-supplied URL.
         const url = new URL(row.exportPath, "https://scene.internal");
@@ -257,15 +285,30 @@ export function createSceneRoutes(
         refs.push({ personIndex: row.personIndex, candidateId: row.candidateId,
           exportPath: row.exportPath, sha256: row.sha256 });
       }
+      if (excludedIds.some(id => seen.has(id) || !job.result!.candidatesByPerson.some(p => p.personIndex === id && p.candidates.length > 0)))
+        return fail(400, "INVALID_INPUT", "제외할 인물을 다시 확인해 주세요.");
+      const people = scenePeople(job, refs.map(r => r.personIndex), excludedIds);
       const binding = sha256Hex(
-        Buffer.from(JSON.stringify([owner, jobId, job.updatedAt, refs])),
+        Buffer.from(JSON.stringify([owner, jobId, job.updatedAt, refs, saveMode, excludedIds])),
       );
+      const confirmation = input.partialConfirmation as { snapshotSha256?: unknown } | null;
+      const partialConfirmed = confirmation?.snapshotSha256 === binding;
+      if (input.partialConfirmation !== undefined && (!confirmation || typeof confirmation !== "object" ||
+          Array.isArray(confirmation) || typeof confirmation.snapshotSha256 !== "string"))
+        return fail(400, "INVALID_INPUT", "부분 저장 확인 정보가 올바르지 않습니다.");
+      if (people.partial && input.prepare !== true && input.metadataOnly !== true && !partialConfirmed)
+        return fail(409, "SCENE_PARTIAL_CONFIRMATION_REQUIRED", "일부 인물만 저장됩니다. 장면을 준비하고 저장 인원을 확인해 주세요.");
+      if (people.partial && !receiptFlow)
+        return fail(409, "SCENE_PARTIAL_CONFIRMATION_REQUIRED", "부분 저장은 장면 정보 확인이 필요합니다.");
       let scene: { bytes: Uint8Array; sha256: string };
       let prepared: RefinedScene | undefined;
       let reviewed: SceneReceipt | undefined;
-      if (refined) {
+      if (receiptFlow) {
         if (input.prepare === true) {
-          prepared = await deps.prepareRefinedScene(owner, job, refs, sources, {}, input.artifactOnly === true);
+          prepared = refined
+            ? await deps.prepareRefinedScene(owner, job, refs, sources, {}, input.artifactOnly === true)
+            : { ...await deps.composeRoughScene(jobId, image, sources), artifactContract: "verified-scene-fbx-v1",
+                preview: "", previewSha256: sha256Hex(Buffer.alloc(0)), summary: [] };
           scene = prepared;
         } else {
           const receipt =
@@ -287,6 +330,11 @@ export function createSceneRoutes(
           if (receipt.scene.sha256 !== input.artifactSha256 ||
               sha256Hex(receipt.scene.bytes) !== receipt.scene.sha256)
             return fail(502, "SCENE_INTEGRITY", "확인한 장면과 파일이 일치하지 않습니다. 다시 준비해 주세요.");
+          if (manifestRequest && (!receipt.manifest || receipt.manifest.version !== SCENE_MANIFEST_VERSION ||
+              receipt.manifest.artifact.sha256 !== receipt.scene.sha256 || receipt.manifest.snapshotSha256 !== binding ||
+              receipt.manifest.artifact.saveMode !== saveMode ||
+              JSON.stringify(receipt.manifest) !== JSON.stringify(sceneManifest(job, binding, receipt.scene.sha256, saveMode, people))))
+            return fail(502, "SCENE_INTEGRITY", "장면 정보가 파일과 일치하지 않습니다.");
           reviewed = receipt;
           scene = receipt.scene;
         }
@@ -365,16 +413,27 @@ export function createSceneRoutes(
         return new Response(png, { headers: { "Content-Type": "image/png", "Cache-Control": "private, no-store",
           "X-Standin-Artifact-SHA256": scene.sha256, "X-Standin-Preview-Artifact-SHA256": sha256Hex(png) } });
       }
+      const manifest = reviewed?.manifest ?? sceneManifest(job, binding, scene.sha256, saveMode, people);
+      if (input.metadataOnly === true)
+        return c.json({ manifest, partialConfirmed, expiresAt: new Date(reviewed!.expires).toISOString() }, 200, { "Cache-Control": "private, no-store" });
+      const observe = () => log.info({ type: "scene_save_result", jobId, requestId: c.get("requestId"),
+        saveMode, operation: prepared ? "prepare" : "release", path: refined ? "scene_refinement" : "compose_scene",
+        detectedIds: people.detectedIds, requestedIds: people.requestedIds, includedIds: people.includedIds,
+        missingIds: people.missing.map(p => p.personIndex), missingReasons: people.missing.map(p => p.reason),
+        partial: people.partial, partialConfirmed, fileCount: 1, personCount: refs.length, durationMs: Date.now() - started });
       if (prepared) {
-        const { key: reviewKey, receipt } = await remember(receipts, binding, prepared, owner, jobId, deps.saveSceneReceipt);
+        const { key: reviewKey, receipt } = await remember(receipts, binding, prepared, owner, jobId, deps.saveSceneReceipt, manifest);
+        observe();
         c.header("Cache-Control", "private, no-store");
         return c.json({
           contractVersion: SCENE_SAVE_CONTRACT,
-          saveMode: "auto-correct-v4",
+          saveMode,
+          manifest,
+          partialConfirmed: false,
           reviewVersion: SCENE_REVIEW_VERSION,
           expiresAt: new Date(receipt.expires).toISOString(),
           fileCount: 1,
-          version: "scene-refinement-v4",
+          version: manifest.artifact.layoutVersion,
           ...(prepared.artifactContract ? { artifactContract: prepared.artifactContract } : {}),
           reviewKey,
           artifactSha256: prepared.sha256,
@@ -384,9 +443,13 @@ export function createSceneRoutes(
           personCount: refs.length,
         });
       }
+      observe();
       return new Response(scene.bytes, {
         headers: {
           "X-Standin-Scene-Contract": SCENE_SAVE_CONTRACT,
+          "X-Standin-Scene-Manifest-Version": SCENE_MANIFEST_VERSION,
+          "X-Standin-Scene-Snapshot-SHA256": binding,
+          "X-Standin-File-Count": "1",
           "X-Standin-Scene-Save-Mode": refined ? "auto-correct-v4" : "original-selection",
           "Content-Type": "application/octet-stream",
           "Cache-Control": "private, no-store",
