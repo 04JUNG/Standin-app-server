@@ -409,6 +409,8 @@ export async function deleteOwnedJob(
   installationId: string,
 ): Promise<DeleteJobOutcome> {
   return transaction(async (client) => {
+    // Replay writes and quality withdrawal lock installation before session/job rows.
+    await client.query("SELECT id FROM installations WHERE id=$1 FOR UPDATE", [installationId]);
     // 소유·상태 판정과 삭제 사이에 워커가 상태를 바꾸지 못하게 잠근다.
     const owned = await client.query<{
       status: JobStatus;

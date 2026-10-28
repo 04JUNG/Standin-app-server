@@ -6,6 +6,14 @@ function env(key: string, def = ""): string {
 }
 
 export const config = {
+  replayEnabled: env("REPLAY_ENABLED", "true") === "true",
+  captureReplayEnabled: env("CAPTURE_REPLAY_ENABLED", "true") === "true",
+  cspResultCaptureEnabled: env("CSP_RESULT_CAPTURE_ENABLED", "true") === "true",
+  replayConsentMode: env("REPLAY_CONSENT_MODE", "assumed"),
+  // Docker uses NODE_ENV=production for staging too. Classification must be explicit there.
+  replayEnvironment: env("REPLAY_ENVIRONMENT", env("NODE_ENV", "development")),
+  replayBucket: env("REPLAY_BUCKET"),
+  replayLocalDir: env("REPLAY_LOCAL_DIR", "work/replay-objects"),
   refineV3Shadow: env("REFINE_V3_SHADOW", "false") === "true",
   poseThumbnailRevision: env(
     "POSE_THUMBNAIL_REVISION",

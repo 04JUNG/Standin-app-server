@@ -34,7 +34,7 @@ export function createRequireInstallation(
     }
     // Keep data withdrawal available even on an unsupported desktop release.
     const withdrawing =
-      c.req.method === "DELETE" && c.req.path === "/v1/installations/current/data";
+      c.req.method === "DELETE" && (c.req.path === "/v1/installations/current/data" || /^\/v1\/replays(?:\/[a-f0-9-]{36})?$/.test(c.req.path));
     const version = c.req.header(CLIENT_VERSION_HEADER) ?? installation.appVersion;
     if (!withdrawing && !isSupportedClientVersion(version)) return updateRequired(c);
     if (installation.consentVersion !== config.consentVersion) {

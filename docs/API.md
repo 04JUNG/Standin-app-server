@@ -1726,3 +1726,25 @@ Standin **0.2.0 정식 이상**만 지원한다. `0.2.0-beta.*`는 미지원이�
 앱의 화면은 소급 변경되지 않는다. 신규 앱은 426을 받으면 업데이트 화면만 표시한다.
 헬스·관리자·인증/OAuth 및 `DELETE /v1/installations/current/data`는 버전 차단 대상이 아니다.
 업데이트 피드와 0.2.0 이상 설치 파일을 먼저 게시한 뒤 BFF를 배포한다.
+
+## Session replay v1 (development/staging)
+
+Replay-only defaults are ON and `REPLAY_CONSENT_MODE=assumed` per the 2026-10-28 implementation
+instruction. This does not change quality-consent evidence or historical analytics.
+Production assumed collection/reads fail closed. Installation authentication, admin review
+authentication and explicit withdrawal/deletion remain required.
+
+- `POST /v1/replays`: versioned/idempotent session creation.
+- `PUT /v1/replays/:id/streams/:window/chunks/:sequence`: SHA-256 validated JSON or bounded gzip/base64 events.
+- `PUT /v1/replays/:id/assets/:hash`: private immutable image/font bytes with append-only snapshot/job bindings.
+- `POST /v1/replays/:id/finish`: declare final sequences; complete vs incomplete manifest.
+- `DELETE /v1/replays/:id`: remove own recording. `DELETE /v1/replays`: withdraw and purge own replay data.
+- `GET /v1/admin/replays`: authorized filtered list; `nextBefore` is an opaque cursor.
+- `GET /v1/admin/replays/:id/manifest`: stream descriptors, immutable assets, gaps and existing timeline.
+- `GET /v1/admin/replays/:id/streams/:window/chunks/:sequence`: authenticated decoded events.
+- `GET /v1/admin/replays/:id/assets/:hash`: authenticated binary, private/no-store, no presigned URL.
+- Existing `/v1/admin/ops/dashboard`: actual bundled rrweb player, capture reconstruction, image comparison.
+
+Exact requests/responses/errors/limits: [replay-contract.v1.json](replay-contract.v1.json).
+Configuration, deletion scope, local real-BFF runner and playback boundaries:
+[SESSION_REPLAY.md](SESSION_REPLAY.md). Infrastructure proposal: [REPLAY_INFRASTRUCTURE.md](REPLAY_INFRASTRUCTURE.md).

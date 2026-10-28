@@ -1,0 +1,289 @@
+{
+  "protocolVersion": "session-replay.v1",
+  "status": "implementation-contract",
+  "basePath": "/v1/replays",
+  "auth": {
+    "installationHeaders": [
+      "X-Installation-Id",
+      "X-Device-Token",
+      "X-App-Version"
+    ],
+    "adminHeader": "X-Beta-Admin-Token",
+    "authorizationMode": [
+      "assumed",
+      "explicit"
+    ],
+    "assumedAllowed": [
+      "development",
+      "staging"
+    ],
+    "production": "REPLAY_ENVIRONMENT is a trusted deployment classification, defaulting to NODE_ENV. Assumed collection and reads reject production, beta, and unknown classifications."
+  },
+  "defaults": {
+    "REPLAY_ENABLED": true,
+    "CAPTURE_REPLAY_ENABLED": true,
+    "CSP_RESULT_CAPTURE_ENABLED": true,
+    "REPLAY_CONSENT_MODE": "assumed"
+  },
+  "units": {
+    "time": "epoch milliseconds; offsets and durations milliseconds",
+    "bytes": "uncompressed bytes unless wireBytes specified",
+    "sequence": "zero based per windowInstanceId"
+  },
+  "limits": {
+    "chunkBytes": 1048576,
+    "assetBytes": 8388608,
+    "sessionBytes": 67108864,
+    "installationDailyBytes": 268435456,
+    "eventsPerChunk": 10000,
+    "sessionDurationMs": 14400000,
+    "retentionDays": 14,
+    "maxStreams": 16,
+    "maxChunks": 4096,
+    "maxAssets": 512,
+    "maxSessionsPerInstallationDay": 100
+  },
+  "assetMime": [
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "font/woff2"
+  ],
+  "endpoints": {
+    "create": {
+      "method": "POST",
+      "path": "/v1/replays",
+      "request": {
+        "protocolVersion": "session-replay.v1",
+        "replayId": "UUID client-generated idempotency key",
+        "appSessionId": "bounded identifier",
+        "startedAt": "epoch ms",
+        "appVersion": "string",
+        "os": "string",
+        "authorizationMode": "assumed",
+        "policyVersion": "2026-10-28"
+      },
+      "response": {
+        "replayId": "UUID",
+        "authorizationMode": "assumed",
+        "expiresAt": "ISO8601"
+      }
+    },
+    "chunk": {
+      "method": "PUT",
+      "path": "/v1/replays/:replayId/streams/:windowInstanceId/chunks/:sequence",
+      "request": {
+        "protocolVersion": "session-replay.v1",
+        "surface": "app | bar | capture",
+        "contentHash": "sha256 of uncompressed UTF-8 JSON.stringify(events)",
+        "encoding": "json | gzip-base64",
+        "events": "array (json encoding)",
+        "data": "base64 gzip of events (gzip-base64 only)",
+        "startedOffsetMs": 0,
+        "endedOffsetMs": 5000,
+        "clock": {
+          "epochMs": 0,
+          "monotonicOffsetMs": 0
+        },
+        "inputAttemptId": "optional",
+        "jobId": "optional owned job",
+        "attemptId": "optional",
+        "screen": "optional safe identifier",
+        "feature": "optional safe identifier",
+        "failed": false,
+        "saveState": "unknown | saved | failed | cancelled"
+      },
+      "response": {
+        "accepted": true,
+        "duplicate": false,
+        "sequence": 0
+      }
+    },
+    "asset": {
+      "method": "PUT",
+      "path": "/v1/replays/:replayId/assets/:assetHash",
+      "request": {
+        "contentType": "allowlisted MIME",
+        "dataBase64": "exact image/font bytes",
+        "kind": "rough | thumbnail | final | csp_result | capture_background | canvas_frame | font",
+        "jobId": "optional owned job; required for csp_result",
+        "inputAttemptId": "optional",
+        "snapshotVersion": "required bounded version",
+        "artifactHash": "required sha256 final FBX for csp_result",
+        "sourceExpiresAt": "optional ISO8601 earlier source expiration",
+        "assessment": "optional good | bad | cannot_import | unspecified; separate from capture success"
+      },
+      "response": {
+        "assetId": "sha256",
+        "contentHash": "sha256",
+        "url": "replay-asset://sha256",
+        "expiresAt": "ISO8601"
+      },
+      "notes": "Same bytes may have multiple append-only kind/snapshot/job bindings. Upload of another binding does not change original bytes and is not charged twice. CSP result requires an owned-job server export/framed/scene hash receipt from this BFF within 14 days. Snapshot version is client-reported; manifest exposes artifactBinding=server_export_hash and selectionBinding=client_reported."
+    },
+    "finish": {
+      "method": "POST",
+      "path": "/v1/replays/:replayId/finish",
+      "request": {
+        "streams": [
+          {
+            "windowInstanceId": "id",
+            "lastSequence": 0
+          }
+        ],
+        "reason": "completed | stopped | crash_recovered"
+      },
+      "response": {
+        "replayId": "UUID",
+        "state": "complete | incomplete",
+        "gaps": "array"
+      }
+    },
+    "delete": {
+      "method": "DELETE",
+      "path": "/v1/replays/:replayId",
+      "response": {
+        "deleted": true
+      }
+    },
+    "withdraw": {
+      "method": "DELETE",
+      "path": "/v1/replays",
+      "response": {
+        "deleted": true
+      }
+    },
+    "adminList": {
+      "method": "GET",
+      "path": "/v1/admin/replays",
+      "query": [
+        "from",
+        "to",
+        "environment",
+        "installationId",
+        "audience=all|internal|unclassified",
+        "os",
+        "appVersion",
+        "surface",
+        "screen",
+        "feature",
+        "failed=true|false",
+        "saveState",
+        "jobId",
+        "appSessionId",
+        "limit",
+        "before"
+      ],
+      "response": {
+        "protocolVersion": "session-replay.v1",
+        "items": "session summaries; no payloads",
+        "nextBefore": "opaque base64url cursor or null; pass back without parsing"
+      }
+    },
+    "manifest": {
+      "method": "GET",
+      "path": "/v1/admin/replays/:replayId/manifest",
+      "response": {
+        "protocolVersion": "session-replay.v1",
+        "session": "metadata incl authorizationMode",
+        "streams": "ordered chunk descriptors",
+        "assets": "immutable hash/version plus authenticated relative URL",
+        "gaps": "missing sequences or upload incomplete",
+        "timeline": "existing product event references only"
+      }
+    },
+    "adminChunk": {
+      "method": "GET",
+      "path": "/v1/admin/replays/:replayId/streams/:windowInstanceId/chunks/:sequence",
+      "response": {
+        "events": "decoded rrweb/custom event array"
+      }
+    },
+    "adminAsset": {
+      "method": "GET",
+      "path": "/v1/admin/replays/:replayId/assets/:assetHash",
+      "response": "binary, no-store; no presigned URL"
+    },
+    "replay": {
+      "method": "GET",
+      "path": "/v1/admin/ops/dashboard",
+      "notes": "Existing dashboard adds authenticated replay list/player. No token in recorded content or sandbox."
+    }
+  },
+  "events": {
+    "rrweb": "rrweb eventWithTime; local @rrweb/record 2.2.0 client / rrweb-player 2.2.0 BFF",
+    "custom": "rrweb Custom type=5 data={tag,payload}",
+    "captureTag": "capture_overlay",
+    "capturePayload": {
+      "backgroundAssetHash": "sha256",
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 1080,
+      "cursor": {
+        "x": 10,
+        "y": 20
+      },
+      "selection": {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 100
+      },
+      "phase": "start | move | select | confirm | cancel",
+      "coordinates": "physical pixels relative to background; include monitor origin/DPI in safe numeric metadata"
+    },
+    "assetReferences": "Use replay-asset://HASH in rrweb src/CSS; content immutable. No expiring source URL.",
+    "gaps": "Custom tag replay_gap with reason. Canvas frames use canvas_frame tag + assetHash.",
+    "security": "Mask all inputs except explicitly allowed search; exclude authentication screens, passwords, tokens, full paths; prohibit raw logs/network bodies."
+  },
+  "errors": {
+    "format": {
+      "error": {
+        "code": "REPLAY_*",
+        "message": "safe text",
+        "details": "optional",
+        "requestId": "id"
+      }
+    },
+    "codes": {
+      "400": [
+        "REPLAY_INVALID",
+        "REPLAY_HASH_MISMATCH",
+        "REPLAY_UNSAFE_CONTENT"
+      ],
+      "403": [
+        "REPLAY_DISABLED",
+        "REPLAY_AUTHORIZATION_DENIED"
+      ],
+      "404": [
+        "REPLAY_NOT_FOUND"
+      ],
+      "409": [
+        "REPLAY_CONFLICT",
+        "REPLAY_FINISHED",
+        "REPLAY_ARTIFACT_UNVERIFIED"
+      ],
+      "413": [
+        "REPLAY_TOO_LARGE"
+      ],
+      "429": [
+        "REPLAY_QUOTA_EXCEEDED"
+      ],
+      "410": [
+        "REPLAY_EXPIRED"
+      ],
+      "503": [
+        "REPLAY_STORAGE_UNAVAILABLE"
+      ]
+    }
+  },
+  "notes": [
+    "No inferred duplicate metrics. Existing product events remain source of truth.",
+    "Deletion of a linked job removes entire recording if partial scrub cannot be proven.",
+    "Explicit withdrawal wins over assumed mode and persists as replay withdrawal marker.",
+    "Retried identical chunks/assets return duplicate success; conflicting sequence/hash rejected. Out of order accepted and missing sequences surfaced.",
+    "Until per-node history provenance is complete, job deletion conservatively purges the installation's recordings, without deleting other analysis jobs.",
+    "Daily volume/session counters survive individual recording deletion. Initial quality fields false are not a replay withdrawal; explicit subsequent false requests and previous withdrawal receipts are honored."
+  ]
+}

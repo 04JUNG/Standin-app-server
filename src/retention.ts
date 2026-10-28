@@ -29,13 +29,15 @@ export const JOB_SCOPED_TABLES = [
 ] as const;
 
 /** jobs(id) ON DELETE CASCADE라 jobs 행과 함께 사라지는 테이블. */
-export const CASCADE_TABLES = ["job_outbox"] as const;
+export const CASCADE_TABLES = ["job_outbox", "replay_job_links", "replay_artifact_receipts"] as const;
 
 /**
  * installation_id 칸이 있는 테이블. 작업 밖 분석 이벤트, 작업 없는 export 기록, 설치 단위
  * 관리자 열람처럼 job_id가 빈 행은 작업을 따라 지워지지 않으므로 이 칸으로 지운다.
  */
 export const INSTALLATION_SCOPED_TABLES = [
+  "replay_sessions",
+  "replay_daily_usage",
   "body_preferences",
   "body_mutations",
   "export_events",
@@ -79,6 +81,12 @@ export interface JobSelection {
 export async function deleteJobs(client: SqlClient, selection: JobSelection): Promise<void> {
   await client.query(
     `SELECT id FROM jobs WHERE id IN (${selection.ids}) ORDER BY id FOR UPDATE`,
+    selection.params,
+  );
+  // A history view can contain older jobs without explicit chunk provenance. Until
+  // every visible asset has provenance, purge that installation's recordings on job deletion.
+  await client.query(
+    `DELETE FROM replay_sessions WHERE installation_id IN (SELECT installation_id FROM jobs WHERE id IN (${selection.ids}))`,
     selection.params,
   );
   for (const table of JOB_SCOPED_TABLES) {

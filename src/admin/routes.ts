@@ -89,6 +89,10 @@ import {
   totals,
 } from "../ops/store.js";
 
+import { createAdminReplayRoutes } from "../replay/routes.js";
+import { replayService } from "../replay/runtime.js";
+import { readFile } from "node:fs/promises";
+
 export const adminRoutes = new Hono<AppEnv>();
 
 /**
@@ -120,6 +124,17 @@ adminRoutes.use("*", async (c, next) => {
 });
 
 adminRoutes.use("*", qualityReviewGuard());
+adminRoutes.route("/replays", createAdminReplayRoutes(replayService, async (reviewer, replayId, requestId) => {
+  await execute(`INSERT INTO admin_access_audit(audit_id,reviewer,action,request_id,occurred_at,replay_id,installation_id)
+    VALUES($1,$2,$3,$4,$5,$6,(SELECT installation_id FROM replay_sessions WHERE id=$6))`,
+    [randomUUID(),reviewer,replayId?"replay_read":"replay_list",requestId??randomUUID(),new Date().toISOString(),replayId??null]);
+}));
+// Bundle contains trusted player code only; recorded DOM is never served as executable HTML.
+adminRoutes.get("/replay-player.js", async c => {
+  c.header("Cache-Control", "private, no-store");
+  c.header("Content-Type", "application/javascript; charset=utf-8");
+  return c.body(await readFile(new URL("../../dist/replay/player.bundle.js", import.meta.url)));
+});
 adminRoutes.route("/review/pose-candidates", createHumanThumbnailRoutes());
 adminRoutes.route("/review/custom-bodies", createCustomBodyRoutes((c, action, installationId) => audit(c, action, { installationId })));
 
@@ -154,7 +169,11 @@ async function audit(
 
 // GET /v1/admin/ops/dashboard — 의존성 없는 정적 대시보드 한 장.
 // 데이터는 담지 않는다. 화면이 열린 뒤 아래 /ops를 토큰 헤더로 호출해 채운다.
-adminRoutes.get("/ops/dashboard", (c) => c.html(DASHBOARD_HTML));
+adminRoutes.get("/ops/dashboard", (c) => {
+  c.header("Content-Security-Policy", "default-src 'self'; script-src 'self' blob: 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self' blob:; connect-src 'self'; frame-src 'self' about:; object-src 'none'; base-uri 'none'; form-action 'none'");
+  c.header("Referrer-Policy", "no-referrer");
+  return c.html(DASHBOARD_HTML);
+});
 
 /**
  * GET /v1/admin/ops — 대시보드가 읽는 집계(계획 3단계).

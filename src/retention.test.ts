@@ -111,7 +111,7 @@ test("deleting one job locks it, clears its rows, then removes the job", async (
   await deleteJobs(client, { ids: "$1", params: ["job_1"] });
 
   assert.equal(calls[0].text, "SELECT id FROM jobs WHERE id IN ($1) ORDER BY id FOR UPDATE");
-  assert.deepEqual(deletedTables(calls), [...JOB_SCOPED_TABLES, "jobs"]);
+  assert.deepEqual(deletedTables(calls), ["replay_sessions", ...JOB_SCOPED_TABLES, "jobs"]);
   for (const call of calls) assert.deepEqual(call.params, ["job_1"]);
 });
 
