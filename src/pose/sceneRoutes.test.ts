@@ -9,11 +9,13 @@ import { SCENE_REVIEW_VERSION, SceneError, sceneSaveContract } from "./sceneCont
 import { type SceneReceipt } from "./sceneStorage.js";
 import { sha256Hex } from "../converter/client.js";
 import { createSceneRoutes } from "./sceneRoutes.js";
+import { createRequireInstallation } from "../installations/middleware.js";
+import { CLIENT_VERSION_HEADER } from "../client-version/policy.js";
 
 const fbx = Buffer.from("Kaydara FBX Binary  \0\x1a\0person");
 const correction = { contractVersion: "scene-save-v1", saveMode: "auto-correct-v4" };
 const confirmation = { ...correction, reviewVersion: "scene-review-v1", artifactSha256: sha256Hex(fbx) };
-function setup(refinement = false, shared = new Map<string, Uint8Array>()) {
+function setup(refinement = false, shared = new Map<string, Uint8Array>(), storedVersion?: string) {
   const state = {
     owner: true,
     installationId: "owner",
@@ -31,6 +33,8 @@ function setup(refinement = false, shared = new Map<string, Uint8Array>()) {
     renders: 0,
     onRender: undefined as (() => void) | undefined,
     sent: [] as number[],
+    clientVersion: "0.2.3-dev.392" as string | undefined,
+    forwardedVersions: [] as (string | null)[],
   };
   const job = {
     id: "job",
@@ -50,6 +54,17 @@ function setup(refinement = false, shared = new Map<string, Uint8Array>()) {
       })),
     },
   } as Job;
+  const protectedArtifact = new Hono<AppEnv>();
+  protectedArtifact.use("*", (c, next) => {
+    c.set("requestId", "artifact-req");
+    return next();
+  });
+  protectedArtifact.use("*", createRequireInstallation(async () => ({
+    id: state.installationId,
+    consentVersion: config.consentVersion,
+    appVersion: storedVersion ?? "0.2.0",
+  })));
+  protectedArtifact.get("*", c => c.body(fbx));
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
     c.set("requestId", "req");
@@ -61,6 +76,11 @@ function setup(refinement = false, shared = new Map<string, Uint8Array>()) {
     createSceneRoutes(
       async (request) => {
         state.reads++;
+        state.forwardedVersions.push(request.headers.get(CLIENT_VERSION_HEADER));
+        if (storedVersion !== undefined) {
+          const authorized = await protectedArtifact.fetch(request);
+          if (!authorized.ok) return authorized;
+        }
         assert.equal(request.headers.get("X-Installation-Id"), state.installationId);
         assert.equal(new URL(request.url).origin, "https://scene.internal");
         if (state.changeHands && state.composed)
@@ -130,11 +150,31 @@ function setup(refinement = false, shared = new Map<string, Uint8Array>()) {
           "Content-Type": "application/json",
           "X-Installation-Id": state.installationId,
           "X-Device-Token": "token",
+          ...(state.clientVersion === undefined ? {} : { [CLIENT_VERSION_HEADER]: state.clientVersion }),
         },
         body: JSON.stringify({ persons: rows, ...extra }),
       }),
   };
 }
+test("upgraded installations retain their version through scene source reads and release checks", async () => {
+  const s = setup(false, undefined, "0.1.1-beta.8");
+  const response = await s.send();
+  assert.equal(response.status, 200);
+  assert.equal(s.state.composed, 1);
+  assert.deepEqual(s.state.forwardedVersions, Array(4).fill("0.2.3-dev.392"));
+});
+test("scene dispatch preserves version-policy rejection and legacy headerless fallback", async () => {
+  for (const [stored, sent, expected] of [
+    ["0.2.0", "0.1.9", 426],
+    ["0.1.1-beta.8", undefined, 426],
+    ["0.2.0", undefined, 200],
+  ] as const) {
+    const s = setup(false, undefined, stored);
+    s.state.clientVersion = sent;
+    assert.equal((await s.send()).status, expected);
+    if (expected === 426) assert.equal(s.state.composed, 0);
+  }
+});
 test("reviewed files plus owned observations compose one authenticated scene", async () => {
   const s = setup(),
     res = await s.send();
