@@ -159,7 +159,7 @@ export function createSceneIntegrationFixture() {
           for (let i = 0; i < files.length; i++) assert.equal(sha256Hex(new Uint8Array(await files[i]!.arrayBuffer())), parsed.persons[i]!.fbx_sha256);
           return new Response(originalFbx, { headers: { "X-Standin-Artifact-SHA256": sha256Hex(originalFbx),
             "X-Standin-FBX-Artifact-SHA256": sha256Hex(originalFbx), "X-Standin-Scene-Input-SHA256": sha256Hex(Buffer.from(manifest)),
-            "X-Standin-Person-Count": "2", "X-Standin-Scene-Version": "rough-layout-v1" } });
+            "X-Standin-Person-Count": String(sources.length), "X-Standin-Scene-Version": "rough-layout-v1" } });
         },
       }),
       renderFinalPreview: (artifact, aligned, _overrides, sceneCamera, signal) => renderFinalPreview(artifact, aligned, {

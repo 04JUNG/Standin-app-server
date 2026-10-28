@@ -1,3 +1,4 @@
+import { analysisFailureDetails } from "./failure.js";
 // 작업 기록(GET /v1/analysis/jobs)의 순수 함수들 — 커서 인코딩, 쿼리 검증, row→응답 매핑.
 //
 // 라우트와 SQL에서 분리해 둔 이유는 테스트 때문이다. 이 레포에는 DB를 띄우는 통합
@@ -137,6 +138,7 @@ export interface JobHistoryItem {
   createdAt: string;
   completedAt: string | null;
   errorCode: string | null;
+  failure: ReturnType<typeof analysisFailureDetails>;
   source: string | null;
   personCount: number;
   selectionCount: number;
@@ -161,6 +163,7 @@ export function toHistoryItem(row: JobHistoryRow): JobHistoryItem {
     createdAt: row.created_at,
     completedAt: row.completed_at,
     errorCode: row.error_code,
+    failure: analysisFailureDetails(row.error_code),
     source: row.source,
     personCount: row.person_count ?? 0,
     selectionCount,

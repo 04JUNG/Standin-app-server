@@ -101,6 +101,8 @@ export async function prepareRefinedScene(
   } catch {
     throw new SceneError("SCENE_UNAVAILABLE", "original input could not be read");
   }
+  if (job.inputSha256 && sha256Hex(image) !== job.inputSha256)
+    throw new SceneError("SCENE_SOURCE_CHANGED", "original input hash changed");
   const persons = refs.map((ref) => {
     const p = job.result!.candidatesByPerson.find(
       (p) => p.personIndex === ref.personIndex,

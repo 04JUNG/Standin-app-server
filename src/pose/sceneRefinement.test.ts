@@ -230,3 +230,15 @@ test("explicit converter calibration mismatch is unsupported body; other 409 err
   f.deps.convertFramed = async () => { throw new ConverterError("CONVERTER_REJECTED", "private", null, 409, "SOURCE_BVH_SHA256_MISMATCH"); };
   await assert.rejects(prepareRefinedScene("owner", f.job, f.refs, f.sources, f.deps, true), { code: "CONVERTER_REJECTED" });
 });
+
+
+test("stored input SHA binds the actual v4 original bytes before any worker request", async () => {
+  const f = fixture();
+  f.job.inputSha256 = sha256Hex(image);
+  await prepareRefinedScene("owner", f.job, f.refs, f.sources, f.deps, true);
+  f.job.inputSha256 = "b".repeat(64);
+  let called = false;
+  f.deps.request = async () => { called = true; throw new Error("must not dispatch"); };
+  await assert.rejects(prepareRefinedScene("owner", f.job, f.refs, f.sources, f.deps, true), { code: "SCENE_SOURCE_CHANGED" });
+  assert.equal(called, false);
+});

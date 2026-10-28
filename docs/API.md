@@ -1726,3 +1726,12 @@ Standin **0.2.0 정식 이상**만 지원한다. `0.2.0-beta.*`는 미지원이�
 앱의 화면은 소급 변경되지 않는다. 신규 앱은 426을 받으면 업데이트 화면만 표시한다.
 헬스·관리자·인증/OAuth 및 `DELETE /v1/installations/current/data`는 버전 차단 대상이 아니다.
 업데이트 피드와 0.2.0 이상 설치 파일을 먼저 게시한 뒤 BFF를 배포한다.
+
+
+## CSP 장면 metadata·부분 저장·입력 identity (2026-10-28)
+
+기존 FBX binary와 scene-save-v1/v4 검수 계약을 유지하면서 `csp-scene-manifest-v1` prepare/metadata/release를 추가했습니다. 기본 통합도 v4와 독립적으로 prepare할 수 있습니다. 미선택 generation 후보는 job 전체를 차단하지 않으며 선택된 generation은 계속 차단합니다. 부분 저장은 누락 사유와 snapshot 확인 없이 release하지 않습니다.
+
+result에 `sourceImage`(job에 묶인 원본명/SHA/크기)와 `capabilities.sceneAvailability`(기본/v4/metadata 가용 이유 및 후보별 사전 조건)를 추가합니다. polling/history의 `failure`는 같은 분석 phase/code/recovery를 전달하며 scene 오류 details.phase는 scene_prepare입니다. 기존 error/errorCode 필드는 보존합니다.
+
+상세 wire 계약·호환성·새 CORS 헤더·카메라 unavailable 상태는 [CSP metadata 계약](csp-scene-manifest-v1.md), 읽기 전용 로그 점검과 설정 보존 제안은 [런타임 점검](csp-runtime-readiness-2026-10-28.md)을 따릅니다. 전체 scene-camera-v1 레시피 전달은 Converter의 artifact-bound metadata 계약을 기다리며 CSP 자동 적용/실제 가져오기는 미검증입니다.

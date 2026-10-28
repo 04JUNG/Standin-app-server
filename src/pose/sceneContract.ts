@@ -10,12 +10,15 @@ export function sceneSaveContract(original: boolean, refined: boolean) {
       ...(original ? ["original-selection" as const] : []),
       ...(original && refined ? ["auto-correct-v4" as const] : []),
     ],
+    manifestVersion: "csp-scene-manifest-v1",
     reviewVersion: SCENE_REVIEW_VERSION,
     reviewTtlSeconds: SCENE_REVIEW_TTL_MS / 1000,
     cancellation: { httpRequest: true, serverOperation: false },
   };
 }
 export const sceneRecovery = {
+  SCENE_PARTIAL_CONFIRMATION_REQUIRED: "confirm_partial",
+  GENERATED_INDIVIDUAL_ONLY: "change_selection",
   SCENE_CONTRACT_UNSUPPORTED: "refresh_capabilities",
   SCENE_REVIEW_REQUIRED: "prepare_again",
   SCENE_REVIEW_EXPIRED: "prepare_again",
@@ -41,6 +44,7 @@ export class SceneError extends Error {
 export function sceneErrorDetails(code: string, allowOriginal = false, serverOperationMayContinue = code === "SCENE_TIMEOUT") {
   if (!Object.hasOwn(sceneRecovery, code)) return undefined;
   return {
+    phase: "scene_prepare",
     recovery: sceneRecovery[code as SceneErrorCode],
     allowedActions: [sceneRecovery[code as SceneErrorCode], ...(allowOriginal ? ["use_original_selection"] : [])],
     serverOperationMayContinue,
