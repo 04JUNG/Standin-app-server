@@ -144,7 +144,7 @@ export async function prepareRefinedScene(
       !ref ||
       seen.has(row.person_index) ||
       typeof row.pose_id !== "string" ||
-      !/^[A-Za-z0-9_-]+$/.test(row.pose_id)
+      (row.pose_id === "." || row.pose_id === ".." || !row.pose_id || /[/\\\u0000-\u001f]/.test(row.pose_id))
     )
       throw new SceneError("SCENE_INTEGRITY", "invalid scene plan identity");
     seen.add(row.person_index);
