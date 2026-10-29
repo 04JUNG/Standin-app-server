@@ -6,6 +6,10 @@ function env(key: string, def = ""): string {
 }
 
 export const config = {
+  // Read-only Marketing API credential. Inject through ECS Secrets, never browser configuration.
+  metaMarketingToken: env("META_MARKETING_TOKEN"),
+  metaMarketingVersion: env("META_MARKETING_VERSION"),
+  metaMarketingAccountId: env("META_MARKETING_ACCOUNT_ID", "1090943087171654"),
   poseThumbnailRevision: env(
     "POSE_THUMBNAIL_REVISION",
     env("DEPLOYMENT_VERSION"),

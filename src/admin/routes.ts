@@ -1,3 +1,4 @@
+import { readMetaMarketing } from "./marketing.js";
 import { createHumanThumbnailRoutes } from "../human-thumbnail.js";
 import { randomUUID } from "node:crypto";
 import { acquisitionSummary } from "../installations/acquisition.js";
@@ -353,6 +354,15 @@ adminRoutes.get("/overview", async (c) => {
       days: accuracy.days,
     },
   });
+});
+
+adminRoutes.get("/marketing", async (c) => {
+  const parsed = parseWindowDays(c.req.query("days"));
+  if (!parsed.ok) return c.json(errorEnvelope("INVALID_INPUT", parsed.message, c.get("requestId")), 400);
+  const queriedAt = new Date().toISOString();
+  const [acquisition, meta] = await Promise.all([acquisitionSummary(parsed.days), readMetaMarketing(parsed.days)]);
+  return c.json({ windowDays: parsed.days, queriedAt,
+    since: new Date(Date.parse(queriedAt) - parsed.days * 86400000).toISOString(), acquisition, meta });
 });
 
 adminRoutes.get("/product", async (c) => {

@@ -230,6 +230,7 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
     <button data-tab="installs">설치</button>
     <button data-tab="gallery">모아 보기</button>
     <button data-tab="metrics">지표</button>
+    <button data-tab="marketing">마케팅</button>
     <button data-tab="ops">운영</button>
   </nav>
   <main>
@@ -325,6 +326,15 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
       </div>
       <div id="productOut"></div>
     </div>
+    </section>
+    <section class="tab" id="tab-marketing">
+      <div class="card">
+        <h2>포스터 A · 영상 A 성과</h2>
+        <p class="sub">화면을 보고 있는 동안 30초마다 서버 집계를 확인합니다. Meta는 최대 1분 간격으로 조회하며 원본 보고 자체에 지연·보정이 있을 수 있습니다.</p>
+        <button id="marketingRefresh">지금 새로고침</button>
+        <p id="marketingMsg" class="sub" role="status"></p>
+        <div id="marketingOut"></div>
+      </div>
     </section>
     <section class="tab" id="tab-ops">
     <div class="row" id="cards"></div>
@@ -1658,6 +1668,57 @@ function acquisitionBlock(rows) {
     ordered.map(r => '<tr><td>'+esc(labels[r.creative])+'</td>'+['installations','active','analyzed','selected','exported'].map(k=>'<td>'+(r.creative==='unknown' && k!=='installations' ? '—' : esc(r[k]))+'</td>').join('')+'</tr>').join('')+'</tbody></table></div><p class="sub">출처 미확인의 이용 이력은 광고 연결 집계에 사용하지 않습니다.</p>';
 }
 
+function marketingRender(data) {
+  const meta = data.meta;
+  const labels = {ready:'연결됨',unconfigured:'API 연결 대기',unavailable:'조회 실패',stale:'갱신 실패 · 이전 데이터'};
+  let html = '<h3>Meta 광고 성과 · ' + esc(labels[meta.status] || '상태 확인 필요') + '</h3>';
+  if (meta.snapshot) {
+    const snap = meta.snapshot;
+    html += '<p class="sub">광고계정 한국 시간 ' + esc(snap.since) + ' ~ ' + esc(snap.until) + ' (오늘 포함) · Meta 조회 ' + esc(when(snap.fetchedAt)) + '</p>';
+    html += '<div class="scroll"><table><thead><tr><th>소재</th><th>광고비 (원)</th><th>노출</th><th>링크 클릭</th><th>랜딩 방문</th><th>클릭률</th><th>방문당 비용 (원)</th></tr></thead><tbody>';
+    const names = {'meta-poster-a':'포스터 A','meta-hook-a':'영상 A'};
+    html += snap.rows.map(r => '<tr><td>' + esc(names[r.creative] || r.creative) + '</td>' +
+      [r.spend,r.impressions,r.clicks,r.landingViews,r.impressions ? (100*r.clicks/r.impressions).toFixed(2)+'%' : '—',r.landingViews ? (r.spend/r.landingViews).toFixed(0) : '—'].map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>').join('') + '</tbody></table></div>';
+  } else html += '<p class="sub">광고 수치를 아직 가져오지 못했습니다. 아래 앱 집계는 별도로 갱신됩니다. 미연결·조회 실패는 성과 0을 의미하지 않습니다.</p>';
+  html += '<p class="sub">앱 조회 ' + esc(when(data.queriedAt)) + ' · 신규 설치 범위: ' + esc(when(data.since)) + ' 이후 최근 ' + esc(data.windowDays) + '일(이동 구간). 광고 달력 날짜 범위와 다르므로 두 표를 나누어 비교하세요.</p>';
+  html += acquisitionBlock(data.acquisition);
+  html += '<p class="sub">신규 설치는 설치 파일 다운로드나 설치 프로그램 완료가 아니라 앱 첫 실행 후 서버에 등록된 설치 식별자 수입니다. 테스트·개발용 설치도 포함됩니다. 출처 연결에 동의한 설치만 소재별 이용을 비교할 수 있어 전체 광고 전환율·승자 판정으로 해석하지 않습니다.</p>';
+  return html;
+}
+let marketingRequest = 0;
+let marketingController = null;
+async function marketingGo() {
+  if (!token) return;
+  if (marketingController) marketingController.abort();
+  const controller = new AbortController();
+  marketingController = controller;
+  const sequence = ++marketingRequest;
+  const days = $("period").value;
+  const timer = setTimeout(() => controller.abort(), 20000);
+  $("marketingMsg").textContent = '최신 집계 조회 중…';
+  try {
+    const res = await fetch('/v1/admin/marketing?days=' + encodeURIComponent(days), {headers:{'X-Beta-Admin-Token':token},signal:controller.signal});
+    if (!res.ok) throw new Error('조회 실패 (' + res.status + ')');
+    const data = await res.json();
+    if (sequence !== marketingRequest) return;
+    $("marketingOut").innerHTML = marketingRender(data);
+    $("marketingMsg").textContent = '서버 응답 ' + when(data.queriedAt) + ' · 자동 갱신 켜짐';
+  } catch (error) {
+    if (sequence !== marketingRequest) return;
+    $("marketingMsg").textContent = '갱신하지 못했습니다. 표시된 자료가 있다면 이전 조회 결과입니다. 선택 기간 ' + days + '일 · 다시 시도해 주세요.';
+  } finally {
+    clearTimeout(timer);
+    if (sequence === marketingRequest) marketingController = null;
+  }
+}
+$("marketingRefresh").addEventListener('click', marketingGo);
+setInterval(() => {
+  if (!document.hidden && $("tab-marketing").classList.contains('on') && !marketingController) marketingGo();
+}, 30000);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && $("tab-marketing").classList.contains('on') && !marketingController) marketingGo();
+});
+
 function productRender(data) {
   const drop = data.dropoff;
   $("productOut").innerHTML = accuracyBlock(data.accuracy) + usageBlock(data.usage) +
@@ -2192,6 +2253,7 @@ function selectTab(name) {
     section.classList.toggle("on", section.id === "tab-" + name);
   });
   try { localStorage.setItem(TAB_KEY, name); } catch (error) { /* 저장 못 해도 동작은 같다 */ }
+  if (name === "marketing") marketingGo();
   if (loadedTabs.has(name)) return;
   loadedTabs.add(name);
   if (name === "jobs") recentGo();
@@ -2210,6 +2272,7 @@ document.querySelectorAll("button[data-goto]").forEach((button) => {
 $("period").addEventListener("change", () => {
   overviewGo();
   if (loadedTabs.has("metrics")) productGo();
+  if (loadedTabs.has("marketing")) { $("marketingOut").innerHTML = ""; marketingGo(); }
 });
 
 $("drawerClose").addEventListener("click", closeDrawer);

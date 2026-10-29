@@ -1594,3 +1594,23 @@ Converter 코드·모델·라이브러리 자산 변경은 필요 없다.
 ## 선택적 광고 설치 연결
 
 신규 설치의 광고 연결·철회와 관리자 집계 계약은 [AD_ACQUISITION.md](AD_ACQUISITION.md)를 따른다. 기존 품질 검토 동의와 별개이며 Google/Meta로 앱 이용 기록을 보내지 않는다.
+
+
+## 관리자 마케팅 자동 집계 (2026-10-29)
+
+`GET /v1/admin/marketing?days=7` (1–90, 기본 7), 기존 X-Beta-Admin-Token 인증 및 private/no-store 적용.
+응답은 `windowDays`, `queriedAt`, `since`, `acquisition`(기존 광고 연결 설치 코호트), `meta`를 포함한다.
+앱은 조회 시점 이전 N×24시간 내 등록한 비철회 설치 기준이며 테스트 설치도 포함한다.
+설치는 첫 실행 서버 등록 식별자이며 설치 프로그램 완료/고유 사람 수가 아니다. 소재별 이용은 연결 동의 이후만 집계한다.
+Meta는 KRW/Asia/Seoul 광고계정의 오늘 포함 N개 달력 날짜, 지정된 포스터 A·영상 A 광고 ID로 조회한다.
+`meta.status`: ready / unconfigured / unavailable / stale. `snapshot`은 없으면 null, 있으면
+since/until/fetchedAt/rows(creative, spend, impressions, clicks, landingViews)를 제공한다.
+오류는 0으로 바꾸지 않는다. stale은 동일 기간의 마지막 성공값이며 기간 변경 시 다른 기간 캐시는 사용하지 않는다.
+관리자 대시보드 마케팅 탭은 보이는 동안 30초마다 조회하며 Meta 호출은 프로세스별 60초 캐시와 중복 요청 병합을 적용한다.
+Meta 보고 지연과 설치 코호트 시간축 차이 때문에 두 표를 합쳐 전체 광고 전환율이나 통계적 A/B 승자를 산출하지 않는다.
+
+서버만 META_MARKETING_TOKEN(ads_read), META_MARKETING_VERSION, META_MARKETING_ACCOUNT_ID를 읽는다.
+토큰은 ECS Secrets로 주입하며 브라우저·소스·로그에 기록하지 않는다. API 버전은 앱에서 확인한 지원 버전을 명시한다.
+미설정이어도 앱 집계는 작동한다. 토큰 만료/조회 실패는 관리자 화면에 표시된다.
+
+배포 환경 변수: META_MARKETING_SECRET_ARN(Secrets Manager JSON token 키), META_MARKETING_VERSION(v26.0 검증), META_MARKETING_ACCOUNT_ID. BFF 실행 역할에 해당 시크릿 GetSecretValue만 허용한다. worker에는 주입하지 않는다. 토큰 갱신 후 새 ECS 배포가 필요하다. CDK로 태스크를 재생성하는 경우에도 동일 secret 연결을 보존하거나 이 배포 워크플로를 재실행한다.
