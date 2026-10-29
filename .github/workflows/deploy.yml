@@ -109,8 +109,11 @@ jobs:
         with:
           task-definition: taskdef.json
           container-name: bff
+          secrets: ${{ vars.META_MARKETING_SECRET_ARN && format('META_MARKETING_TOKEN={0}:token::', vars.META_MARKETING_SECRET_ARN) || '' }}
           image: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.image.outputs.digest }}
           environment-variables: |
+            META_MARKETING_VERSION=${{ vars.META_MARKETING_VERSION }}
+            META_MARKETING_ACCOUNT_ID=${{ vars.META_MARKETING_ACCOUNT_ID || '1090943087171654' }}
             HAND_SELECTION_ENABLED=${{ vars.HAND_SELECTION_ENABLED || 'false' }}
             SEMANTIC_SEARCH_ENABLED=${{ vars.SEMANTIC_SEARCH_ENABLED || 'false' }}
             SEMANTIC_SEARCH_PER_MINUTE=${{ vars.SEMANTIC_SEARCH_PER_MINUTE || '10' }}
