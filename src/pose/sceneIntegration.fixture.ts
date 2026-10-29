@@ -1,5 +1,7 @@
 /** Local contract harness: real BFF handlers/orchestration, synthetic repositories,
  * worker/Converter and binary payloads. Never an installed-app or real-worker E2E. */
+import type { SceneCameraBinding } from "./sceneCamera.js";
+import { setTimeout as delay } from "node:timers/promises";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
@@ -26,7 +28,7 @@ export const fixtureFbx = (label: string) => Buffer.from(`Kaydara FBX Binary  \0
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=", "base64");
 const character = "a".repeat(64), runtime = "b".repeat(64), model = "c".repeat(64);
 const owner = "fixture-owner";
-export function createSceneIntegrationFixture() {
+export function createSceneIntegrationFixture(options: { camera?: SceneCameraBinding["recipe"]; timeoutMs?: number; sourceDelayMs?: number } = {}) {
   // Framed receipts use the existing per-person cache. Refuse any external S3 IO.
   if (config.betaDataBucket || process.env.NODE_ENV === "production")
     throw new Error("Scene fixture requires no BETA_DATA_BUCKET and non-production NODE_ENV");
@@ -53,8 +55,10 @@ export function createSceneIntegrationFixture() {
   const job = { id: jobId, inputS3Key: "fixture-original", status: "completed", updatedAt: "fixture-v1",
     result: { jobId, source: "image", image: { width: 1000, height: 768 }, candidatesByPerson: people } as AnalysisResult,
   } as Job;
-  const load = async (id: string, installation: string) =>
-    state.owned && id === jobId && installation === owner ? structuredClone(job) : undefined;
+  const load = async (id: string, installation: string) => {
+    if (options.sourceDelayMs) await delay(options.sourceDelayMs);
+    return state.owned && id === jobId && installation === owner ? structuredClone(job) : undefined;
+  };
   const confirmed = async () => state.confirmed;
   const body = async (_owner: string, _job: string, index: number): Promise<BodySelection> => ({
     schemaVersion: "body-selection.v1", personIndex: index, intent: "manual", manualCharacterId: "chosen",
@@ -111,7 +115,7 @@ export function createSceneIntegrationFixture() {
     }
     const artifactOnly = input.artifact_only === true;
     const preview = artifactOnly ? Buffer.alloc(0) : png;
-    return Response.json({ version: "scene-refinement-v4", plan_id: input.plan_id, image_sha256: imageSha,
+    return Response.json({ ...(options.camera ? { camera: { version: "scene-camera-artifact-v1", artifact_sha256: sha256Hex(finalFbx), recipe: options.camera } } : {}), version: "scene-refinement-v4", plan_id: input.plan_id, image_sha256: imageSha,
       person_count: 2, people: planPeople, ...(artifactOnly ? { artifact_contract: "verified-scene-fbx-v1" } : {}),
       fbx_base64: finalFbx.toString("base64"), artifact_sha256: sha256Hex(finalFbx),
       preview_base64: preview.toString("base64"), preview_sha256: sha256Hex(preview) });
@@ -135,6 +139,7 @@ export function createSceneIntegrationFixture() {
       modelRevision: model, solverVersion: "fixture-solver", framingVersion: "fixture-framing",
     }) }));
     app.route("/v1/analysis/jobs", createSceneRoutes(request => app.fetch(request), {
+      budgetMs: () => options.timeoutMs ?? 900000,
       enabled: () => true, refinementEnabled: () => true, getOwnedJob: load, validateConfirmedSelection: confirmed,
       saveSceneReceipt: async (installation, id, key, receipt) => { shared.set(`${installation}/${id}/${key}`, encodeSceneReceipt(receipt)); },
       loadSceneReceipt: async (installation, id, key) => {
@@ -142,14 +147,14 @@ export function createSceneIntegrationFixture() {
         const stored = shared.get(`${installation}/${id}/${key}`);
         return stored ? decodeSceneReceipt(stored) : undefined;
       },
-      prepareRefinedScene: (installation, sourceJob, refs, sources, _overrides, artifactOnly) =>
+      prepareRefinedScene: (installation, sourceJob, refs, sources, _overrides, artifactOnly, budget) =>
         prepareRefinedScene(installation, sourceJob, refs, sources, {
           loadInput: async () => new Blob(["synthetic original image"]), selection: body, handBakeFor: hands,
           getPoseBvh, resolveExportArtifact: resolveArtifact, convertFramed: convert,
           request: (stage, input) => sceneRefinementRequest(stage, input, {
             baseUrl: "https://worker.fixture", token: "fixture-only-not-a-credential", fetch: workerFetch,
           }),
-        }, artifactOnly),
+        }, artifactOnly, budget),
       composeRoughScene: (id, image, sources) => composeRoughScene(id, image, sources, {
         baseUrl: "https://converter.fixture", fetch: async (_url, init) => {
           state.composeCalls++;
@@ -157,7 +162,7 @@ export function createSceneIntegrationFixture() {
           const parsed = JSON.parse(manifest) as { persons: Record<string, unknown>[] };
           const files = form.getAll("fbx") as File[];
           for (let i = 0; i < files.length; i++) assert.equal(sha256Hex(new Uint8Array(await files[i]!.arrayBuffer())), parsed.persons[i]!.fbx_sha256);
-          return new Response(originalFbx, { headers: { "X-Standin-Artifact-SHA256": sha256Hex(originalFbx),
+          return new Response(originalFbx, { headers: { ...(options.camera ? { "X-Standin-Scene-Camera": Buffer.from(JSON.stringify({ version: "scene-camera-artifact-v1", artifact_sha256: sha256Hex(originalFbx), recipe: options.camera })).toString("base64") } : {}), "X-Standin-Artifact-SHA256": sha256Hex(originalFbx),
             "X-Standin-FBX-Artifact-SHA256": sha256Hex(originalFbx), "X-Standin-Scene-Input-SHA256": sha256Hex(Buffer.from(manifest)),
             "X-Standin-Person-Count": String(sources.length), "X-Standin-Scene-Version": "rough-layout-v1" } });
         },

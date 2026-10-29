@@ -592,13 +592,13 @@ export function getDefaultBodyTemplate(scope: string): Promise<Response> {
 export async function sceneRefinementRequest(
   stage: "plan" | "build",
   value: unknown,
-  overrides: Partial<{ baseUrl: string; token: string; timeoutMs: number; fetch: typeof fetch }> = {},
+  overrides: Partial<{ baseUrl: string; token: string; timeoutMs: number; fetch: typeof fetch; signal: AbortSignal }> = {},
 ): Promise<Record<string, unknown>> {
   const deps = { baseUrl: config.sceneRefinementBaseUrl, token: config.sceneRefinementToken,
     timeoutMs: config.sceneRefinementTimeoutMs, fetch, ...overrides };
   if (!deps.baseUrl || !deps.token)
     throw new SceneError("SCENE_UNAVAILABLE", "scene worker disabled");
-  const deadline = AbortSignal.timeout(deps.timeoutMs);
+  const deadline = AbortSignal.any([AbortSignal.timeout(deps.timeoutMs), ...(deps.signal ? [deps.signal] : [])]);
   let response: Response;
   try {
     response = await deps.fetch(
