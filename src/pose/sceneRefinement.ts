@@ -1,3 +1,5 @@
+import { SceneBudget } from "./sceneBudget.js";
+import { validateSceneCamera, type SceneCameraBinding } from "./sceneCamera.js";
 import { SceneError } from "./sceneContract.js";
 /** Scene orchestration only. Direction/IK/layout inference belongs to inference. */
 import type { Job } from "../jobs/store.js";
@@ -68,6 +70,7 @@ function publicDirection(raw: unknown): SceneDirection | null {
   };
 }
 export interface RefinedScene {
+  camera?: SceneCameraBinding;
   artifactContract?: "verified-scene-fbx-v1";
   bytes: Uint8Array;
   sha256: string;
@@ -91,14 +94,25 @@ export async function prepareRefinedScene(
   sources: SceneSource[],
   overrides: Partial<typeof defaults> = {},
   artifactOnly = false,
+  budget = new SceneBudget(config.sceneRefinementTimeoutMs),
 ): Promise<RefinedScene> {
-  const deps = { ...defaults, ...overrides };
+  const base = { ...defaults, ...overrides };
+  const deps = { ...base,
+    loadInput: (...args: Parameters<typeof base.loadInput>) => budget.run(() => base.loadInput(...args)),
+    getPoseBvh: (...args: Parameters<typeof base.getPoseBvh>) => budget.run(() => base.getPoseBvh(...args)),
+    resolveExportArtifact: (...args: Parameters<typeof base.resolveExportArtifact>) => budget.run(() => base.resolveExportArtifact(...args)),
+    selection: (...args: Parameters<typeof base.selection>) => budget.run(() => base.selection(...args)),
+    handBakeFor: (...args: Parameters<typeof base.handBakeFor>) => budget.run(() => base.handBakeFor(...args)),
+    convertFramed: (input: Parameters<typeof base.convertFramed>[0]) => budget.run(() => base.convertFramed({ ...input, signal: budget.signal })),
+    request: (stage: "plan" | "build", input: unknown) => budget.run(() => base.request(stage, input, { signal: budget.signal })),
+  };
   if (!job.inputS3Key || !job.result)
     throw new SceneError("SCENE_UNAVAILABLE", "original image unavailable");
   let image: Uint8Array;
   try {
     image = new Uint8Array(await (await deps.loadInput(job.inputS3Key)).arrayBuffer());
-  } catch {
+  } catch (error) {
+    if (error instanceof SceneError) throw error;
     throw new SceneError("SCENE_UNAVAILABLE", "original input could not be read");
   }
   if (job.inputSha256 && sha256Hex(image) !== job.inputSha256)
@@ -287,7 +301,10 @@ export async function prepareRefinedScene(
       armGoalCount: Array.isArray(p.arm_goals) ? p.arm_goals.length : null,
     };
   });
+  budget.check();
+  const camera = result.camera === undefined ? undefined : validateSceneCamera(result.camera, sha256Hex(bytes), job.result.image ?? undefined);
   return {
+    ...(camera ? { camera } : {}),
     ...(artifactOnly ? { artifactContract: "verified-scene-fbx-v1" as const } : {}),
     bytes,
     sha256: sha256Hex(bytes),

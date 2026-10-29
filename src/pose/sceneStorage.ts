@@ -1,3 +1,4 @@
+import { validateSceneCamera } from "./sceneCamera.js";
 import { SCENE_MANIFEST_VERSION, type SceneManifest } from "./sceneManifest.js";
 import { SCENE_REVIEW_VERSION, SceneError } from "./sceneContract.js";
 /** Immutable scene receipts survive a BFF replica change, like person receipts. */
@@ -72,6 +73,11 @@ export function decodeSceneReceipt(data: Uint8Array): SceneReceipt {
     if (value.manifest && (value.manifest.version !== SCENE_MANIFEST_VERSION ||
         value.manifest.snapshotSha256 !== value.binding || value.manifest.artifact?.sha256 !== scene.sha256 ||
         value.manifest.artifact?.fileCount !== 1)) throw new Error("manifest lineage");
+    if (scene.camera) validateSceneCamera(scene.camera, scene.sha256);
+    if (value.manifest?.camera?.status === "available" &&
+        (!scene.camera || value.manifest.camera.artifactSha256 !== scene.sha256 ||
+         JSON.stringify(value.manifest.camera.recipe) !== JSON.stringify(scene.camera.recipe)))
+      throw new Error("camera lineage");
     return {
       ...(value.manifest ? { manifest: value.manifest } : {}),
       reviewVersion: value.reviewVersion,

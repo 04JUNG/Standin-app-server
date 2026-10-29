@@ -5,7 +5,8 @@ import { loadSceneReceipt, saveSceneReceipt, sceneReceiptStorageAvailable, type 
 import { renderFinalPreview } from "../converter/finalPreview.js";
 import { randomBytes } from "node:crypto";
 import { prepareRefinedScene, type RefinedScene } from "./sceneRefinement.js";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
+import { SceneBudget } from "./sceneBudget.js";
 import type { AppEnv } from "../env.js";
 import { getOwnedJob } from "../jobs/store.js";
 import { validateConfirmedSelection } from "../analytics/store.js";
@@ -33,6 +34,7 @@ const defaults = {
     !!config.sceneRefinementBaseUrl &&
     !!config.sceneRefinementToken,
   enabled: () => config.sceneExportEnabled && converterEnabled(),
+  budgetMs: () => Math.min(config.sceneRefinementTimeoutMs, 900000),
 };
 // Bounded development/cache receipts. Shared publication completes before a key is returned.
 const receiptCacheKey = (owner: string, job: string, key: string) => `${owner}/${job}/${key}`;
@@ -60,14 +62,21 @@ async function remember(
   return { key, receipt };
 }
 export function createSceneRoutes(
-  dispatch: (request: Request) => Response | Promise<Response>,
+  dispatchSource: (request: Request) => Response | Promise<Response>,
   overrides: Partial<typeof defaults> = {},
 ) {
-  const deps = { ...defaults, ...overrides };
+  const dependencies = { ...defaults, ...overrides };
   const routes = new Hono<AppEnv>();
   // Per application, never a module-global cross-owner/replica registry.
   const receipts = new Map<string, SceneReceipt>();
-  routes.post("/:jobId/scene", async (c) => {
+  const handle = async (c: Context<AppEnv>, budget: SceneBudget, recovery: { allowOriginal: boolean }) => {
+    const dispatch = (request: Request) => budget.run(async () => dispatchSource(new Request(request, { signal: budget.signal })));
+    const deps = { ...dependencies,
+      getOwnedJob: (...args: Parameters<typeof dependencies.getOwnedJob>) => budget.run(() => dependencies.getOwnedJob(...args)),
+      validateConfirmedSelection: (...args: Parameters<typeof dependencies.validateConfirmedSelection>) => budget.run(() => dependencies.validateConfirmedSelection(...args)),
+      loadSceneReceipt: (...args: Parameters<typeof dependencies.loadSceneReceipt>) => budget.run(() => dependencies.loadSceneReceipt(...args)),
+      composeRoughScene: (id: string, image: { width: number; height: number }, sources: SceneSource[]) => budget.run(() => dependencies.composeRoughScene(id, image, sources, { signal: budget.signal })),
+    };
     const started = Date.now();
     let allowOriginal = false;
     let serverOperationMayContinue: boolean | undefined;
@@ -88,7 +97,7 @@ export function createSceneRoutes(
         "지금은 장면 FBX 저장을 사용할 수 없습니다.",
       );
     const owner = c.get("installationId")!,
-      jobId = c.req.param("jobId");
+      jobId = c.req.param("jobId")!;
     let value: unknown;
     try {
       value = await c.req.json();
@@ -96,6 +105,7 @@ export function createSceneRoutes(
       return fail(400, "INVALID_INPUT", "저장할 인물을 다시 선택해 주세요.");
     }
     const input = value as {
+      cameraContractVersion?: unknown;
       contractVersion?: unknown;
       saveMode?: unknown;
       reviewVersion?: unknown;
@@ -123,6 +133,9 @@ export function createSceneRoutes(
         "한 장면에는 1~8명을 저장할 수 있습니다.",
       );
     const manifestRequest = input.manifestVersion !== undefined;
+    const cameraNegotiated = input.cameraContractVersion === "scene-camera-artifact-v1";
+    if (input.cameraContractVersion !== undefined && !cameraNegotiated)
+      return fail(409, "SCENE_CONTRACT_UNSUPPORTED", "카메라 정보 계약을 다시 확인해 주세요.");
     if (manifestRequest && input.manifestVersion !== SCENE_MANIFEST_VERSION)
       return fail(409, "SCENE_CONTRACT_UNSUPPORTED", "장면 정보 버전을 다시 확인해 주세요.");
     if (input.metadataOnly !== undefined && (input.metadataOnly !== true || !manifestRequest || input.prepare === true || input.preview !== undefined))
@@ -159,6 +172,7 @@ export function createSceneRoutes(
         (typeof input.artifactSha256 !== "string" || !/^[a-f0-9]{64}$/.test(input.artifactSha256)))
       return fail(400, "INVALID_INPUT", "확인한 장면의 SHA가 필요합니다.");
     allowOriginal = refined;
+    recovery.allowOriginal = refined;
     if (refined && !deps.refinementEnabled())
       return fail(503, "SCENE_UNAVAILABLE", "장면 보정을 사용할 수 없습니다.");
     const job = await deps.getOwnedJob(jobId, owner);
@@ -168,6 +182,7 @@ export function createSceneRoutes(
       job.result.source === "semantic"
     ) {
       allowOriginal = false;
+      recovery.allowOriginal = false;
       return fail(
         409,
         "SCENE_OBSERVATION_MISSING",
@@ -290,7 +305,7 @@ export function createSceneRoutes(
         return fail(400, "INVALID_INPUT", "제외할 인물을 다시 확인해 주세요.");
       const people = scenePeople(job, refs.map(r => r.personIndex), excludedIds);
       const binding = sha256Hex(
-        Buffer.from(JSON.stringify([owner, jobId, job.updatedAt, refs, saveMode, excludedIds])),
+        Buffer.from(JSON.stringify([owner, jobId, job.updatedAt, refs, saveMode, excludedIds, ...(cameraNegotiated ? ["scene-camera-artifact-v1"] : [])])),
       );
       const confirmation = input.partialConfirmation as { snapshotSha256?: unknown } | null;
       const partialConfirmed = confirmation?.snapshotSha256 === binding;
@@ -301,13 +316,13 @@ export function createSceneRoutes(
         return fail(409, "SCENE_PARTIAL_CONFIRMATION_REQUIRED", "일부 인물만 저장됩니다. 장면을 준비하고 저장 인원을 확인해 주세요.");
       if (people.partial && !receiptFlow)
         return fail(409, "SCENE_PARTIAL_CONFIRMATION_REQUIRED", "부분 저장은 장면 정보 확인이 필요합니다.");
-      let scene: { bytes: Uint8Array; sha256: string };
+      let scene: { bytes: Uint8Array; sha256: string; camera?: import("./sceneCamera.js").SceneCameraBinding };
       let prepared: RefinedScene | undefined;
       let reviewed: SceneReceipt | undefined;
       if (receiptFlow) {
         if (input.prepare === true) {
           prepared = refined
-            ? await deps.prepareRefinedScene(owner, job, refs, sources, {}, input.artifactOnly === true)
+            ? await deps.prepareRefinedScene(owner, job, refs, sources, {}, input.artifactOnly === true, budget)
             : { ...await deps.composeRoughScene(jobId, image, sources), artifactContract: "verified-scene-fbx-v1",
                 preview: "", previewSha256: sha256Hex(Buffer.alloc(0)), summary: [] };
           scene = prepared;
@@ -334,7 +349,7 @@ export function createSceneRoutes(
           if (manifestRequest && (!receipt.manifest || receipt.manifest.version !== SCENE_MANIFEST_VERSION ||
               receipt.manifest.artifact.sha256 !== receipt.scene.sha256 || receipt.manifest.snapshotSha256 !== binding ||
               receipt.manifest.artifact.saveMode !== saveMode ||
-              JSON.stringify(receipt.manifest) !== JSON.stringify(sceneManifest(job, binding, receipt.scene.sha256, saveMode, people))))
+              JSON.stringify(receipt.manifest) !== JSON.stringify(sceneManifest(job, binding, receipt.scene.sha256, saveMode, people, cameraNegotiated ? receipt.scene.camera : undefined))))
             return fail(502, "SCENE_INTEGRITY", "장면 정보가 파일과 일치하지 않습니다.");
           reviewed = receipt;
           scene = receipt.scene;
@@ -358,6 +373,7 @@ export function createSceneRoutes(
           previewFailure = { error };
         }
       }
+      budget.check();
       const current = await deps.getOwnedJob(jobId, owner);
       if (
         !current ||
@@ -414,7 +430,7 @@ export function createSceneRoutes(
         return new Response(png, { headers: { "Content-Type": "image/png", "Cache-Control": "private, no-store",
           "X-Standin-Artifact-SHA256": scene.sha256, "X-Standin-Preview-Artifact-SHA256": sha256Hex(png) } });
       }
-      const manifest = reviewed?.manifest ?? sceneManifest(job, binding, scene.sha256, saveMode, people);
+      const manifest = reviewed?.manifest ?? sceneManifest(job, binding, scene.sha256, saveMode, people, cameraNegotiated ? scene.camera : undefined);
       const observe = () => log.info({ type: "scene_save_result", jobId, requestId: c.get("requestId"),
         saveMode, operation: input.metadataOnly === true ? "metadata" : prepared ? "prepare" : "release",
         path: reviewed ? "scene_receipt" : refined ? "scene_refinement" : "compose_scene",
@@ -426,7 +442,8 @@ export function createSceneRoutes(
         return c.json({ manifest, partialConfirmed, expiresAt: new Date(reviewed!.expires).toISOString() }, 200, { "Cache-Control": "private, no-store" });
       }
       if (prepared) {
-        const { key: reviewKey, receipt } = await remember(receipts, binding, prepared, owner, jobId, deps.saveSceneReceipt, manifest);
+        budget.check();
+        const { key: reviewKey, receipt } = await budget.run(() => remember(receipts, binding, prepared, owner, jobId, deps.saveSceneReceipt, manifest));
         observe();
         c.header("Cache-Control", "private, no-store");
         return c.json({
@@ -447,6 +464,7 @@ export function createSceneRoutes(
           personCount: refs.length,
         });
       }
+      budget.check();
       observe();
       return new Response(scene.bytes, {
         headers: {
@@ -476,6 +494,17 @@ export function createSceneRoutes(
         : ["SCENE_UNAVAILABLE", "SCENE_BUSY"].includes(code) ? 503
         : ["SCENE_UNSUPPORTED_BODY", "SCENE_SOURCE_CHANGED"].includes(code) ? 409 : 502,
         code, "장면 FBX를 만들지 못했습니다. 복구 안내에 따라 다시 시도해 주세요.");
+    }
+  };
+  routes.post("/:jobId/scene", async c => {
+    const budget = new SceneBudget(dependencies.budgetMs(), c.req.raw.signal);
+    const recovery = { allowOriginal: false };
+    try { return await budget.run(() => handle(c, budget, recovery)); }
+    catch (error) {
+      if (!(error instanceof SceneError)) throw error;
+      c.header("Cache-Control", "private, no-store");
+      return c.json(errorEnvelope(error.code, "장면 준비 시간이 초과됐습니다. 다시 준비해 주세요.",
+        c.get("requestId"), sceneErrorDetails(error.code, recovery.allowOriginal, true)), 504);
     }
   });
   return routes;

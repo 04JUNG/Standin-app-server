@@ -1735,3 +1735,7 @@ Standin **0.2.0 정식 이상**만 지원한다. `0.2.0-beta.*`는 미지원이�
 result에 `sourceImage`(job에 묶인 원본명/SHA/크기)와 `capabilities.sceneAvailability`(기본/v4/metadata 가용 이유 및 후보별 사전 조건)를 추가합니다. polling/history의 `failure`는 같은 분석 phase/code/recovery를 전달하며 scene 오류 details.phase는 scene_prepare입니다. 기존 error/errorCode 필드는 보존합니다.
 
 상세 wire 계약·호환성·새 CORS 헤더·카메라 unavailable 상태는 [CSP metadata 계약](csp-scene-manifest-v1.md), 읽기 전용 로그 점검과 설정 보존 제안은 [런타임 점검](csp-runtime-readiness-2026-10-28.md)을 따릅니다. 전체 scene-camera-v1 레시피 전달은 Converter의 artifact-bound metadata 계약을 기다리며 CSP 자동 적용/실제 가져오기는 미검증입니다.
+
+## Scene camera metadata extension
+
+Scene manifest requests may negotiate `cameraContractVersion=scene-camera-artifact-v1`. The artifact-bound available-camera shape and backwards compatibility are described in [scene-camera-transport-v1.md](scene-camera-transport-v1.md). One shared scene deadline covers prepare stages; this does not change `/analyze` deadlines.
