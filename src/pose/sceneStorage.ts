@@ -1,3 +1,6 @@
+import { partsDigest, validateStoredPartsReceipts } from "./sceneParts.js";
+import { validateSceneCamera } from "./sceneCamera.js";
+import { SCENE_MANIFEST_VERSION, type SceneManifest } from "./sceneManifest.js";
 import { SCENE_REVIEW_VERSION, SceneError } from "./sceneContract.js";
 /** Immutable scene receipts survive a BFF replica change, like person receipts. */
 import {
@@ -9,6 +12,7 @@ import { config } from "../config.js";
 import { ConverterError, sha256Hex } from "../converter/client.js";
 import type { RefinedScene } from "./sceneRefinement.js";
 export interface SceneReceipt {
+  manifest?: SceneManifest;
   reviewVersion: typeof SCENE_REVIEW_VERSION;
   binding: string;
   expires: number;
@@ -67,7 +71,22 @@ export function decodeSceneReceipt(data: Uint8Array): SceneReceipt {
         : !preview.length)
     )
       throw new Error("lineage");
+    if (value.manifest && (value.manifest.version !== SCENE_MANIFEST_VERSION ||
+        value.manifest.snapshotSha256 !== value.binding || value.manifest.artifact?.sha256 !== scene.sha256 ||
+        value.manifest.artifact?.fileCount !== 1)) throw new Error("manifest lineage");
+    if (scene.parts !== undefined) {
+      scene.parts = validateStoredPartsReceipts(scene.parts);
+      if (!value.manifest || partsDigest(value.manifest.artifact.parts) !== partsDigest(scene.parts))
+        throw new Error("parts manifest lineage");
+      value.manifest.artifact.parts = scene.parts;
+    }
+    if (scene.camera) validateSceneCamera(scene.camera, scene.sha256);
+    if (value.manifest?.camera?.status === "available" &&
+        (!scene.camera || value.manifest.camera.artifactSha256 !== scene.sha256 ||
+         JSON.stringify(value.manifest.camera.recipe) !== JSON.stringify(scene.camera.recipe)))
+      throw new Error("camera lineage");
     return {
+      ...(value.manifest ? { manifest: value.manifest } : {}),
       reviewVersion: value.reviewVersion,
       binding: value.binding,
       expires: value.expires,

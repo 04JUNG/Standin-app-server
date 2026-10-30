@@ -1,3 +1,4 @@
+import { partsCapabilityFixture, partsSelectionFixture } from "./sceneParts.fixture.js";
 import { config } from "../config.js";
 import { encodeSceneReceipt, decodeSceneReceipt, sceneReceiptStorageAvailable, saveSceneReceipt } from "./sceneStorage.js";
 import assert from "node:assert/strict";
@@ -9,11 +10,13 @@ import { SCENE_REVIEW_VERSION, SceneError, sceneSaveContract } from "./sceneCont
 import { type SceneReceipt } from "./sceneStorage.js";
 import { sha256Hex } from "../converter/client.js";
 import { createSceneRoutes } from "./sceneRoutes.js";
+import { createRequireInstallation } from "../installations/middleware.js";
+import { CLIENT_VERSION_HEADER } from "../client-version/policy.js";
 
 const fbx = Buffer.from("Kaydara FBX Binary  \0\x1a\0person");
 const correction = { contractVersion: "scene-save-v1", saveMode: "auto-correct-v4" };
 const confirmation = { ...correction, reviewVersion: "scene-review-v1", artifactSha256: sha256Hex(fbx) };
-function setup(refinement = false, shared = new Map<string, Uint8Array>()) {
+function setup(refinement = false, shared = new Map<string, Uint8Array>(), storedVersion?: string) {
   const state = {
     owner: true,
     installationId: "owner",
@@ -31,6 +34,8 @@ function setup(refinement = false, shared = new Map<string, Uint8Array>()) {
     renders: 0,
     onRender: undefined as (() => void) | undefined,
     sent: [] as number[],
+    clientVersion: "0.2.3-dev.392" as string | undefined,
+    forwardedVersions: [] as (string | null)[],
   };
   const job = {
     id: "job",
@@ -50,6 +55,17 @@ function setup(refinement = false, shared = new Map<string, Uint8Array>()) {
       })),
     },
   } as Job;
+  const protectedArtifact = new Hono<AppEnv>();
+  protectedArtifact.use("*", (c, next) => {
+    c.set("requestId", "artifact-req");
+    return next();
+  });
+  protectedArtifact.use("*", createRequireInstallation(async () => ({
+    id: state.installationId,
+    consentVersion: config.consentVersion,
+    appVersion: storedVersion ?? "0.2.0",
+  })));
+  protectedArtifact.get("*", c => c.body(fbx));
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
     c.set("requestId", "req");
@@ -61,6 +77,11 @@ function setup(refinement = false, shared = new Map<string, Uint8Array>()) {
     createSceneRoutes(
       async (request) => {
         state.reads++;
+        state.forwardedVersions.push(request.headers.get(CLIENT_VERSION_HEADER));
+        if (storedVersion !== undefined) {
+          const authorized = await protectedArtifact.fetch(request);
+          if (!authorized.ok) return authorized;
+        }
         assert.equal(request.headers.get("X-Installation-Id"), state.installationId);
         assert.equal(new URL(request.url).origin, "https://scene.internal");
         if (state.changeHands && state.composed)
@@ -70,6 +91,9 @@ function setup(refinement = false, shared = new Map<string, Uint8Array>()) {
         });
       },
       {
+        getScenePartsCapability: async () => structuredClone(partsCapabilityFixture),
+        loadSceneSelectionRevisions: async (_owner, _job, refs) => refs.map(r => ({ personIndex: r.personIndex, candidateId: r.candidateId, confirmedAt: "fixture-confirmation-v1" })),
+        loadSceneDescriptions: async () => [{ personIndex: 0, description: null }],
         saveSceneReceipt: async (owner, job, key, receipt) => {
           if (state.storageFails) throw new SceneError("SCENE_UNAVAILABLE", "fixture publication failure");
           shared.set(`${owner}/${job}/${key}`, encodeSceneReceipt(receipt));
@@ -105,7 +129,7 @@ function setup(refinement = false, shared = new Map<string, Uint8Array>()) {
           state.composed++;
           state.sent = sources.map((s) => s.person_index);
           assert.deepEqual(image, job.result!.image);
-          assert.equal(sources[1]!.observation.box[0], 310);
+          if (sources[1]) assert.equal(sources[1].observation.box[0], 310);
           assert.deepEqual(Buffer.from(sources[0]!.bytes), fbx);
           return { bytes: fbx, sha256: sha256Hex(fbx) };
         },
@@ -130,11 +154,31 @@ function setup(refinement = false, shared = new Map<string, Uint8Array>()) {
           "Content-Type": "application/json",
           "X-Installation-Id": state.installationId,
           "X-Device-Token": "token",
+          ...(state.clientVersion === undefined ? {} : { [CLIENT_VERSION_HEADER]: state.clientVersion }),
         },
-        body: JSON.stringify({ persons: rows, ...extra }),
+        body: JSON.stringify({ persons: rows, ...(extra.saveMode === "auto-correct-v4" ? { parts: partsSelectionFixture } : {}), ...extra }),
       }),
   };
 }
+test("upgraded installations retain their version through scene source reads and release checks", async () => {
+  const s = setup(false, undefined, "0.1.1-beta.8");
+  const response = await s.send();
+  assert.equal(response.status, 200);
+  assert.equal(s.state.composed, 1);
+  assert.deepEqual(s.state.forwardedVersions, Array(4).fill("0.2.3-dev.392"));
+});
+test("scene dispatch preserves version-policy rejection and legacy headerless fallback", async () => {
+  for (const [stored, sent, expected] of [
+    ["0.2.0", "0.1.9", 426],
+    ["0.1.1-beta.8", undefined, 426],
+    ["0.2.0", undefined, 200],
+  ] as const) {
+    const s = setup(false, undefined, stored);
+    s.state.clientVersion = sent;
+    assert.equal((await s.send()).status, expected);
+    if (expected === 426) assert.equal(s.state.composed, 0);
+  }
+});
 test("reviewed files plus owned observations compose one authenticated scene", async () => {
   const s = setup(),
     res = await s.send();
@@ -402,5 +446,113 @@ test("scene preview rechecks job and source revisions after a slow render", asyn
     assert.equal(response.status, 409, `stale ${change} preview must not be published`);
     assert.notEqual(response.headers.get("Content-Type"), "image/png");
     assert.equal(f.state.preparations, 1, "rechecking never rebuilds the reviewed file");
+  }
+});
+
+const manifestMode = { contractVersion: "scene-save-v1", saveMode: "original-selection", manifestVersion: "csp-scene-manifest-v1" };
+type ManifestReview = { reviewKey: string; artifactSha256: string; reviewVersion: string;
+  manifest: import("./sceneManifest.js").SceneManifest };
+function releaseFields(review: ManifestReview) {
+  return { ...manifestMode, reviewKey: review.reviewKey, reviewVersion: review.reviewVersion,
+    artifactSha256: review.artifactSha256 };
+}
+test("unselected generated alternative preserves scene capability and export; selected generation remains blocked", async () => {
+  const f = setup();
+  f.job.result!.candidatesByPerson[0]!.candidates.push({ id: "generated", poseId: "other", source: "generation" } as never);
+  assert.equal((await f.send()).status, 200);
+  f.rows[0]!.candidateId = "generated";
+  await errorCode(await f.send(), "GENERATED_INDIVIDUAL_ONLY", 409, "change_selection");
+  assert.equal(f.state.composed, 1);
+});
+test("original manifest prepare works with v4 off; metadata and replica release share exact source, SHA, and expiry", async () => {
+  const a = setup(false), b = setup(false, a.shared);
+  for (const f of [a, b]) Object.assign(f.job, { inputOriginalName: "T001.png", inputSha256: "a".repeat(64), inputWidth: 765, inputHeight: 714 });
+  const response = await a.send({ ...manifestMode, prepare: true });
+  assert.equal(response.status, 200, await response.clone().text());
+  const review = await response.json() as ManifestReview;
+  assert.equal(review.manifest.sourceImage.originalName, "T001.png");
+  assert.equal(review.manifest.sourceImage.sha256, "a".repeat(64));
+  assert.equal(review.manifest.sourceImage.identity, "job:input");
+  assert.equal(review.manifest.sourceImage.captureMapping.status, "unavailable");
+  assert.equal(review.manifest.camera.recipe, null);
+  assert.equal(review.manifest.camera.cspValidation, "unverified");
+  assert.deepEqual(review.manifest.people.includedIds, [0, 1]);
+  assert.equal(review.manifest.people.partial, false);
+  const metadata = await b.send({ ...releaseFields(review), metadataOnly: true });
+  assert.equal(metadata.status, 200);
+  assert.deepEqual((await metadata.json() as { manifest: unknown }).manifest, review.manifest);
+  const download = await b.send(releaseFields(review));
+  assert.equal(download.status, 200);
+  assert.equal(download.headers.get("X-Standin-Artifact-SHA256"), review.manifest.artifact.sha256);
+  assert.equal(download.headers.get("X-Standin-Scene-Snapshot-SHA256"), review.manifest.snapshotSha256);
+  assert.equal(download.headers.get("X-Standin-File-Count"), "1");
+  assert.deepEqual(Buffer.from(await download.arrayBuffer()), fbx);
+  assert.equal(b.state.composed, 0, "release/metadata do not rebuild");
+});
+for (const reason of ["no_candidates", "user_excluded", "not_requested"] as const)
+  test(`partial ${reason} is explicit and only releases with the prepared snapshot`, async () => {
+    const f = setup();
+    if (reason === "no_candidates") f.job.result!.candidatesByPerson[1]!.candidates = [];
+    const selection = { persons: [f.rows[0]], ...(reason === "user_excluded" ? { excludedPersonIds: [1] } : {}) };
+    await errorCode(await f.send(selection), "SCENE_PARTIAL_CONFIRMATION_REQUIRED", 409);
+    const response = await f.send({ ...manifestMode, ...selection, prepare: true });
+    assert.equal(response.status, 200, await response.clone().text());
+    const review = await response.json() as ManifestReview;
+    assert.deepEqual(review.manifest.people.detectedIds, [0, 1]);
+    assert.deepEqual(review.manifest.people.requestedIds, [0]);
+    assert.deepEqual(review.manifest.people.includedIds, [0]);
+    assert.deepEqual(review.manifest.people.missing, [{ personIndex: 1, reason }]);
+    const release = { ...releaseFields(review), ...selection };
+    await errorCode(await f.send(release), "SCENE_PARTIAL_CONFIRMATION_REQUIRED", 409, "confirm_partial");
+    await errorCode(await f.send({ ...release, partialConfirmation: { snapshotSha256: "0".repeat(64) } }), "SCENE_PARTIAL_CONFIRMATION_REQUIRED", 409);
+    const saved = await f.send({ ...release, partialConfirmation: { snapshotSha256: review.manifest.snapshotSha256 } });
+    assert.equal(saved.status, 200);
+    assert.equal(saved.headers.get("X-Standin-Person-Count"), "1");
+    assert.equal(f.state.composed, 1);
+  });
+for (const change of ["job", "hands", "selection", "exclusion", "owner", "expiry", "sha", "metadata"] as const)
+  test(`original manifest and partial confirmation reject changed ${change}`, async () => {
+    const f = setup();
+    const selection = { persons: [f.rows[0]], excludedPersonIds: [1] };
+    const review = await (await f.send({ ...manifestMode, ...selection, prepare: true })).json() as ManifestReview;
+    const request = { ...releaseFields(review), ...selection, partialConfirmation: { snapshotSha256: review.manifest.snapshotSha256 } };
+    if (change === "job") f.job.updatedAt = "new";
+    if (change === "hands") f.state.changeHands = true;
+    if (change === "selection") f.state.confirmed = false;
+    if (change === "exclusion") request.excludedPersonIds = [];
+    if (change === "owner") f.state.installationId = "other";
+    if (change === "sha") request.artifactSha256 = "b".repeat(64);
+    // New replica forces shared decode and checks metadata integrity too.
+    const b = setup(false, f.shared);
+    b.job.result!.candidatesByPerson = f.job.result!.candidatesByPerson;
+    const key = `owner/job/${review.reviewKey}`;
+    if (change === "expiry" || change === "metadata") {
+      const receipt = decodeSceneReceipt(f.shared.get(key)!);
+      if (change === "expiry") receipt.expires = Date.now() - 1;
+      else receipt.manifest!.people.includedIds = [0, 1];
+      f.shared.set(key, encodeSceneReceipt(receipt));
+    }
+    const result = await (change === "expiry" || change === "metadata" ? b : f).send(request);
+    assert.equal(result.status, change === "sha" || change === "metadata" ? 502 : 409, await result.clone().text());
+    assert.notEqual(result.headers.get("Content-Type"), "application/octet-stream");
+  });
+test("v4 partial prepare cannot bypass confirmation and rejected selections are not counted as saved", async () => {
+  const f = setup(true);
+  f.job.result!.candidatesByPerson[1]!.candidates = [];
+  const persons = [f.rows[0]];
+  const review = await (await f.send({ ...correction, persons, prepare: true })).json() as ManifestReview;
+  await errorCode(await f.send({ ...confirmation, persons, reviewKey: review.reviewKey }), "SCENE_PARTIAL_CONFIRMATION_REQUIRED", 409);
+  const release = { ...confirmation, persons, reviewKey: review.reviewKey, partialConfirmation: { snapshotSha256: review.manifest.snapshotSha256 } };
+  assert.equal((await f.send(release)).status, 200);
+  f.state.reviewStatus = 409;
+  assert.equal((await f.send(release)).status, 409);
+});
+test("manifest contract rejects unknown versions and invalid exclusions", async () => {
+  for (const extra of [{ manifestVersion: "future" }, { excludedPersonIds: [0] }, { excludedPersonIds: [7] },
+    { excludedPersonIds: [1, 1] }, { metadataOnly: true }, { partialConfirmation: true }]) {
+    const f = setup();
+    const response = await f.send({ ...manifestMode, prepare: true, ...extra });
+    assert.ok(response.status >= 400, JSON.stringify(extra));
+    assert.equal(f.state.composed, 0);
   }
 });

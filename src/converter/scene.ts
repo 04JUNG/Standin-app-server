@@ -1,4 +1,5 @@
 /** Composition only: every input is an already authorized final FBX. */
+import { readSceneCameraHeader } from "../pose/sceneCamera.js";
 import { config } from "../config.js";
 import { ConverterError, sha256Hex, type ConverterDeps } from "./client.js";
 
@@ -19,7 +20,7 @@ export async function composeRoughScene(
   sources: SceneSource[],
   overrides: Partial<
     Pick<ConverterDeps, "fetch" | "baseUrl" | "timeoutMs">
-  > = {},
+  > & { signal?: AbortSignal } = {},
 ) {
   const deps = {
     fetch,
@@ -53,7 +54,7 @@ export async function composeRoughScene(
         method: "POST",
         body,
         redirect: "error",
-        signal: AbortSignal.timeout(Math.max(deps.timeoutMs, 120_000)),
+        signal: AbortSignal.any([AbortSignal.timeout(Math.max(deps.timeoutMs, 120_000)), ...(deps.signal ? [deps.signal] : [])]),
       },
     );
   } catch (e) {
@@ -106,7 +107,8 @@ export async function composeRoughScene(
       response.headers.get("X-Standin-Scene-Version") !== "rough-layout-v1"
     )
       throw new Error("scene lineage mismatch");
-    return { bytes, sha256 };
+    const camera = readSceneCameraHeader(response.headers.get("X-Standin-Scene-Camera"), sha256, image);
+    return { bytes, sha256, ...(camera ? { camera } : {}) };
   } catch {
     throw new ConverterError(
       "CONVERTER_INTEGRITY",
