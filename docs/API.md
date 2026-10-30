@@ -1760,3 +1760,26 @@ slider/hand/camera/multi-person output. Sex explicitly selects the QA base body;
 the bundle does not claim to reproduce the app-selected body or render. CSP must
 import the VRM and then apply the BVH; that native step and lock persistence
 require manual acceptance. The VRM does not contain CSP joint lock settings.
+
+## Selected-body CSP ZIP
+
+`GET /v1/csp-shape/bundle?poseId=...&jobId=...&candidateId=...&personIndex=0&bodySelectionRevision=N`
+uses installation authentication and is disabled unless `CSP_SHAPE_ENABLED=true`
+and `CSP_REVIEW_ENV=staging`. Capability `cspNativeExport.characterIds` enumerates
+catalog assets with `cspNative:true`; such assets require shape, shapeSource and
+shapeRuntime. Existing assets and export formats remain available.
+
+The endpoint reads the persisted body choice and slider controls, checks its
+revision and asset/source identity, obtains the exact selected BVH through the
+existing authenticated export guard, and requests `/csp-shape` from Converter.
+It verifies each slider, source hash, shape digest and output digest, then checks
+the body and BVH again before returning a ZIP. Default controls receive an
+explicit shape digest too. Body or pose changes discard the output (409).
+Manually changed hand selections are refused; the bundle is explicitly a body
+and pose asset and does not apply hand suggestions, camera or merged scene data.
+
+The ZIP contains `model.vrm`, `pose.bvh`, a complete shape/source/selection
+manifest, and Korean instructions. `X-Standin-Artifact-SHA256` pins the ZIP and
+`X-Standin-Shape-SHA256` pins the requested numeric shape. Source/bake failures
+are 503 with no previous-body substitution. This is separate from the original
+base-body QA endpoint and uses neither its `sex` override nor static model files.
