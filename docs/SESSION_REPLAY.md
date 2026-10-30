@@ -160,5 +160,5 @@ See [SESSION_REPLAY_VALIDATION.md](SESSION_REPLAY_VALIDATION.md) for exact obser
 limitations. Production/AWS integration, actual macOS/Windows Tauri recordings, real CSP
 window capture, native permissions, multi-monitor/DPI behavior and ON/OFF render/latency
 measurements require their corresponding runtimes; a browser replay or synthetic fixture
-does not establish those results. This PR is a Draft and must not be deployed or merged
-as part of the current task.
+does not establish those results. Code-review readiness does not establish release readiness. Native/runtime and infrastructure
+checks remain activation gates; no deployment or PR merge is performed by this integration.
