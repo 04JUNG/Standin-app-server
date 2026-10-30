@@ -177,6 +177,7 @@ export async function characterSelectionEnabled(
 export async function currentCapabilities(
   overrides: Partial<CharacterDeps> = {},
 ): Promise<{
+  cspNativeExport?: { characterIds: string[] };
   analyticsJourney?: boolean;
   handSelection: boolean;
   bodySelection: boolean;
@@ -192,6 +193,7 @@ export async function currentCapabilities(
 }> {
   return {
     analyticsJourney: true,
+    ...(config.cspShapeEnabled ? {cspNativeExport: {characterIds: loadBodyCatalog().assets.filter(a => a.cspNative).map(a => a.characterId)}} : {}),
     handSelection: await handSelectionAvailable(),
     bodySelection: config.bodySelectionEnabled,
     bodyRecommendation: config.bodySelectionEnabled,

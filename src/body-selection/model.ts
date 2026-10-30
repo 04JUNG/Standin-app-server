@@ -15,6 +15,7 @@ export interface BodyRef {
   characterId: string;
 }
 export interface BodyAsset extends BodyRef {
+  cspNative?: boolean;
   displayName?: string;
   neutralPreview?: {
     path: string;

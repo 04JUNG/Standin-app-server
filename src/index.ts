@@ -1,4 +1,6 @@
 import { createSemanticRoutes } from "./semantic/routes.js";
+import { createCspReviewRoutes } from "./csp-review/routes.js";
+import { createShapedCspRoutes } from "./csp-review/shaped.js";
 // Standin BFF (앱 서버) 엔트리포인트.
 // 경계: [Tauri] ──/v1──> [BFF: 이 서버] ──HTTP──> [도원 추론 서버]
 import { createHandRoutes } from "./hands/routes.js";
@@ -184,6 +186,8 @@ app.use("/v1/semantic-search/*", requireInstallation);
 app.route("/v1/semantic-search", createSemanticRoutes());
 app.use("/v1/models", requireInstallation);
 app.use("/v1/models/*", requireInstallation);
+app.use("/v1/csp-review/*", requireInstallation);
+app.use("/v1/csp-shape/*", requireInstallation);
 app.use("/v1/pose-candidates/*", requireInstallation);
 app.use("/v1/hands/*", requireInstallation);
 app.use("/v1/events/*", requireInstallation);
@@ -193,6 +197,8 @@ app.route("/v1/analysis/jobs", jobsRoutes);
 app.use("/v1/analysis/jobs/:jobId/scene", bodyLimit({ maxSize: 32768 }));
 app.route("/v1/analysis/jobs", createSceneRoutes((request) => app.fetch(request)));
 app.route("/v1/models", characterRoutes);
+app.route("/v1/csp-review", createCspReviewRoutes(request => app.fetch(request)));
+app.route("/v1/csp-shape", createShapedCspRoutes(request => app.fetch(request)));
 app.route("/v1/pose-candidates", poseRoutes);
 app.route("/v1/events", analyticsRoutes);
 app.route("/v1/hands", createHandRoutes());
