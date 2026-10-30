@@ -36,8 +36,8 @@ jobs:
       ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
       ECS_SERVICE: ${{ vars.ECS_SERVICE }}
       ECS_WORKER_SERVICE: ${{ vars.ECS_WORKER_SERVICE }}
-      # A manual false must override a previously enabled environment variable.
-      STAGING_SCENE_EXPORT_ENABLED: ${{ github.event_name == 'workflow_dispatch' && (inputs.scene_export_enabled && 'true' || 'false') || (vars.SCENE_EXPORT_ENABLED == 'true' && 'true' || 'false') }}
+      # Staging defaults off, including automatic deploys. Re-enable explicitly for a manual run.
+      STAGING_SCENE_EXPORT_ENABLED: ${{ github.event_name == 'workflow_dispatch' && inputs.scene_export_enabled && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@v4
 
