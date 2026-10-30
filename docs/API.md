@@ -45,45 +45,48 @@ tools/basic-closeup-fixture.mjs`로 loopback fixture를 실행한다. 서버의 
 main 기반 로컬 재검증: 타입 검사 통과, 전체 테스트 701개 통과/2개 기존 skip/실패 0.
 기본 계획의 과거 결과 조회 보완·범위 변경 시 무효화·권한 유지 테스트를 포함한다.
 
-## v4 장면 보정과 최종 장면 확인 (scene-save-v1)
+## native 파츠 v4 장면 보정과 최종 확인 (2026-10-30)
 
-기본 꺼짐입니다. 기존 `{persons}` 요청은 v4 flag가 켜져도 항상 기본 통합
-`rough-layout-v1` FBX를 저장합니다. 자동 보정은 `contractVersion: "scene-save-v1"`와
-`saveMode: "auto-correct-v4"`를 모두 명시한 요청에만 적용됩니다. 새 클라이언트의
-기본 저장 값은 `saveMode: "original-selection"`입니다. 보정 실패 시 자동 모드 전환은 없습니다.
+`POST /v1/analysis/jobs/:jobId/scene`의 `auto-correct-v4`는 서버 #153의
+`refine-v4-parts-http-v1` / `refine-v4-parts.1`에 연결합니다. 기존 `/scene/plan`·`build`의
+장면 계약 문자열은 native 실행 증거로 사용하지 않습니다. 기존 `{persons}` 및
+`original-selection`은 원선택 저장이며 자동 보정 실패 후 모드를 자동 전환하지 않습니다.
+현재 통합 FBX 저장 중지·기본 flags·기존 인물별 저장 정책은 유지합니다.
 
-Job 결과의 `capabilities.sceneSaveContract`는 지원 버전·가용 모드·확인 버전·900초 TTL·취소
-범위를 제공합니다. 기존 `sceneExport`, `sceneRefinement`도 유지합니다. 보정 capability는
-flag/URL/토큰/보관 원본 등의 자격 조건이며 worker live readiness를 보장하지 않습니다.
+Job capability의 `autoCorrectV4.readiness=configuration_only`, `configured`는 설정 상태입니다.
+`available=false`, `parts_discovery_required`/`explicit_intent_required`로 실행 가능 상태와
+구분합니다. 새 인증 endpoint **`GET /v1/analysis/jobs/:jobId/scene/parts`**는 소유 completed job에서
+실제 private `GET /parts/capabilities`를 확인하고, 지원 동작·카탈로그·정확한 설명과
+명시적 검수 요구를 반환합니다. worker 미배포/구버전/disabled는 실패하며 준비 완료로 만들지 않습니다.
 
-prepare에는 명시 계약·보정 모드와 `prepare:true`, 기존 reviewed `persons`를 보냅니다.
-응답은 `reviewVersion:"scene-review-v1"`, `expiresAt`, `reviewKey`, `artifactSha256`,
-인물별 before/after summary, `personCount`, `fileCount:1`을 포함합니다.
-기존 paired PNG 및 `artifactOnly:true`의 `verified-scene-fbx-v1` 경로를 모두 지원합니다.
-확인·미리보기에는 동일한 `persons`, 계약·모드, `reviewVersion`, `reviewKey`, `artifactSha256`가
-필요합니다. 사용자 확인 후에도 소유권·후보 확정·체형/손 revision·원본 SHA를 다시 검사하고
-준비한 동일 바이트만 반환하며 새로 보정하지 않습니다. 실제 다운로드 SHA도 확인해야 합니다.
+클라이언트 변경이 필요합니다. prepare/preview/confirm에 동일한 `parts`(계약/엔진 버전,
+카탈로그 SHA, 인물별 명시적으로 확인한 intent와 operation)를 전달합니다. 수정할 인물의 현재
+검수한 **full FBX**를 원본 그대로 `POST /parts/refine`에 보내며, 서버가 반환한 자산만
+장면 조립에 사용합니다. 반신 등 잘린 자산은 미지원이며 원본 BVH로 재생성하지 않습니다.
+기존 `refineAllowed=false`, 피부·저장 정책은 바꾸지 않고, 기존 보호된 자산 소유권/후보/
+체형/손/범위/검수 검증과 서버의 버전 있는 명시적 파츠 계약을 함께 통과해야 합니다.
 
-scene 영수증은 기존 인물별 shared receipt와 별도의 owner/job `scene-receipts/` S3 객체로
-공유합니다. 저장 성공 전 키를 반환하지 않으며 다른 BFF 인스턴스도 같은 파일을 읽습니다.
-개발 환경에서 공유 버킷이 없으면 인스턴스별 메모리만 사용하며 다른 인스턴스·재시작은
-`SCENE_REVIEW_REQUIRED` 재준비로 복구합니다. production에서 버킷이 없으면 준비를 실패시킵니다.
+원래 저장된 VLM 상세 설명과 검색 문장은 소유권·현재 선택 동의 범위에서 원문 그대로 전달하며,
+후속 사용자 지시와 구분합니다. 미보관 원문은 null, 표현 한도 초과는 명시적 실패입니다.
+원래 분석 저장 한도 이전의 전체 raw VLM 텍스트 복원은 보장하지 않습니다. BFF의 자연어 좌우
+추정·IK·관계값 생성은 없습니다. 서버 계약은 자동 이미지 기반 파츠 선택을 제공하지 않습니다.
 
-만료 `SCENE_REVIEW_EXPIRED`, 원본 변경 `SCENE_SOURCE_CHANGED`, 지원 불가 체형
-`SCENE_UNSUPPORTED_BODY`, 사용 불가 `SCENE_UNAVAILABLE`, busy `SCENE_BUSY`,
-제한 시간 `SCENE_TIMEOUT`, 무결성 `SCENE_INTEGRITY`를 구분합니다. 오류별
-`details.recovery`/`allowedActions`를 사용하고 임의 원인·진행률을 생성하지 않습니다.
-HTTP 요청 취소는 대기 중단이며 worker 연산 중단 보장이 없습니다. 서버 취소 API는 없습니다.
+준비 응답 `parts`와 manifest의 `artifact.parts`는 실제 버전/실행 여부/요청 ID·SHA/context SHA/
+현재·native 결과 SHA/적용 부위·저장 검증을 제공합니다. `applied`와 `retained`를 구분하며
+`retained`는 입력 현재 FBX와 바이트가 같아야 합니다. 점수 상승은 반환하지 않습니다.
+최종 조립 SHA에 `reviewKey`/`scene-review-v1`/15분 만료/카메라를 결합하고, 별도 PNG는 저장된
+최종 FBX를 렌더합니다. 새 preview/save 요청도 동일한 persons/parts/검수 SHA가 필요합니다.
+다운로드는 동일 바이트만 반환하며 엔진/BVH를 다시 실행하지 않습니다.
 
-2026-10-22 연동 보강: 장면 PNG 렌더 후에도 job/확정 후보·체형·손·범위·원본 SHA를
-재검증하여 렌더 중 바뀐 선택의 이미지를 반환하지 않습니다. 기존 인물별 guard 오류는
-그대로 전달합니다. 장면 endpoint의 `PREVIEW_NOT_READY`(503)는 기존 source 영수증을
-찾지 못한 경우이므로 인물별 결과를 다시 확인해야 합니다. 선택을 유지한 채 PNG 실패로만
-취급하지 않습니다. 이 코드는 worker의 live readiness를 뜻하지 않습니다.
+입력·설명·지시·체형·손·범위·선택·카탈로그·버전 변경 시 검수/캐시를 무효화합니다.
+서버 typed 오류와 HTTP 상태를 allowlist하고, `details.stage`, `jobId`, `retryable`,
+복구 행동·연산 지속 가능 여부를 제공합니다. HTTP 취소 `SCENE_CANCELLED`와 제한 시간
+`SCENE_TIMEOUT`을 구분하며 worker 중지나 자동 재시도를 보장하지 않습니다.
 
-정확한 JSON·오류/복구·summary·취소·앱/바 상태 계약과 worker 미해결 범위는
-[장면 저장 계약](scene-save-contract.md), 내부 경계는 [v4 장면 저장](scene-refinement-v4.md)을 참고하세요.
-실제 최신 Staging 설치 앱의 3컷 검증은 worker 준비 후 별도로 필요합니다.
+정확한 [요청/응답·상태·클라이언트 UI 계약](scene-save-contract.md)과
+[서버 의존성·원문 보존 한계·검증 경계](scene-refinement-v4.md)를 참고하세요.
+서버 #153은 확인 시 미병합·미배포였으며 실제 staging 앱의 팔/다리 적용·다운로드·FBX 재열기와
+새 점수는 미검증입니다. 이 변경은 운영 변경·배포·병합을 수행하지 않습니다.
 
 ## 선택 품질 검토 동의 (2026-10-19)
 

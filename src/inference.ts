@@ -588,37 +588,60 @@ export function getDefaultBodyTemplate(scope: string): Promise<Response> {
   );
 }
 
-/** Separate opt-in scene worker; does not alter /analyze's deadline. */
+/** Legacy scene worker transport. A response does NOT prove native parts execution. */
 export async function sceneRefinementRequest(
   stage: "plan" | "build",
   value: unknown,
   overrides: Partial<{ baseUrl: string; token: string; timeoutMs: number; fetch: typeof fetch; signal: AbortSignal }> = {},
+): Promise<Record<string, unknown>> {
+  return privateSceneWorkerRequest(`/scene/${stage}`, "POST", value, overrides, stage);
+}
+
+export async function scenePartsRequest(
+  operation: "capabilities" | "refine", value: unknown,
+  overrides: Partial<{ baseUrl: string; token: string; timeoutMs: number; fetch: typeof fetch; signal: AbortSignal }> = {},
+): Promise<Record<string, unknown>> {
+  return privateSceneWorkerRequest(`/parts/${operation}`, operation === "capabilities" ? "GET" : "POST", value,
+    overrides, operation === "capabilities" ? "parts_capabilities" : "parts_refine");
+}
+
+async function privateSceneWorkerRequest(path: string, method: "GET" | "POST", value: unknown,
+  overrides: Partial<{ baseUrl: string; token: string; timeoutMs: number; fetch: typeof fetch; signal: AbortSignal }>,
+  stage: import("./pose/sceneContract.js").SceneStage,
 ): Promise<Record<string, unknown>> {
   const deps = { baseUrl: config.sceneRefinementBaseUrl, token: config.sceneRefinementToken,
     timeoutMs: config.sceneRefinementTimeoutMs, fetch, ...overrides };
   if (!deps.baseUrl || !deps.token)
     throw new SceneError("SCENE_UNAVAILABLE", "scene worker disabled");
   const deadline = AbortSignal.any([AbortSignal.timeout(deps.timeoutMs), ...(deps.signal ? [deps.signal] : [])]);
+  const check = () => {
+    if (deadline.aborted) throw new SceneError(deps.signal?.aborted && deps.signal.reason?.name !== "TimeoutError"
+      ? "SCENE_CANCELLED" : "SCENE_TIMEOUT", "scene request ended", true, stage);
+  };
+  check();
   let response: Response;
   try {
     response = await deps.fetch(
-      `${deps.baseUrl.replace(/\/+$/, "")}/scene/${stage}`,
+      `${deps.baseUrl.replace(/\/+$/, "")}${path}`,
       {
-        method: "POST",
+        method,
         redirect: "error",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${deps.token}`,
         },
-        body: JSON.stringify(value),
+        ...(method === "POST" ? { body: JSON.stringify(value) } : {}),
         signal: deadline,
       },
     );
+    check();
   } catch {
-    throw new SceneError(deadline.aborted ? "SCENE_TIMEOUT" : "SCENE_UNAVAILABLE", "scene worker request failed", true);
+    check();
+    throw new SceneError("SCENE_UNAVAILABLE", "scene worker request failed", true, stage);
   }
   if (!response.ok) {
     let busy = response.status === 429;
+    let domainCode: import("./pose/sceneContract.js").SceneErrorCode | undefined;
     // api.py currently reports its lock with this exact bounded 503 detail.
     // Other 503/422 responses do not identify queue/body/plan-expiry causes.
     const reader = response.body?.getReader();
@@ -628,37 +651,50 @@ export async function sceneRefinementRequest(
         let size = 0;
         for (;;) {
           const part = await reader.read();
+          check();
           if (part.done) break;
           size += part.value.length;
           if (size > 4096) break;
           chunks.push(part.value);
         }
-        if (response.status === 503 && size <= 4096) {
+        if (size <= 4096) {
           const value: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-          busy = !!value && typeof value === "object" &&
+          busy ||= response.status === 503 && !!value && typeof value === "object" &&
             (value as { detail?: unknown }).detail === "scene worker busy";
+          const code = (value as { detail?: { code?: unknown } } | null)?.detail?.code;
+          const allowed: Record<string, number> = {
+            PARTS_CONTRACT_UNSUPPORTED: 409, PARTS_EXPLICIT_INTENT_REQUIRED: 409, PARTS_RECIPE_UNAVAILABLE: 409,
+            PARTS_INTENT_MISMATCH: 409, PARTS_INVALID_INPUT: 422, PARTS_DISABLED: 503,
+            PARTS_UNAVAILABLE: 503, PARTS_RELEASE_CHANGED: 503, PARTS_TIMEOUT: 504,
+            PARTS_WORKER_FAILED: 502, PARTS_INTEGRITY: 502,
+          };
+          if (stage.startsWith("parts_") && typeof code === "string" && Object.hasOwn(allowed, code) && allowed[code] === response.status)
+            domainCode = code as import("./pose/sceneContract.js").SceneErrorCode;
         }
       } catch {
-        if (deadline.aborted) throw new SceneError("SCENE_TIMEOUT", "scene response deadline");
+        check();
       } finally {
         await reader.cancel().catch(() => {});
         reader.releaseLock();
       }
     }
-    throw new SceneError(busy ? "SCENE_BUSY"
+    throw new SceneError(domainCode ?? (busy ? "SCENE_BUSY"
       : response.status === 504 ? "SCENE_TIMEOUT"
-      : response.status === 503 ? "SCENE_UNAVAILABLE" : "SCENE_FAILED", "scene worker rejected");
+      : response.status === 503 || response.status === 404 ? "SCENE_UNAVAILABLE" : "SCENE_FAILED"), "scene worker rejected", response.status === 504, stage);
   }
   const reader = response.body?.getReader();
   if (!reader) throw new SceneError("SCENE_INTEGRITY", "empty scene result");
   const chunks: Uint8Array[] = [];
+  const maxResponseBytes = stage === "parts_capabilities" ? 2 * 1024 * 1024
+    : stage === "parts_refine" ? 48 * 1024 * 1024 : 192 * 1024 * 1024;
   let size = 0;
   try {
     for (;;) {
       const v = await reader.read();
+      check();
       if (v.done) break;
       size += v.value.length;
-      if (size > 192 * 1024 * 1024) throw new SceneError("SCENE_INTEGRITY", "scene response too large");
+      if (size > maxResponseBytes) throw new SceneError("SCENE_INTEGRITY", "scene response too large", false, stage);
       chunks.push(v.value);
     }
     const result: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
@@ -667,7 +703,8 @@ export async function sceneRefinementRequest(
     return result as Record<string, unknown>;
   } catch (error) {
     if (error instanceof SceneError) throw error;
-    throw new SceneError(deadline.aborted ? "SCENE_TIMEOUT" : "SCENE_INTEGRITY", "invalid scene response");
+    check();
+    throw new SceneError("SCENE_INTEGRITY", "invalid scene response", false, stage);
   } finally {
     await reader.cancel().catch(() => {});
     reader.releaseLock();
