@@ -55,7 +55,8 @@ existing reviewer token and produce an audit row with the actual request ID, ins
 and replay target. Assets and chunks never have public/presigned URLs; every byte is
 proxied through the admin gate with `private, no-store` and hash verification.
 
-`REPLAY_ENVIRONMENT` defaults to `NODE_ENV`, otherwise `development`. Assumed collection
+`REPLAY_ENVIRONMENT` defaults to `NODE_ENV`, otherwise `unclassified` (denied).
+Local development must explicitly set `REPLAY_ENVIRONMENT=development` or use the local launcher. Assumed collection
 **and all assumed reads** are limited to `development` / `staging`. Docker uses
 `NODE_ENV=production` even in staging, so a future staging deployment must explicitly set
 `REPLAY_ENVIRONMENT=staging`. Do not set that value on a production deployment.

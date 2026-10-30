@@ -97,3 +97,25 @@ window capture + real FBX version, minimized/closed CSP windows, multiple native
 large production DOM sessions and long-duration memory/latency. The client agent owns native
 adapter testing. The BFF requires owned job + artifact hash + snapshot version for CSP assets;
 its PNG storage/read contract is tested, but a real CSP picture was not produced in this chat.
+
+## Review integration — 2026-10-31
+
+Latest develop was merged without dropping the input-identity/partial-save/scene-camera
+contracts or their tests. Missing deployment classification now fails closed; local use
+classifies development explicitly. Final-only review frames are included in the dashboard's
+3D collection status. The existing 30-day/earlier-source/deletion/receipt rules remain.
+
+Validation on the integrated working tree:
+- Full BFF suite: 973 passed / 0 failed / 2 existing conditional PostgreSQL skips.
+- Replay suite: 14 passed, including a child process importing the real config with both
+  environment variables removed, plus explicit production/unknown/dev/staging policy checks.
+- Actual React recorder -> local PGlite/private objects -> existing ops dashboard: app/bar/
+  capture playback and seek, final-frame status, distinct same-byte offline bindings and
+  earlier source expiry. No upload success response was mocked.
+- A separate synthetic installation's DELETE was failed through restart; an online retry
+  then produced a real server deletion and an admin manifest 404 while collection stayed off.
+
+The frame-adapter sample is synthetic, not a native or production model rendering. No
+CSP import, paid inference, AWS/RDS/S3, real user pixels or deployment was exercised.
+Native CSP/DPI/Windows runtime, long real-model performance and infrastructure activation
+remain release gates.

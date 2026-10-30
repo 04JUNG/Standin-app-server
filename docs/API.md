@@ -1732,7 +1732,7 @@ Standin **0.2.0 정식 이상**만 지원한다. `0.2.0-beta.*`는 미지원이�
 
 ## Session replay v1 (development/staging)
 
-Replay-only defaults are ON and `REPLAY_CONSENT_MODE=assumed` per the 2026-10-28 implementation
+Replay-only flags default ON and `REPLAY_CONSENT_MODE=assumed` per the 2026-10-28 implementation
 instruction. This does not change quality-consent evidence or historical analytics.
 Production assumed collection/reads fail closed. Installation authentication, admin review
 authentication and explicit withdrawal/deletion remain required. New recordings have a
@@ -1765,3 +1765,11 @@ result에 `sourceImage`(job에 묶인 원본명/SHA/크기)와 `capabilities.sce
 ## Scene camera metadata extension
 
 Scene manifest requests may negotiate `cameraContractVersion=scene-camera-artifact-v1`. The artifact-bound available-camera shape and backwards compatibility are described in [scene-camera-transport-v1.md](scene-camera-transport-v1.md). One shared scene deadline covers prepare stages; this does not change `/analyze` deadlines.
+
+### Replay deployment classification and review fixes (2026-10-31)
+
+Missing `REPLAY_ENVIRONMENT` and `NODE_ENV` now classify as `unclassified`, so assumed
+collection/read is denied. Set development explicitly for local use; the isolated launcher
+already does so. Docker staging still requires `REPLAY_ENVIRONMENT=staging`.
+The dashboard recognizes both body-shape `canvas_frame` and review-model `final` assets as
+recorded 3D frames; this does not prove a saved FBX or a successful CSP import.

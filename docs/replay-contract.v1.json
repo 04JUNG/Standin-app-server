@@ -17,7 +17,7 @@
       "development",
       "staging"
     ],
-    "production": "REPLAY_ENVIRONMENT is a trusted deployment classification, defaulting to NODE_ENV. Assumed collection and reads reject production, beta, and unknown classifications."
+    "production": "REPLAY_ENVIRONMENT is a trusted deployment classification, defaulting to NODE_ENV. Missing or empty classification is unclassified. Assumed collection and reads reject unclassified, production, beta, and unknown classifications."
   },
   "defaults": {
     "REPLAY_ENABLED": true,

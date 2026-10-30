@@ -5,6 +5,8 @@ import { mkdtemp, readFile, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
+import { spawnSync } from "node:child_process";
+import { resolveReplayEnvironment } from "./environment.js";
 import { PGlite } from "@electric-sql/pglite";
 import { Hono } from "hono";
 import { SCHEMA } from "../db.js";
@@ -71,6 +73,50 @@ const makeChunk = (extra: Record<string, unknown> = {}) => ({
   clock: { epochMs: now, monotonicOffsetMs: 0 },
   ...extra,
 });
+test("missing deployment classification fails closed through actual BFF configuration", () => {
+  const env = { ...process.env };
+  delete env.NODE_ENV;
+  delete env.REPLAY_ENVIRONMENT;
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `const {config}=await import(${JSON.stringify(new URL("../config.js", import.meta.url).href)}); console.log(config.replayEnvironment);`,
+    ],
+    { env, encoding: "utf8" },
+  );
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout.trim(), "unclassified");
+  for (const values of [
+    {},
+    { NODE_ENV: "production" },
+    { NODE_ENV: "beta" },
+    { REPLAY_ENVIRONMENT: "" },
+    { REPLAY_ENVIRONMENT: "unknown", NODE_ENV: "development" },
+  ])
+    assert.throws(
+      () =>
+        checkPolicy(
+          { ...policy, environment: resolveReplayEnvironment(values) },
+          "assumed",
+        ),
+      /REPLAY_AUTHORIZATION_DENIED/,
+    );
+  for (const environment of ["development", "staging"])
+    assert.doesNotThrow(() =>
+      checkPolicy(
+        {
+          ...policy,
+          environment: resolveReplayEnvironment({
+            REPLAY_ENVIRONMENT: environment,
+            NODE_ENV: "production",
+          }),
+        },
+        "assumed",
+      ),
+    );
+});
 async function fixture() {
   const db = new PGlite();
   await db.exec(SCHEMA);
@@ -95,7 +141,13 @@ async function fixture() {
       }),
     );
   const clock = { now };
-  const service = new ReplayService(sql, tx, storage, { ...policy }, () => clock.now);
+  const service = new ReplayService(
+    sql,
+    tx,
+    storage,
+    { ...policy },
+    () => clock.now,
+  );
   return { db, sql, service, root, clock };
 }
 test("real PostgreSQL schema: assumed preserves consent, idempotency, order gaps, filters, manifest and private storage", async () => {
@@ -348,10 +400,12 @@ test("30-day boundaries preserve existing expiry and retain CSP receipts until e
     await f.service.create(inst, create(oldId, "existing-session"));
     const oldExpiry = new Date(now + 14 * day).toISOString();
     await f.db.query("UPDATE replay_sessions SET expires_at=$2 WHERE id=$1", [
-      oldId, oldExpiry,
+      oldId,
+      oldExpiry,
     ]);
     assert.equal(
-      (await f.service.create(inst, create(oldId, "existing-session"))).expiresAt,
+      (await f.service.create(inst, create(oldId, "existing-session")))
+        .expiresAt,
       oldExpiry,
     );
     await f.db.query(
@@ -367,16 +421,20 @@ test("30-day boundaries preserve existing expiry and retain CSP receipts until e
     await assert.rejects(f.service.manifest(oldId), /REPLAY_EXPIRED/);
     await f.service.sweep();
     assert.equal(
-      (await f.db.query("SELECT * FROM replay_artifact_receipts")).rows.length, 1,
+      (await f.db.query("SELECT * FROM replay_artifact_receipts")).rows.length,
+      1,
     );
     const png = Buffer.from(
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==",
       "base64",
     );
     const asset = {
-      contentType: "image/png", dataBase64: png.toString("base64"),
-      kind: "csp_result", jobId: "job_retention",
-      snapshotVersion: "retention-v1", artifactHash,
+      contentType: "image/png",
+      dataBase64: png.toString("base64"),
+      kind: "csp_result",
+      jobId: "job_retention",
+      snapshotVersion: "retention-v1",
+      artifactHash,
     };
     await f.service.asset(inst, id, hash(png), asset);
     f.clock.now = now + 30 * day - 1;
@@ -385,7 +443,8 @@ test("30-day boundaries preserve existing expiry and retain CSP receipts until e
     await assert.rejects(f.service.manifest(id), /REPLAY_EXPIRED/);
     const freshId = randomUUID();
     await f.service.create(inst, {
-      ...create(freshId, "new-session"), startedAt: f.clock.now,
+      ...create(freshId, "new-session"),
+      startedAt: f.clock.now,
     });
     await assert.rejects(
       f.service.asset(inst, freshId, hash(png), asset),
@@ -393,9 +452,13 @@ test("30-day boundaries preserve existing expiry and retain CSP receipts until e
     );
     await f.service.sweep();
     assert.equal(
-      (await f.db.query("SELECT * FROM replay_artifact_receipts")).rows.length, 0,
+      (await f.db.query("SELECT * FROM replay_artifact_receipts")).rows.length,
+      0,
     );
-    assert.equal((await f.db.query("SELECT id FROM replay_sessions")).rows.length, 1);
+    assert.equal(
+      (await f.db.query("SELECT id FROM replay_sessions")).rows.length,
+      1,
+    );
     await f.service.manifest(freshId);
   } finally {
     await f.db.close();
@@ -655,7 +718,10 @@ test("actual existing admin router records non-null audit request ID and replay 
   const f = await fixture();
   try {
     const { config } = await import("../config.js");
-    Object.assign(config, { betaReviewAdminToken: "local-integration-test" });
+    Object.assign(config, {
+      betaReviewAdminToken: "local-integration-test",
+      replayEnvironment: "development",
+    });
     const { pool } = await import("../db.js");
     const { adminRoutes } = await import("../admin/routes.js");
     t.mock.method(pool, "query", async (q: string, p?: unknown[]) => {
