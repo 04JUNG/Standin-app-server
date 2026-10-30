@@ -1,3 +1,4 @@
+import { partsCapabilityFixture, partsSelectionFixture } from "./sceneParts.fixture.js";
 import { config } from "../config.js";
 import { encodeSceneReceipt, decodeSceneReceipt, sceneReceiptStorageAvailable, saveSceneReceipt } from "./sceneStorage.js";
 import assert from "node:assert/strict";
@@ -90,6 +91,9 @@ function setup(refinement = false, shared = new Map<string, Uint8Array>(), store
         });
       },
       {
+        getScenePartsCapability: async () => structuredClone(partsCapabilityFixture),
+        loadSceneSelectionRevisions: async (_owner, _job, refs) => refs.map(r => ({ personIndex: r.personIndex, candidateId: r.candidateId, confirmedAt: "fixture-confirmation-v1" })),
+        loadSceneDescriptions: async () => [{ personIndex: 0, description: null }],
         saveSceneReceipt: async (owner, job, key, receipt) => {
           if (state.storageFails) throw new SceneError("SCENE_UNAVAILABLE", "fixture publication failure");
           shared.set(`${owner}/${job}/${key}`, encodeSceneReceipt(receipt));
@@ -152,7 +156,7 @@ function setup(refinement = false, shared = new Map<string, Uint8Array>(), store
           "X-Device-Token": "token",
           ...(state.clientVersion === undefined ? {} : { [CLIENT_VERSION_HEADER]: state.clientVersion }),
         },
-        body: JSON.stringify({ persons: rows, ...extra }),
+        body: JSON.stringify({ persons: rows, ...(extra.saveMode === "auto-correct-v4" ? { parts: partsSelectionFixture } : {}), ...extra }),
       }),
   };
 }
