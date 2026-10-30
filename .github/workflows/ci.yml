@@ -41,6 +41,9 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Verify staging scene export toggle
+        run: node --test scripts/configure-staging-scene-export.test.mjs
+
       - name: Verify body initializer deployment regression
         run: node --test scripts/refresh-body-init-image.test.mjs
 
