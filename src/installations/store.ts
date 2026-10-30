@@ -69,6 +69,7 @@ export async function createInstallation(
         client,
         installationId,
         metadata.qualityConsent,
+        true,
       );
   });
   return { installationId, deviceToken };

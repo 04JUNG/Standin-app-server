@@ -1,11 +1,20 @@
 // 환경설정 단일 소스. dev는 셸 env 또는 `tsx --env-file=.env`로 주입.
 import { parseExemptList } from "./limits/policy.js";
+import { resolveReplayEnvironment } from "./replay/environment.js";
 
 function env(key: string, def = ""): string {
   return process.env[key] ?? def;
 }
 
 export const config = {
+  replayEnabled: env("REPLAY_ENABLED", "true") === "true",
+  captureReplayEnabled: env("CAPTURE_REPLAY_ENABLED", "true") === "true",
+  cspResultCaptureEnabled: env("CSP_RESULT_CAPTURE_ENABLED", "true") === "true",
+  replayConsentMode: env("REPLAY_CONSENT_MODE", "assumed"),
+  // Docker uses NODE_ENV=production for staging too. Classification must be explicit there.
+  replayEnvironment: resolveReplayEnvironment(process.env),
+  replayBucket: env("REPLAY_BUCKET"),
+  replayLocalDir: env("REPLAY_LOCAL_DIR", "work/replay-objects"),
   refineV3Shadow: env("REFINE_V3_SHADOW", "false") === "true",
   poseThumbnailRevision: env(
     "POSE_THUMBNAIL_REVISION",

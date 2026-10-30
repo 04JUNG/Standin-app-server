@@ -39,7 +39,7 @@ function journeyAdvancedRender(data) {
  const activation=a.activation||{}, ret=a.retention||[];
  const search=a.searchOutcomes||{}, results=a.results||{};
  const recovery=(a.recovery||[]).filter(r=>journeyDetailsFilter(r,false));
- return '<h3>기능별 사용 현황 — 실제로 열고 조작했나</h3>'+
+ return '<h3>기능별 사용 현황 — 실제로 열고 조작했나</h3><button class="ghost" data-replay-metric="features">관련 기능 세션 보기</button>'+
  '<p class="sub">선택 기간에 발생한 동의된 기능 이벤트 기준입니다. 전체화면·플로팅바의 같은 설치는 합계에서 한 번만 셉니다. 사용은 직접 열기·검색·선택·조절 등이며 자동 기본값과 단순 노출을 제외합니다. 노출 대비 이용은 기능이 제공·표시된 설치와 이용 설치의 교집합입니다. 표시 기록은 가용 컨트롤이 렌더되었다는 뜻이며, 사용자의 시선을 확인한 것은 아닙니다. 기록 0은 실제 미사용을 확정하지 않습니다. 기능 미사용은 필수 흐름의 이탈이 아닙니다.</p>'+
  journeyTable(['기능','노출 설치','고유 이용 설치','전체화면 이용','플로팅바 이용','노출 대비 이용 · 설치','적용 후 실제 저장 · 설치','이용 기록이 연결된 저장 작업','기능 기록'],summary)+
  '<p class="sub">적용 후 저장은 같은 작업에서 시간 순서가 연결된 관측입니다. 기능을 사용해서 저장률이 높아졌다는 인과관계나 그 설정 그대로 저장했다는 증거는 아닙니다. 작업 밖에서 만든 체형은 재사용 시 별도로 관측합니다.</p>'+
@@ -53,7 +53,7 @@ function journeyAdvancedRender(data) {
  '<h3>단계별 미진행 상태 — 어떤 기능·화면이었나</h3>'+
  '<p class="sub">위 단계별 도달 표와 같은 작업 생성 코호트입니다. 아래 기능 활동·재방문 표의 현재 동의 범위와 표본 수가 다를 수 있습니다. 후속 행동 미관측은 원인 미확인입니다. 서버 오류나 명시적 취소와 구분하고, 화면 전환 뒤의 성공도 작업 전체에서 확인합니다.</p>'+
  journeyTable(['단계','기능','화면','입력 방식','상태','작업'],stageOutcomes.map(r=>[r.label||journeyPhaseNames[r.stage]||r.stage,journeyFeatureName(r.feature),journeySurfaceName(r.surface),journeySourceName(r.source),journeyOutcomeNames[r.outcome]||r.outcome,journeyNum(r.jobs)]))+
- '<h3>오류 원인과 발생 환경</h3>'+
+ '<h3>오류 원인과 발생 환경</h3><button class="ghost" data-replay-metric="errors">관련 오류 세션 보기</button>'+
  '<p class="sub">보고된 오류 증거를 분류합니다. HTTP 상태와 오류 코드가 없으면 원인을 추정하지 않습니다. 이벤트 시간 기준으로 작업 생성 전 실패도 포함하며, 같은 작업에서 여러 오류가 발생할 수 있습니다. 서버 작업 상태와 앱 보고는 같은 실패를 중복 관측할 수 있으므로 두 출처의 건수를 합산하지 않습니다.</p>'+
  journeyTable(['기록 출처','분류','기능','단계','화면','OS','입력 방식','앱 버전','오류 코드','HTTP','기록','작업','설치'],failures.map(r=>[r.origin==='server_job'?'서버 작업 상태':'앱 보고',journeyCategoryNames[r.category]||r.category,journeyFeatureName(r.feature),journeyPhaseNames[r.phase]||r.phase||'미확인',journeySurfaceName(r.surface),r.osName||'미확인',journeySourceName(r.source),r.appVersion||'미확인',r.code||'미확인',r.httpStatus??'—',journeyNum(r.events),journeyNum(r.jobs),journeyNum(r.installations)]))+
  '<h3>오류 후 복구</h3><p class="sub">동일 시도에서 실패 뒤 성공이 연결된 경우와, 실패 후 같은 작업·기능에서 재시도하거나 성공한 경우를 구분합니다. 다른 시도의 성공이 동일 설정을 복구했다는 뜻은 아닙니다. 취소와 단순 미관측은 서버 실패로 세지 않습니다.</p>'+

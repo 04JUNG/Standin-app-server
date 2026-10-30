@@ -55,6 +55,7 @@ export async function writeQualityConsent(
   db: Database,
   installationId: string,
   input: QualityConsentInput,
+  initialRegistration = false,
 ): Promise<QualityConsent> {
   const locked = await db.query(
     "SELECT id FROM installations WHERE id = $1 FOR UPDATE",
@@ -62,6 +63,13 @@ export async function writeQualityConsent(
   );
   if (!locked.rowCount) throw new Error("installation no longer exists");
   const previous = await readQualityConsent(db, installationId);
+  // Explicit withdrawal outranks assumed eligibility, including an explicit false -> false request.
+  if (!initialRegistration && (!input.personalData || !input.contentLicense)) {
+    await db.query("UPDATE installations SET replay_withdrawn_at=$2 WHERE id=$1", [installationId,new Date().toISOString()]);
+    await db.query("DELETE FROM replay_sessions WHERE installation_id=$1", [installationId]);
+    await db.query("DELETE FROM replay_daily_usage WHERE installation_id=$1", [installationId]);
+    await db.query("DELETE FROM replay_artifact_receipts WHERE job_id IN (SELECT id FROM jobs WHERE installation_id=$1)", [installationId]);
+  }
   if (
     previous.personalData === input.personalData &&
     previous.contentLicense === input.contentLicense

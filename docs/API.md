@@ -1730,6 +1730,29 @@ Standin **0.2.0 정식 이상**만 지원한다. `0.2.0-beta.*`는 미지원이�
 헬스·관리자·인증/OAuth 및 `DELETE /v1/installations/current/data`는 버전 차단 대상이 아니다.
 업데이트 피드와 0.2.0 이상 설치 파일을 먼저 게시한 뒤 BFF를 배포한다.
 
+## Session replay v1 (development/staging)
+
+Replay-only flags default ON and `REPLAY_CONSENT_MODE=assumed` per the 2026-10-28 implementation
+instruction. This does not change quality-consent evidence or historical analytics.
+Production assumed collection/reads fail closed. Installation authentication, admin review
+authentication and explicit withdrawal/deletion remain required. New recordings have a
+30-day maximum retention; earlier source expiry, withdrawal and deletion take precedence.
+Existing recordings keep their stored `expiresAt`.
+
+- `POST /v1/replays`: versioned/idempotent session creation.
+- `PUT /v1/replays/:id/streams/:window/chunks/:sequence`: SHA-256 validated JSON or bounded gzip/base64 events.
+- `PUT /v1/replays/:id/assets/:hash`: private immutable image/font bytes with append-only snapshot/job bindings.
+- `POST /v1/replays/:id/finish`: declare final sequences; complete vs incomplete manifest.
+- `DELETE /v1/replays/:id`: remove own recording. `DELETE /v1/replays`: withdraw and purge own replay data.
+- `GET /v1/admin/replays`: authorized filtered list; `nextBefore` is an opaque cursor.
+- `GET /v1/admin/replays/:id/manifest`: stream descriptors, immutable assets, gaps and existing timeline.
+- `GET /v1/admin/replays/:id/streams/:window/chunks/:sequence`: authenticated decoded events.
+- `GET /v1/admin/replays/:id/assets/:hash`: authenticated binary, private/no-store, no presigned URL.
+- Existing `/v1/admin/ops/dashboard`: actual bundled rrweb player, capture reconstruction, image comparison.
+
+Exact requests/responses/errors/limits: [replay-contract.v1.json](replay-contract.v1.json).
+Configuration, deletion scope, local real-BFF runner and playback boundaries:
+[SESSION_REPLAY.md](SESSION_REPLAY.md). Infrastructure proposal: [REPLAY_INFRASTRUCTURE.md](REPLAY_INFRASTRUCTURE.md).
 
 ## CSP 장면 metadata·부분 저장·입력 identity (2026-10-28)
 
@@ -1742,3 +1765,11 @@ result에 `sourceImage`(job에 묶인 원본명/SHA/크기)와 `capabilities.sce
 ## Scene camera metadata extension
 
 Scene manifest requests may negotiate `cameraContractVersion=scene-camera-artifact-v1`. The artifact-bound available-camera shape and backwards compatibility are described in [scene-camera-transport-v1.md](scene-camera-transport-v1.md). One shared scene deadline covers prepare stages; this does not change `/analyze` deadlines.
+
+### Replay deployment classification and review fixes (2026-10-31)
+
+Missing `REPLAY_ENVIRONMENT` and `NODE_ENV` now classify as `unclassified`, so assumed
+collection/read is denied. Set development explicitly for local use; the isolated launcher
+already does so. Docker staging still requires `REPLAY_ENVIRONMENT=staging`.
+The dashboard recognizes both body-shape `canvas_frame` and review-model `final` assets as
+recorded 3D frames; this does not prove a saved FBX or a successful CSP import.
