@@ -1739,3 +1739,24 @@ result에 `sourceImage`(job에 묶인 원본명/SHA/크기)와 `capabilities.sce
 ## Scene camera metadata extension
 
 Scene manifest requests may negotiate `cameraContractVersion=scene-camera-artifact-v1`. The artifact-bound available-camera shape and backwards compatibility are described in [scene-camera-transport-v1.md](scene-camera-transport-v1.md). One shared scene deadline covers prepare stages; this does not change `/analyze` deadlines.
+# Staging CSP review (opt-in)
+
+`GET /v1/csp-review/{male|female}/bundle?poseId=...&jobId=...&candidateId=...&personIndex=0`
+requires the normal installation headers. Disabled by default (404); enabled only
+with `CSP_REVIEW_ENABLED=true`, `CSP_REVIEW_ENV=staging` and pinned private S3
+`CSP_REVIEW_BUCKET`, `CSP_REVIEW_MANIFEST_KEY`, `CSP_REVIEW_MANIFEST_SHA256`.
+The manifest must be under `body-models/csp-review/` and pin two VRM files by SHA.
+
+Returns a ZIP with a neutral review base body (`model.vrm`), the exact bytes of
+the existing authenticated candidate BVH export (`pose.bvh`), `manifest.json`
+and Korean `README.txt`. It reuses the full BVH export guard/refined selection;
+an upstream refusal is returned unchanged and no model is read. Source release,
+model and pose hashes are included. Model fetch/hash failure is 503 with no
+fallback; unsupported query arguments are 400. Existing BVH/FBX endpoints and
+default character registrations are unchanged.
+
+This is a technical staging comparison lane, not a posed VRM export or body
+slider/hand/camera/multi-person output. Sex explicitly selects the QA base body;
+the bundle does not claim to reproduce the app-selected body or render. CSP must
+import the VRM and then apply the BVH; that native step and lock persistence
+require manual acceptance. The VRM does not contain CSP joint lock settings.

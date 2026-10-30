@@ -6,6 +6,10 @@ function env(key: string, def = ""): string {
 }
 
 export const config = {
+  cspReviewEnabled: env("CSP_REVIEW_ENABLED", "false") === "true" && env("CSP_REVIEW_ENV") === "staging",
+  cspReviewBucket: env("CSP_REVIEW_BUCKET"),
+  cspReviewManifestKey: env("CSP_REVIEW_MANIFEST_KEY"),
+  cspReviewManifestSha256: env("CSP_REVIEW_MANIFEST_SHA256"),
   refineV3Shadow: env("REFINE_V3_SHADOW", "false") === "true",
   poseThumbnailRevision: env(
     "POSE_THUMBNAIL_REVISION",
