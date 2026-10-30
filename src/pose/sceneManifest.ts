@@ -1,3 +1,4 @@
+import type { PartsReceipt } from "./sceneParts.js";
 import { validateSceneCamera, type SceneCameraBinding } from "./sceneCamera.js";
 import type { Job } from "../jobs/store.js";
 import type { SceneSaveMode } from "./sceneContract.js";
@@ -26,7 +27,7 @@ export function scenePeople(job: Job, requestedIds: number[], excludedIds: numbe
   };
 }
 export function sceneManifest(job: Job, snapshotSha256: string, artifactSha256: string,
-  saveMode: SceneSaveMode, people: ReturnType<typeof scenePeople>, camera?: SceneCameraBinding) {
+  saveMode: SceneSaveMode, people: ReturnType<typeof scenePeople>, camera?: SceneCameraBinding, parts?: PartsReceipt[]) {
   if (camera) validateSceneCamera(camera, artifactSha256, job.result?.image ?? undefined);
   const sourceImage = sourceImageIdentity(job);
   const mapped = !camera || (sourceImage.width === camera.recipe.source_dimensions[0] &&
@@ -36,7 +37,8 @@ export function sceneManifest(job: Job, snapshotSha256: string, artifactSha256: 
     version: SCENE_MANIFEST_VERSION,
     jobId: job.id, snapshotSha256, sourceImage,
     artifact: { sha256: artifactSha256, saveMode,
-      layoutVersion: saveMode === "auto-correct-v4" ? "scene-refinement-v4" : "rough-layout-v1", fileCount: 1 },
+      layoutVersion: saveMode === "auto-correct-v4" && !parts ? "scene-refinement-v4" : "rough-layout-v1", fileCount: 1,
+      ...(parts ? { parts } : {}) },
     people,
     // Only forward a verified compiler recipe; CSP application remains unverified.
     camera: availableCamera ? { version: "scene-camera-v1", status: "available", reason: null,

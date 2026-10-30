@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Job } from "../jobs/store.js";
-import { prepareRefinedScene } from "./sceneRefinement.js";
+import { prepareLegacyRefinedScene as prepareRefinedScene } from "./sceneLegacyRefinement.fixture.js";
 import { ConverterError, sha256Hex } from "../converter/client.js";
 import type { FramedInput } from "../converter/framing.js";
 const fbx = Buffer.from("Kaydara FBX Binary  \0\x1a\0full"),

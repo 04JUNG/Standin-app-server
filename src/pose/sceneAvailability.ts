@@ -1,6 +1,7 @@
 import type { Job } from "../jobs/store.js";
 import { config } from "../config.js";
 import { sceneReceiptStorageAvailable } from "./sceneStorage.js";
+import { scenePartsCapability } from "./sceneParts.js";
 const defaults = {
   scene: () => config.sceneExportEnabled, fbx: () => config.fbxExportEnabled,
   converter: () => !!config.converterBaseUrl, storage: sceneReceiptStorageAvailable,
@@ -21,6 +22,10 @@ export function sceneAvailability(job: Job, overrides: Partial<typeof defaults> 
   if (!deps.refinement()) v4.push("refinement_disabled");
   if (!deps.worker()) v4.push("refinement_unavailable");
   if (!job.inputS3Key) v4.push("source_image_unavailable");
+  const configurationReasons = ["feature_disabled", "fbx_export_disabled", "converter_unavailable",
+    "receipt_storage_unavailable", "refinement_disabled", "refinement_unavailable"];
+  const configured = !v4.some(reason => configurationReasons.includes(reason));
+  v4.push("parts_discovery_required", "explicit_intent_required");
   return {
     version: "scene-availability-v1", selectionValidation: "required_on_prepare",
     candidateEligibility: (job.result?.candidatesByPerson ?? []).map(p => ({
@@ -32,7 +37,8 @@ export function sceneAvailability(job: Job, overrides: Partial<typeof defaults> 
       })),
     })),
     originalSelection: { available: reasons.length === 0, reasons },
-    autoCorrectV4: { available: v4.length === 0, reasons: v4, readiness: "configuration_only" },
+    autoCorrectV4: { available: false, reasons: v4, readiness: "configuration_only", configured,
+      parts: { ...scenePartsCapability(), discoveryPath: `/v1/analysis/jobs/${encodeURIComponent(job.id)}/scene/parts` } },
     manifest: { available: reasons.length === 0 && deps.storage(), reasons: deps.storage() ? reasons : [...reasons, "receipt_storage_unavailable"] },
   };
 }

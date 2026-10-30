@@ -40,7 +40,7 @@ test("one scene budget spans sequential stages and blocks late publication", asy
 test("abandoning the HTTP request shares its signal with all remaining stages", async () => {
   const parent = new AbortController(), budget = new SceneBudget(1000, parent.signal);
   parent.abort();
-  await assert.rejects(budget.run(async () => "must not run"), { code: "SCENE_TIMEOUT" });
+  await assert.rejects(budget.run(async () => "must not run"), { code: "SCENE_CANCELLED" });
 });
 
 for (const saveMode of ["original-selection", "auto-correct-v4"]) {

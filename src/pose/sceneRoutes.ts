@@ -1,10 +1,14 @@
 import { SCENE_MANIFEST_VERSION, sceneManifest, scenePeople, type SceneManifest } from "./sceneManifest.js";
 import { log } from "../log.js";
-import { SCENE_SAVE_CONTRACT, SCENE_REVIEW_VERSION, SCENE_REVIEW_TTL_MS, SceneError, sceneErrorDetails } from "./sceneContract.js";
+import { SCENE_SAVE_CONTRACT, SCENE_REVIEW_VERSION, SCENE_REVIEW_TTL_MS, SceneError, sceneErrorDetails, type SceneStage, sceneErrorStatus, sceneSaveContract } from "./sceneContract.js";
+import { sceneSourceIdentity, sceneReviewBinding } from "./sceneBinding.js";
 import { loadSceneReceipt, saveSceneReceipt, sceneReceiptStorageAvailable, type SceneReceipt } from "./sceneStorage.js";
 import { renderFinalPreview } from "../converter/finalPreview.js";
 import { randomBytes } from "node:crypto";
-import { prepareRefinedScene, type RefinedScene } from "./sceneRefinement.js";
+import { getScenePartsCapability, prepareRefinedScene, type RefinedScene } from "./sceneRefinement.js";
+import { parsePartsSelection, authorizePartsSelection, partsDigest, type PartsSelection, type PartsCapability } from "./sceneParts.js";
+import { loadSceneSelectionRevisions } from "./sceneSelection.js";
+import { loadSceneDescriptions, type SceneDescriptions } from "./scenePartsDescriptions.js";
 import { Hono, type Context } from "hono";
 import { SceneBudget } from "./sceneBudget.js";
 import type { AppEnv } from "../env.js";
@@ -21,6 +25,7 @@ import { errorEnvelope } from "../mapping.js";
 import { CLIENT_VERSION_HEADER } from "../client-version/policy.js";
 
 const defaults = {
+  getScenePartsCapability, loadSceneDescriptions, loadSceneSelectionRevisions,
   loadSceneReceipt, saveSceneReceipt,
   receiptStorageAvailable: sceneReceiptStorageAvailable,
   renderFinalPreview,
@@ -41,11 +46,12 @@ const receiptCacheKey = (owner: string, job: string, key: string) => `${owner}/$
 const MAX_RECEIPT_BYTES = 256 * 1024 * 1024;
 async function remember(
   receipts: Map<string, SceneReceipt>, binding: string, scene: RefinedScene,
-  owner: string, job: string, save: typeof saveSceneReceipt, manifest: SceneManifest,
+  owner: string, job: string, save: typeof saveSceneReceipt, manifest: SceneManifest, budget: SceneBudget,
 ) {
   const key = randomBytes(24).toString("hex");
   const receipt: SceneReceipt = { manifest, reviewVersion: SCENE_REVIEW_VERSION, binding, scene, expires: Date.now() + SCENE_REVIEW_TTL_MS };
   await save(owner, job, key, receipt);
+  budget.check();
   for (const [k, v] of receipts) if (v.expires < Date.now()) receipts.delete(k);
   let size = scene.bytes.length + scene.preview.length;
   for (const v of receipts.values())
@@ -69,7 +75,7 @@ export function createSceneRoutes(
   const routes = new Hono<AppEnv>();
   // Per application, never a module-global cross-owner/replica registry.
   const receipts = new Map<string, SceneReceipt>();
-  const handle = async (c: Context<AppEnv>, budget: SceneBudget, recovery: { allowOriginal: boolean }) => {
+  const handle = async (c: Context<AppEnv>, budget: SceneBudget, recovery: { allowOriginal: boolean; stage: SceneStage }) => {
     const dispatch = (request: Request) => budget.run(async () => dispatchSource(new Request(request, { signal: budget.signal })));
     const deps = { ...dependencies,
       getOwnedJob: (...args: Parameters<typeof dependencies.getOwnedJob>) => budget.run(() => dependencies.getOwnedJob(...args)),
@@ -81,14 +87,15 @@ export function createSceneRoutes(
     let allowOriginal = false;
     let serverOperationMayContinue: boolean | undefined;
     const fail = (
-      status: 400 | 409 | 502 | 503 | 504,
+      status: 400 | 409 | 422 | 502 | 503 | 504,
       code: string,
       message: string,
     ) => {
       log.info({ type: "scene_save_failed", jobId: c.req.param("jobId"), requestId: c.get("requestId"),
-        phase: "scene_prepare", errorCode: code, durationMs: Date.now() - started });
+        phase: "scene_prepare", stage: recovery.stage, errorCode: code, durationMs: Date.now() - started });
       c.header("Cache-Control", "private, no-store");
-      return c.json(errorEnvelope(code, message, c.get("requestId"), sceneErrorDetails(code, allowOriginal, serverOperationMayContinue)), status);
+      return c.json(errorEnvelope(code, message, c.get("requestId"), sceneErrorDetails(code, allowOriginal, serverOperationMayContinue,
+        recovery.stage, c.req.param("jobId"))), status);
     };
     if (!deps.enabled())
       return fail(
@@ -105,6 +112,7 @@ export function createSceneRoutes(
       return fail(400, "INVALID_INPUT", "저장할 인물을 다시 선택해 주세요.");
     }
     const input = value as {
+      parts?: unknown;
       cameraContractVersion?: unknown;
       contractVersion?: unknown;
       saveMode?: unknown;
@@ -192,6 +200,23 @@ export function createSceneRoutes(
     if (refined && !job.inputS3Key)
       return fail(503, "SCENE_UNAVAILABLE", "원본이 보관된 작업에서 장면 보정을 다시 요청해 주세요.");
 
+    let parts: PartsSelection | undefined;
+    let capability: PartsCapability | undefined;
+    let descriptions: SceneDescriptions | undefined;
+    if (refined) {
+      recovery.stage = "parts_contract";
+      parts = parsePartsSelection(input.parts);
+      recovery.stage = "parts_capabilities";
+      capability = await budget.run(() => deps.getScenePartsCapability(budget.signal));
+      authorizePartsSelection(parts, capability);
+      recovery.stage = "source_validation";
+      descriptions = await budget.run(() => deps.loadSceneDescriptions(owner, jobId, parts!.edits.map(e => e.personIndex)));
+    } else if (input.parts !== undefined) {
+      return fail(400, "INVALID_INPUT", "보정 요청과 선택한 포즈 저장을 구분해 주세요.");
+    }
+    recovery.stage = "source_validation";
+    const sourceIdentity = sceneSourceIdentity(job);
+    const jobVersion = job.updatedAt;
     const image = job.result.image;
     const seen = new Set<number>();
     const refs: {
@@ -301,12 +326,14 @@ export function createSceneRoutes(
         refs.push({ personIndex: row.personIndex, candidateId: row.candidateId,
           exportPath: row.exportPath, sha256: row.sha256 });
       }
+      if (parts?.edits.some(e => !refs.some(r => r.personIndex === e.personIndex)))
+        return fail(409, "PARTS_INVALID_INPUT", "보정할 인물을 다시 선택해 주세요.");
       if (excludedIds.some(id => seen.has(id) || !job.result!.candidatesByPerson.some(p => p.personIndex === id && p.candidates.length > 0)))
         return fail(400, "INVALID_INPUT", "제외할 인물을 다시 확인해 주세요.");
       const people = scenePeople(job, refs.map(r => r.personIndex), excludedIds);
-      const binding = sha256Hex(
-        Buffer.from(JSON.stringify([owner, jobId, job.updatedAt, refs, saveMode, excludedIds, ...(cameraNegotiated ? ["scene-camera-artifact-v1"] : [])])),
-      );
+      const selectionRevisions = receiptFlow
+        ? await budget.run(() => deps.loadSceneSelectionRevisions(owner, jobId, refs)) : undefined;
+      const binding = sceneReviewBinding(owner, jobId, sourceIdentity, refs, saveMode, excludedIds, cameraNegotiated, parts, descriptions, selectionRevisions);
       const confirmation = input.partialConfirmation as { snapshotSha256?: unknown } | null;
       const partialConfirmed = confirmation?.snapshotSha256 === binding;
       if (input.partialConfirmation !== undefined && (!confirmation || typeof confirmation !== "object" ||
@@ -321,8 +348,10 @@ export function createSceneRoutes(
       let reviewed: SceneReceipt | undefined;
       if (receiptFlow) {
         if (input.prepare === true) {
+          recovery.stage = refined ? "parts_refine" : "composition";
           prepared = refined
-            ? await deps.prepareRefinedScene(owner, job, refs, sources, {}, input.artifactOnly === true, budget)
+            ? await deps.prepareRefinedScene(owner, job, refs, sources, {}, input.artifactOnly === true, budget,
+                { selection: parts!, capability: capability!, descriptions: descriptions!, selectionRevisions: selectionRevisions!, requestId: c.get("requestId"), setStage: stage => { recovery.stage = stage; } })
             : { ...await deps.composeRoughScene(jobId, image, sources), artifactContract: "verified-scene-fbx-v1",
                 preview: "", previewSha256: sha256Hex(Buffer.alloc(0)), summary: [] };
           scene = prepared;
@@ -349,7 +378,7 @@ export function createSceneRoutes(
           if (manifestRequest && (!receipt.manifest || receipt.manifest.version !== SCENE_MANIFEST_VERSION ||
               receipt.manifest.artifact.sha256 !== receipt.scene.sha256 || receipt.manifest.snapshotSha256 !== binding ||
               receipt.manifest.artifact.saveMode !== saveMode ||
-              JSON.stringify(receipt.manifest) !== JSON.stringify(sceneManifest(job, binding, receipt.scene.sha256, saveMode, people, cameraNegotiated ? receipt.scene.camera : undefined))))
+              JSON.stringify(receipt.manifest) !== JSON.stringify(sceneManifest(job, binding, receipt.scene.sha256, saveMode, people, cameraNegotiated ? receipt.scene.camera : undefined, receipt.scene.parts))))
             return fail(502, "SCENE_INTEGRITY", "장면 정보가 파일과 일치하지 않습니다.");
           reviewed = receipt;
           scene = receipt.scene;
@@ -357,16 +386,18 @@ export function createSceneRoutes(
       } else {
         scene = await deps.composeRoughScene(jobId, image, sources);
       }
+      recovery.stage = "source_validation";
       // Preview rendering can outlast a body/hand/selection change. The final
       // authorization below must run after every asynchronous artifact operation.
       let png: Uint8Array | undefined;
       let previewFailure: { error: unknown } | undefined;
       if (input.preview === true) {
+        recovery.stage = "preview";
         if (prepared || !refined)
           return fail(400, "INVALID_INPUT", "준비한 장면을 다시 선택해 주세요.");
         try {
           png = await deps.renderFinalPreview(
-            { fbx: scene.bytes, artifactSha256: scene.sha256 }, true, {}, true, c.req.raw.signal,
+            { fbx: scene.bytes, artifactSha256: scene.sha256 }, true, {}, true, budget.signal,
           );
         } catch (error) {
           // A render-only failure cannot hide concurrent review invalidation.
@@ -377,7 +408,7 @@ export function createSceneRoutes(
       const current = await deps.getOwnedJob(jobId, owner);
       if (
         !current ||
-        current.updatedAt !== job.updatedAt ||
+        current.updatedAt !== jobVersion ||
         current.status !== "completed" ||
         !(
           await Promise.all(
@@ -399,29 +430,54 @@ export function createSceneRoutes(
         );
       // Body/hand revisions live outside the job row. Re-authorize pinned
       // downloads after composition as well; stale reviews cannot be released.
-      for (const ref of refs) {
-        const headers = new Headers();
-        for (const key of ["X-Installation-Id", "X-Device-Token", CLIENT_VERSION_HEADER])
-          if (c.req.header(key)) headers.set(key, c.req.header(key)!);
-        const response = await dispatch(
-          new Request(new URL(ref.exportPath, "https://scene.internal"), {
-            headers,
-          }),
-        );
-        if (!response.ok)
-          return new Response(response.body, {
-            status: response.status,
-            headers: response.headers,
-          });
-        if (
-          sha256Hex(new Uint8Array(await response.arrayBuffer())) !== ref.sha256
-        )
-          return fail(
-            409,
-            "SCENE_SOURCE_CHANGED",
-            "확인한 체형이나 손이 바뀌었습니다. 다시 확인해 주세요.",
+      const reauthorize = async () => {
+        for (const ref of refs) {
+          const headers = new Headers();
+          for (const key of ["X-Installation-Id", "X-Device-Token", CLIENT_VERSION_HEADER])
+            if (c.req.header(key)) headers.set(key, c.req.header(key)!);
+          const response = await dispatch(
+            new Request(new URL(ref.exportPath, "https://scene.internal"), {
+              headers,
+            }),
           );
-      }
+          if (!response.ok)
+            return new Response(response.body, {
+              status: response.status,
+              headers: response.headers,
+            });
+          if (
+            sha256Hex(new Uint8Array(await response.arrayBuffer())) !== ref.sha256
+          )
+            return fail(
+              409,
+              "SCENE_SOURCE_CHANGED",
+              "확인한 체형이나 손이 바뀌었습니다. 다시 확인해 주세요.",
+            );
+        }
+        // Source reads are asynchronous too. Reject changes occurring during the
+        // last reauthorization before publishing or releasing a pinned artifact.
+        const finalJob = await deps.getOwnedJob(jobId, owner);
+        if (!finalJob || finalJob.status !== "completed" || sceneSourceIdentity(finalJob) !== sourceIdentity)
+          return fail(409, "SCENE_SOURCE_CHANGED", "작업이 변경되었습니다. 후보 화면에서 다시 확인해 주세요.");
+        if (selectionRevisions) {
+          const latest = await budget.run(() => deps.loadSceneSelectionRevisions(owner, jobId, refs));
+          if (partsDigest(latest) !== partsDigest(selectionRevisions))
+            return fail(409, "SCENE_SOURCE_CHANGED", "선택 확정 정보가 바뀌었습니다. 다시 준비해 주세요.");
+        }
+        if (parts) {
+          const latestDescriptions = await budget.run(() => deps.loadSceneDescriptions(owner, jobId, parts!.edits.map(e => e.personIndex)));
+          if (partsDigest(latestDescriptions) !== partsDigest(descriptions))
+            return fail(409, "SCENE_SOURCE_CHANGED", "보정에 사용한 설명이 바뀌었습니다. 다시 준비해 주세요.");
+          const latestCapability = await budget.run(() => deps.getScenePartsCapability(budget.signal));
+          authorizePartsSelection(parts, latestCapability);
+        }
+        const afterChecks = await deps.getOwnedJob(jobId, owner);
+        if (!afterChecks || afterChecks.status !== "completed" || sceneSourceIdentity(afterChecks) !== sourceIdentity)
+          return fail(409, "SCENE_SOURCE_CHANGED", "작업이 변경되었습니다. 후보 화면에서 다시 확인해 주세요.");
+        return undefined;
+      };
+      const invalidated = await reauthorize();
+      if (invalidated) return invalidated;
       // Reauthorization/preview can be slow; never release an expired review.
       if (reviewed && reviewed.expires <= Date.now())
         return fail(409, "SCENE_REVIEW_EXPIRED", "확인 시간이 지났습니다. 장면을 다시 준비해 주세요.");
@@ -430,7 +486,7 @@ export function createSceneRoutes(
         return new Response(png, { headers: { "Content-Type": "image/png", "Cache-Control": "private, no-store",
           "X-Standin-Artifact-SHA256": scene.sha256, "X-Standin-Preview-Artifact-SHA256": sha256Hex(png) } });
       }
-      const manifest = reviewed?.manifest ?? sceneManifest(job, binding, scene.sha256, saveMode, people, cameraNegotiated ? scene.camera : undefined);
+      const manifest = reviewed?.manifest ?? sceneManifest(job, binding, scene.sha256, saveMode, people, cameraNegotiated ? scene.camera : undefined, (scene as RefinedScene).parts);
       const observe = () => log.info({ type: "scene_save_result", jobId, requestId: c.get("requestId"),
         saveMode, operation: input.metadataOnly === true ? "metadata" : prepared ? "prepare" : "release",
         path: reviewed ? "scene_receipt" : refined ? "scene_refinement" : "compose_scene",
@@ -439,14 +495,19 @@ export function createSceneRoutes(
         partial: people.partial, partialConfirmed, fileCount: 1, personCount: refs.length, durationMs: Date.now() - started });
       if (input.metadataOnly === true) {
         observe();
-        return c.json({ manifest, partialConfirmed, expiresAt: new Date(reviewed!.expires).toISOString() }, 200, { "Cache-Control": "private, no-store" });
+        return c.json({ manifest, ...(reviewed?.scene.parts ? { parts: reviewed.scene.parts } : {}), partialConfirmed, expiresAt: new Date(reviewed!.expires).toISOString() }, 200, { "Cache-Control": "private, no-store" });
       }
       if (prepared) {
+        recovery.stage = "receipt_publication";
         budget.check();
-        const { key: reviewKey, receipt } = await budget.run(() => remember(receipts, binding, prepared, owner, jobId, deps.saveSceneReceipt, manifest));
+        const { key: reviewKey, receipt } = await budget.run(() => remember(receipts, binding, prepared, owner, jobId, deps.saveSceneReceipt, manifest, budget));
+        const changedDuringPublication = await reauthorize();
+        if (changedDuringPublication) return changedDuringPublication;
+        budget.check();
         observe();
         c.header("Cache-Control", "private, no-store");
         return c.json({
+          requestId: c.get("requestId"), jobId,
           contractVersion: SCENE_SAVE_CONTRACT,
           saveMode,
           manifest,
@@ -461,10 +522,12 @@ export function createSceneRoutes(
           previewSha256: prepared.previewSha256,
           previewBase64: prepared.preview,
           summary: prepared.summary,
+          ...(prepared.parts ? { parts: prepared.parts } : {}),
           personCount: refs.length,
         });
       }
       budget.check();
+      recovery.stage = "release";
       observe();
       return new Response(scene.bytes, {
         headers: {
@@ -478,33 +541,54 @@ export function createSceneRoutes(
           "X-Standin-Artifact-SHA256": scene.sha256,
           "X-Standin-Person-Count": String(sources.length),
           "X-Standin-Scene-Version": refined
-            ? "scene-refinement-v4"
+            ? (reviewed?.scene.parts ? "refine-v4-parts-http-v1" : "scene-refinement-v4")
             : "rough-layout-v1",
           "Content-Disposition": 'attachment; filename="standin_scene.fbx"',
         },
       });
     } catch (e) {
-      if (e instanceof SceneError) serverOperationMayContinue = e.serverOperationMayContinue;
+      if (e instanceof SceneError) {
+        serverOperationMayContinue = e.serverOperationMayContinue;
+        recovery.stage = e.stage ?? recovery.stage;
+      }
       const code = e instanceof SceneError ? e.code : e instanceof ConverterError
         ? e.code === "CONVERTER_TIMEOUT" ? "SCENE_TIMEOUT"
           : ["CONVERTER_UNAVAILABLE", "CONVERTER_DISABLED", "BODY_PREVIEW_UNAVAILABLE"].includes(e.code) ? "SCENE_UNAVAILABLE"
           : e.code === "CONVERTER_INTEGRITY" ? "SCENE_INTEGRITY" : "SCENE_FAILED"
         : "SCENE_FAILED";
-      return fail(code === "SCENE_TIMEOUT" ? 504
-        : ["SCENE_UNAVAILABLE", "SCENE_BUSY"].includes(code) ? 503
-        : ["SCENE_UNSUPPORTED_BODY", "SCENE_SOURCE_CHANGED"].includes(code) ? 409 : 502,
+      return fail(sceneErrorStatus(code),
         code, "장면 FBX를 만들지 못했습니다. 복구 안내에 따라 다시 시도해 주세요.");
     }
   };
+  routes.get("/:jobId/scene/parts", async c => {
+    c.header("Cache-Control", "private, no-store");
+    const jobId = c.req.param("jobId"), owner = c.get("installationId")!;
+    try {
+      const budget = new SceneBudget(Math.min(dependencies.budgetMs(), 5000), c.req.raw.signal);
+      const job = await budget.run(() => dependencies.getOwnedJob(jobId, owner));
+      if (!job || job.status !== "completed") throw new SceneError("SCENE_OBSERVATION_MISSING", "owned completed job required");
+      if (!dependencies.enabled() || !dependencies.refinementEnabled()) throw new SceneError("PARTS_UNAVAILABLE", "parts not configured");
+      const capability = await budget.run(() => dependencies.getScenePartsCapability(budget.signal));
+      return c.json({ capability, sceneSaveContract: sceneSaveContract(true, true),
+        supportedCurrentAssetScopes: ["full"], requestEligibility: "requires_explicit_selection", executionStatus: "not_attempted" });
+    } catch (error) {
+      const failure = error instanceof SceneError ? error : new SceneError("PARTS_UNAVAILABLE", "parts unavailable");
+      return c.json(errorEnvelope(failure.code, "지금은 자동 보정을 사용할 수 없습니다.",
+        c.get("requestId"), sceneErrorDetails(failure.code, false, failure.serverOperationMayContinue,
+          failure.stage ?? "parts_capabilities", jobId)), sceneErrorStatus(failure.code));
+    }
+  });
   routes.post("/:jobId/scene", async c => {
     const budget = new SceneBudget(dependencies.budgetMs(), c.req.raw.signal);
-    const recovery = { allowOriginal: false };
+    const recovery = { allowOriginal: false, stage: "request_validation" as SceneStage };
     try { return await budget.run(() => handle(c, budget, recovery)); }
-    catch (error) {
-      if (!(error instanceof SceneError)) throw error;
+    catch (caught) {
+      const error = caught instanceof SceneError ? caught : new SceneError("SCENE_FAILED", "scene request failed",
+        ["parts_refine", "composition", "receipt_publication"].includes(recovery.stage), recovery.stage);
       c.header("Cache-Control", "private, no-store");
-      return c.json(errorEnvelope(error.code, "장면 준비 시간이 초과됐습니다. 다시 준비해 주세요.",
-        c.get("requestId"), sceneErrorDetails(error.code, recovery.allowOriginal, true)), 504);
+      return c.json(errorEnvelope(error.code, error.code === "SCENE_CANCELLED" ? "장면 준비 요청을 취소했습니다." : error.code === "SCENE_TIMEOUT" ? "장면 준비 시간이 초과됐습니다. 다시 준비해 주세요." : "자동 보정을 준비할 수 없습니다. 복구 안내를 확인해 주세요.",
+        c.get("requestId"), sceneErrorDetails(error.code, recovery.allowOriginal, error.serverOperationMayContinue,
+          error.stage ?? recovery.stage, c.req.param("jobId"))), sceneErrorStatus(error.code));
     }
   });
   return routes;

@@ -10,7 +10,7 @@ const enabled = { scene: () => true, fbx: () => true, converter: () => true, sto
 test("basic readiness ignores unselected generation and is independent of v4 worker/flag", () => {
   const capability = sceneAvailability(job, enabled);
   assert.deepEqual(capability.originalSelection, { available: true, reasons: [] });
-  assert.deepEqual(capability.autoCorrectV4.reasons, ["refinement_disabled", "refinement_unavailable"]);
+  assert.deepEqual(capability.autoCorrectV4.reasons, ["refinement_disabled", "refinement_unavailable", "parts_discovery_required", "explicit_intent_required"]);
   assert.equal(capability.candidateEligibility[0]!.candidates[0]!.available, true);
   assert.deepEqual(capability.candidateEligibility[0]!.candidates[1]!.reasons, ["generated_individual_only"]);
 });

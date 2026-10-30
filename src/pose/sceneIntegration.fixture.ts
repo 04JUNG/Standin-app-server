@@ -20,7 +20,8 @@ import { createFramingRoutes } from "../output-scope/framingRoutes.js";
 import { resolveOutputScope } from "../output-scope/model.js";
 import { sceneRefinementRequest } from "../inference.js";
 import { createSceneRoutes } from "./sceneRoutes.js";
-import { prepareRefinedScene, type SceneRef } from "./sceneRefinement.js";
+import { prepareLegacyRefinedScene as prepareRefinedScene, type SceneRef } from "./sceneLegacyRefinement.fixture.js";
+import { partsCapabilityFixture, partsSelectionFixture } from "./sceneParts.fixture.js";
 import { encodeSceneReceipt, decodeSceneReceipt } from "./sceneStorage.js";
 
 export const fixtureFbx = (label: string) => Buffer.from(`Kaydara FBX Binary  \0\x1a\0${label}`);
@@ -139,6 +140,9 @@ export function createSceneIntegrationFixture(options: { camera?: SceneCameraBin
       modelRevision: model, solverVersion: "fixture-solver", framingVersion: "fixture-framing",
     }) }));
     app.route("/v1/analysis/jobs", createSceneRoutes(request => app.fetch(request), {
+      getScenePartsCapability: async () => structuredClone(partsCapabilityFixture),
+      loadSceneSelectionRevisions: async (_owner, _job, refs) => refs.map(r => ({ personIndex: r.personIndex, candidateId: r.candidateId, confirmedAt: "fixture-confirmation-v1" })),
+      loadSceneDescriptions: async () => [{ personIndex: 0, description: null }],
       budgetMs: () => options.timeoutMs ?? 900000,
       enabled: () => true, refinementEnabled: () => true, getOwnedJob: load, validateConfirmedSelection: confirmed,
       saveSceneReceipt: async (installation, id, key, receipt) => { shared.set(`${installation}/${id}/${key}`, encodeSceneReceipt(receipt)); },
@@ -186,7 +190,7 @@ export function createSceneIntegrationFixture(options: { camera?: SceneCameraBin
   const app = makeReplica();
   const headers = { "X-Installation-Id": owner, "Content-Type": "application/json", Origin: "tauri://localhost" };
   const send = (body: unknown, replica = app) => replica.request(`/v1/analysis/jobs/${jobId}/scene`, {
-    method: "POST", headers, body: JSON.stringify(body),
+    method: "POST", headers, body: JSON.stringify({ ...((body as { saveMode?: string }).saveMode === "auto-correct-v4" ? { parts: partsSelectionFixture } : {}), ...(body as object) }),
   });
   const individuals: { personIndex: number; reference: SceneRef; readyPath: string;
     readyResponse: { status: number; headers: Record<string, string>; bodyBase64: string };
