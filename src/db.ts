@@ -58,6 +58,13 @@ export async function transaction<T>(fn: (client: PoolClient) => Promise<T>): Pr
 import { QUALITY_CONSENT_SCHEMA } from "./installations/qualityConsent.js";
 
 export const SCHEMA = `
+  CREATE TABLE IF NOT EXISTS campaign_daily_counts (
+    day DATE NOT NULL,
+    creative TEXT NOT NULL CHECK (creative IN ('meta-poster-a','meta-hook-a')),
+    event TEXT NOT NULL CHECK (event IN ('first_run','first_analysis_success')),
+    count INTEGER NOT NULL CHECK (count >= 0 AND count <= 10000),
+    PRIMARY KEY(day,creative,event)
+  );
   CREATE TABLE IF NOT EXISTS installations (
     id                    TEXT PRIMARY KEY,
     token_hash            TEXT NOT NULL,
@@ -728,6 +735,7 @@ export async function runDataMaintenance(): Promise<void> {
   const client = await pool.connect();
   try {
     await refreshAggregatesAndRetention(client);
+    await client.query("DELETE FROM campaign_daily_counts WHERE day <= (now() AT TIME ZONE 'Asia/Seoul')::date - 90");
     await client.query("DELETE FROM usage_counters WHERE expires_at < $1", [
       Math.floor(Date.now() / 1000),
     ]);

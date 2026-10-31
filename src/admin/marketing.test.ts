@@ -106,4 +106,8 @@ test('dashboard JS parses and renders unknown attribution separately from API un
   assert.ok(conversion.includes('다운로드 최적화 / 포스터 A'));
   assert.ok(conversion.includes('<td>3</td><td>200</td>'));
   assert.ok(conversion.includes('생성 전 기록은 소급 집계하지 않으며'));
+  const counts=vm.runInContext(`campaignCountsBlock({enabled:true,since:'2026-10-25',until:'2026-10-31',rows:[{creative:'meta-poster-a',first_run:8,first_analysis_success:5},{creative:'meta-hook-a',first_run:null,first_analysis_success:null}]})`,ctx) as string;
+  assert.ok(counts.includes('<td>8</td><td>5</td>'));
+  assert.ok(counts.includes('표본 부족 (5건 미만)'));
+  assert.ok(counts.includes('전날까지의 합계'));assert.ok(!counts.includes('<td>0</td>'));
 });

@@ -1679,6 +1679,16 @@ function marketingUsageBlock(usage) {
     '<p class="sub">두 번째 표는 기존 설치도 포함합니다. 동일 설치의 반복 분석은 설치 수에서 한 번만 셉니다. 분석 성공은 해당 기간에 시작한 작업의 현재 완료 상태입니다. 다운로드만 했거나 앱을 실행·등록하지 않은 경우는 확인할 수 없습니다.</p>';
 }
 
+function campaignCountsBlock(counts) {
+  if (!counts || !counts.enabled) return '<h3>소재별 첫 실행·첫 분석 성공 건수</h3><p class="sub">수집 시작 전입니다. 성과 0을 의미하지 않습니다.</p>';
+  const names = {'meta-poster-a':'포스터 A','meta-hook-a':'영상 A'};
+  const cell = value => value === null || value === undefined ? '표본 부족 (5건 미만)' : esc(value);
+  return '<h3>소재별 첫 실행·첫 분석 성공 건수</h3><p class="sub">한국 시간 ' + esc(counts.since) + ' ~ ' + esc(counts.until) + ' · 전날까지의 합계 · 선택 동의와 별도</p>' +
+    '<div class="scroll"><table><thead><tr><th>소재</th><th>첫 실행 보고</th><th>첫 이미지 분석 성공 보고</th></tr></thead><tbody>' +
+    counts.rows.map(r => '<tr><td>' + esc(names[r.creative] || r.creative) + '</td><td>' + cell(r.first_run) + '</td><td>' + cell(r.first_analysis_success) + '</td></tr>').join('') + '</tbody></table></div>' +
+    '<p class="sub">지원 버전에서 새 등록 후 24시간 내 앱 열기 링크로 받은 첫 소재를 기준으로, 등록 후 최대 7일 내 첫 이미지 분석 성공을 셉니다. 설치·작업 식별자 없이 앱이 보낸 건수이며 실제 사람 수·설치 완료 수·서버 검증 전환이 아닙니다. 두 이벤트는 각각 수신 날짜 기준이므로 성공률을 계산하지 않습니다. 기존 버전·직접 실행·통신 실패는 빠질 수 있고 재설치·위조 요청은 중복될 수 있습니다. 개발자 설치 제외 설정은 적용하지 않습니다. 5건 미만은 0을 포함해 모두 숨기며 당일 내역과 개별 이용 이력을 제공하지 않습니다.</p>';
+}
+
 function marketingRender(data) {
   const meta = data.meta;
   const labels = {ready:'연결됨',unconfigured:'API 연결 대기',unavailable:'조회 실패',stale:'갱신 실패 · 이전 데이터'};
@@ -1695,8 +1705,9 @@ function marketingRender(data) {
   } else html += '<p class="sub">광고 수치를 아직 가져오지 못했습니다. 아래 앱 집계는 별도로 갱신됩니다. 미연결·조회 실패는 성과 0을 의미하지 않습니다.</p>';
   html += '<p class="sub">앱 조회 ' + esc(when(data.queriedAt)) + ' · 신규 설치 범위: ' + esc(when(data.since)) + ' 이후 최근 ' + esc(data.windowDays) + '일(이동 구간). 광고 달력 날짜 범위와 다르므로 두 표를 나누어 비교하세요.</p>';
   html += marketingUsageBlock(data.usage);
+  html += campaignCountsBlock(data.campaignCounts);
   html += acquisitionBlock(data.acquisition);
-  html += '<p class="sub">신규 설치는 설치 파일 다운로드나 설치 프로그램 완료가 아니라 앱 첫 실행 후 서버에 등록된 설치 식별자 수입니다. 개발자 제외 설정은 앱 집계 모두에 적용합니다. 출처 연결에 동의한 설치만 소재별 이용을 비교합니다. 같은 소재의 랜딩·다운로드 광고 단계는 앱 출처에서 구분되지 않으므로 전체 광고 전환율·단계별 A/B 승자 판정으로 해석하지 않습니다.</p>';
+  html += '<p class="sub">신규 설치는 설치 파일 다운로드나 설치 프로그램 완료가 아니라 앱 첫 실행 후 서버에 등록된 설치 식별자 수입니다. 개발자 제외 설정은 서버 기록·선택 연결 집계에 적용합니다. 설치별 이용 연결은 동의한 기록만 비교하며 소재별 건수 통계와 합산하지 않습니다. 같은 소재의 랜딩·다운로드 광고 단계는 앱 출처에서 구분되지 않으므로 전체 광고 전환율·단계별 A/B 승자 판정으로 해석하지 않습니다.</p>';
   return html;
 }
 let marketingRequest = 0;

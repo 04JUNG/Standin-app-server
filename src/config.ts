@@ -6,6 +6,7 @@ function env(key: string, def = ""): string {
 }
 
 export const config = {
+  campaignCountsEnabled: env("CAMPAIGN_COUNTS_ENABLED", "false") === "true",
   // Read-only Marketing API credential. Inject through ECS Secrets, never browser configuration.
   metaMarketingToken: env("META_MARKETING_TOKEN"),
   metaMarketingVersion: env("META_MARKETING_VERSION"),

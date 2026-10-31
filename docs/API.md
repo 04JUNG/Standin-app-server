@@ -1598,6 +1598,8 @@ Converter 코드·모델·라이브러리 자산 변경은 필요 없다.
 
 ## 관리자 마케팅 자동 집계 (2026-10-29)
 
+소재별 건수 API와 `campaignCounts` 응답은 [CAMPAIGN_COUNTS.md](CAMPAIGN_COUNTS.md)를 따른다. 기존 설치별 연결은 계속 선택 동의를 요구한다.
+
 `GET /v1/admin/marketing?days=7` (1–90, 기본 7), 기존 X-Beta-Admin-Token 인증 및 private/no-store 적용.
 응답은 `windowDays`, `queriedAt`, `since`, `acquisition`(기존 광고 연결 설치 코호트), `usage`(전체 운영 합계), `meta`를 포함한다.
 앱은 조회 시점 이전 N×24시간 내 등록한 설치 기준이며 철회·삭제 요청 설치를 제외한다. 개발자 제외 설정은 `acquisition`과 `usage` 모두에 적용한다.

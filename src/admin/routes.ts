@@ -1,4 +1,5 @@
 import { readMetaMarketing } from "./marketing.js";
+import { campaignCountSummary } from "../marketingCounts.js";
 import { marketingUsage } from "./marketingUsage.js";
 import { createHumanThumbnailRoutes } from "../human-thumbnail.js";
 import { randomUUID } from "node:crypto";
@@ -361,11 +362,11 @@ adminRoutes.get("/marketing", async (c) => {
   const parsed = parseWindowDays(c.req.query("days"));
   if (!parsed.ok) return c.json(errorEnvelope("INVALID_INPUT", parsed.message, c.get("requestId")), 400);
   const queriedAt = new Date().toISOString();
-  const [acquisition, meta, usage] = await Promise.all([
-    acquisitionSummary(parsed.days), readMetaMarketing(parsed.days), marketingUsage(parsed.days, queriedAt),
+  const [acquisition, meta, usage, campaignCounts] = await Promise.all([
+    acquisitionSummary(parsed.days), readMetaMarketing(parsed.days), marketingUsage(parsed.days, queriedAt), campaignCountSummary(parsed.days, Date.parse(queriedAt)),
   ]);
   return c.json({ windowDays: parsed.days, queriedAt,
-    since: new Date(Date.parse(queriedAt) - parsed.days * 86400000).toISOString(), acquisition, meta, usage });
+    since: new Date(Date.parse(queriedAt) - parsed.days * 86400000).toISOString(), acquisition, meta, usage, campaignCounts });
 });
 
 adminRoutes.get("/product", async (c) => {
