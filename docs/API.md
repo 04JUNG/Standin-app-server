@@ -1599,15 +1599,25 @@ Converter 코드·모델·라이브러리 자산 변경은 필요 없다.
 ## 관리자 마케팅 자동 집계 (2026-10-29)
 
 `GET /v1/admin/marketing?days=7` (1–90, 기본 7), 기존 X-Beta-Admin-Token 인증 및 private/no-store 적용.
-응답은 `windowDays`, `queriedAt`, `since`, `acquisition`(기존 광고 연결 설치 코호트), `meta`를 포함한다.
-앱은 조회 시점 이전 N×24시간 내 등록한 비철회 설치 기준이며 테스트 설치도 포함한다.
+응답은 `windowDays`, `queriedAt`, `since`, `acquisition`(기존 광고 연결 설치 코호트), `usage`(전체 운영 합계), `meta`를 포함한다.
+앱은 조회 시점 이전 N×24시간 내 등록한 설치 기준이며 철회·삭제 요청 설치를 제외한다. 개발자 제외 설정은 `acquisition`과 `usage` 모두에 적용한다.
 설치는 첫 실행 서버 등록 식별자이며 설치 프로그램 완료/고유 사람 수가 아니다. 소재별 이용은 연결 동의 이후만 집계한다.
 Meta는 KRW/Asia/Seoul 광고계정의 오늘 포함 N개 달력 날짜, 지정된 포스터 A·영상 A 광고 ID로 조회한다.
 `meta.status`: ready / unconfigured / unavailable / stale. `snapshot`은 없으면 null, 있으면
-since/until/fetchedAt/rows(creative, spend, impressions, clicks, landingViews)를 제공한다.
+since/until/fetchedAt/rows(creative, adId, phase: landing|download, spend, impressions, clicks, landingViews, downloadClicks)를 제공한다.
+기존 LPV 광고 2개와 다운로드 전환 광고 2개를 별도 행으로 제공한다. `downloadClicks`는 맞춤 전환 `offsite_conversion.custom.1680558963511586`만 읽으며 다른 맞춤 이벤트 합계는 사용하지 않는다. 2026-10-31 생성 전 전환은 소급 집계하지 않고, 설치·파일 다운로드 완료로 해석하지 않는다. 미게재 초안의 행도 0일 수 있다. 앱 귀속 키는 동일 소재의 광고 단계를 구분하지 않으므로 단계별 설치 전환율을 계산하지 않는다.
+Meta가 명시적으로 API 접근 차단을 반환하면 `meta.reason: access_blocked`를 추가한다. 원시 오류나 자격증명은 반환하지 않는다.
 오류는 0으로 바꾸지 않는다. stale은 동일 기간의 마지막 성공값이며 기간 변경 시 다른 기간 캐시는 사용하지 않는다.
 관리자 대시보드 마케팅 탭은 보이는 동안 30초마다 조회하며 Meta 호출은 프로세스별 60초 캐시와 중복 요청 병합을 적용한다.
 Meta 보고 지연과 설치 코호트 시간축 차이 때문에 두 표를 합쳐 전체 광고 전환율이나 통계적 A/B 승자를 산출하지 않는다.
+
+`usage`는 기존 `ops_count_installations`/`ops_count_jobs` 집계 전용 뷰만 읽는다. 광고·품질 선택 동의 유무와 관계없이 이미 서비스 제공 과정에서 저장된 등록·분석 처리 기록의 합계이며, 신규 데이터 수집·개별 설치 응답·광고 출처 연결·Google/Meta 전송은 없다.
+- `newInstallations`: 기간 내 최초 서버 등록 설치. 다운로드/설치 프로그램 완료/고유 사람 수와 다르다.
+- `newStarted`, `newCompleted`: 신규 등록 설치 중 등록 이후 분석을 시작/성공한 설치 수. 반복 작업은 설치별 한 번만 센다.
+- `activeInstallations`: 기존·신규 설치를 포함해 기간 내 최근 인증 요청이 있는 설치 수.
+- `startedInstallations`, `completedInstallations`, `jobsStarted`, `jobsCompleted`: 기간 내 시작된 작업 기준 설치 수/작업 수. 성공은 조회 시점의 completed 상태이며 완료 시각 코호트가 아니다.
+- `hideInternal`: 적용한 개발자 제외 설정.
+광고 연결 미동의 설치의 이용은 이 전체 운영 합계에만 포함하며 `acquisition`의 출처 미확인 이용 수는 표시하지 않는다. 서버 등록/통신이 없는 다운로드, 오프라인 실행, 로컬 저장 완료를 전체 이용으로 추정하지 않는다. 서버 요청 실패도 성과 0으로 처리하지 않는다.
 
 서버만 META_MARKETING_TOKEN(ads_read), META_MARKETING_VERSION, META_MARKETING_ACCOUNT_ID를 읽는다.
 토큰은 ECS Secrets로 주입하며 브라우저·소스·로그에 기록하지 않는다. API 버전은 앱에서 확인한 지원 버전을 명시한다.
