@@ -70,5 +70,10 @@ test('dashboard JS parses and renders unknown attribution separately from API un
   vm.runInContext(acquisition+render,ctx);
   const html=vm.runInContext(`marketingRender({meta:{status:'unconfigured',snapshot:null},queriedAt:'now',since:'then',windowDays:7,acquisition:[{creative:'unknown',installations:4}]})`,ctx) as string;
   assert.ok(html.includes('API 연결 대기'));assert.ok(html.includes('출처 미확인'));
-  assert.ok(html.includes('<td>4</td><td>—</td>'));assert.ok(html.includes('테스트·개발용'));
+  assert.ok(html.includes('<td>4</td><td>—</td>'));assert.ok(html.includes('개발자 제외 설정'));
+  assert.ok(html.includes('운영 집계가 제공되지 않았습니다'));
+  const operational=vm.runInContext(`marketingUsageBlock({newInstallations:4,newStarted:3,newCompleted:2,activeInstallations:8,startedInstallations:5,completedInstallations:4,jobsStarted:12,jobsCompleted:10,hideInternal:true})`,ctx) as string;
+  assert.ok(operational.includes('<td>4</td><td>3</td><td>2</td><td>50.0%</td>'));
+  assert.ok(operational.includes('개발자 설치 제외'));
+  assert.ok(!operational.includes('NaN'));
 });

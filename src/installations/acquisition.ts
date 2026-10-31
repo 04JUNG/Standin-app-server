@@ -68,6 +68,7 @@ export async function acquisitionSummary(days: number) {
         AND s.confirmed_at::timestamptz >= COALESCE(i.acquisition_consented_at,i.created_at::timestamptz)))::int AS selected,
       count(*) FILTER (WHERE i.acquisition_creative IS NOT NULL AND EXISTS (SELECT 1 FROM export_events e WHERE e.installation_id=i.id AND e.status='completed'
         AND e.occurred_at::timestamptz >= COALESCE(i.acquisition_consented_at,i.created_at::timestamptz)))::int AS exported
-    FROM installations i WHERE i.created_at::timestamptz >= now()-($1::int * interval '1 day')
-      AND i.revoked_at IS NULL GROUP BY COALESCE(i.acquisition_creative,'unknown')`, [days]);
+    FROM installations i JOIN ops_count_installations eligible ON eligible.id=i.id
+    WHERE i.created_at::timestamptz >= now()-($1::int * interval '1 day')
+    GROUP BY COALESCE(i.acquisition_creative,'unknown')`, [days]);
 }
