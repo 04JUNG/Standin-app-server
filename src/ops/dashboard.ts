@@ -1663,7 +1663,7 @@ function acquisitionBlock(rows) {
   if (!rows) return '';
   const labels = {'meta-poster-a':'포스터 A','meta-hook-a':'영상 A','unknown':'출처 미확인'};
   const ordered = Object.keys(labels).map(key => rows.find(r => r.creative === key) || {creative:key,installations:0,active:0,analyzed:0,selected:0,exported:0});
-  return '<h3>광고별 신규 설치와 실제 사용</h3><p class="sub">선택 기간에 등록한 설치 기준. 앱에서 광고 연결에 동의한 이후의 이용만 집계합니다. 앱 열기 링크를 통한 선택 연결이며 광고 조회 증명이 아닙니다. 미동의·일반 실행은 출처 미확인입니다. 설치 수는 사람 수와 다릅니다.</p>' +
+  return '<h3>광고별 신규 설치와 실제 사용</h3><p class="sub">선택 기간에 등록한 설치 기준. 앱에서 광고 연결에 동의한 이후의 이용만 집계합니다. 전용 설치 파일 또는 앱 열기 링크를 통한 선택 연결이며 광고 조회 증명이 아닙니다. 미동의·소재 없는 일반 실행은 출처 미확인입니다. 설치 수는 사람 수와 다릅니다.</p>' +
     '<div class="scroll"><table><thead><tr><th>광고</th><th>신규 설치</th><th>최근 24시간 활성</th><th>분석 성공</th><th>후보 선택</th><th>저장 완료</th></tr></thead><tbody>' +
     ordered.map(r => '<tr><td>'+esc(labels[r.creative])+'</td>'+['installations','active','analyzed','selected','exported'].map(k=>'<td>'+(r.creative==='unknown' && k!=='installations' ? '—' : esc(r[k]))+'</td>').join('')+'</tr>').join('')+'</tbody></table></div><p class="sub">출처 미확인의 이용 이력은 광고 연결 집계에 사용하지 않습니다.</p>';
 }
@@ -1686,7 +1686,7 @@ function campaignCountsBlock(counts) {
   return '<h3>소재별 첫 실행·첫 분석 성공 건수</h3><p class="sub">한국 시간 ' + esc(counts.since) + ' ~ ' + esc(counts.until) + ' · 전날까지의 합계 · 선택 동의와 별도</p>' +
     '<div class="scroll"><table><thead><tr><th>소재</th><th>첫 실행 보고</th><th>첫 이미지 분석 성공 보고</th></tr></thead><tbody>' +
     counts.rows.map(r => '<tr><td>' + esc(names[r.creative] || r.creative) + '</td><td>' + cell(r.first_run) + '</td><td>' + cell(r.first_analysis_success) + '</td></tr>').join('') + '</tbody></table></div>' +
-    '<p class="sub">지원 버전에서 새 등록 후 24시간 내 앱 열기 링크로 받은 첫 소재를 기준으로, 등록 후 최대 7일 내 첫 이미지 분석 성공을 셉니다. 설치·작업 식별자 없이 앱이 보낸 건수이며 실제 사람 수·설치 완료 수·서버 검증 전환이 아닙니다. 두 이벤트는 각각 수신 날짜 기준이므로 성공률을 계산하지 않습니다. 기존 버전·직접 실행·통신 실패는 빠질 수 있고 재설치·위조 요청은 중복될 수 있습니다. 개발자 설치 제외 설정은 적용하지 않습니다. 5건 미만은 0을 포함해 모두 숨기며 당일 내역과 개별 이용 이력을 제공하지 않습니다.</p>';
+    '<p class="sub">v0.2.8 전용 설치 파일은 새 설치 후 바로 실행해도 소재를 전달합니다. 일반 파일은 새 등록 후 24시간 내 앱 열기 링크로 받은 첫 소재를 사용합니다. 등록 후 최대 7일 내 첫 이미지 분석 성공을 셉니다. 설치·작업 식별자 없이 앱이 보낸 건수이며 실제 사람 수·설치 완료 수·서버 검증 전환이 아닙니다. 두 이벤트는 각각 수신 날짜 기준이므로 성공률을 계산하지 않습니다. 기존 버전·일반 파일의 직접 실행·통신 실패는 빠질 수 있고 공유된 파일·재설치·위조 요청은 중복 또는 다른 경로를 포함할 수 있습니다. 개발자 설치 제외 설정은 적용하지 않습니다. 5건 미만은 0을 포함해 모두 숨기며 당일 내역과 개별 이용 이력을 제공하지 않습니다.</p>';
 }
 
 function marketingRender(data) {
