@@ -1604,7 +1604,9 @@ Converter 코드·모델·라이브러리 자산 변경은 필요 없다.
 설치는 첫 실행 서버 등록 식별자이며 설치 프로그램 완료/고유 사람 수가 아니다. 소재별 이용은 연결 동의 이후만 집계한다.
 Meta는 KRW/Asia/Seoul 광고계정의 오늘 포함 N개 달력 날짜, 지정된 포스터 A·영상 A 광고 ID로 조회한다.
 `meta.status`: ready / unconfigured / unavailable / stale. `snapshot`은 없으면 null, 있으면
-since/until/fetchedAt/rows(creative, spend, impressions, clicks, landingViews)를 제공한다.
+since/until/fetchedAt/rows(creative, adId, phase: landing|download, spend, impressions, clicks, landingViews, downloadClicks)를 제공한다.
+기존 LPV 광고 2개와 다운로드 전환 광고 2개를 별도 행으로 제공한다. `downloadClicks`는 맞춤 전환 `offsite_conversion.custom.1680558963511586`만 읽으며 다른 맞춤 이벤트 합계는 사용하지 않는다. 2026-10-31 생성 전 전환은 소급 집계하지 않고, 설치·파일 다운로드 완료로 해석하지 않는다. 미게재 초안의 행도 0일 수 있다. 앱 귀속 키는 동일 소재의 광고 단계를 구분하지 않으므로 단계별 설치 전환율을 계산하지 않는다.
+Meta가 명시적으로 API 접근 차단을 반환하면 `meta.reason: access_blocked`를 추가한다. 원시 오류나 자격증명은 반환하지 않는다.
 오류는 0으로 바꾸지 않는다. stale은 동일 기간의 마지막 성공값이며 기간 변경 시 다른 기간 캐시는 사용하지 않는다.
 관리자 대시보드 마케팅 탭은 보이는 동안 30초마다 조회하며 Meta 호출은 프로세스별 60초 캐시와 중복 요청 병합을 적용한다.
 Meta 보고 지연과 설치 코호트 시간축 차이 때문에 두 표를 합쳐 전체 광고 전환율이나 통계적 A/B 승자를 산출하지 않는다.

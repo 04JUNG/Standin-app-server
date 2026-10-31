@@ -1683,18 +1683,20 @@ function marketingRender(data) {
   const meta = data.meta;
   const labels = {ready:'연결됨',unconfigured:'API 연결 대기',unavailable:'조회 실패',stale:'갱신 실패 · 이전 데이터'};
   let html = '<h3>Meta 광고 성과 · ' + esc(labels[meta.status] || '상태 확인 필요') + '</h3>';
+  if (meta.reason === 'access_blocked') html += '<p class="sub">Meta가 API 접근을 차단했습니다. Meta 개발자 계정의 확인 안내를 처리해야 광고 조회가 재개됩니다. 성과가 0이라는 뜻은 아닙니다.</p>';
   if (meta.snapshot) {
     const snap = meta.snapshot;
     html += '<p class="sub">광고계정 한국 시간 ' + esc(snap.since) + ' ~ ' + esc(snap.until) + ' (오늘 포함) · Meta 조회 ' + esc(when(snap.fetchedAt)) + '</p>';
-    html += '<div class="scroll"><table><thead><tr><th>소재</th><th>광고비 (원)</th><th>노출</th><th>링크 클릭</th><th>랜딩 방문</th><th>클릭률</th><th>방문당 비용 (원)</th></tr></thead><tbody>';
+    html += '<div class="scroll"><table><thead><tr><th>단계 / 소재</th><th>광고비 (원)</th><th>노출</th><th>링크 클릭</th><th>랜딩 방문</th><th>다운로드 클릭</th><th>다운로드 클릭당 비용 (원)</th><th>클릭률</th><th>방문당 비용 (원)</th></tr></thead><tbody>';
     const names = {'meta-poster-a':'포스터 A','meta-hook-a':'영상 A'};
-    html += snap.rows.map(r => '<tr><td>' + esc(names[r.creative] || r.creative) + '</td>' +
-      [r.spend,r.impressions,r.clicks,r.landingViews,r.impressions ? (100*r.clicks/r.impressions).toFixed(2)+'%' : '—',r.landingViews ? (r.spend/r.landingViews).toFixed(0) : '—'].map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>').join('') + '</tbody></table></div>';
+    html += snap.rows.map(r => '<tr><td>' + esc((r.phase === 'download' ? '다운로드 최적화 / ' : '랜딩 최적화 / ') + (names[r.creative] || r.creative)) + '</td>' +
+      [r.spend,r.impressions,r.clicks,r.landingViews,r.downloadClicks ?? '—',r.downloadClicks ? (r.spend/r.downloadClicks).toFixed(0) : '—',r.impressions ? (100*r.clicks/r.impressions).toFixed(2)+'%' : '—',r.landingViews ? (r.spend/r.landingViews).toFixed(0) : '—'].map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>').join('') + '</tbody></table></div>';
+    html += '<p class="sub">다운로드 클릭은 2026-10-31 생성한 Standin | DownloadClick 맞춤 전환에 Meta가 귀속한 수입니다. 생성 전 기록은 소급 집계하지 않으며 다운로드 완료·설치·사용 수와 다릅니다. 미게재 초안의 행도 0으로 표시될 수 있습니다. 최적화 목표가 다른 두 단계의 비용을 합쳐 A/B 승자를 판단하지 않습니다.</p>';
   } else html += '<p class="sub">광고 수치를 아직 가져오지 못했습니다. 아래 앱 집계는 별도로 갱신됩니다. 미연결·조회 실패는 성과 0을 의미하지 않습니다.</p>';
   html += '<p class="sub">앱 조회 ' + esc(when(data.queriedAt)) + ' · 신규 설치 범위: ' + esc(when(data.since)) + ' 이후 최근 ' + esc(data.windowDays) + '일(이동 구간). 광고 달력 날짜 범위와 다르므로 두 표를 나누어 비교하세요.</p>';
   html += marketingUsageBlock(data.usage);
   html += acquisitionBlock(data.acquisition);
-  html += '<p class="sub">신규 설치는 설치 파일 다운로드나 설치 프로그램 완료가 아니라 앱 첫 실행 후 서버에 등록된 설치 식별자 수입니다. 개발자 제외 설정은 앱 집계 모두에 적용합니다. 출처 연결에 동의한 설치만 소재별 이용을 비교할 수 있어 전체 광고 전환율·승자 판정으로 해석하지 않습니다.</p>';
+  html += '<p class="sub">신규 설치는 설치 파일 다운로드나 설치 프로그램 완료가 아니라 앱 첫 실행 후 서버에 등록된 설치 식별자 수입니다. 개발자 제외 설정은 앱 집계 모두에 적용합니다. 출처 연결에 동의한 설치만 소재별 이용을 비교합니다. 같은 소재의 랜딩·다운로드 광고 단계는 앱 출처에서 구분되지 않으므로 전체 광고 전환율·단계별 A/B 승자 판정으로 해석하지 않습니다.</p>';
   return html;
 }
 let marketingRequest = 0;
