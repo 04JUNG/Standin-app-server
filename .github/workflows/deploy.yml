@@ -112,6 +112,7 @@ jobs:
           secrets: ${{ vars.META_MARKETING_SECRET_ARN && format('META_MARKETING_TOKEN={0}:token::', vars.META_MARKETING_SECRET_ARN) || '' }}
           image: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.image.outputs.digest }}
           environment-variables: |
+            CAMPAIGN_COUNTS_ENABLED=${{ vars.CAMPAIGN_COUNTS_ENABLED || 'false' }}
             META_MARKETING_VERSION=${{ vars.META_MARKETING_VERSION }}
             META_MARKETING_ACCOUNT_ID=${{ vars.META_MARKETING_ACCOUNT_ID || '1090943087171654' }}
             HAND_SELECTION_ENABLED=${{ vars.HAND_SELECTION_ENABLED || 'false' }}
