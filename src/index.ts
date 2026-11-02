@@ -33,7 +33,10 @@ import { rateLimitByIp } from "./limits/middleware.js";
 import { clientPolicyRoutes } from "./client-version/routes.js";
 import { adminRoutes } from "./admin/routes.js";
 
-const app = new Hono<AppEnv>();
+import { createReplayRoutes } from "./replay/routes.js";
+import { replayArtifactWitness } from "./replay/witness.js";
+import { replayService } from "./replay/runtime.js";
+export const app = new Hono<AppEnv>();
 
 /**
  * requestId 부여 + 요청 로그 한 줄(오류봉투·집계·알림의 공통 입구).
@@ -188,6 +191,9 @@ app.use("/v1/pose-candidates/*", requireInstallation);
 app.use("/v1/hands/*", requireInstallation);
 app.use("/v1/events/*", requireInstallation);
 
+const artifactWitness=replayArtifactWitness(replayService,()=>log.warn({type:"replay_artifact_witness",errorCode:"REPLAY_WITNESS_FAILED"}));
+app.use("/v1/pose-candidates/*",artifactWitness);
+app.use("/v1/analysis/jobs/:jobId/scene",artifactWitness);
 app.route("/v1/users", usersRoutes);
 app.route("/v1/analysis/jobs", jobsRoutes);
 app.use("/v1/analysis/jobs/:jobId/scene", bodyLimit({ maxSize: 32768 }));
@@ -196,6 +202,9 @@ app.route("/v1/models", characterRoutes);
 app.route("/v1/pose-candidates", poseRoutes);
 app.route("/v1/events", analyticsRoutes);
 app.route("/v1/hands", createHandRoutes());
+app.use("/v1/replays", requireInstallation);
+app.use("/v1/replays/*", requireInstallation);
+app.route("/v1/replays", createReplayRoutes(replayService));
 app.route("/v1/admin", adminRoutes);
 
 // DB가 준비된 뒤에 요청을 받는다. 실패하면 기동하지 않는다 —
@@ -245,6 +254,9 @@ const stopInferenceWatch = startInferenceWatch();
 // 요청 지표를 1분 롤업으로 저장하고 추론 서버 지표도 함께 긁어 온다(계획 3단계).
 const stopOpsFlush = startOpsFlush();
 
+// Replay objects have a shorter retention and a durable deletion queue.
+const replayMaintenance = setInterval(() => { void replayService.sweep().catch(() => log.warn({type:"replay_maintenance",errorCode:"REPLAY_DELETE_RETRY"})); }, 60_000);
+replayMaintenance.unref();
 const maintenanceTimer = setInterval(
   () => {
     void runDataMaintenance().catch((error) =>
