@@ -51,6 +51,8 @@ function setup() {
     result: null as AnalysisResult | null,
     missingBvh: false,
     failed: false,
+    bvhs: 0,
+    snapshots: 0,
   };
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
@@ -73,10 +75,23 @@ function setup() {
         state.calls++;
         return state.upstream;
       },
-      getPoseBvh: async (id) =>
-        new Response(`HIERARCHY:${id}`, {
+      library: async () => ({
+        healthy: true,
+        library: {
+          version: "lib",
+          contentSha256: "a".repeat(64),
+          source: null,
+        },
+      }),
+      saveSnapshot: async () => {
+        state.snapshots++;
+      },
+      getPoseBvh: async (id) => {
+        state.bvhs++;
+        return new Response(`HIERARCHY:${id}`, {
           status: state.missingBvh ? 409 : 200,
-        }),
+        });
+      },
       createJob: async (owner) => {
         assert.equal(owner, "owner");
         state.created++;
@@ -445,4 +460,31 @@ test("near-only response stays a reference group and every release escalation fa
     Object.assign(invalid.candidates[0]!, { [field]: true });
     assert.throws(() => readSearchResponse(invalid, 5));
   }
+});
+
+test("progressive opt-in keeps the whole ranking but prepares only the first 20 of 1000", async () => {
+  const { post, state } = setup();
+  const raw = response();
+  raw.pose_library = {
+    version: "lib",
+    content_sha256: "a".repeat(64),
+  } as typeof raw.pose_library;
+  const template = raw.candidates[0]!;
+  raw.candidates = Array.from({ length: 1000 }, (_, i) => ({
+    ...structuredClone(template),
+    rank: i + 1,
+    pose_id: `pose${i}`,
+    pose: { ...template.pose, pose_id: `pose${i}` },
+  }));
+  state.upstream = raw;
+  assert.equal(
+    (await post({ query: "던지는 자세", topK: null, progressive: true }))
+      .status,
+    200,
+  );
+  assert.equal(state.requestedTopK, null);
+  assert.equal(state.bvhs, 20);
+  assert.equal(state.snapshots, 1);
+  assert.equal(state.result!.candidatesByPerson[0]!.candidates.length, 20);
+  assert.equal(state.result!.semantic!.paging!.total, 1000);
 });
