@@ -110,7 +110,7 @@ export interface AnalysisResult {
   manualExportVersion?: 1 | 2;
   jobId: string;
   source?: "image" | "semantic";
-  semantic?: { query: string; index: Record<string, string> };
+  semantic?: { query: string; index: Record<string, string>; paging?: import("./semantic/pages.js").SemanticPaging };
   image: { width: number; height: number } | null;
   inferenceMetadata: {
     deploymentVersion: string;

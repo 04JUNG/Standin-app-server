@@ -1444,7 +1444,7 @@ PNG/304 응답의 `X-Standin-Hand-Library-SHA256`으로 카탈로그 일치를 �
 미준비는 404 `HAND_THUMBNAIL_UNAVAILABLE`, 라이브러리 변경은 409 `HAND_LIBRARY_CHANGED`다.
 ## 직접 자연어 포즈 검색
 
-`GET /v1/semantic-search/capabilities`, `POST /v1/semantic-search`는 설치 인증을 사용한다. `query`와 `topK`(양의 안전 정수 또는 명시적인 `null`, 생략 시 5)로 검색하고 정식 또는 근접 후보가 있으면 `jobId`를 반환한다. 자동 refine·release는 금지하며 원본 해시에 바인딩된 후보의 수동 저장은 위 계약을 따른다. 이미지 없는 `source=semantic` 결과의 `image`는 null이다. 자연어 작업은 이미지 기반 refine/search-fit camera를 허용하지 않으며 정면 참고 카메라의 체형 검수는 지원한다. `topK:null`은 검색 기준을 통과한 전체 결과를 전달하며 BFF에서 5/20개로 자르지 않는다. capabilities의 `supportsAllResults:true`로 이를 알리고, 기존 앱용 `maxTopK:20` 힌트는 유지한다. 서버 페이지네이션은 없으며 UI에서 저장 썸네일을 지연 로딩하고 그룹별 20개씩 추가 표시한다. 입력 제한, 별도 검색 rate limit, 오류, 기록·해시 계약은 [SEMANTIC_SEARCH_INTEGRATION.md](SEMANTIC_SEARCH_INTEGRATION.md)를 따른다.
+`GET /v1/semantic-search/capabilities`, `POST /v1/semantic-search`는 설치 인증을 사용한다. `query`와 `topK`(양의 안전 정수 또는 명시적인 `null`, 생략 시 5)로 검색하고 정식 또는 근접 후보가 있으면 `jobId`를 반환한다. 자동 refine·release는 금지하며 원본 해시에 바인딩된 후보의 수동 저장은 위 계약을 따른다. 이미지 없는 `source=semantic` 결과의 `image`는 null이다. 자연어 작업은 이미지 기반 refine/search-fit camera를 허용하지 않으며 정면 참고 카메라의 체형 검수는 지원한다. `topK:null`은 검색 기준을 통과한 전체 결과를 전달하며 BFF에서 5/20개로 자르지 않는다. capabilities의 `supportsAllResults:true`로 이를 알리고, 기존 앱용 `maxTopK:20` 힌트는 유지한다. `supportsProgressiveResults:true`인 BFF에 `progressive:true`를 추가하면 전체 검색 순위의 스냅샷을 저장하고 첫 20개만 준비한다. `GET /v1/semantic-search/:jobId/pages?cursor=…`로 다음 20개를 읽는다. 자세한 커서·소유권·재시도·배포 계약은 [SEMANTIC_PROGRESSIVE_LOADING.md](SEMANTIC_PROGRESSIVE_LOADING.md)를 따른다. 기존 요청은 전체 결과 반환을 유지한다. 입력 제한, 별도 검색 rate limit, 오류, 기록·해시 계약은 [SEMANTIC_SEARCH_INTEGRATION.md](SEMANTIC_SEARCH_INTEGRATION.md)를 따른다.
 
 두 기능의 공통 흐름·통합 검증·PR 제출 범위는 [HANDS_SEMANTIC_INTEGRATION.md](HANDS_SEMANTIC_INTEGRATION.md)를 따른다. 자연어 결과도 준비된 handSelection capability를 유지해 수동 손 선택을 사용할 수 있다.
 
@@ -1785,3 +1785,11 @@ requests never run Blender. `INTERACTIVE_STATE_ENABLED` remains false by default
 private service token is required. Refined interactive states require actual persisted
 inference version/config/base hashes. Legacy verified FBX, static history/semantic lists
 and scene contracts retain their established safety/release rules.
+
+### 기본형 역할 메타데이터 (2026-11-04, 활성화 없음)
+
+승인 체형 카탈로그는 자산별 `gender: male|female|child`, `role: default|previous_default|preset`, `order: nonnegative integer`를 선택적으로 선언할 수 있다. `body-options`와 `body-preferences.shapeEditable`에 그대로 전달하며, `/models`는 표시 이름·성별·role·order를 제공하고 실제 availability는 Converter 목록으로 결정한다. `/models.isDefault/defaultCharacterId`는 구 export용 `CONVERTER_CHARACTER_ID` 의미를 유지한다.
+
+role이 있는 카탈로그의 공통 남성 폴백은 `defaultCharacterId`로 명시한 유일한 `gender=male,role=default` 자산이다. 기존 `male-base-*`는 `previous_default` 카드로 남고 새 ID/자산을 가리키도록 덮어쓰지 않는다. role 없는 카탈로그의 기존 남성 기본형 탐색 및 last_used/auto 정책은 유지한다. 작업 시작에 BodyRef를 고정하고, 과거 폴백 선택에 캡처 필드가 없더라도 저장된 BodyRef가 있으면 그 ID/해시/revision을 보존한다. 신규 자산 누락은 다른 BASE로 대체하지 않고 unavailable로 닫는다.
+
+새 비율·실제 hash·기존형 보존·캐시/포스터·병행 PR 경계는 [통합 계약](BODY_DEFAULT_ROLLOUT_20261104.md)을 따른다. 이 코드 변경은 자산 승인이나 배포/활성화를 뜻하지 않는다.
