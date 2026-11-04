@@ -187,7 +187,9 @@ test("prepare is immediate; repeated mutation is idempotent; request does not ac
 test("full polling/model/export/file path separates preparation, PNG and native save events", async () => {
   const s = await setup();
   try {
-    const o = await (await s.prepare())
+    const o = await (
+      await s.prepare()
+    )
       .json()
       .then((v) => v as ReturnType<typeof publicOperation>);
     await s.tick("preview");
@@ -223,10 +225,14 @@ test("full polling/model/export/file path separates preparation, PNG and native 
 test("latest wins: queued older revision never runs; late running response cannot publish", async () => {
   const s = await setup();
   try {
-    const a = await (await s.prepare())
+    const a = await (
+      await s.prepare()
+    )
       .json()
       .then((v) => v as ReturnType<typeof publicOperation>);
-    const b = await (await s.prepare(2, 1))
+    const b = await (
+      await s.prepare(2, 1)
+    )
       .json()
       .then((v) => v as ReturnType<typeof publicOperation>);
     await s.tick("preview");
@@ -235,12 +241,16 @@ test("latest wins: queued older revision never runs; late running response canno
     assert.equal((await s.read(b.operationId)).previewState, "authoritative");
     let release!: () => void;
     s.state.hold = new Promise<void>((r) => (release = r));
-    const c = await (await s.prepare(3, 2))
+    const c = await (
+      await s.prepare(3, 2)
+    )
       .json()
       .then((v) => v as ReturnType<typeof publicOperation>);
     const pending = s.tick("preview");
     while (s.state.solveCalls < 2) await new Promise((r) => setTimeout(r, 1));
-    const d = await (await s.prepare(4, 3))
+    const d = await (
+      await s.prepare(4, 3)
+    )
       .json()
       .then((v) => v as ReturnType<typeof publicOperation>);
     release();
@@ -266,7 +276,9 @@ test("hand/refine/body/scope changes invalidate ready downloads, including chang
   ]) {
     const s = await setup();
     try {
-      const o = await (await s.prepare())
+      const o = await (
+        await s.prepare()
+      )
         .json()
         .then((v) => v as ReturnType<typeof publicOperation>);
       await s.tick("preview");
@@ -289,7 +301,9 @@ test("hand/refine/body/scope changes invalidate ready downloads, including chang
 test("cross-installation, expiry, cancellation, parent deletion and old poster pointer are fenced", async () => {
   const s = await setup();
   try {
-    const o = await (await s.prepare())
+    const o = await (
+      await s.prepare()
+    )
       .json()
       .then((v) => v as ReturnType<typeof publicOperation>);
     assert.equal(
@@ -302,7 +316,9 @@ test("cross-installation, expiry, cancellation, parent deletion and old poster p
     await s.tick("preview");
     assert.equal(s.state.solveCalls, 0);
     assert.equal((await s.request(`/${o.operationId}/file`)).status, 409);
-    const b = await (await s.prepare(2, 1))
+    const b = await (
+      await s.prepare(2, 1)
+    )
       .json()
       .then((v) => v as ReturnType<typeof publicOperation>);
     await s.tick("preview");
@@ -311,7 +327,9 @@ test("cross-installation, expiry, cancellation, parent deletion and old poster p
     await s.tick("poster");
     assert.ok((await s.read(b.operationId)).poster);
     const old = await s.read(b.operationId);
-    const c = await (await s.prepare(3, 2))
+    const c = await (
+      await s.prepare(3, 2)
+    )
       .json()
       .then((v) => v as ReturnType<typeof publicOperation>);
     assert.equal(
@@ -509,6 +527,41 @@ test("a reclaimed lease rejects an old worker publication even without a new rev
         { previewState: "error" },
         second.leaseId,
       ),
+    );
+  } finally {
+    await s.pg.close();
+  }
+});
+
+test("lost Converter snapshot revokes durable ready and head recovery permits a new revision", async () => {
+  const s = await setup();
+  try {
+    const op = (await (await s.prepare()).json()) as ReturnType<
+      typeof publicOperation
+    >;
+    await s.tick("preview");
+    await s.request(`/${op.operationId}/export`, "POST");
+    await s.tick("export");
+    assert.equal((await s.read(op.operationId)).exportState, "ready");
+    s.service.deps.worker.file = async () => {
+      throw new InteractiveError("INTERACTIVE_EXPIRED", 410);
+    };
+    assert.equal((await s.request(`/${op.operationId}/file`)).status, 410);
+    assert.equal((await s.read(op.operationId)).previewState, "superseded");
+    const head = (await (await s.request("?candidateId=candidate")).json()) as {
+      operation: unknown;
+      currentRevision: number;
+      currentStateHash: string;
+    };
+    assert.equal(head.operation, null);
+    assert.equal(head.currentRevision, 1);
+    assert.equal(
+      (
+        await s.prepare(2, 1, "restart-recovery", {
+          expectedStateHash: head.currentStateHash,
+        })
+      ).status,
+      202,
     );
   } finally {
     await s.pg.close();

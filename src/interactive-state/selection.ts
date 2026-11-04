@@ -118,6 +118,11 @@ export function createSelectionResolver(
       personIndex,
       candidateId,
     );
+    if (
+      artifact.variant === "refined" &&
+      (!refine?.lineage || refine.lineage.baseSha256 !== originalSha)
+    )
+      throw new InteractiveError("INTERACTIVE_REFINE_LINEAGE_UNAVAILABLE");
     const runtime = await deps.runtime(),
       model = await deps.modelPreviewIdentity(characterId);
     if (!model || model.characterSha256 !== body.resolvedBody.assetSha256)
@@ -139,6 +144,7 @@ export function createSelectionResolver(
               refined: refine.refined,
               reason: refine.reason,
               limbs: refine.limbs,
+              lineage: refine.lineage ?? null,
             }
           : null,
       },

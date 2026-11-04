@@ -1774,11 +1774,14 @@ already does so. Docker staging still requires `REPLAY_ENVIRONMENT=staging`.
 The dashboard recognizes both body-shape `canvas_frame` and review-model `final` assets as
 recorded 3D frames; this does not prove a saved FBX or a successful CSP import.
 
-## Interactive pose operation v1 (draft, inactive)
+## Interactive pose operation v1 (opt-in real-model integration)
 
-The additive installation-authenticated polling/cancel/export/model/file and auxiliary
-canvas-frame routes are specified in [INTERACTIVE_STATE_V1.md](./INTERACTIVE_STATE_V1.md)
-and [bff-http-contract-v1.json](./contracts/bff-http-contract-v1.json).
-This is an inactive BFF foundation: Converter HTTP/camera integration is not implemented
-or frozen. Setting `INTERACTIVE_STATE_ENABLED=true` alone does not enable it.
-Legacy `verified-fbx-v1`, PNG, static history/semantic lists and scene contracts remain.
+The installation-authenticated polling/cancel/model/export/file and auxiliary canvas-frame
+routes are specified in [INTERACTIVE_STATE_V1.md](./INTERACTIVE_STATE_V1.md) and
+[bff-http-contract-v1.json](./contracts/bff-http-contract-v1.json). The private Converter
+HTTP transport, exact camera/frame bridge and verified recent hand-variant endpoint are
+implemented. Static Top5 capability requires complete prebuilt candidate coverage; card
+requests never run Blender. `INTERACTIVE_STATE_ENABLED` remains false by default and a
+private service token is required. Refined interactive states require actual persisted
+inference version/config/base hashes. Legacy verified FBX, static history/semantic lists
+and scene contracts retain their established safety/release rules.

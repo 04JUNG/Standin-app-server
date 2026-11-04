@@ -1,27 +1,28 @@
 {
   "schemaVersion": "standin.interactive-http.v1",
-  "status": "draft",
+  "status": "implemented-opt-in-local-real-verified",
   "updatedAt": "2026-11-04",
   "source": {
     "repository": "04JUNG/Standin-app-server",
     "baseCommit": "37adaa616b21ac49933974f73b56fbc5c575b0c2",
-    "branch": "codex/interactive-preview-bff-20261104",
+    "branch": "codex/interactive-real-model-bff",
     "commit": "7dcfcfda16b7825b35122e0ddab2418b593154a0",
-    "commitRef": "codex/interactive-preview-bff-20261104",
-    "commitRole": "BFF implementation code; subsequent metadata commit pins Converter draft"
+    "commitRef": "codex/interactive-real-model-bff",
+    "commitRole": "implementation baseline plus real-model integration in this branch"
   },
   "converterContract": {
     "path": "converter-contract-v1.json",
-    "status": "draft",
+    "status": "implemented-opt-in-local-real-verified",
     "baseCommit": "592ab0f059089e64a5c88a3ad607539124e8e6c6",
     "stateSchema": "solved-pose-state-v1",
     "modelSchema": "interactive-pose-model-v1",
     "receiptSchema": "interactive-fbx-receipt-v1",
     "canonicalEncoding": "typed-f64be-json-v1",
     "initialFbxRequired": true,
-    "httpTransport": "not yet implemented; do not activate",
-    "implementationCommit": "3fa41e71fc51b4aa696a2855c858dc5a73d36265",
-    "runtimeSha256": "2bf47b9e187a678960d0265db7cd2a36164639f0c40c94061ad6b4ed3af43572"
+    "httpTransport": "private authenticated /interactive/v1; default disabled",
+    "runtimeSha256": "d35d8c8c2d7888c437e53791c8dd5ba58c8bd65a597c016eb26e6236c3369eff",
+    "adapterVersion": "post-frozen-file-canonical-snapshot-v2",
+    "deadline": "Immutable BFF operation expiry; maximum one hour, missing/expired handle revokes ready"
   },
   "basePath": "/v1/analysis/jobs/{jobId}/people/{personIndex}/interactive-state",
   "authentication": "existing installation headers on every request; private no-store",
@@ -49,7 +50,8 @@
       "request": "ClientFrame JSON schema below; max 1 MiB PNG / 1.5 MB HTTP body",
       "response": "201 auxiliary UI-only acknowledgement; same-hash retry idempotent; never accuracy/file safety evidence; never authoritative history poster"
     },
-    "GET /v1/analysis/jobs/{jobId}/people/{personIndex}/interactive-frame": "200 archived current-selection server PNG; separate from operation/file expiry, same owned-job retention/source checks"
+    "GET /v1/analysis/jobs/{jobId}/people/{personIndex}/interactive-frame": "200 archived current-selection server PNG; separate from operation/file expiry, same owned-job retention/source checks",
+    "GET /{operationId}/variants": "200 bounded exact previously verified owner-bound hand variants; current ready operation required"
   },
   "Operation": {
     "schemaVersion": "standin.interactive-http.v1",
@@ -83,9 +85,10 @@
     "Initial BFF polling draft; converter packet schema pending",
     "Aligned snapshot hash semantics to Converter solved_state.py: no synthetic geometry hash before solve; separate selectionHash.",
     "Implemented durable polling/head recovery/cancel/queue, strict canonical packet+receipt+file checks, server history archive and auxiliary frame upload; actual Converter HTTP transport and full camera mapping remain blocked.",
-    "Pinned BFF implementation 7dcfcfd and Converter draft implementation 3fa41e71; confirmed no HTTP transport and no frozen/activated integration."
+    "Pinned BFF implementation 7dcfcfd and Converter draft implementation 3fa41e71; confirmed no HTTP transport and no frozen/activated integration.",
+    "Real-model v2 integration: authenticated internal HTTP, normalized search projection, strict file-canonical display/export correspondence, prebuilt 5/5 local Top5 and bounded verified hand tables. Default flags remain off."
   ],
-  "implementationStatus": "inactive BFF foundation; real Converter HTTP/camera integration and real-file validation pending",
+  "implementationStatus": "implemented private Converter HTTP/camera/static/verified-hand transport; local real-asset and full-wire tests pass; disabled by default",
   "schemas": {
     "Prepare": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -213,5 +216,12 @@
     "realWorkerValidated": false,
     "nativeSaveValidated": false,
     "top5MatrixCoverageValidated": false
-  }
+  },
+  "staticAssets": {
+    "resolve": "batched offline Converter manifest; never Blender per card",
+    "url": "/v1/analysis/jobs/{jobId}/people/{personIndex}/interactive-static/{candidateId}/{sha256}",
+    "capability": "interactive-preview-capability-v1 only when all returned candidates have prebuilt source/character/scope coverage",
+    "scopeOfProof": "5/5 local candidates, not global library"
+  },
+  "documentation": "docs/INTERACTIVE_STATE_V1.md"
 }

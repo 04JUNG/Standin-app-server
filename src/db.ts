@@ -288,6 +288,7 @@ export const SCHEMA = `
   /* 확인 화면 미리보기 PNG의 S3 key. object_key와 마찬가지로 NULL이면 "없다"이지
      오류가 아니다 — 그림이 없으면 화면이 후보 썸네일로 폴백한다. */
   ALTER TABLE refined_artifacts ADD COLUMN IF NOT EXISTS thumbnail_key TEXT;
+  ALTER TABLE refined_artifacts ADD COLUMN IF NOT EXISTS interactive_lineage JSONB;
 
   CREATE TABLE IF NOT EXISTS daily_analytics_aggregates (
     day                   TEXT PRIMARY KEY,

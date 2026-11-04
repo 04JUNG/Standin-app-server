@@ -1,3 +1,4 @@
+import { refineLineage } from "./lineage.js";
 // 선택 후보 refine 오케스트레이션(BFF-05 ~ BFF-07).
 //
 // 핵심 원칙 하나: **refine은 사용자 작업을 실패시키지 않는다.** 안전 게이트가 조정을 버려도,
@@ -45,7 +46,9 @@ export interface RefineOutcome {
 export type RefineFailure = { error: "JOB_CANDIDATE_MISMATCH" };
 
 /** 후보를 찾지 못했다는 뜻. 소유권 검증은 라우트가 먼저 끝낸다. */
-export function isRefineFailure(v: RefineOutcome | RefineFailure): v is RefineFailure {
+export function isRefineFailure(
+  v: RefineOutcome | RefineFailure,
+): v is RefineFailure {
   return "error" in v;
 }
 
@@ -103,13 +106,23 @@ const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 export function decodeUpstreamThumbnail(
   thumbnail: RefineUpstreamThumbnail | null | undefined,
 ): Uint8Array | null {
-  if (!thumbnail || typeof thumbnail.data !== "string" || thumbnail.data.length === 0) {
+  if (
+    !thumbnail ||
+    typeof thumbnail.data !== "string" ||
+    thumbnail.data.length === 0
+  ) {
     return null;
   }
-  if (thumbnail.encoding !== undefined && thumbnail.encoding !== "base64") return null;
-  if (thumbnail.media_type !== undefined && thumbnail.media_type !== "image/png") return null;
+  if (thumbnail.encoding !== undefined && thumbnail.encoding !== "base64")
+    return null;
+  if (
+    thumbnail.media_type !== undefined &&
+    thumbnail.media_type !== "image/png"
+  )
+    return null;
   // base64는 4바이트가 3바이트가 된다. 디코드 전에 상한을 본다.
-  if (thumbnail.data.length > Math.ceil((MAX_THUMBNAIL_BYTES * 4) / 3) + 4) return null;
+  if (thumbnail.data.length > Math.ceil((MAX_THUMBNAIL_BYTES * 4) / 3) + 4)
+    return null;
 
   const bytes = new Uint8Array(Buffer.from(thumbnail.data, "base64"));
   // Buffer.from은 잘못된 base64를 던지지 않고 조용히 잘라낸다 — 길이로 걸러낸다.
@@ -135,7 +148,11 @@ export async function runRefine(
   if (!candidate) return { error: "JOB_CANDIDATE_MISMATCH" };
 
   // 같은 선택을 다시 눌러도 추론을 다시 호출하지 않고 S3 객체도 늘어나지 않는다(BFF-07).
-  const existing = await deps.findRefinedArtifact(jobId, personIndex, candidateId);
+  const existing = await deps.findRefinedArtifact(
+    jobId,
+    personIndex,
+    candidateId,
+  );
   if (existing) {
     return {
       refined: existing.refined,
@@ -168,7 +185,12 @@ export async function runRefine(
       await deps.putRefinedThumbnail(key, bytes);
       return key;
     } catch {
-      logRefine({ event: "refine_thumbnail_failed", jobId, personIndex, stage: "persist" });
+      logRefine({
+        event: "refine_thumbnail_failed",
+        jobId,
+        personIndex,
+        stage: "persist",
+      });
       return null;
     }
   };
@@ -213,8 +235,12 @@ export async function runRefine(
   try {
     upstream = await deps.refineUpstream({
       // 미리보기는 refine 밖에서 그린다. 안에서 그리면 5초 상한을 넘겨 조정 결과까지 잃는다.
-      ...(input.deferPreview || !config.refineInlineThumbnail ? { render_thumbnail: false } : {}),
-      ...(config.refineV3Shadow && context.refineV3 ? { refine_v3: context.refineV3 } : {}),
+      ...(input.deferPreview || !config.refineInlineThumbnail
+        ? { render_thumbnail: false }
+        : {}),
+      ...(config.refineV3Shadow && context.refineV3
+        ? { refine_v3: context.refineV3 }
+        : {}),
       pose_id: candidate.poseId,
       view: candidate.view,
       ...(candidate.camera ? { camera: candidate.camera } : {}),
@@ -241,7 +267,8 @@ export async function runRefine(
   // 안전 게이트가 베이스를 유지한 것 — 오류가 아니다(요구서 §3-3).
   // 이 경우에도 미리보기는 있다. 추론이 **실제로 저장될 베이스 BVH**를 같은 렌더러로
   // 그려 주므로, 확인 화면은 조정 여부와 무관하게 같은 그림을 쓸 수 있다.
-  if (!upstream.refined) return skip(upstream.reason, await persistThumbnail(upstream.thumbnail));
+  if (!upstream.refined)
+    return skip(upstream.reason, await persistThumbnail(upstream.thumbnail));
 
   // refined=true인데 본문이 없다면 계약 위반이다. 추론 서버가 조정본을 넘기는 경로는
   // 이 필드 하나뿐이고(REFINE_HANDOFF §3 4단계에서 /refined/{handle}/bvh는 제거됐다),
@@ -251,7 +278,12 @@ export async function runRefine(
   //   (`bvh=res.bvh_text if res.refined else None`), null이 새어 나가면 아래
   //   `TextEncoder().encode()`가 문자열 `"null"`을 조정본으로 S3에 올린다.
   if (typeof upstream.bvh !== "string" || upstream.bvh.length === 0) {
-    logRefine({ event: "refine_failed", jobId, personIndex, stage: "contract" });
+    logRefine({
+      event: "refine_failed",
+      jobId,
+      personIndex,
+      stage: "contract",
+    });
     return skip("upstream_missing_bvh");
   }
 
@@ -279,6 +311,7 @@ export async function runRefine(
     objectKey,
     thumbnailKey,
     limbs: upstream.limbs,
+    lineage: refineLineage(upstream.refine_version, upstream.diagnostics),
   });
   logRefine({
     event: "refine_applied",
@@ -315,7 +348,8 @@ export async function resolveExportArtifact(
     return { variant: "base", fallbackReason: null };
   }
   const bytes = await getRefinedBvh(artifact.objectKey);
-  if (!bytes) return { variant: "base", fallbackReason: "refined_object_missing" };
+  if (!bytes)
+    return { variant: "base", fallbackReason: "refined_object_missing" };
   return { variant: "refined", bytes };
 }
 

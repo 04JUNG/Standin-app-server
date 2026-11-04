@@ -11,4 +11,5 @@ export interface InteractiveWorker {
   export(op: Operation, signal: AbortSignal): Promise<Record<string, unknown>>;
   file(op: Operation, signal?: AbortSignal): Promise<Uint8Array>;
   cancel(op: Operation): Promise<void>;
+  variants?(op: Operation, signal?: AbortSignal): Promise<Uint8Array>;
 }

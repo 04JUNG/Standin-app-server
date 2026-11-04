@@ -64,7 +64,7 @@ export const identitySchema = z
       .object({
         version: z.literal(EXPECTED_SOLVER_VERSION),
         manifestSha256: sha,
-        adapterVersion: z.literal("post-frozen-snapshot-v1"),
+        adapterVersion: z.enum(["post-frozen-snapshot-v1", "post-frozen-file-canonical-snapshot-v2"]),
         runtimeSha256: sha,
       })
       .strict(),

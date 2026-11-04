@@ -1,4 +1,6 @@
 import { clientFrameSchema } from "./clientFrame.js";
+import { staticFile } from "./static.js";
+import { sha256Hex } from "../converter/client.js";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { AppEnv } from "../env.js";
@@ -102,6 +104,24 @@ export function createInteractiveRoutes(
       "Cache-Control": "private, no-store",
     });
   });
+  r.get(
+    "/:jobId/people/:personIndex/interactive-static/:candidateId/:sha",
+    async (c) => {
+      const bytes = await staticFile(
+        l(c),
+        c.req.param("candidateId"),
+        c.req.param("sha"),
+        c.req.raw.signal,
+      );
+      return new Response(bytes, {
+        headers: {
+          "Content-Type": "model/gltf-binary",
+          "Content-Length": String(bytes.length),
+          "Cache-Control": "private, no-store",
+        },
+      });
+    },
+  );
   r.post(INTERACTIVE_PATH, async (c) => {
     const location = l(c),
       parsed = prepareSchema.safeParse(await c.req.json().catch(() => null));
@@ -146,6 +166,20 @@ export function createInteractiveRoutes(
       "Retry-After": "1",
     }),
   );
+  r.get(`${INTERACTIVE_PATH}/:operationId/variants`, async (c) => {
+    const operation = await op(c),
+      bytes = await service.variants(operation, c.req.raw.signal);
+    return new Response(bytes, {
+      headers: {
+        "Content-Type": "application/vnd.standin.hand-variants-v1+json",
+        "Content-Length": String(bytes.length),
+        "Cache-Control": "private, no-store",
+        "X-Standin-Atlas-SHA256": sha256Hex(bytes),
+        "X-Standin-State-Hash": operation.stateHash!,
+        "X-Standin-Revision": String(operation.revision),
+      },
+    });
+  });
   for (const kind of ["model", "file", "poster"] as const)
     r.get(`${INTERACTIVE_PATH}/:operationId/${kind}`, async (c) => {
       const operation = await op(c);

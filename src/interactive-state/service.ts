@@ -45,6 +45,21 @@ export class InteractiveService {
   private running = new Map<string, AbortController>();
   private stopped = false;
   constructor(readonly deps: InteractiveDeps) {}
+  private async consume<T>(
+    op: Operation,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await action();
+    } catch (error) {
+      if (
+        error instanceof InteractiveError &&
+        error.code === "INTERACTIVE_EXPIRED"
+      )
+        await this.cancel(op, true);
+      throw error;
+    }
+  }
   async prepare(l: Location, input: Prepare) {
     const selection = await this.deps.resolve(l, input.candidateId);
     const prepared = await this.deps.store.prepare(
@@ -121,7 +136,9 @@ export class InteractiveService {
     if (!active(op) || !op.stateHash)
       throw new InteractiveError("INTERACTIVE_NOT_READY");
     const selection = await this.revalidate(op);
-    const bytes = await this.deps.worker.model(op, signal);
+    const bytes = await this.consume(op, () =>
+      this.deps.worker.model(op, signal),
+    );
     if (bytes.length > 96 * 1024 * 1024)
       throw new InteractiveError("CONVERTER_INTEGRITY");
     let packet: unknown;
@@ -142,6 +159,18 @@ export class InteractiveService {
     await this.assertDeliverable(op);
     // This is HTTP delivery, not native disk persistence or an export-completed event.
     this.deps.metric("artifact_download_delivered", "download", 0);
+    return bytes;
+  }
+  async variants(op: Operation, signal?: AbortSignal) {
+    if (!active(op) || op.exportState !== "ready" || !this.deps.worker.variants)
+      throw new InteractiveError("INTERACTIVE_NOT_READY");
+    await this.revalidate(op);
+    const bytes = await this.consume(op, () =>
+      this.deps.worker.variants!(op, signal),
+    );
+    if (bytes.length > 64 * 1024 * 1024)
+      throw new InteractiveError("CONVERTER_INTEGRITY");
+    await this.assertDeliverable(op);
     return bytes;
   }
   async clientFrame(op: Operation, frame: ClientFrame) {
@@ -207,7 +236,9 @@ export class InteractiveService {
     return { op, bytes };
   }
   private async verifiedFile(op: Operation, signal?: AbortSignal) {
-    const bytes = await this.deps.worker.file(op, signal),
+    const bytes = await this.consume(op, () =>
+        this.deps.worker.file(op, signal),
+      ),
       receipt = op.receipt;
     const binary = Buffer.from(bytes.subarray(0, 23)).equals(
       Buffer.from("Kaydara FBX Binary  \0\x1a\0"),
@@ -304,7 +335,9 @@ export class InteractiveService {
         if (!building) return;
         op = building;
         const receipt = parseReceipt(
-          await this.deps.worker.export(op, controller.signal),
+          await this.consume(op, () =>
+            this.deps.worker.export(op, controller.signal),
+          ),
           op,
           selection,
         );

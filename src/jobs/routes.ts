@@ -1,4 +1,5 @@
 import { interactiveEnabled } from "../interactive-state/runtime.js";
+import { staticAssets } from "../interactive-state/static.js";
 import { historyFrames } from "../interactive-state/history.js";
 import { safeOriginalName } from "./inputIdentity.js";
 import { analysisFailureDetails } from "./failure.js";
@@ -186,7 +187,11 @@ jobsRoutes.post("/", async (c) => {
     const stored = await storeInput(installationId, job.id, bytes, file.type);
     await setJobInput(
       job.id,
-      { s3Key: stored.key, sha256: stored.sha256, originalName: safeOriginalName(file.name) },
+      {
+        s3Key: stored.key,
+        sha256: stored.sha256,
+        originalName: safeOriginalName(file.name),
+      },
       config.jobExecutionMode === "sqs",
     );
   } catch {
@@ -247,9 +252,19 @@ jobsRoutes.get("/", async (c) => {
   const page = toHistoryPage(rows, parsed.query.limit);
   if (interactiveEnabled()) {
     // Capture/storage failure cannot fail the list or change its established static poster.
-    const frames = await historyFrames(c.get("installationId")!, page.items).catch(() => new Map());
-    return c.json({ ...page, items: page.items.map(item => ({ ...item,
-      ...(frames.has(item.jobId) ? { representativeFrame: frames.get(item.jobId) } : {}) })) });
+    const frames = await historyFrames(
+      c.get("installationId")!,
+      page.items,
+    ).catch(() => new Map());
+    return c.json({
+      ...page,
+      items: page.items.map((item) => ({
+        ...item,
+        ...(frames.has(item.jobId)
+          ? { representativeFrame: frames.get(item.jobId) }
+          : {}),
+      })),
+    });
   }
   return c.json(page);
 });
@@ -307,10 +322,49 @@ jobsRoutes.get("/:id/result", async (c) => {
     job.result,
   );
   const availability = sceneAvailability(job);
-  log.info({ type: "scene_capability", jobId: job.id, requestId: c.get("requestId"),
-    sceneExport: availability.originalSelection.available, sceneRefinement: availability.autoCorrectV4.available,
-    originalReasons: availability.originalSelection.reasons, refinementReasons: availability.autoCorrectV4.reasons,
-    saveModes: sceneSaveContract(availability.originalSelection.available, availability.autoCorrectV4.available).saveModes });
+  const interactiveAssets = new Map<string, Map<string, unknown>>();
+  if (interactiveEnabled() && result.source !== "semantic") {
+    await Promise.all(
+      result.candidatesByPerson.map(async (person) => {
+        const body = person.bodySelection;
+        if (
+          !body?.resolvedBody ||
+          body.resolutionStatus !== "ready" ||
+          body.previewOnly ||
+          body.shape
+        )
+          return;
+        const assets = await staticAssets(
+          person,
+          body.resolvedBody,
+          result.jobId,
+        ).catch(() => new Map());
+        interactiveAssets.set(String(person.personIndex), assets);
+      }),
+    );
+  }
+  const top5Ready =
+    result.candidatesByPerson.some((p) => p.candidates.length > 0) &&
+    result.candidatesByPerson.every(
+      (p) =>
+        !p.candidates.length ||
+        p.candidates.every((candidate) =>
+          interactiveAssets.get(String(p.personIndex))?.has(candidate.id),
+        ),
+    );
+  log.info({
+    type: "scene_capability",
+    jobId: job.id,
+    requestId: c.get("requestId"),
+    sceneExport: availability.originalSelection.available,
+    sceneRefinement: availability.autoCorrectV4.available,
+    originalReasons: availability.originalSelection.reasons,
+    refinementReasons: availability.autoCorrectV4.reasons,
+    saveModes: sceneSaveContract(
+      availability.originalSelection.available,
+      availability.autoCorrectV4.available,
+    ).saveModes,
+  });
   return c.json({
     ...result,
     sourceImage: sourceImageIdentity(job),
@@ -335,6 +389,13 @@ jobsRoutes.get("/:id/result", async (c) => {
         : {}),
       candidates: person.candidates.map((candidate) => ({
         ...candidate,
+        ...(interactiveAssets.get(String(person.personIndex))?.has(candidate.id)
+          ? {
+              interactivePreview: interactiveAssets
+                .get(String(person.personIndex))!
+                .get(candidate.id),
+            }
+          : {}),
         ...(candidate.camera && candidate.thumbnailUrl
           ? {
               previewModelUrl: candidate.thumbnailUrl.replace(
@@ -346,10 +407,27 @@ jobsRoutes.get("/:id/result", async (c) => {
       })),
     })),
     capabilities: {
-      interactiveState: { schemaVersion: "standin.interactive-http.v1", available: interactiveEnabled(),
-        transport: "polling", localHands: false, initialFbxRequired: true },
+      ...(top5Ready
+        ? {
+            interactivePreview: {
+              schemaVersion: "interactive-preview-capability-v1",
+              top5: true,
+              operations: interactiveEnabled(),
+            },
+          }
+        : {}),
+      interactiveState: {
+        schemaVersion: "standin.interactive-http.v1",
+        available: interactiveEnabled(),
+        transport: "polling",
+        localHands: false,
+        initialFbxRequired: true,
+      },
       sceneAvailability: availability,
-      sceneSaveContract: sceneSaveContract(availability.originalSelection.available, availability.autoCorrectV4.available),
+      sceneSaveContract: sceneSaveContract(
+        availability.originalSelection.available,
+        availability.autoCorrectV4.available,
+      ),
       sceneRefinement: availability.autoCorrectV4.available,
       sceneExport: availability.originalSelection.available,
       presentationBodyPreviews:
