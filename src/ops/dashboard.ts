@@ -1633,7 +1633,7 @@ function accuracyBlock(accuracy) {
     : '<p class="empty">피드백이 없습니다.</p>';
   return "<h3>검색 결과 활용 — 마감된 기록 " + accuracy.days + "일</h3>" +
     metricCards([
-      { label: "작업 사용 확정률", value: pct(accuracy.selectionRate),
+      { label: "선택률", value: pct(accuracy.selectionRate),
         hint: "작업 기준 · 완료 " + accuracy.jobsCompleted + "건 중 사용 확정" },
       { label: "Top-1 비율", value: pct(accuracy.top1Rate),
         hint: "유효 순위 " + (accuracy.rankSamples ?? "미확인") + "개 / 선택 인물 " + (accuracy.rankSelectionSamples ?? "미확인") + "명" },
@@ -1812,7 +1812,7 @@ function overviewRender(data) {
     kpiCard("활성 설치", n(k.activeInstallations), "기간 중 접속 · 전체 " + k.totalInstallations + "곳 · 동의 무관") +
     kpiCard("오늘 활성", n(k.activeToday), "최근 24시간 접속 · 동의 무관") +
     kpiCard("분석", n(k.jobsStarted), "완료 " + k.jobsCompleted + "건 · 동의 무관") +
-    kpiCard("작업 사용 확정률", pct(k.selectionRate), "품질 동의 작업 기준 · 확정 " + k.jobsSelected + "건") +
+    kpiCard("선택률", pct(k.selectionRate), "품질 동의 작업 기준 · 확정 " + k.jobsSelected + "건") +
     kpiCard("서버 파일 제공", n(k.downloads), "서버 기록 " + k.jobsExported + "작업 · 실제 저장 성공은 지표 탭에서 확인") +
     kpiCard("실패율", pct(k.failureRate), "실패 " + k.jobsFailed + "건",
       k.failureRate !== null && k.failureRate >= 10 ? "bad" : k.failureRate !== null && k.failureRate >= 5 ? "warn" : "") +
