@@ -108,6 +108,11 @@ test('dashboard JS parses and renders unknown attribution separately from API un
   assert.ok(conversion.includes('생성 전 기록은 소급 집계하지 않으며'));
   const counts=vm.runInContext(`campaignCountsBlock({enabled:true,since:'2026-10-25',until:'2026-10-31',rows:[{creative:'meta-poster-a',first_run:8,first_analysis_success:5},{creative:'meta-hook-a',first_run:null,first_analysis_success:null}]})`,ctx) as string;
   assert.ok(counts.includes('<td>8</td><td>5</td>'));
-  assert.ok(counts.includes('표본 부족 (5건 미만)'));
+  assert.ok(counts.includes('<td>5건 미만</td>'));
   assert.ok(counts.includes('전날까지의 합계'));assert.ok(!counts.includes('<td>0</td>'));
+  const mixed=vm.runInContext(`campaignCountsBlock({enabled:true,since:'2026-11-05',until:'2026-11-05',minimumCell:0,rows:[{creative:'meta-poster-a',first_run:2,first_analysis_success:0},{creative:'meta-hook-a',first_run:3,first_analysis_success:1}],previousPeriod:{since:'2026-11-01',until:'2026-11-04',minimumCell:5,rows:[{creative:'meta-poster-a',first_run:null,first_analysis_success:null}]}})`,ctx) as string;
+  assert.ok(mixed.includes('<td>포스터 A</td><td>2</td><td>0</td>'));
+  assert.ok(mixed.includes('<td>영상 A</td><td>3</td><td>1</td>'));
+  assert.ok(mixed.includes('<td>포스터 A</td><td>5건 미만</td><td>5건 미만</td>'));
+  assert.equal((mixed.match(/<caption>/g) ?? []).length,2);
 });
