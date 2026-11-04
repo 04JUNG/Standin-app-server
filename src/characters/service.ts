@@ -1,7 +1,7 @@
 import { handSelectionAvailable } from "../hands/service.js";
 import { bodyUxAvailable } from "../body-selection/availability.js";
 import { loadBodyCatalog } from "../body-selection/catalog.js";
-import { bodyRef, type BodyRef } from "../body-selection/model.js";
+import { bodyRef, type BodyRef, type BodyCatalog, type BodyAsset } from "../body-selection/model.js";
 import { framingAvailable, modelPreviewIdentity } from "../converter/framing.js";
 // /v1/models 의 본체. converter의 "지금 만들 수 있는 것"과 BFF의 "어떻게 보여줄 것인가"를
 // 합쳐 클라이언트 계약(Standin-client docs/08 §8-1)으로 만든다.
@@ -24,6 +24,8 @@ export type CharacterAvailability = "available" | "coming_soon";
 
 export interface ModelCharacter {
   bodyRef?: BodyRef | null;
+  role?: BodyAsset["role"];
+  order?: number;
   characterId: string;
   displayName: string;
   gender: CharacterGender;
@@ -51,11 +53,15 @@ export interface CharacterDeps {
   enabled: boolean;
   defaultCharacterId: string;
   listUpstream: () => Promise<ConverterCharacter[]>;
+  bodyCatalog: () => BodyCatalog;
 }
 
 function defaultDeps(): CharacterDeps {
   return {
     enabled: converterEnabled(),
+    bodyCatalog: () => config.bodySelectionEnabled
+      ? loadBodyCatalog()
+      : { version: "disabled", defaultCharacterId: null, assets: [] },
     defaultCharacterId: config.converterCharacterId,
     listUpstream: () => fetchConverterCharacters(),
   };
@@ -85,7 +91,7 @@ function toModel(
   available: boolean,
   upstream: ConverterCharacter | undefined,
   defaultCharacterId: string,
-  selectedBody: BodyRef | null = null,
+  selectedBody: BodyAsset | null = null,
 ): ModelCharacter {
   const presentation = presentationFor(
     characterId,
@@ -93,9 +99,11 @@ function toModel(
   );
   return {
     characterId,
-    ...(config.bodySelectionEnabled ? { bodyRef: selectedBody } : {}),
-    displayName: presentation.displayName,
-    gender: presentation.gender,
+    ...(config.bodySelectionEnabled ? { bodyRef: selectedBody ? bodyRef(selectedBody) : null } : {}),
+    displayName: selectedBody?.displayName ?? presentation.displayName,
+    gender: selectedBody?.gender === "child" ? "unspecified" : selectedBody?.gender ?? presentation.gender,
+    ...(selectedBody?.role ? { role: selectedBody.role } : {}),
+    ...(selectedBody?.order !== undefined ? { order: selectedBody.order } : {}),
     availability: available ? "available" : "coming_soon",
     source: "builtin",
     isDefault: characterId === defaultCharacterId,
@@ -123,9 +131,10 @@ export async function listCharacters(
   const deps = { ...defaultDeps(), ...overrides };
   const upstream = (await deps.listUpstream()).filter((row) => !isRetiredCharacter(row.characterId));
   const byId = new Map(upstream.map((row) => [row.characterId, row]));
-  const ids = new Set([...Object.keys(CHARACTER_PRESENTATION), ...byId.keys()]);
-
-  const bodies = config.bodySelectionEnabled ? loadBodyCatalog().assets : [];
+  const bodyCatalog = deps.bodyCatalog();
+  const bodies = bodyCatalog.assets;
+  const ids = new Set([...Object.keys(CHARACTER_PRESENTATION), ...byId.keys(), ...bodies.map((a) => a.characterId)]);
+  // /models also serves legacy exports: its global default remains the converter config.
   const defaultCharacterId = isRetiredCharacter(deps.defaultCharacterId)
     ? (upstream[0]?.characterId ?? "")
     : deps.defaultCharacterId;
@@ -137,13 +146,13 @@ export async function listCharacters(
         byId.has(id),
         byId.get(id),
         defaultCharacterId,
-        a ? bodyRef(a) : null,
+        a ?? null,
       );
     })
     .sort((a, b) => {
       const order =
-        presentationFor(a.characterId, "").order -
-        presentationFor(b.characterId, "").order;
+        (a.order ?? presentationFor(a.characterId, "").order) -
+        (b.order ?? presentationFor(b.characterId, "").order);
       return order !== 0 ? order : a.characterId.localeCompare(b.characterId);
     });
 

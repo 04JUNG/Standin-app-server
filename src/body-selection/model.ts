@@ -14,7 +14,13 @@ export interface BodyRef {
   measurementVersion: string;
   characterId: string;
 }
-export interface BodyAsset extends BodyRef {
+/** Operator-authored presentation; identities and rendering contracts are independent. */
+export interface BodyPresentation {
+  gender?: "male" | "female" | "child";
+  role?: "default" | "previous_default" | "preset";
+  order?: number;
+}
+export interface BodyAsset extends BodyRef, BodyPresentation {
   displayName?: string;
   neutralPreview?: {
     path: string;
@@ -183,11 +189,16 @@ export function snapshot(
     firstUseDefault: firstUseBody(catalog),
   };
 }
-/** Use only a registered current male BASE asset; never invent a fallback identity. */
+/** Use the declared male default, or the original BASE rule for role-free catalogs. */
 export function firstUseBody(catalog: BodyCatalog): BodyRef | null {
-  const asset = catalog.assets.find((a) =>
-    /^male-base(?:-|$)/.test(a.characterId),
-  );
+  // Once roles are declared, never rediscover the old BASE by array order or ID.
+  const declared = catalog.assets.some((a) => a.role !== undefined);
+  const asset = declared
+    ? catalog.assets.find((a) =>
+        a.characterId === catalog.defaultCharacterId &&
+        a.role === "default" && a.gender === "male",
+      )
+    : catalog.assets.find((a) => /^male-base(?:-|$)/.test(a.characterId));
   return asset ? bodyRef(asset) : null;
 }
 /**
