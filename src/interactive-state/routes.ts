@@ -1,3 +1,5 @@
+import { z } from "zod";
+import type { SelectionPreviewService } from "./selectionPreview.js";
 import { clientFrameSchema } from "./clientFrame.js";
 import { staticFile } from "./static.js";
 import { sha256Hex } from "../converter/client.js";
@@ -14,6 +16,7 @@ export const INTERACTIVE_PATH = "/:jobId/people/:personIndex/interactive-state";
 export function createInteractiveRoutes(
   service: InteractiveService,
   enabled: () => boolean,
+  previewService?: SelectionPreviewService,
 ) {
   const r = new Hono<AppEnv>();
   r.onError((e, c) => {
@@ -83,6 +86,45 @@ export function createInteractiveRoutes(
       throw new InteractiveError("INVALID_INPUT", 400);
     return { installationId, jobId, personIndex };
   };
+  const previewPath = "/:jobId/people/:personIndex/selection-preview";
+  r.use(
+    previewPath,
+    bodyLimit({
+      maxSize: 4096,
+      onError: (c) =>
+        c.json(
+          errorEnvelope(
+            "PAYLOAD_TOO_LARGE",
+            "요청이 너무 큽니다.",
+            c.get("requestId"),
+          ),
+          413,
+        ),
+    }),
+  );
+  r.post(previewPath, async (c) => {
+    const location = l(c);
+    if (!previewService)
+      throw new InteractiveError("INTERACTIVE_DISABLED", 503);
+    const parsed = z
+      .object({
+        candidateId: z.string().min(1).max(200),
+        bodyRevision: z.number().int().nonnegative(),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) throw new InteractiveError("INVALID_INPUT", 400);
+    return c.json(
+      await previewService.preview(
+        location,
+        parsed.data.candidateId,
+        parsed.data.bodyRevision,
+        c.req.raw.signal,
+      ),
+      200,
+      { "Cache-Control": "private, no-store" },
+    );
+  });
   r.get("/:jobId/people/:personIndex/interactive-frame", async (c) => {
     const { op, bytes } = await service.historyFrame(l(c));
     return new Response(bytes, {

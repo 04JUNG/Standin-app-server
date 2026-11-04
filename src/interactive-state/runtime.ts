@@ -1,3 +1,4 @@
+import { SelectionPreviewService } from "./selectionPreview.js";
 /** Activation intentionally gated on an agreed, implemented Converter transport. */
 import { config } from "../config.js";
 import { renderFinalPreview } from "../converter/finalPreview.js";
@@ -36,3 +37,8 @@ export const interactiveService = new InteractiveService({
 });
 export const interactiveEnabled = () =>
   config.interactiveStateEnabled && converterTransportAvailable;
+
+export const selectionPreviewService = new SelectionPreviewService(
+  createSelectionResolver({}, "preview"),
+  worker,
+);

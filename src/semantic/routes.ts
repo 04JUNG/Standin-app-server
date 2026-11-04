@@ -1,3 +1,4 @@
+import { interactiveEnabled } from "../interactive-state/runtime.js";
 import { poseThumbnailUrl } from "../pose-thumbnail.js";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -60,7 +61,14 @@ const defaults = {
   createJob: createSemanticJob,
   persist: persistAnalysisRecords,
   updateJob,
-  capabilities: currentCapabilities,
+  capabilities: async (): Promise<
+    Awaited<ReturnType<typeof currentCapabilities>> & {
+      selectionPreview?: boolean;
+    }
+  > => ({
+    ...(await currentCapabilities()),
+    ...(interactiveEnabled() ? { selectionPreview: true } : {}),
+  }),
   consume: (owner: string) =>
     tryConsume(
       "semantic_search",

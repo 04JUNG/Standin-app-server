@@ -39,6 +39,7 @@ const defaults = {
 };
 export function createSelectionResolver(
   overrides: Partial<typeof defaults> = {},
+  purpose: "export" | "preview" = "export",
 ) {
   const deps = { ...defaults, ...overrides };
   return async (location: Location, candidateId: string) => {
@@ -68,6 +69,7 @@ export function createSelectionResolver(
     )
       throw new InteractiveError("CANDIDATE_RELEASE_FORBIDDEN");
     if (
+      purpose === "export" &&
       !(await deps.validateConfirmedSelection(
         installationId,
         jobId,
@@ -83,7 +85,7 @@ export function createSelectionResolver(
     if (
       body.resolutionStatus !== "ready" ||
       !body.resolvedBody ||
-      body.previewOnly ||
+      (purpose === "export" && body.previewOnly) ||
       !shapeRenderable(body)
     )
       throw new InteractiveError("BODY_PREVIEW_STALE");
