@@ -19,6 +19,8 @@ function setup() {
     quarantined: false,
     calls: 0,
     modelCalls: 0,
+    modelMissing: false,
+    changeDuringModel: false,
   };
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
@@ -62,6 +64,8 @@ function setup() {
       converterEnabled: () => true,
       getPreviewModel: async () => {
         state.modelCalls++;
+        if (state.modelMissing) throw new Error("cache miss");
+        if (state.changeDuringModel) state.stale = true;
         return Buffer.from("glTFmodel");
       },
       convertFramed: async (input) => {
@@ -125,4 +129,15 @@ test("precomputed preview checks ownership/source but never runs conversion", as
   state.owner = false;
   assert.equal((await request("", "preview-model")).status, 409);
   assert.equal(state.modelCalls, 1);
+});
+
+test("Top-5 cache miss never starts Blender or PNG; changed candidate cannot publish late cached model", async () => {
+  const { state, request } = setup();
+  state.modelMissing = true;
+  assert.equal((await request("", "preview-model")).status, 503);
+  assert.equal(state.calls, 0);
+  state.modelMissing = false;
+  state.changeDuringModel = true;
+  assert.equal((await request("", "preview-model")).status, 409);
+  assert.equal(state.calls, 0);
 });

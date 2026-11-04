@@ -1,0 +1,130 @@
+/** Additive HTTP contract. Client requests contain identifiers, never authoritative geometry. */
+import { createHash } from "node:crypto";
+import { z } from "zod";
+export const HTTP_SCHEMA = "standin.interactive-http.v1";
+export const SHA = /^[a-f0-9]{64}$/;
+export class InteractiveError extends Error {
+  constructor(
+    readonly code: string,
+    readonly status: 400 | 404 | 409 | 410 | 413 | 429 | 503 = 409,
+  ) {
+    super(code);
+  }
+}
+export const prepareSchema = z
+  .object({
+    schemaVersion: z.literal(HTTP_SCHEMA),
+    candidateId: z.string().min(1).max(200),
+    revision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    expectedRevision: z
+      .number()
+      .int()
+      .nonnegative()
+      .max(Number.MAX_SAFE_INTEGER),
+    expectedStateHash: z.string().regex(SHA).nullable(),
+    mutationId: z.string().regex(/^[A-Za-z0-9_-]{8,128}$/),
+  })
+  .strict()
+  .refine((v) => v.revision > v.expectedRevision);
+export type Prepare = z.infer<typeof prepareSchema>;
+export interface Location {
+  installationId: string;
+  jobId: string;
+  personIndex: number;
+}
+export type PreviewState =
+  | "solving"
+  | "authoritative"
+  | "error"
+  | "superseded"
+  | "cancelled";
+export type ExportState =
+  | "not-requested"
+  | "queued"
+  | "building"
+  | "ready"
+  | "failed"
+  | "superseded"
+  | "cancelled";
+export interface Operation extends Location {
+  operationId: string;
+  candidateId: string;
+  revision: number;
+  /** Stable request identity; includes server preferences, no clocks/paths/display names. */
+  selectionHash: string;
+  /** Converter canonical snapshot digest. Null until solve; never replaced once assigned. */
+  stateHash: string | null;
+  previewState: PreviewState;
+  exportState: ExportState;
+  eventSequence: number;
+  expiresAt: string;
+  createdAt: string;
+  mutationId: string;
+  requestHash: string;
+  errorCode: string | null;
+  snapshotProof: {
+    identityHash: string;
+    modelSha256: string;
+    runtimeRevision: string;
+  } | null;
+  snapshotId: string | null;
+  receipt: Record<string, unknown> | null;
+  uiFrame?: { sha256: string; renderer: string; cameraHash: string };
+  poster: { sha256: string; renderer: string } | null;
+}
+export function canonical(value: unknown): string {
+  if (value === null || typeof value === "boolean" || typeof value === "string")
+    return JSON.stringify(value);
+  if (typeof value === "number" && Number.isFinite(value))
+    return JSON.stringify(Object.is(value, -0) ? 0 : value);
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value && typeof value === "object")
+    return `{${Object.entries(value)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`)
+      .join(",")}}`;
+  throw new InteractiveError("INVALID_STATE");
+}
+export const hash = (value: unknown) =>
+  createHash("sha256").update(canonical(value)).digest("hex");
+export const locationKey = (l: Location) =>
+  [l.installationId, l.jobId, l.personIndex].join(":");
+export function active(op: Operation) {
+  return !["superseded", "cancelled", "error"].includes(op.previewState);
+}
+export function publicOperation(op: Operation) {
+  const base = `/v1/analysis/jobs/${encodeURIComponent(op.jobId)}/people/${op.personIndex}/interactive-state/${op.operationId}`;
+  return {
+    schemaVersion: HTTP_SCHEMA,
+    operationId: op.operationId,
+    candidateId: op.candidateId,
+    revision: op.revision,
+    selectionHash: op.selectionHash,
+    stateHash: op.stateHash,
+    previewState: op.previewState,
+    exportState: op.exportState,
+    eventSequence: op.eventSequence,
+    expiresAt: op.expiresAt,
+    modelUrl: active(op) && op.stateHash ? `${base}/model` : null,
+    fileUrl: active(op) && op.exportState === "ready" ? `${base}/file` : null,
+    posterUrl: active(op) && op.poster ? `${base}/poster` : null,
+    exportReceipt:
+      active(op) && op.exportState === "ready" && op.receipt
+        ? {
+            schema: "interactive-fbx-receipt-v1",
+            operationId: op.operationId,
+            revision: op.revision,
+            stateHash: op.stateHash,
+            artifactSha256: op.receipt.artifactSha256,
+            artifactBytes: op.receipt.artifactBytes,
+            runtimeRevision: op.receipt.runtimeRevision,
+            packetModelSha256: op.receipt.packetModelSha256,
+            solverVersion: "chain-transport-v3.2.5",
+            validationVersion: "final-fbx-v1",
+            initialFbxRequired: true,
+            nativeSaved: false,
+          }
+        : null,
+    errorCode: op.errorCode,
+  };
+}

@@ -1,0 +1,144 @@
+{
+  "evidence": "Synthetic 3-vertex protocol fixture; no Blender, file export, skin or camera equivalence evidence. Generated using Converter Python implementation.",
+  "converterBase": "592ab0f059089e64a5c88a3ad607539124e8e6c6",
+  "sourceSha256": {
+    "converter/solved_state.py": "cf0033d6b2892c1087d93448b56e53ff0c7c37613ee7336690c5994b7fb5a5f1",
+    "converter/interactive_adapter.py": "16a54a64adea64f0a510a66313fdbbdb5ba101554a61cb7edf0e94d61c712850",
+    "converter/interactive_scene.py": "6c0918eb8b9571364aac44a9caeb18328a7106ef2506d9d8fc8628cc93277255",
+    "converter/interactive_export.py": "0b188a28cbe8cd720c740a48118b91ae0937f67c8900b43e943e7aacb93fbcf8"
+  },
+  "packet": {
+    "schema": "solved-pose-state-v1",
+    "operation": "op_00000000-0000-4000-8000-000000000001",
+    "revision": 1,
+    "stateHash": "3e448505022ba42e586527ebafd1b16e0377bfda0b8f65e1edf6816a7779d5f0",
+    "previewState": "authoritative",
+    "exportState": "not-requested",
+    "canonicalEncoding": "typed-f64be-json-v1",
+    "canonicalState": "{\"dependencies\":{\"boundary\":\"post-frozen-body-pre-final-export-v1\",\"initialFbxRequired\":true},\"identity\":{\"body\":{\"characterId\":\"registered-fixture\",\"characterSha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"rigProfile\":\"mixamo\"},\"camera\":{\"baked\":false,\"distanceTorso\":{\"$f64\":\"4010000000000000\"},\"projection\":\"orthographic\",\"projectionMatrix\":[{\"$f64\":\"3ff0000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"3ff0000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"3ff0000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"3ff0000000000000\"}],\"torsoReferenceSha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"viewMatrix\":[{\"$f64\":\"3ff0000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"3ff0000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"3ff0000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"3ff0000000000000\"}]},\"hands\":{\"left\":null,\"librarySha256\":\"d6c7a92051088ad6ba171b95f43065d6688b8b6595513505ba8a6763805c6b47\",\"right\":null,\"rulesVersion\":\"hand-bake-v1\"},\"mirror\":false,\"ownerBinding\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"scope\":\"full\",\"selection\":{\"candidate\":\"candidate\",\"operation\":\"op_00000000-0000-4000-8000-000000000001\",\"person\":\"0\",\"revision\":1},\"shape\":{\"controlsSha256\":null,\"rulesVersion\":\"none\",\"sha256\":null,\"sourceSha256\":null},\"solver\":{\"adapterVersion\":\"post-frozen-snapshot-v1\",\"manifestSha256\":\"52eae0b0eb6a7023540fdf023ad4321f24c11d439f3ecf9f390b5b72358b24e3\",\"runtimeSha256\":\"4335081a60d431ed25711d46783bafa6237c7fcd4f323e24adcb6fbead4bae4c\",\"version\":\"chain-transport-v3.2.5\"},\"source\":{\"originalBvhSha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"refineVersion\":\"none\",\"refinedBvhSha256\":null}},\"model\":{\"bones\":[{\"inverseBind\":[{\"$f64\":\"3ff0000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"3ff0000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"3ff0000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"3ff0000000000000\"}],\"name\":\"Hips\",\"parent\":-1,\"poseLocal\":[{\"$f64\":\"3ff0000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"3ff0000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"3ff0000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"3ff0000000000000\"}],\"restLocal\":[{\"$f64\":\"3ff0000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"3ff0000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"3ff0000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"3ff0000000000000\"}]}],\"capabilities\":{\"localHands\":false},\"coordinates\":{\"baked\":\"rigged_rest\",\"matrixLayout\":\"row-major\",\"originBlender\":[{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"3ff0000000000000\"}],\"space\":\"right-handed-y-up-metres-hip-origin\"},\"meshes\":[{\"name\":\"mesh_000\",\"normalTriangles\":[[0,1,2]],\"normals\":[[{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"3ff0000000000000\"}],[{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"3ff0000000000000\"}],[{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"3ff0000000000000\"}]],\"positions\":[[{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"}],[{\"$f64\":\"3ff0000000000000\"},{\"$f64\":\"0000000000000000\"},{\"$f64\":\"0000000000000000\"}],[{\"$f64\":\"0000000000000000\"},{\"$f64\":\"3ff0000000000000\"},{\"$f64\":\"0000000000000000\"}]],\"triangles\":[[0,1,2]],\"weights\":[[[0,{\"$f64\":\"3ff0000000000000\"}]],[[0,{\"$f64\":\"3ff0000000000000\"}]],[[0,{\"$f64\":\"3ff0000000000000\"}]]]}],\"schema\":\"interactive-pose-model-v1\"},\"safety\":{\"bodyAccepted\":true,\"finalFileVerified\":false,\"handChecksPassed\":true,\"surface\":\"existing-adapter-checks-only\"},\"schema\":\"solved-pose-state-v1\"}"
+  },
+  "receipt": {
+    "schema": "interactive-fbx-receipt-v1",
+    "stateHash": "3e448505022ba42e586527ebafd1b16e0377bfda0b8f65e1edf6816a7779d5f0",
+    "revision": 1,
+    "operation": "op_00000000-0000-4000-8000-000000000001",
+    "identity": {
+      "ownerBinding": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "selection": {
+        "operation": "op_00000000-0000-4000-8000-000000000001",
+        "revision": 1,
+        "person": "0",
+        "candidate": "candidate"
+      },
+      "source": {
+        "originalBvhSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "refinedBvhSha256": null,
+        "refineVersion": "none"
+      },
+      "body": {
+        "characterId": "registered-fixture",
+        "characterSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "rigProfile": "mixamo"
+      },
+      "shape": {
+        "sha256": null,
+        "rulesVersion": "none",
+        "sourceSha256": null,
+        "controlsSha256": null
+      },
+      "hands": {
+        "left": null,
+        "right": null,
+        "librarySha256": "d6c7a92051088ad6ba171b95f43065d6688b8b6595513505ba8a6763805c6b47",
+        "rulesVersion": "hand-bake-v1"
+      },
+      "scope": "full",
+      "mirror": false,
+      "camera": {
+        "projection": "orthographic",
+        "viewMatrix": [
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "projectionMatrix": [
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distanceTorso": 4.0,
+        "torsoReferenceSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "baked": false
+      },
+      "solver": {
+        "version": "chain-transport-v3.2.5",
+        "manifestSha256": "52eae0b0eb6a7023540fdf023ad4321f24c11d439f3ecf9f390b5b72358b24e3",
+        "adapterVersion": "post-frozen-snapshot-v1",
+        "runtimeSha256": "4335081a60d431ed25711d46783bafa6237c7fcd4f323e24adcb6fbead4bae4c"
+      }
+    },
+    "verified": true,
+    "artifactSha256": "9cd7f785bd455c6cd6be8a17efd7fcfa6741def643f74f104221062053d9b466",
+    "artifactBytes": 29,
+    "runtimeRevision": "4335081a60d431ed25711d46783bafa6237c7fcd4f323e24adcb6fbead4bae4c",
+    "packetModelSha256": "e2287733dad970faa670d35429fdc30d2e5bacb0257f80a8dc7806c8c46d92e0",
+    "reimportModelSha256": "e2287733dad970faa670d35429fdc30d2e5bacb0257f80a8dc7806c8c46d92e0",
+    "skin": {
+      "version": "final-fbx-v1",
+      "artifact_sha256": "9cd7f785bd455c6cd6be8a17efd7fcfa6741def643f74f104221062053d9b466",
+      "scope": "full",
+      "bones": 1,
+      "meshes": 1,
+      "vertices": 3,
+      "polygons": 1,
+      "skin_verified": true
+    },
+    "correspondence": {
+      "topology": true,
+      "jointIdentity": true,
+      "skinIdentity": true,
+      "maxPositionErrorM": 0.0,
+      "maxMatrixError": 0.0,
+      "maxWeightError": 0.0,
+      "maxNormalError": 0.0,
+      "positionToleranceM": 0.0001,
+      "matrixTolerance": 1e-05,
+      "weightTolerance": 1e-06
+    },
+    "safety": {
+      "bodyAccepted": true,
+      "finalFileVerified": false,
+      "handChecksPassed": true,
+      "surface": "existing-adapter-checks-only"
+    },
+    "limitations": [
+      "synthetic-fixture-only"
+    ]
+  }
+}

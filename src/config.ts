@@ -7,6 +7,8 @@ function env(key: string, def = ""): string {
 }
 
 export const config = {
+  /** Additive operation API; also requires a frozen implemented Converter transport. */
+  interactiveStateEnabled: env("INTERACTIVE_STATE_ENABLED", "false") === "true",
   replayEnabled: env("REPLAY_ENABLED", "true") === "true",
   captureReplayEnabled: env("CAPTURE_REPLAY_ENABLED", "true") === "true",
   cspResultCaptureEnabled: env("CSP_RESULT_CAPTURE_ENABLED", "true") === "true",

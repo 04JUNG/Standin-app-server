@@ -29,13 +29,16 @@ export const JOB_SCOPED_TABLES = [
 ] as const;
 
 /** jobs(id) ON DELETE CASCADE라 jobs 행과 함께 사라지는 테이블. */
-export const CASCADE_TABLES = ["job_outbox", "replay_job_links", "replay_artifact_receipts"] as const;
+export const CASCADE_TABLES = ["job_outbox", "replay_job_links", "replay_artifact_receipts", "interactive_heads", "interactive_operations", "interactive_history_frames"] as const;
 
 /**
  * installation_id 칸이 있는 테이블. 작업 밖 분석 이벤트, 작업 없는 export 기록, 설치 단위
  * 관리자 열람처럼 job_id가 빈 행은 작업을 따라 지워지지 않으므로 이 칸으로 지운다.
  */
 export const INSTALLATION_SCOPED_TABLES = [
+  "interactive_history_frames",
+  "interactive_operations",
+  "interactive_heads",
   "replay_sessions",
   "replay_daily_usage",
   "body_preferences",

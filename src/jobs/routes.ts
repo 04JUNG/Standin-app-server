@@ -1,3 +1,5 @@
+import { interactiveEnabled } from "../interactive-state/runtime.js";
+import { historyFrames } from "../interactive-state/history.js";
 import { safeOriginalName } from "./inputIdentity.js";
 import { analysisFailureDetails } from "./failure.js";
 import { sourceImageIdentity } from "../pose/sceneManifest.js";
@@ -242,7 +244,14 @@ jobsRoutes.get("/", async (c) => {
     );
   }
   const rows = await listJobHistory(c.get("installationId")!, parsed.query);
-  return c.json(toHistoryPage(rows, parsed.query.limit));
+  const page = toHistoryPage(rows, parsed.query.limit);
+  if (interactiveEnabled()) {
+    // Capture/storage failure cannot fail the list or change its established static poster.
+    const frames = await historyFrames(c.get("installationId")!, page.items).catch(() => new Map());
+    return c.json({ ...page, items: page.items.map(item => ({ ...item,
+      ...(frames.has(item.jobId) ? { representativeFrame: frames.get(item.jobId) } : {}) })) });
+  }
+  return c.json(page);
 });
 
 // GET /v1/analysis/jobs/:id — 상태 폴링
@@ -337,6 +346,8 @@ jobsRoutes.get("/:id/result", async (c) => {
       })),
     })),
     capabilities: {
+      interactiveState: { schemaVersion: "standin.interactive-http.v1", available: interactiveEnabled(),
+        transport: "polling", localHands: false, initialFbxRequired: true },
       sceneAvailability: availability,
       sceneSaveContract: sceneSaveContract(availability.originalSelection.available, availability.autoCorrectV4.available),
       sceneRefinement: availability.autoCorrectV4.available,

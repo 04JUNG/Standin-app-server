@@ -53,7 +53,11 @@ export function createAlignedRoutes(overrides: Partial<typeof defaults> = {}) {
         ?.candidates.find(
           (p) => p.id === candidateId && p.poseId === c.req.param("id"),
         );
-      if (job?.status !== "completed" || (!candidate?.camera || !candidate.poseId))
+      if (
+        job?.status !== "completed" ||
+        !candidate?.camera ||
+        !candidate.poseId
+      )
         return fail(409, "INVALID_EXPORT");
       if (!deps.converterEnabled()) return fail(503, "FBX_UNAVAILABLE");
       const characterId =
@@ -72,11 +76,34 @@ export function createAlignedRoutes(overrides: Partial<typeof defaults> = {}) {
             characterId,
           );
           const current = await deps.getOwnedJob(jobId, installationId);
-          if (current?.status !== "completed")
+          const currentCandidate = current?.result?.candidatesByPerson
+            .find((p) => p.personIndex === personIndex)
+            ?.candidates.find(
+              (p) => p.id === candidateId && p.poseId === candidate.poseId,
+            );
+          if (
+            current?.status !== "completed" ||
+            JSON.stringify(currentCandidate) !== JSON.stringify(candidate)
+          )
             return fail(409, "INVALID_EXPORT");
+          const freshSource = await deps.getPoseBvh(candidate.poseId);
+          if (!freshSource.ok) {
+            await freshSource.body?.cancel();
+            return fail(409, "POSE_UNAVAILABLE");
+          }
+          if (
+            sha256Hex(new Uint8Array(await freshSource.arrayBuffer())) !==
+              candidate.camera.source_bvh_sha256 ||
+            (await deps.checkCharacter(characterId)) !== "ok"
+          )
+            return fail(409, "POSE_UNAVAILABLE");
           return new Response(model, {
             headers: {
               "Content-Type": "model/gltf-binary",
+              "Content-Length": String(model.byteLength),
+              "X-Standin-Model-Version": "posed-mesh-v1",
+              "X-Standin-Artifact-SHA256": sha256Hex(model),
+              "X-Standin-Source-BVH-SHA256": candidate.camera.source_bvh_sha256,
               "Cache-Control": "private, no-store",
             },
           });
