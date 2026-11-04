@@ -2,7 +2,7 @@
 
 This PR implements the BFF operation lifecycle and validates the actual Converter Python snapshot/receipt schema with a synthetic fixture. **It does not complete the interactive-preview design or connect a live Converter worker.** `runtime.ts` deliberately supplies an unavailable worker and `converterTransportAvailable=false`; setting `INTERACTIVE_STATE_ENABLED=true` cannot bypass that gate. No schema is frozen and no rollout, deployment or paid evaluation was performed.
 
-Base: BFF develop `37adaa616b21ac49933974f73b56fbc5c575b0c2`. Design: `Standin-server/docs/NEXT_SPRINT/INTERACTIVE_POSE_PREVIEW_ASYNC_FBX_DESIGN_2026-11-04.md`. Machine-readable draft: `docs/contracts/bff-http-contract-v1.json`. Converter draft: `Standin-server/artifacts/interactive-preview-20261104/converter-contract-v1.json` (branch `codex/interactive-pose-converter-v1`, base `592ab0f059089e64a5c88a3ad607539124e8e6c6`). The fixture records SHA256 of the exact Python sources observed before commit; those are draft sources, not a released worker version.
+Base: BFF develop `37adaa616b21ac49933974f73b56fbc5c575b0c2`. Design: `Standin-server/docs/NEXT_SPRINT/INTERACTIVE_POSE_PREVIEW_ASYNC_FBX_DESIGN_2026-11-04.md`. Machine-readable draft: `docs/contracts/bff-http-contract-v1.json`. Converter draft: `Standin-server/artifacts/interactive-preview-20261104/converter-contract-v1.json` (branch `codex/interactive-pose-converter-v1`, base `592ab0f059089e64a5c88a3ad607539124e8e6c6`). The fixture records SHA256 of the exact Python sources observed before commit; the fixture is now pinned to draft implementation commit `3fa41e71fc51b4aa696a2855c858dc5a73d36265`, not a released worker version.
 
 ## Implemented boundary
 

@@ -6,8 +6,9 @@
     "repository": "04JUNG/Standin-app-server",
     "baseCommit": "37adaa616b21ac49933974f73b56fbc5c575b0c2",
     "branch": "codex/interactive-preview-bff-20261104",
-    "commit": "pending implementation commit; see source.commitRef",
-    "commitRef": "codex/interactive-preview-bff-20261104"
+    "commit": "7dcfcfda16b7825b35122e0ddab2418b593154a0",
+    "commitRef": "codex/interactive-preview-bff-20261104",
+    "commitRole": "BFF implementation code; subsequent metadata commit pins Converter draft"
   },
   "converterContract": {
     "path": "converter-contract-v1.json",
@@ -18,7 +19,9 @@
     "receiptSchema": "interactive-fbx-receipt-v1",
     "canonicalEncoding": "typed-f64be-json-v1",
     "initialFbxRequired": true,
-    "httpTransport": "not yet implemented; do not activate"
+    "httpTransport": "not yet implemented; do not activate",
+    "implementationCommit": "3fa41e71fc51b4aa696a2855c858dc5a73d36265",
+    "runtimeSha256": "2bf47b9e187a678960d0265db7cd2a36164639f0c40c94061ad6b4ed3af43572"
   },
   "basePath": "/v1/analysis/jobs/{jobId}/people/{personIndex}/interactive-state",
   "authentication": "existing installation headers on every request; private no-store",
@@ -79,7 +82,8 @@
   "changes": [
     "Initial BFF polling draft; converter packet schema pending",
     "Aligned snapshot hash semantics to Converter solved_state.py: no synthetic geometry hash before solve; separate selectionHash.",
-    "Implemented durable polling/head recovery/cancel/queue, strict canonical packet+receipt+file checks, server history archive and auxiliary frame upload; actual Converter HTTP transport and full camera mapping remain blocked."
+    "Implemented durable polling/head recovery/cancel/queue, strict canonical packet+receipt+file checks, server history archive and auxiliary frame upload; actual Converter HTTP transport and full camera mapping remain blocked.",
+    "Pinned BFF implementation 7dcfcfd and Converter draft implementation 3fa41e71; confirmed no HTTP transport and no frozen/activated integration."
   ],
   "implementationStatus": "inactive BFF foundation; real Converter HTTP/camera integration and real-file validation pending",
   "schemas": {
