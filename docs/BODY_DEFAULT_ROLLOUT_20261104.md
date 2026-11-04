@@ -43,3 +43,11 @@ The model session's review catalog uses distinct new IDs `male-default83-v0-7-6-
 
 
 The final model handoff includes genuine neutral PNGs and source-bound SSR2 runtime bytes. Runtime uses the verified BASE evaluator anchor with the new catalog default heads passed as numeric controls; the old preset name does not imply an old default. Source/rules/runtime byte SHA checks remain intact. At the observed handoff, the catalog declares only `Finding_01` and `rokoko_Lawyer_02_mixamo_00008` pose coverage for the new assets; arbitrary library coverage and activation are not claimed, and unsupported poses remain unavailable. Model status prose and catalog coverage must be reconciled before release if they differ.
+# Develop-only integration approval (2026-11-04)
+
+The user approved male 8.3-head/female 8.0-head appearance and requested app
+integration through develop only. For this merge, include `[skip deploy]` in
+the squash commit message. The deployment workflow honors that marker while
+the ordinary CI workflow remains enabled. Global auto-deploy settings and all
+live catalog/task definitions remain unchanged. This is not permission to
+publish assets or deploy staging/production.
