@@ -1773,3 +1773,11 @@ collection/read is denied. Set development explicitly for local use; the isolate
 already does so. Docker staging still requires `REPLAY_ENVIRONMENT=staging`.
 The dashboard recognizes both body-shape `canvas_frame` and review-model `final` assets as
 recorded 3D frames; this does not prove a saved FBX or a successful CSP import.
+
+### 기본형 역할 메타데이터 (2026-11-04, 활성화 없음)
+
+승인 체형 카탈로그는 자산별 `gender: male|female|child`, `role: default|previous_default|preset`, `order: nonnegative integer`를 선택적으로 선언할 수 있다. `body-options`와 `body-preferences.shapeEditable`에 그대로 전달하며, `/models`는 표시 이름·성별·role·order를 제공하고 실제 availability는 Converter 목록으로 결정한다. `/models.isDefault/defaultCharacterId`는 구 export용 `CONVERTER_CHARACTER_ID` 의미를 유지한다.
+
+role이 있는 카탈로그의 공통 남성 폴백은 `defaultCharacterId`로 명시한 유일한 `gender=male,role=default` 자산이다. 기존 `male-base-*`는 `previous_default` 카드로 남고 새 ID/자산을 가리키도록 덮어쓰지 않는다. role 없는 카탈로그의 기존 남성 기본형 탐색 및 last_used/auto 정책은 유지한다. 작업 시작에 BodyRef를 고정하고, 과거 폴백 선택에 캡처 필드가 없더라도 저장된 BodyRef가 있으면 그 ID/해시/revision을 보존한다. 신규 자산 누락은 다른 BASE로 대체하지 않고 unavailable로 닫는다.
+
+새 비율·실제 hash·기존형 보존·캐시/포스터·병행 PR 경계는 [통합 계약](BODY_DEFAULT_ROLLOUT_20261104.md)을 따른다. 이 코드 변경은 자산 승인이나 배포/활성화를 뜻하지 않는다.
