@@ -12,7 +12,9 @@ POST /v1/metrics/campaign-counts: JSON {v:1, creative:meta-poster-a|meta-hook-a,
 
 ## 관리자
 
-기존 인증된 GET /v1/admin/marketing?days=N에 campaignCounts: {enabled,since,until,minimumCell:5,rows:[{creative,first_run,first_analysis_success}]} 추가. 전날까지 N개 한국 날짜, 5 이상 정수 또는 null. 0과 1–4 모두 null. 총합/성공률/당일 실시간/설치 필터/개별 행 없음. 범위 간 차분이 가능한 단순 소수 셀 숨김이지 수학적 익명성 보장은 아니다.
+인증된 `GET /v1/admin/marketing?days=N`은 전날까지 N개 한국 날짜의 수신량을 반환한다. `campaignCounts`의 `since`, `until`, `minimumCell`, `rows[{creative, first_run, first_analysis_success}]`는 같은 표시 기준이 적용되는 기간 하나를 가리킨다. 수집이 비활성이면 `enabled:false`이고 숫자를 표시하지 않는다.
+
+2026-11-04까지 수신한 건은 `minimumCell:5`이며 기간 합계가 0~4이면 null이다. 11월 5일 수신분부터는 `minimumCell:0`이며, 활성 상태에서 수신한 행이 없는 조합은 0이다. 변경 첫날의 숫자는 11월 6일 00:00 KST부터 조회할 수 있다. 양쪽에 걸친 조회는 최상위에 새 기간을, `previousPeriod`에 이전 기간과 그 행을 담는다. 이전 소수 건수를 역산할 수 있는 혼합 합계는 반환하지 않는다. 원래의 서로 다른 조회 기간 간 차분 가능성까지 제거하는 수학적 익명성 보장은 아니다.
 
 이벤트별 수신 날짜라 실행과 성공은 같은 코호트가 아니다. 성공률·고유 사람 수·광고 단계별 승자를 계산하지 않는다. 개발자 제외 설정 미적용. 기존 Meta·운영·선택 연결 표와 합산하지 않는다.
 

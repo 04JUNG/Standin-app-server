@@ -1682,11 +1682,17 @@ function marketingUsageBlock(usage) {
 function campaignCountsBlock(counts) {
   if (!counts || !counts.enabled) return '<h3>소재별 첫 실행·첫 분석 성공 건수</h3><p class="sub">수집 시작 전입니다. 성과 0을 의미하지 않습니다.</p>';
   const names = {'meta-poster-a':'포스터 A','meta-hook-a':'영상 A'};
-  const cell = value => value === null || value === undefined ? '표본 부족 (5건 미만)' : esc(value);
-  return '<h3>소재별 첫 실행·첫 분석 성공 건수</h3><p class="sub">한국 시간 ' + esc(counts.since) + ' ~ ' + esc(counts.until) + ' · 전날까지의 합계 · 선택 동의와 별도</p>' +
-    '<div class="scroll"><table><thead><tr><th>소재</th><th>첫 실행 보고</th><th>첫 이미지 분석 성공 보고</th></tr></thead><tbody>' +
-    counts.rows.map(r => '<tr><td>' + esc(names[r.creative] || r.creative) + '</td><td>' + cell(r.first_run) + '</td><td>' + cell(r.first_analysis_success) + '</td></tr>').join('') + '</tbody></table></div>' +
-    '<p class="sub">v0.2.8 전용 설치 파일은 새 설치 후 바로 실행해도 소재를 전달합니다. 일반 파일은 새 등록 후 24시간 내 앱 열기 링크로 받은 첫 소재를 사용합니다. 등록 후 최대 7일 내 첫 이미지 분석 성공을 셉니다. 설치·작업 식별자 없이 앱이 보낸 건수이며 실제 사람 수·설치 완료 수·서버 검증 전환이 아닙니다. 두 이벤트는 각각 수신 날짜 기준이므로 성공률을 계산하지 않습니다. 기존 버전·일반 파일의 직접 실행·통신 실패는 빠질 수 있고 공유된 파일·재설치·위조 요청은 중복 또는 다른 경로를 포함할 수 있습니다. 개발자 설치 제외 설정은 적용하지 않습니다. 5건 미만은 0을 포함해 모두 숨기며 당일 내역과 개별 이용 이력을 제공하지 않습니다.</p>';
+  function periodTable(period) {
+    const exact = period.minimumCell === 0;
+    const cell = value => value == null ? (exact ? '집계 없음' : '5건 미만') : esc(value);
+    return '<div class="scroll"><table><caption>' + esc(period.since) + ' ~ ' + esc(period.until) +
+      (exact ? ' · 0건부터 표시' : ' · 이전 고지 적용 (5건 미만 숨김)') + '</caption>' +
+      '<thead><tr><th>소재</th><th>첫 실행 보고</th><th>첫 이미지 분석 성공 보고</th></tr></thead><tbody>' +
+      period.rows.map(r => '<tr><td>' + esc(names[r.creative] || r.creative) + '</td><td>' + cell(r.first_run) + '</td><td>' + cell(r.first_analysis_success) + '</td></tr>').join('') + '</tbody></table></div>';
+  }
+  return '<h3>소재별 첫 실행·첫 분석 성공 건수</h3><p class="sub">한국시간 전날까지의 합계입니다. 2026년 11월 5일 수신분부터 0~4건도 표시합니다.</p>' +
+    periodTable(counts) + (counts.previousPeriod ? periodTable(counts.previousPeriod) : '') +
+    '<p class="sub">v0.2.8 전용 설치 파일은 새 설치 후 바로 실행해도 소재를 전달합니다. 일반 파일은 새 등록 후 24시간 내 앱 열기 링크로 받은 첫 소재를 사용합니다. 등록 후 최대 7일 내 첫 이미지 분석 성공을 셉니다. 설치·작업 식별자 없이 앱이 보낸 건수이며 실제 사람 수·설치 완료 수·서버 검증 전환이 아닙니다. 두 이벤트는 각각 수신 날짜 기준이므로 성공률을 계산하지 않습니다. 기존 버전·일반 파일의 직접 실행·통신 실패는 빠질 수 있고 공유된 파일·재설치·위조 요청은 중복 또는 다른 경로를 포함할 수 있습니다. 개발자 설치 제외 설정은 적용하지 않습니다.</p>';
 }
 
 function marketingRender(data) {

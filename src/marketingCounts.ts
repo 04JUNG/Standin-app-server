@@ -10,7 +10,9 @@ type Creative = typeof COUNT_CREATIVES[number];
 type CountEvent = typeof COUNT_EVENTS[number];
 export type CampaignCount = { v: 1; creative: Creative; event: CountEvent };
 const DAY = 86400000;
-const MINIMUM_CELL = 5;
+// First Korean receipt date covered by the revised public measurement notice.
+const EXACT_COUNTS_FROM = '2026-11-05';
+const LAST_MASKED_DAY = seoulDay(Date.parse(EXACT_COUNTS_FROM + 'T00:00:00+09:00') - DAY);
 export function seoulDay(now: number) { return new Date(now + 9 * 3600000).toISOString().slice(0, 10); }
 export function parseCampaignCount(input: unknown): CampaignCount | null {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
@@ -69,18 +71,26 @@ export function createCampaignCountRoutes(options: {
   return routes;
 }
 
-export async function campaignCountSummary(days: number, now = Date.now(), enabled = config.campaignCountsEnabled) {
-  if (!Number.isInteger(days) || days < 1 || days > 90) throw new Error('invalid_window');
-  const since = seoulDay(now - days * DAY), until = seoulDay(now - DAY);
+async function countPeriod(since: string, until: string, minimumCell: 0 | 5, enabled: boolean) {
   const values = enabled ? await query<{creative: string; event: string; count: number}>(`
     SELECT creative,event,SUM(count)::int AS count FROM campaign_daily_counts
     WHERE day >= $1::date AND day <= $2::date GROUP BY creative,event`, [since, until]) : [];
   function cell(creative: Creative, event: CountEvent) {
     const count = Number(values.find(row => row.creative === creative && row.event === event)?.count ?? 0);
-    return count >= MINIMUM_CELL ? count : null;
+    return enabled && count >= minimumCell ? count : null;
   }
-  return { enabled, since, until, minimumCell: MINIMUM_CELL,
+  return { since, until, minimumCell,
     rows: COUNT_CREATIVES.map(creative => ({ creative,
       first_run: cell(creative, 'first_run'), first_analysis_success: cell(creative, 'first_analysis_success'),
     })) };
+}
+
+export async function campaignCountSummary(days: number, now = Date.now(), enabled = config.campaignCountsEnabled) {
+  if (!Number.isInteger(days) || days < 1 || days > 90) throw new Error('invalid_window');
+  const since = seoulDay(now - days * DAY), until = seoulDay(now - DAY);
+  // Never expose a combined total from which a small historical cell could be subtracted.
+  const mixed = since < EXACT_COUNTS_FROM && until >= EXACT_COUNTS_FROM;
+  const current = await countPeriod(mixed ? EXACT_COUNTS_FROM : since, until, until < EXACT_COUNTS_FROM ? 5 : 0, enabled);
+  const previousPeriod = mixed ? await countPeriod(since, LAST_MASKED_DAY, 5, enabled) : undefined;
+  return { enabled, ...current, previousPeriod };
 }

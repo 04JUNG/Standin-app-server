@@ -63,10 +63,45 @@ test('database stores only bounded daily cells and API excludes today/suppresses
   const result=await campaignCountSummary(7,now,true);
   assert.equal(result.since,'2026-10-25');assert.equal(result.until,'2026-10-31');
   assert.deepEqual(result.rows,[{creative:'meta-poster-a',first_run:6,first_analysis_success:null},{creative:'meta-hook-a',first_run:null,first_analysis_success:null}]);
+  assert.equal(result.minimumCell,5);
   const columns=await db.query<{column_name:string}>("SELECT column_name FROM information_schema.columns WHERE table_name='campaign_daily_counts' ORDER BY ordinal_position");
   assert.deepEqual(columns.rows.map(r=>r.column_name),['day','creative','event','count']);
   await db.query('UPDATE campaign_daily_counts SET count=10000');await incrementCampaignCount(value,now-86400000);
   assert.equal((await campaignCountSummary(7,now,true)).rows[0].first_run,10000);
   await assert.rejects(campaignCountSummary(0,now));
   assert.equal((await campaignCountSummary(7,now,false)).enabled,false);
+});
+
+test('small totals start with the November 5 Seoul receipt day, with no mixed-policy total', async t => {
+  const db = new PGlite();
+  t.after(() => db.close());
+  await db.exec(SCHEMA);
+  t.mock.method(pool, 'query', (async (sql: string, values?: unknown[]) => {
+    const r = await db.query(sql, values);
+    return { rows: r.rows };
+  }) as typeof pool.query);
+  const cutoff = Date.parse('2026-11-04T15:00:00Z');
+  const nextDay = cutoff + 86400000;
+  const video = { ...value, creative: 'meta-hook-a' as const };
+  for (let i = 0; i < 4; i++) await incrementCampaignCount(value, cutoff - 1);
+  for (let i = 0; i < 5; i++) await incrementCampaignCount(video, cutoff - 1);
+  for (let i = 0; i < 4; i++) await incrementCampaignCount(value, cutoff);
+  await incrementCampaignCount({ ...video, event: 'first_analysis_success' }, nextDay - 1);
+  await incrementCampaignCount(video, nextDay); // Today's receipt must stay out of both periods.
+
+  const prior = await campaignCountSummary(1, nextDay - 1, true);
+  assert.equal(prior.until, '2026-11-04');
+  assert.deepEqual(prior.rows.map(r => r.first_run), [null, 5]);
+  const mixed = await campaignCountSummary(2, nextDay, true);
+  assert.deepEqual([mixed.since, mixed.until, mixed.minimumCell], ['2026-11-05', '2026-11-05', 0]);
+  assert.deepEqual(mixed.previousPeriod, { since: '2026-11-04', until: '2026-11-04', minimumCell: 5, rows: prior.rows });
+  assert.deepEqual(mixed.rows, [
+    { creative: 'meta-poster-a', first_run: 4, first_analysis_success: 0 },
+    { creative: 'meta-hook-a', first_run: 0, first_analysis_success: 1 },
+  ]);
+  const current = await campaignCountSummary(1, nextDay, true);
+  assert.deepEqual(current.rows, mixed.rows);
+  assert.equal(current.previousPeriod, undefined);
+  const disabled = await campaignCountSummary(1, nextDay, false);
+  assert.ok(disabled.rows.every(r => r.first_run === null && r.first_analysis_success === null));
 });
