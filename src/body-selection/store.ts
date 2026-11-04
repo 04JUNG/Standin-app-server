@@ -1,3 +1,4 @@
+import { bodyPresentation } from "./presentation.js";
 import { shapeRuntimeMetadata } from "./shapeRuntime.js";
 import { automaticRecommendation, isChildBody } from "./childPolicy.js";
 import { neutralMetadata } from "./neutral.js";
@@ -90,6 +91,7 @@ export function presentShapeEditable(catalog: BodyCatalog) {
     const a = byId.get(entry.characterId)!;
     return {
       ...entry,
+      ...bodyPresentation(a),
       ...(a.displayName ? { displayName: a.displayName } : {}),
       ...(a.neutralPreview ? { neutralPreview: neutralMetadata(a) } : {}),
       ...(a.shapeRuntime ? { shapeRuntime: shapeRuntimeMetadata(a) } : {}),
@@ -481,9 +483,16 @@ function revalidate(
     value.intent !== "manual" &&
     (legacyDefault || automaticDefault || unresolved || autoChild)
   ) {
+    // Catalog role adoption must not upgrade an already resolved historical fallback.
+    // Older jobs predate firstUseDefault; their stored BodyRef is the only identity record.
+    const capturedPolicy =
+      (automaticDefault || legacyDefault) && value.resolvedBody &&
+      policy.firstUseDefault === undefined && catalog.assets.some((a) => a.role !== undefined)
+        ? { ...policy, firstUseDefault: value.resolvedBody }
+        : policy;
     value = resolveBody(
       value.personIndex,
-      policy,
+      capturedPolicy,
       value.recommendation,
       catalog,
       poses,
@@ -659,6 +668,7 @@ export async function bodyOptions(
       return {
         characterId: a.characterId,
         bodyRef: bodyRef(a),
+        ...bodyPresentation(a),
         ...(a.displayName ? { displayName: a.displayName } : {}),
         ...(a.neutralPreview ? { neutralPreview: neutralMetadata(a) } : {}),
         ...(shapeSpec(a) ? { shape: shapeSpec(a) } : {}),
