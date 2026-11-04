@@ -48,7 +48,10 @@ export function readSearchInput(value: unknown): {
 } {
   const body = object(value);
   if (
-    Object.keys(body).some((k) => k !== "query" && k !== "topK") ||
+    Object.keys(body).some(
+      (k) => k !== "query" && k !== "topK" && k !== "progressive",
+    ) ||
+    (body.progressive !== undefined && body.progressive !== true) ||
     typeof body.query !== "string"
   )
     throw new SemanticError("INVALID_INPUT", 400);
@@ -166,7 +169,8 @@ export function semanticCapabilities(
   return {
     ...capabilities,
     refine: false,
-    semanticBodySelection: capabilities.bodySelection === true && capabilities.bodyPreviews === true,
+    semanticBodySelection:
+      capabilities.bodySelection === true && capabilities.bodyPreviews === true,
     bodySelection: false,
     bodyRecommendation: false,
     bodyPreviews: capabilities.bodyPreviews === true,

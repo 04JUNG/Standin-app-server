@@ -1,4 +1,14 @@
-import { poseThumbnailUrl } from "../pose-thumbnail.js";
+import { randomUUID } from "node:crypto";
+import { inferenceStatus } from "../inference.js";
+import {
+  materialize,
+  assertLibrary,
+  paging,
+  SEMANTIC_PAGE_SIZE,
+  saveSnapshot,
+  readPage,
+  SemanticPageError,
+} from "./pages.js";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { AppEnv } from "../env.js";
@@ -10,7 +20,6 @@ import {
   updateJob,
 } from "../jobs/store.js";
 import { currentCapabilities } from "../characters/service.js";
-import { sha256Hex } from "../converter/client.js";
 import { errorEnvelope } from "../mapping.js";
 import { fixedWindow } from "../limits/policy.js";
 import { tryConsume } from "../limits/store.js";
@@ -21,36 +30,7 @@ import {
   SemanticError,
   SEMANTIC_MAX_TOP_K,
 } from "./contract.js";
-import type { PoseCandidate } from "../types.js";
 import { attachSemanticPresentation } from "./presentation.js";
-
-async function previewBytes(response: Response): Promise<Uint8Array> {
-  const reader = response.body?.getReader();
-  if (!reader || Number(response.headers.get("Content-Length")) > 2_000_000)
-    throw new SemanticError("SEMANTIC_CONTRACT", 502);
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  try {
-    for (;;) {
-      const part = await reader.read();
-      if (part.done) break;
-      size += part.value.length;
-      if (size > 2_000_000) throw new SemanticError("SEMANTIC_CONTRACT", 502);
-      chunks.push(part.value);
-    }
-    const bytes = Buffer.concat(chunks);
-    if (
-      !new TextDecoder("utf-8", { fatal: true })
-        .decode(bytes)
-        .startsWith("HIERARCHY")
-    )
-      throw new SemanticError("SEMANTIC_CONTRACT", 502);
-    return bytes;
-  } finally {
-    await reader.cancel().catch(() => {});
-    reader.releaseLock();
-  }
-}
 
 const defaults = {
   enabled: () => config.semanticSearchEnabled,
@@ -61,6 +41,9 @@ const defaults = {
   persist: persistAnalysisRecords,
   updateJob,
   capabilities: currentCapabilities,
+  library: inferenceStatus,
+  saveSnapshot,
+  readPage,
   consume: (owner: string) =>
     tryConsume(
       "semantic_search",
@@ -79,11 +62,36 @@ export function createSemanticRoutes(overrides: Partial<typeof defaults> = {}) {
         maxQueryLength: 500,
         maxTopK: SEMANTIC_MAX_TOP_K,
         supportsAllResults: true,
+        supportsProgressiveResults: true,
       },
       200,
       { "Cache-Control": "private, no-store" },
     ),
   );
+  routes.get("/:jobId/pages", async (c) => {
+    try {
+      const result = await deps.readPage(
+        c.get("installationId")!,
+        c.req.param("jobId"),
+        c.req.query("cursor") ?? "",
+        c.req.raw.signal,
+        { getPoseBvh: deps.getPoseBvh, library: deps.library },
+      );
+      return c.json(result, 200, { "Cache-Control": "private, no-store" });
+    } catch (error) {
+      const status = error instanceof SemanticPageError ? error.status : 503;
+      return c.json(
+        errorEnvelope(
+          error instanceof SemanticPageError
+            ? error.code
+            : "SEMANTIC_UNAVAILABLE",
+          "포즈를 더 불러오지 못했어요. 다시 시도해 주세요.",
+          c.get("requestId"),
+        ),
+        status,
+      );
+    }
+  });
   routes.use(
     "/",
     bodyLimit({
@@ -129,7 +137,10 @@ export function createSemanticRoutes(overrides: Partial<typeof defaults> = {}) {
       );
     let jobId: string | undefined;
     try {
-      const deadline = AbortSignal.timeout(config.semanticSearchTimeoutMs);
+      const deadline = AbortSignal.any([
+        c.req.raw.signal,
+        AbortSignal.timeout(config.semanticSearchTimeoutMs),
+      ]);
       const upstream = await deps.search(input.query, input.topK, deadline);
       const response = readSearchResponse(upstream, input.topK, input.query);
       if (!response.groups.length)
@@ -137,51 +148,13 @@ export function createSemanticRoutes(overrides: Partial<typeof defaults> = {}) {
           "Cache-Control": "private, no-store",
         });
       // Pin the actual original/mirror BVH bytes. Scores never become geometric confidence.
-      const entries = response.groups.flatMap((group) =>
-        group.variants.map((variant) => ({ group, variant })),
-      );
-      const candidates: PoseCandidate[] = new Array(entries.length);
-      let cursor = 0;
-      await Promise.all(
-        Array.from({ length: Math.min(4, entries.length) }, async () => {
-          for (let i = cursor++; i < entries.length; i = cursor++) {
-            const { group, variant } = entries[i]!;
-            const bvh = await deps.getPoseBvh(variant.poseId, deadline);
-            if (!bvh.ok) throw new SemanticError("SEMANTIC_UNAVAILABLE", 503);
-            const bytes = await previewBytes(bvh);
-            candidates[i] = {
-              id: `${variant.poseId}::front`,
-              poseId: variant.poseId,
-              rank: group.rank,
-              view: "front",
-              tags: group.labels,
-              matchLevel: "medium",
-              bvhAvailable: true,
-              source: "semantic",
-              lookupAllowed: true,
-              refineAllowed: false,
-              releaseAllowed: false,
-              manualExportAllowed: true,
-              presentationKind: group.near ? "near_match" : "library_match",
-              actualMeshValidated: false,
-              reviewRequired: true,
-              rankScore: group.score,
-              semantic: {
-                familyId: group.variants[0]!.poseId,
-                alternate: variant.alternate,
-                description: group.description,
-                near: group.near === true,
-              },
-              sourceBvhSha256: sha256Hex(bytes),
-              ...(variant.thumbnail
-                ? {
-                    thumbnailUrl: poseThumbnailUrl(variant.poseId, "front"),
-                  }
-                : {}),
-            };
-          }
-        }),
-      );
+      const progressive = (await c.req.json()).progressive === true;
+      const groups = progressive
+        ? response.groups.slice(0, SEMANTIC_PAGE_SIZE)
+        : response.groups;
+      if (progressive) await assertLibrary(response.index, deps.library);
+      const candidates = await materialize(groups, deadline, deps.getPoseBvh);
+      if (progressive) await assertLibrary(response.index, deps.library);
       const job = await deps.createJob(owner, c.get("userId") ?? null);
       jobId = job.id;
       const result = semanticResult(
@@ -191,6 +164,12 @@ export function createSemanticRoutes(overrides: Partial<typeof defaults> = {}) {
         candidates,
         await deps.capabilities(),
       );
+      if (progressive)
+        result.semantic!.paging = paging(
+          randomUUID(),
+          response.groups,
+          candidates.length,
+        );
       // Rows and completed result publish together. An export can only address exposed candidates.
       await deps.persist(
         job.id,
@@ -200,6 +179,12 @@ export function createSemanticRoutes(overrides: Partial<typeof defaults> = {}) {
         null,
         true,
       );
+      if (progressive)
+        await deps.saveSnapshot(
+          job.id,
+          result.semantic!.paging!.snapshotId,
+          response.groups,
+        );
       return c.json({ status: "ok", jobId: job.id }, 200, {
         "Cache-Control": "private, no-store",
       });
@@ -209,6 +194,15 @@ export function createSemanticRoutes(overrides: Partial<typeof defaults> = {}) {
           status: "failed",
           errorCode: "SEMANTIC_FAILED",
         });
+      if (error instanceof SemanticPageError)
+        return c.json(
+          errorEnvelope(
+            error.code,
+            "포즈 목록이 바뀌었어요. 다시 검색해 주세요.",
+            c.get("requestId"),
+          ),
+          error.status,
+        );
       if (error instanceof SemanticError) return fail(error.code, error.status);
       return fail("SEMANTIC_UNAVAILABLE", 503);
     }
