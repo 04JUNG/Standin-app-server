@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import { parseCatalog } from '../dist/body-selection/catalog.js';
 import { bodyRef, defaultPreferences, snapshot, resolveBody } from '../dist/body-selection/model.js';
 import { presentShapeEditable } from '../dist/body-selection/store.js';
+import { readShapeRuntime } from '../dist/body-selection/shapeRuntime.js';
 const read = p => JSON.parse(readFileSync(p, 'utf8'));
 const digest = p => createHash('sha256').update(readFileSync(p)).digest('hex');
 assert.equal(process.env.BODY_SHAPE_EDIT_ENABLED, 'true', 'This standalone read-only check requires BODY_SHAPE_EDIT_ENABLED=true in this process only');
@@ -56,6 +57,10 @@ for (const [gender, model] of Object.entries(manifest.models)) {
   if (!a.neutralPreview) gaps.push(`${gender}: catalog neutral PNG not yet published`);
   else assert.equal(digest(a.neutralPreview.path),a.neutralPreview.sha256);
   if (!a.shapeRuntime) gaps.push(`${gender}: sampled runtime not yet published`);
+  else {
+    const bytes = await readShapeRuntime(a);
+    assert.equal(createHash('sha256').update(bytes).digest('hex'),a.shapeRuntime.sha256,'runtime byte hash and source header');
+  }
   evidence.push({gender,characterId:a.characterId,assetSha256:a.assetSha256,previousCharacterId:previous.characterId,previousSha256:previous.assetSha256,measurement:model.measurement,poseCoverage:poses});
 }
 console.log(JSON.stringify({schema:'body-default-integration-evidence.v1',modelManifestSha256:digest(process.env.BODY_DEFAULT_MANIFEST),catalogSha256:digest(contract.catalogPath),previousCatalogSha256:digest(process.env.BODY_DEFAULT_BASE_CATALOG),status:'local_identity_policy_passed',activationAllowed:false,upstreamStatus:manifest.status,gaps,evidence,scope:'actual local FBX/source hashes and registry/catalog identities + policy checks; not a live HTTP conversion, final download or UI runtime proof'},null,2));
