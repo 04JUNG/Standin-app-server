@@ -1,3 +1,5 @@
+import { createInteractiveRoutes } from "./interactive-state/routes.js";
+import { interactiveService, interactiveEnabled } from "./interactive-state/runtime.js";
 import { createSemanticRoutes } from "./semantic/routes.js";
 // Standin BFF (앱 서버) 엔트리포인트.
 // 경계: [Tauri] ──/v1──> [BFF: 이 서버] ──HTTP──> [도원 추론 서버]
@@ -195,6 +197,7 @@ const artifactWitness=replayArtifactWitness(replayService,()=>log.warn({type:"re
 app.use("/v1/pose-candidates/*",artifactWitness);
 app.use("/v1/analysis/jobs/:jobId/scene",artifactWitness);
 app.route("/v1/users", usersRoutes);
+app.route("/v1/analysis/jobs", createInteractiveRoutes(interactiveService, interactiveEnabled));
 app.route("/v1/analysis/jobs", jobsRoutes);
 app.use("/v1/analysis/jobs/:jobId/scene", bodyLimit({ maxSize: 32768 }));
 app.route("/v1/analysis/jobs", createSceneRoutes((request) => app.fetch(request)));
@@ -251,6 +254,7 @@ notify({
 
 // 추론 서버는 ALB에 붙어 있지 않아 밖에서 아무도 보지 않는다. BFF가 대신 지켜본다.
 const stopInferenceWatch = startInferenceWatch();
+const stopInteractive = interactiveEnabled() ? interactiveService.start() : () => {};
 // 요청 지표를 1분 롤업으로 저장하고 추론 서버 지표도 함께 긁어 온다(계획 3단계).
 const stopOpsFlush = startOpsFlush();
 
@@ -320,6 +324,7 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, () => {
     log.info({ type: "shutdown", msg: `${signal} 수신 — 종료합니다.`, signal });
     stopInferenceWatch();
+    stopInteractive();
     stopOpsFlush();
     server.close(() => {
       // 버퍼에 남은 알림과 지표를 먼저 밀어낸다. 종료 신호 뒤에는 주기를 기다릴 수 없다.
