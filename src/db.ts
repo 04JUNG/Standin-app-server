@@ -149,6 +149,12 @@ export const SCHEMA = `
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS lease_expires_at TEXT;
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0;
 
+  CREATE TABLE IF NOT EXISTS semantic_snapshots (
+    job_id TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+    snapshot_id TEXT NOT NULL,
+    groups_json TEXT NOT NULL
+  );
+
   -- DB commit과 SQS 전송 사이의 유실을 막는 transactional outbox.
   CREATE TABLE IF NOT EXISTS job_outbox (
     job_id           TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
