@@ -88,11 +88,9 @@ async function countPeriod(since: string, until: string, minimumCell: 0 | 5, ena
 export async function campaignCountSummary(days: number, now = Date.now(), enabled = config.campaignCountsEnabled) {
   if (!Number.isInteger(days) || days < 1 || days > 90) throw new Error('invalid_window');
   const since = seoulDay(now - days * DAY), until = seoulDay(now - DAY);
-  if (until < EXACT_COUNTS_FROM) return { enabled, ...await countPeriod(since, until, 5, enabled) };
-
   // Never expose a combined total from which a small historical cell could be subtracted.
-  const mixed = since < EXACT_COUNTS_FROM;
-  const current = await countPeriod(mixed ? EXACT_COUNTS_FROM : since, until, 0, enabled);
+  const mixed = since < EXACT_COUNTS_FROM && until >= EXACT_COUNTS_FROM;
+  const current = await countPeriod(mixed ? EXACT_COUNTS_FROM : since, until, until < EXACT_COUNTS_FROM ? 5 : 0, enabled);
   const previousPeriod = mixed ? await countPeriod(since, LAST_MASKED_DAY, 5, enabled) : undefined;
   return { enabled, ...current, previousPeriod };
 }
