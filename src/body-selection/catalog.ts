@@ -21,6 +21,7 @@ export function parseCatalog(value: unknown): BodyCatalog {
   const characters = new Set<string>(),
     bodies = new Set<string>();
   for (const a of c.assets) {
+    if (a.cspNative !== undefined && (a.cspNative !== true || !a.shape || !a.shapeSource || !a.shapeRuntime)) throw new Error("invalid CSP shape asset");
     if (
       !a ||
       ![

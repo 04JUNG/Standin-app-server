@@ -21,6 +21,7 @@ export interface BodyPresentation {
   order?: number;
 }
 export interface BodyAsset extends BodyRef, BodyPresentation {
+  cspNative?: boolean;
   displayName?: string;
   neutralPreview?: {
     path: string;

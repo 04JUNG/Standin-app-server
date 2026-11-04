@@ -133,6 +133,7 @@ export interface AnalysisResult {
    * 추론 endpoint가 살아 있어도 BFF flag가 꺼져 있으면 여기서 false가 나간다.
    */
   capabilities: {
+    cspNativeExport?: { characterIds: string[] };
     analyticsJourney?: boolean;
     handSelection?: boolean;
     bodySelection?: boolean;

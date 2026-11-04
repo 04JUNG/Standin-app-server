@@ -7,6 +7,12 @@ function env(key: string, def = ""): string {
 }
 
 export const config = {
+  cspShapeEnabled: env("CSP_SHAPE_ENABLED", "false") === "true" && env("CSP_REVIEW_ENV") === "staging",
+  cspReviewEnabled: env("CSP_REVIEW_ENABLED", "false") === "true" && env("CSP_REVIEW_ENV") === "staging",
+  cspReviewBucket: env("CSP_REVIEW_BUCKET"),
+  cspReviewManifestKey: env("CSP_REVIEW_MANIFEST_KEY"),
+  cspReviewManifestSha256: env("CSP_REVIEW_MANIFEST_SHA256"),
+
   /** Additive operation API; also requires a frozen implemented Converter transport. */
   interactiveConverterToken: env("CONVERTER_INTERACTIVE_TOKEN"),
   interactiveStateEnabled: env("INTERACTIVE_STATE_ENABLED", "false") === "true",
