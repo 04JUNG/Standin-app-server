@@ -1819,6 +1819,18 @@ already does so. Docker staging still requires `REPLAY_ENVIRONMENT=staging`.
 The dashboard recognizes both body-shape `canvas_frame` and review-model `final` assets as
 recorded 3D frames; this does not prove a saved FBX or a successful CSP import.
 
+## Interactive pose operation v1 (opt-in real-model integration)
+
+The installation-authenticated polling/cancel/model/export/file and auxiliary canvas-frame
+routes are specified in [INTERACTIVE_STATE_V1.md](./INTERACTIVE_STATE_V1.md) and
+[bff-http-contract-v1.json](./contracts/bff-http-contract-v1.json). The private Converter
+HTTP transport, exact camera/frame bridge and verified recent hand-variant endpoint are
+implemented. Static Top5 capability requires complete prebuilt candidate coverage; card
+requests never run Blender. `INTERACTIVE_STATE_ENABLED` remains false by default and a
+private service token is required. Refined interactive states require actual persisted
+inference version/config/base hashes. Legacy verified FBX, static history/semantic lists
+and scene contracts retain their established safety/release rules.
+
 ### 기본형 역할 메타데이터 (2026-11-04, 활성화 없음)
 
 승인 체형 카탈로그는 자산별 `gender: male|female|child`, `role: default|previous_default|preset`, `order: nonnegative integer`를 선택적으로 선언할 수 있다. `body-options`와 `body-preferences.shapeEditable`에 그대로 전달하며, `/models`는 표시 이름·성별·role·order를 제공하고 실제 availability는 Converter 목록으로 결정한다. `/models.isDefault/defaultCharacterId`는 구 export용 `CONVERTER_CHARACTER_ID` 의미를 유지한다.

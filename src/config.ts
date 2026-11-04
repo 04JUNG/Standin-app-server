@@ -13,6 +13,9 @@ export const config = {
   cspReviewManifestKey: env("CSP_REVIEW_MANIFEST_KEY"),
   cspReviewManifestSha256: env("CSP_REVIEW_MANIFEST_SHA256"),
 
+  /** Additive operation API; also requires a frozen implemented Converter transport. */
+  interactiveConverterToken: env("CONVERTER_INTERACTIVE_TOKEN"),
+  interactiveStateEnabled: env("INTERACTIVE_STATE_ENABLED", "false") === "true",
   replayEnabled: env("REPLAY_ENABLED", "true") === "true",
   captureReplayEnabled: env("CAPTURE_REPLAY_ENABLED", "true") === "true",
   cspResultCaptureEnabled: env("CSP_RESULT_CAPTURE_ENABLED", "true") === "true",
