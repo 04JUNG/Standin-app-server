@@ -176,3 +176,22 @@ test("export 검증은 '모르는 값'과 '아는데 못 만듦'을 나눈다", 
   );
   assert.equal(await checkCharacter("not-a-character", only), "unknown");
 });
+
+
+test("operator body presentation retains the previous choices and missing assets stay coming_soon", async () => {
+  const { catalog } = await import("../body-selection/fixtures.js");
+  const c = catalog(4);
+  for (const [i, a] of c.assets.entries()) Object.assign(a, {
+    displayName: i < 2 ? "기본형" : "기존 기본형",
+    gender: i % 2 === 0 ? "male" : "female",
+    role: i < 2 ? "default" : "previous_default", order: i,
+  });
+  c.defaultCharacterId = c.assets[0].characterId;
+  const value = await listCharacters({ ...deps(c.assets.slice(0, 3).map(a => a.characterId)), bodyCatalog: () => c });
+  const rows = value.characters.filter(a => a.role);
+  assert.deepEqual(rows.map(a => [a.characterId, a.gender, a.role, a.displayName]),
+    c.assets.map(a => [a.characterId, a.gender, a.role, a.displayName]));
+  assert.equal(rows[3].availability, "coming_soon");
+  // The legacy global converter default is not silently changed by a presentation badge.
+  assert.equal(value.defaultCharacterId, DEFAULT_ID);
+});

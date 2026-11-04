@@ -74,11 +74,33 @@ export function parseCatalog(value: unknown): BodyCatalog {
         a.displayName.length > 200)
     )
       throw new Error("invalid display name");
+    if (a.gender !== undefined && !["male", "female", "child"].includes(a.gender))
+      throw new Error("invalid body gender");
+    if (
+      a.role !== undefined &&
+      !["default", "previous_default", "preset"].includes(a.role)
+    )
+      throw new Error("invalid body role");
+    if (a.order !== undefined && (!Number.isSafeInteger(a.order) || a.order < 0))
+      throw new Error("invalid body order");
+    if (a.role === "default" && !["male", "female"].includes(a.gender ?? ""))
+      throw new Error("default body requires gender");
     characters.add(a.characterId);
     bodies.add(a.bodyId);
   }
   if (c.defaultCharacterId !== null && !characters.has(c.defaultCharacterId))
     throw new Error("unknown body default");
+  if (c.assets.some((a) => a.role !== undefined)) {
+    const defaults = c.assets.filter((a) => a.role === "default");
+    const male = defaults.filter((a) => a.gender === "male");
+    if (
+      male.length !== 1 ||
+      defaults.filter((a) => a.gender === "female").length > 1 ||
+      male[0].characterId !== c.defaultCharacterId ||
+      isRetiredCharacter(male[0].characterId)
+    )
+      throw new Error("invalid declared body defaults");
+  }
   // An old mounted manifest must not reintroduce retired fixed models into options,
   // recommendations, saved defaults or manual selections. Keep the input untouched.
   return {

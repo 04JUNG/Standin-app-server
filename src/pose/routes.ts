@@ -50,6 +50,7 @@ function bytesResponse(bytes: Uint8Array, fileName: string): Response {
       "Content-Type": "application/octet-stream",
       "Content-Disposition": `attachment; filename="${fileName}"`,
       "Content-Length": String(bytes.byteLength),
+      ...(fileName.endsWith(".fbx")?{"X-Standin-Artifact-SHA256":sha256Hex(bytes)}:{}),
     },
   });
 }

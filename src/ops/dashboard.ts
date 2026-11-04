@@ -1,3 +1,4 @@
+import { REPLAY_PANEL_HTML, REPLAY_PANEL_SCRIPT } from "./replayDashboard.js";
 import { CUSTOM_BODIES_HTML, CUSTOM_BODIES_DIALOG, CUSTOM_BODIES_SCRIPT } from "./customBodiesDashboard.js";
 // 운영 대시보드 한 장(계획 3단계).
 //
@@ -321,6 +322,7 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
     </section>
     <section class="tab" id="tab-metrics">
     ${JOURNEY_PANEL_HTML}
+    ${REPLAY_PANEL_HTML}
     <div class="card">
       <h2>제품 지표 — 퍼널 · 코호트 · 이탈 신호</h2>
       <div class="lookup">
@@ -989,6 +991,10 @@ function poseDescriptionBlock(person) {
 function detailRender(detail) {
   releaseDetailBlobs();
   currentDetailJobId = detail.jobId;
+  const replayLink = document.createElement("button");
+  replayLink.className = "ghost"; replayLink.textContent = "관련 세션 보기";
+  replayLink.dataset.replayJob = detail.jobId;
+  setTimeout(() => $("detailOut").prepend(replayLink), 0);
   const byPerson = groupBy(detail.candidates, "person_index");
   const refinedByPerson = groupBy(detail.refined, "personIndex");
   const chosen = new Map((detail.selections || []).map((s) => [s.person_index, s.candidate_id]));
@@ -1192,7 +1198,7 @@ function lookupRender() {
       : item.inputAvailable
       ? '<span class="sub">' + (item.inputWidth || "?") + "×" + (item.inputHeight || "?") + "</span>"
       : '<span class="sub" title="버킷 lifecycle 90일">만료</span>') + "</td>" +
-    '<td><button class="ghost" data-detail="' + esc(item.jobId) + '">상세</button></td></tr>'
+    '<td><button class="ghost" data-detail="' + esc(item.jobId) + '">상세</button><button class="ghost" data-replay-job="' + esc(item.jobId) + '">관련 세션</button></td></tr>'
   ).join("");
 
   $("lookupOut").innerHTML = head +
@@ -1241,6 +1247,7 @@ async function lookupGo(cursor) {
 function pct(value) { return value === null || value === undefined ? "—" : value + "%"; }
 
 ${JOURNEY_PANEL_SCRIPT}
+${REPLAY_PANEL_SCRIPT}
 
 function funnelTable(stages) {
   const first = stages[0] ? stages[0].installations : 0;

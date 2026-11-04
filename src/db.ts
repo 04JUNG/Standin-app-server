@@ -55,6 +55,7 @@ export async function transaction<T>(fn: (client: PoolClient) => Promise<T>): Pr
   }
 }
 
+import { REPLAY_SCHEMA } from "./replay/schema.js";
 import { QUALITY_CONSENT_SCHEMA } from "./installations/qualityConsent.js";
 
 export const SCHEMA = `
@@ -400,6 +401,7 @@ export const SCHEMA = `
   CREATE INDEX IF NOT EXISTS ops_metrics_bucket ON ops_metrics (bucket_at);
 
   ${QUALITY_CONSENT_SCHEMA}
+  ${REPLAY_SCHEMA}
 
   CREATE OR REPLACE VIEW analytics_job_funnel AS
   SELECT
