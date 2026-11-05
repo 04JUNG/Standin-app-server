@@ -1,3 +1,4 @@
+import type { ProgressFence } from "./progressStore.js";
 // Job 저장소(PostgreSQL). result는 JSON 문자열로 저장.
 // 인터페이스(createJob/getJob/updateJob)는 유지하되 Promise를 돌려준다.
 import {
@@ -40,6 +41,8 @@ export interface Job {
   installationId: string | null;
   inputS3Key: string | null;
   inputMime: string | null;
+  progress?: unknown;
+  attemptCount?: number;
   inputOriginalName?: string | null;
   inputSha256?: string | null;
   inputWidth?: number | null;
@@ -58,6 +61,8 @@ interface JobRow {
   installation_id: string | null;
   input_s3_key: string | null;
   input_mime: string | null;
+  progress_json?: unknown;
+  attempt_count?: number;
   input_original_name?: string | null;
   input_sha256?: string | null;
   input_width?: number | null;
@@ -79,6 +84,8 @@ function toJob(r: JobRow): Job {
     installationId: r.installation_id,
     inputS3Key: r.input_s3_key,
     inputMime: r.input_mime,
+    progress: r.progress_json,
+    attemptCount: r.attempt_count,
     inputOriginalName: r.input_original_name ?? null,
     inputSha256: r.input_sha256 ?? null,
     inputWidth: r.input_width ?? null,
@@ -286,14 +293,15 @@ export async function refundAnalysisQuota(
 export async function failJob(
   id: string,
   errorCode: string,
-  options: { refundQuota?: boolean } = {},
+  options: { refundQuota?: boolean; fence?: ProgressFence } = {},
 ): Promise<boolean> {
   const now = new Date().toISOString();
   const row = await queryOne<{ installation_id: string | null }>(
     `UPDATE jobs SET status = 'failed', error_code = $2, updated_at = $3, completed_at = $3
      WHERE id = $1 AND status NOT IN ('failed', 'completed')
+       AND ($4::text IS NULL OR (lease_owner=$4 AND attempt_count=$5 AND lease_expires_at > $3))
      RETURNING installation_id`,
-    [id, errorCode, now],
+    [id, errorCode, now, options.fence?.workerId ?? null, options.fence?.attempt ?? null],
   );
   if (!row) return false;
   if (options.refundQuota && row.installation_id) {
@@ -502,7 +510,8 @@ export async function claimJob(
   const rows = await queryOne<JobRow>(
     `UPDATE jobs
      SET status = 'running', started_at = COALESCE(started_at, $2), updated_at = $2,
-         lease_owner = $3, lease_expires_at = $4, attempt_count = attempt_count + 1
+         lease_owner = $3, lease_expires_at = $4, attempt_count = attempt_count + 1,
+         progress_run_id=NULL, progress_json=NULL, progress_source_sequence=0
      WHERE id = $1 AND input_s3_key IS NOT NULL
        AND (status = 'queued' OR (status = 'running' AND (lease_expires_at IS NULL OR lease_expires_at < $2)))
      RETURNING *`,
@@ -540,6 +549,7 @@ export async function getJob(id: string): Promise<Job | undefined> {
 export async function updateJob(
   id: string,
   patch: Partial<Job>,
+  fence?: ProgressFence,
 ): Promise<void> {
   const sets: string[] = ["updated_at = $2"];
   const params: unknown[] = [id, new Date().toISOString()];
@@ -565,7 +575,12 @@ export async function updateJob(
     sets.push(`error_code = $${params.length}`);
   }
 
-  await execute(`UPDATE jobs SET ${sets.join(", ")} WHERE id = $1`, params);
+  let where = "id = $1";
+  if (fence) {
+    params.push(fence.workerId, fence.attempt);
+    where += ` AND status='running' AND lease_owner=$${params.length-1} AND attempt_count=$${params.length} AND lease_expires_at > $2`;
+  }
+  await execute(`UPDATE jobs SET ${sets.join(", ")} WHERE ${where}`, params);
 }
 
 /**
@@ -626,6 +641,7 @@ export async function persistAnalysisRecords(
   signals: PersonSignals[] = [],
   cutSummary: CutSummary | null = null,
   complete = false,
+  fence?: ProgressFence,
 ): Promise<void> {
   const contextByPerson = new Map(
     refineContexts.map((ctx) => [ctx.personIndex, ctx]),
@@ -638,8 +654,9 @@ export async function persistAnalysisRecords(
     // 존재하지 않는 job_id의 관절 행이 남고, 어떤 삭제 경로도 그 행을 다시 찾지 못한다.
     // 삭제 쪽(retention.ts::deleteJobs)도 같은 행을 먼저 잠그므로 둘은 차례로만 지나간다.
     const job = await client.query(
-      "SELECT quality_consent_id FROM jobs WHERE id = $1 FOR UPDATE",
-      [jobId],
+      `SELECT quality_consent_id FROM jobs WHERE id = $1
+       AND ($2::text IS NULL OR (status='running' AND lease_owner=$2 AND attempt_count=$3 AND lease_expires_at > $4)) FOR UPDATE`,
+      [jobId, fence?.workerId ?? null, fence?.attempt ?? null, new Date().toISOString()],
     );
     if (job.rowCount === 0) return;
     const qualityAllowed = Boolean(job.rows[0].quality_consent_id);

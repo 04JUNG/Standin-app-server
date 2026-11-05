@@ -1,6 +1,7 @@
 import { interactiveEnabled } from "../interactive-state/runtime.js";
 import { staticAssets } from "../interactive-state/static.js";
 import { historyFrames } from "../interactive-state/history.js";
+import { publicProgress } from "./progressStore.js";
 import { safeOriginalName } from "./inputIdentity.js";
 import { analysisFailureDetails } from "./failure.js";
 import { sourceImageIdentity } from "../pose/sceneManifest.js";
@@ -285,6 +286,7 @@ jobsRoutes.get("/:id", async (c) => {
     updatedAt: job.updatedAt,
     error: job.errorCode,
     failure: analysisFailureDetails(job.errorCode),
+    ...(publicProgress(job.status, job.progress) ? { progress: publicProgress(job.status, job.progress) } : {}),
   });
 });
 
