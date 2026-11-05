@@ -698,3 +698,14 @@ test("operation export validates snapshot body and refuses ignored appearance fi
     assert.equal((await s.request(`/${op.operationId}/file`)).status, 200);
   } finally { await s.pg.close(); }
 });
+
+
+test("explicit zero head support is identical to omitted appearance", async () => {
+  const s = await setup();
+  try {
+    s.service.deps.outline!.check = async (_selection, appearance) => { assert.equal(appearance, undefined); };
+    const omitted = await (await s.request("?candidateId=candidate")).json();
+    const zero = await (await s.request("?" + new URLSearchParams({ candidateId: "candidate", appearance: JSON.stringify({ version: "fbx-outline-v1", width: 0 }) }))).json();
+    assert.deepEqual(zero, omitted);
+  } finally { await s.pg.close(); }
+});

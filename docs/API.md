@@ -1794,6 +1794,6 @@ role이 있는 카탈로그의 공통 남성 폴백은 `defaultCharacterId`로 �
 
 새 비율·실제 hash·기존형 보존·캐시/포스터·병행 PR 경계는 [통합 계약](BODY_DEFAULT_ROLLOUT_20261104.md)을 따른다. 이 코드 변경은 자산 승인이나 배포/활성화를 뜻하지 않는다.
 
-### Final FBX appearance boundary (2026-11-05, unavailable pending accepted CSP representation)
+### Final FBX appearance boundary (2026-11-06, scoped native v2 support)
 
-The strict optional `appearance: {version:"fbx-outline-v1",width:0..2}` on interactive prepare, owned `appearanceExport` capability/head recovery, separate verified postprocess proof and final artifact binding are documented in [OUTLINE_EXPORT_APPEARANCE.md](./OUTLINE_EXPORT_APPEARANCE.md). Omission/zero retains existing request identity and file bytes. Legacy individual/scene paths reject nonzero rather than ignore it. Actual CSP rejected the current hull expression, so it remains unavailable even if flags or upstream certification booleans are true. No deployment or final CSP success is implied.
+The strict optional `appearance:{version:"fbx-outline-v1",width:0..2}` on interactive prepare, owned capability/head recovery, exact target-width support, separate base/outline proofs and final byte binding are documented in [OUTLINE_EXPORT_APPEARANCE.md](./OUTLINE_EXPORT_APPEARANCE.md). Current approved male/female defaults support full continuous0<width<=2 and cropped width2 under the live posed-FBX-import contract. BFF independently pins those targets; an upstream boolean alone cannot enable them. Omission/zero preserves legacy identity and bytes. Old opaque v1 remains rejected. `.clip`/CSP-internal posing are outside present scope; default flags remain off and this is not deployment.

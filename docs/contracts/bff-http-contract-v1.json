@@ -1,7 +1,7 @@
 {
   "schemaVersion": "standin.interactive-http.v1",
   "status": "implemented-opt-in-local-real-verified",
-  "updatedAt": "2026-11-05",
+  "updatedAt": "2026-11-06",
   "source": {
     "repository": "04JUNG/Standin-app-server",
     "baseCommit": "37adaa616b21ac49933974f73b56fbc5c575b0c2",
@@ -88,7 +88,8 @@
     "Implemented durable polling/head recovery/cancel/queue, strict canonical packet+receipt+file checks, server history archive and auxiliary frame upload; actual Converter HTTP transport and full camera mapping remain blocked.",
     "Pinned BFF implementation 7dcfcfd and Converter draft implementation 3fa41e71; confirmed no HTTP transport and no frozen/activated integration.",
     "Real-model v2 integration: authenticated internal HTTP, normalized search projection, strict file-canonical display/export correspondence, prebuilt 5/5 local Top5 and bounded verified hand tables. Default flags remain off.",
-    "Strict appearance-bound final export boundary; rejected CSP hull remains unavailable, zero legacy unchanged."
+    "Strict appearance-bound final export boundary; rejected CSP hull remains unavailable, zero legacy unchanged.",
+    "Align native-v2/culling/surface/continuous full-width/width2 cropped target proof with current posed-FBX scope; preserve v1 rejection and zero path."
   ],
   "implementationStatus": "implemented private Converter HTTP/camera/static/verified-hand transport; local real-asset and full-wire tests pass; disabled by default",
   "schemas": {
@@ -246,12 +247,24 @@
   "documentation": "docs/INTERACTIVE_STATE_V1.md",
   "appearanceExport": {
     "version": "fbx-outline-v1",
-    "status": "current expression rejected by actual CSP; unavailable even with env/upstream certificate",
+    "status": "scoped native v2 posed-FBX-import support; legacy opaque v1 rejected; default off",
     "documentation": "docs/OUTLINE_EXPORT_APPEARANCE.md",
     "environmentFlag": "OUTLINE_EXPORT_ENABLED=false",
     "zero": "omit before identity hash; preserve existing bytes",
     "selectionIdentity": "nonzero appearance + complete current server selection; base Converter packet schema unchanged",
     "receipt": "separate final outlined-fbx-receipt-v1 proof, base receipt retained; no ready URL without both",
-    "finalByteLimit": 31457280
+    "finalByteLimit": 31457280,
+    "support": {
+      "expression": "skinned-outward-transparent-native-outline-v2",
+      "mapping": "csp-native-scope-stature-v2-experimental",
+      "acceptanceScope": "posed-fbx-import",
+      "characters": [
+        "male-default83-v0-7-6-p1",
+        "female-default80-v0-3-9-p1"
+      ],
+      "fullWidth": "continuous 0 < width <= 2",
+      "croppedWidth": "exactly 2",
+      "check": "live supported_targets exact row + requested width + independently pinned BFF matrix; summary lists/booleans insufficient"
+    }
   }
 }

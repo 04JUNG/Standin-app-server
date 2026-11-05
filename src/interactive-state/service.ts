@@ -27,7 +27,7 @@ export interface PosterStorage {
   ): Promise<void>;
 }
 export interface OutlineArtifacts {
-  check(selection: ResolvedSelection): Promise<void>;
+  check(selection: ResolvedSelection, appearance?: Appearance): Promise<void>;
   prepare(op: Operation, selection: ResolvedSelection, source: Uint8Array, signal: AbortSignal): Promise<Record<string, unknown>>;
   file(op: Operation, selection: ResolvedSelection, signal?: AbortSignal): Promise<Uint8Array>;
 }
@@ -75,7 +75,7 @@ export class InteractiveService {
   }
   async prepare(l: Location, input: Prepare) {
     const selection = await this.resolve(l, input.candidateId, input.appearance);
-    if (input.appearance) await this.outline().check(selection);
+    if (input.appearance) await this.outline().check(selection, input.appearance);
     const prepared = await this.deps.store.prepare(
       l,
       input,
@@ -94,7 +94,7 @@ export class InteractiveService {
       head = await this.deps.store.currentHead(l);
     let appearanceAvailable = false;
     if (this.deps.outline) {
-      try { await this.deps.outline.check(selection); appearanceAvailable = true; } catch { /* Fail closed capability only. */ }
+      try { await this.deps.outline.check(selection, nonzeroAppearance(appearance)); appearanceAvailable = true; } catch { /* Fail closed capability only. */ }
     }
     return {
       schemaVersion: "standin.interactive-http.v1",

@@ -1,0 +1,188 @@
+{
+  "startedAt": "2026-11-05T17:23:15.264Z",
+  "method": "actual TCP Hono + installation middleware + PGlite operation/owned selection SQL + production selection resolver + actual interactive Converter/Blender + live native-v2 postprocess HTTP + strict final-byte/receipt checks; fixture installation authentication driver/source/BVH selection and memory private storage, not production PG/S3/native/CSP UI proof",
+  "cases": [
+    {
+      "name": "final-http-male-w065",
+      "width": 0.65,
+      "sha256": "b3e7fef4ab9a23954a91a38aac9ea38ac4d4b6a457d81955bec35f045d3885a9",
+      "bytes": 3932348,
+      "binding": "74fd2063c39db11533d27de0bbc3bbe1cae414101b5954f68a1c00b9275d1956",
+      "sourceArtifactSha256": "cff731b60e72100b84d45746e253ae0ed5b28a2bb8e68b49bbf656f3fe6aab1b",
+      "elapsedMs": 57.995999999999185
+    }
+  ],
+  "converterContract": {
+    "version": "fbx-outline-v1",
+    "enabled": true,
+    "expression": "skinned-outward-transparent-native-outline-v2",
+    "mapping": "csp-native-scope-stature-v2-experimental",
+    "runtime_revision": "292a41a2bfa1e4398f0033be57004961161653a9f8e0114f325d9c3fcae281c4",
+    "csp_certified": true,
+    "certified_expressions": [
+      "skinned-outward-transparent-native-outline-v2"
+    ],
+    "supported_characters": [
+      "female-default80-v0-3-9-p1",
+      "male-default83-v0-7-6-p1"
+    ],
+    "supported_scopes": [
+      "bust",
+      "full",
+      "half",
+      "head",
+      "shoulder_head"
+    ],
+    "supported_targets": [
+      {
+        "character_id": "male-default83-v0-7-6-p1",
+        "character_sha256": "085dd9c65a3a66035f7e0ce9e0a9171b9abb0e33dada92194676d92e00c8b026",
+        "output_scope": "full",
+        "width": {
+          "min": 0,
+          "max": 2,
+          "min_exclusive": true
+        }
+      },
+      {
+        "character_id": "male-default83-v0-7-6-p1",
+        "character_sha256": "085dd9c65a3a66035f7e0ce9e0a9171b9abb0e33dada92194676d92e00c8b026",
+        "output_scope": "half",
+        "width": {
+          "min": 2,
+          "max": 2,
+          "min_exclusive": false
+        }
+      },
+      {
+        "character_id": "male-default83-v0-7-6-p1",
+        "character_sha256": "085dd9c65a3a66035f7e0ce9e0a9171b9abb0e33dada92194676d92e00c8b026",
+        "output_scope": "bust",
+        "width": {
+          "min": 2,
+          "max": 2,
+          "min_exclusive": false
+        }
+      },
+      {
+        "character_id": "male-default83-v0-7-6-p1",
+        "character_sha256": "085dd9c65a3a66035f7e0ce9e0a9171b9abb0e33dada92194676d92e00c8b026",
+        "output_scope": "shoulder_head",
+        "width": {
+          "min": 2,
+          "max": 2,
+          "min_exclusive": false
+        }
+      },
+      {
+        "character_id": "male-default83-v0-7-6-p1",
+        "character_sha256": "085dd9c65a3a66035f7e0ce9e0a9171b9abb0e33dada92194676d92e00c8b026",
+        "output_scope": "head",
+        "width": {
+          "min": 2,
+          "max": 2,
+          "min_exclusive": false
+        }
+      },
+      {
+        "character_id": "female-default80-v0-3-9-p1",
+        "character_sha256": "712ac75e58efd4d6ccded0b1e931590900015de023327f1320cf6d7d94026ffc",
+        "output_scope": "full",
+        "width": {
+          "min": 0,
+          "max": 2,
+          "min_exclusive": true
+        }
+      },
+      {
+        "character_id": "female-default80-v0-3-9-p1",
+        "character_sha256": "712ac75e58efd4d6ccded0b1e931590900015de023327f1320cf6d7d94026ffc",
+        "output_scope": "half",
+        "width": {
+          "min": 2,
+          "max": 2,
+          "min_exclusive": false
+        }
+      },
+      {
+        "character_id": "female-default80-v0-3-9-p1",
+        "character_sha256": "712ac75e58efd4d6ccded0b1e931590900015de023327f1320cf6d7d94026ffc",
+        "output_scope": "bust",
+        "width": {
+          "min": 2,
+          "max": 2,
+          "min_exclusive": false
+        }
+      },
+      {
+        "character_id": "female-default80-v0-3-9-p1",
+        "character_sha256": "712ac75e58efd4d6ccded0b1e931590900015de023327f1320cf6d7d94026ffc",
+        "output_scope": "shoulder_head",
+        "width": {
+          "min": 2,
+          "max": 2,
+          "min_exclusive": false
+        }
+      },
+      {
+        "character_id": "female-default80-v0-3-9-p1",
+        "character_sha256": "712ac75e58efd4d6ccded0b1e931590900015de023327f1320cf6d7d94026ffc",
+        "output_scope": "head",
+        "width": {
+          "min": 2,
+          "max": 2,
+          "min_exclusive": false
+        }
+      }
+    ],
+    "acceptance_scope": "posed-fbx-import",
+    "candidate_characters": {
+      "male-base-v0-7-2": "809a131510434089888429605bf7cd2e3bc75b63109e4ac5c9734b211ee52365",
+      "female-base-v0-3-4": "e6947d8e2aeb1014e9505a61d2f42e6bd9d34965cc7bb3a6c2fcd2722d4f280a",
+      "male-default83-v0-7-6-p1": "085dd9c65a3a66035f7e0ce9e0a9171b9abb0e33dada92194676d92e00c8b026",
+      "female-default80-v0-3-9-p1": "712ac75e58efd4d6ccded0b1e931590900015de023327f1320cf6d7d94026ffc"
+    },
+    "width": {
+      "min": 0,
+      "max": 2
+    },
+    "zero": "legacy-byte-preserving"
+  },
+  "counters": {
+    "solve": 1,
+    "export": 1,
+    "outlinePost": 1,
+    "publications": 1
+  },
+  "events": [
+    {
+      "event": "artifact_prepare_started",
+      "stage": "preview",
+      "ms": 16
+    },
+    {
+      "event": "artifact_prepare_ready",
+      "stage": "preview",
+      "ms": 8048
+    },
+    {
+      "event": "artifact_prepare_started",
+      "stage": "export",
+      "ms": 8079
+    },
+    {
+      "event": "artifact_prepare_ready",
+      "stage": "export",
+      "ms": 11652
+    },
+    {
+      "event": "artifact_download_delivered",
+      "stage": "download",
+      "ms": 0
+    }
+  ],
+  "completedAt": "2026-11-05T17:23:35.545Z",
+  "bff_base_commit": "48980f1a5a9908ad451f87aed079cf8eb75ef413",
+  "converter_base_import_fix": "70b8a6f37d748d5a81801e0c1d632f7c512ba517",
+  "note": "Current branch implementation before commit; controlled installation/source/storage drivers explicitly stated in method. This is actual newly solved FBX delivery, not CSP/native-save proof of these exact bytes."
+}

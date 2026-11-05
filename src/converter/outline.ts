@@ -1,4 +1,6 @@
+import type { Appearance } from "../appearance/model.js";
 /** Existing verified individual FBX -> private, separately certified appearance postprocess. */
+import { OUTLINE_SUPPORT } from "../appearance/support.js";
 import { config } from "../config.js";
 import { loadBodyCatalog } from "../body-selection/catalog.js";
 import { sameShapeSource } from "../body-selection/shape.js";
@@ -13,6 +15,9 @@ export function resolvedStature(selection: ResolvedSelection): number {
     a.assetSha256 === selection.body.resolvedBody?.assetSha256);
   const control = asset?.shape?.controls.find(c => c.key === "height");
   if (!selection.body.shape && !control) {
+    const current = Object.entries(OUTLINE_SUPPORT).find(([id, value]) =>
+      id === selection.characterId && value.sha256 === selection.body.resolvedBody?.assetSha256)?.[1];
+    if (current) return current.statureM;
     // Published converter release-manifest metadata, pinned by bytes rather than model names.
     const baseline = new Set([
       "809a131510434089888429605bf7cd2e3bc75b63109e4ac5c9734b211ee52365",
@@ -73,15 +78,15 @@ export function createOutlineArtifacts(overrides: Partial<OutlineDeps> = {}): Ou
       throw new InteractiveError("OUTLINE_INTEGRITY_ERROR");
     } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
   }
-  async function context(selection: ResolvedSelection, signal?: AbortSignal) {
-    const contract = checkContract(await request("/outline-contract", signal), selection), stature = deps.stature(selection);
+  async function context(selection: ResolvedSelection, signal?: AbortSignal, appearance?: Appearance) {
+    const contract = checkContract(await request("/outline-contract", signal), selection, appearance?.width), stature = deps.stature(selection);
     if (!Number.isFinite(stature) || stature < 1 || stature > 2.5) throw new InteractiveError("OUTLINE_UNSUPPORTED");
     return { contract, stature };
   }
   return {
-    async check(selection) { await context(selection); },
+    async check(selection, appearance) { await context(selection, undefined, appearance); },
     async prepare(op, selection, source, signal) {
-      const { contract, stature } = await context(selection, signal), binding = outlineBinding(op, selection, stature, contract);
+      const { contract, stature } = await context(selection, signal, op.appearance), binding = outlineBinding(op, selection, stature, contract);
       if (source.length > MAX_OUTLINE_BYTES || sha256Hex(source) !== op.receipt!.artifactSha256 ||
           !Buffer.from(source.subarray(0, 23)).equals(Buffer.from("Kaydara FBX Binary  \0\x1a\0")))
         throw new InteractiveError("OUTLINE_INTEGRITY_ERROR");
@@ -96,20 +101,20 @@ export function createOutlineArtifacts(overrides: Partial<OutlineDeps> = {}): Ou
         raw = await request("/outline-fbx", signal, body);
         parseOutlinedArtifact(raw, op, selection, stature, contract);
         if (signal.aborted) throw new InteractiveError("INTERACTIVE_SUPERSEDED");
-        const fresh = await context(selection, signal);
+        const fresh = await context(selection, signal, op.appearance);
         if (outlineBinding(op, selection, fresh.stature, fresh.contract) !== binding) throw new InteractiveError("OUTLINE_BINDING_MISMATCH");
         raw = await deps.storage.publish(op, binding, raw);
       }
       return parseOutlinedArtifact(raw, op, selection, stature, contract).receipt;
     },
     async file(op, selection, signal) {
-      const { contract, stature } = await context(selection, signal), binding = outlineBinding(op, selection, stature, contract);
+      const { contract, stature } = await context(selection, signal, op.appearance), binding = outlineBinding(op, selection, stature, contract);
       if (op.outlineReceipt?.bindingSha256 !== binding) throw new InteractiveError("OUTLINE_BINDING_MISMATCH");
       const raw = await deps.storage.load(op, binding);
       if (!raw) throw new InteractiveError("INTERACTIVE_EXPIRED", 410);
       const parsed = parseOutlinedArtifact(raw, op, selection, stature, contract);
       if (hash(parsed.receipt) !== hash(op.outlineReceipt)) throw new InteractiveError("OUTLINE_INTEGRITY_ERROR");
-      const fresh = await context(selection, signal);
+      const fresh = await context(selection, signal, op.appearance);
       if (outlineBinding(op, selection, fresh.stature, fresh.contract) !== binding) throw new InteractiveError("OUTLINE_BINDING_MISMATCH");
       return parsed.bytes;
     },
