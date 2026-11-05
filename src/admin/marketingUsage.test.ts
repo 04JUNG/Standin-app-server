@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PGlite } from '@electric-sql/pglite';
 import { pool, SCHEMA } from '../db.js';
-import { marketingUsage } from './marketingUsage.js';
+import { marketingUsage, marketingUsageDetails } from './marketingUsage.js';
 import { acquisitionSummary } from '../installations/acquisition.js';
 import { HIDE_INTERNAL_FLAG } from '../installations/qualityConsent.js';
 
@@ -41,4 +41,37 @@ test('operational aggregates count non-consenting use, deduplicate installs and 
   assert.equal(withInternal.newInstallations,3); assert.equal(withInternal.newCompleted,2); assert.equal(withInternal.hideInternal,false);
   const empty=await marketingUsage(7,new Date(Date.parse(now)+30*86400000).toISOString());
   assert.equal(empty.newInstallations,0);assert.equal(empty.newCompleted,0);assert.equal(empty.jobsStarted,0);
+});
+
+test('daily operational report uses KST and counts repeat analysis days without identifying installs',async t=>{
+  const db=new PGlite();t.after(()=>db.close());await db.exec(SCHEMA);
+  t.mock.method(pool,'query',(async(sql:string,values?:unknown[])=>{
+    const r=await db.query(sql,values);return {rows:r.rows,rowCount:r.rows.length||r.affectedRows||0,fields:[],command:'',oid:0};
+  }) as typeof pool.query);
+  const now='2026-11-05T10:00:00.000Z', beforeMidnight='2026-11-04T14:59:00.000Z',afterMidnight='2026-11-04T15:01:00.000Z';
+  for(const id of ['returning','same-day','internal','revoked','deleting']) await db.query(`INSERT INTO installations(id,token_hash,consent_version,consented_at,created_at,last_seen_at,app_version,os_name,os_version,architecture,locale)
+    VALUES($1,'hash','test',$2,$2,$2,'test','windows','test','x64','ko')`,[id,beforeMidnight]);
+  await db.query('INSERT INTO internal_installations(id,added_at) VALUES($1,$2)',['internal',now]);
+  await db.query("UPDATE installations SET revoked_at=$1 WHERE id='revoked'",[now]);
+  await db.query("UPDATE installations SET deletion_requested_at=$1 WHERE id='deleting'",[now]);
+  let index=0;
+  for(const [owner,date,status] of [
+    ['returning',beforeMidnight,'completed'],['returning',afterMidnight,'completed'],['returning',afterMidnight,'failed'],
+    ['same-day',afterMidnight,'completed'],['same-day',afterMidnight,'running'],
+    ['returning','2026-11-05T11:00:00.000Z','failed'],['returning','2026-11-01T00:00:00.000Z','failed'],
+    ...['internal','revoked','deleting'].flatMap(id=>[[id,beforeMidnight,'failed'],[id,afterMidnight,'failed']]),
+  ]) await db.query('INSERT INTO jobs(id,installation_id,status,created_at,updated_at) VALUES($1,$2,$3,$4,$4)',[String(++index),owner,status,date]);
+  const result=await marketingUsageDetails(2,now);
+  assert.equal(result.repeatAnalyzers,1,'same date repeated requests are not returning on another day');
+  assert.equal(result.jobsFailed,1);assert.equal(result.jobsPending,1);
+  assert.deepEqual(result.trend,[
+    {day:'2026-11-03',newInstallations:0,jobsStarted:0,jobsCompleted:0,jobsFailed:0},
+    {day:'2026-11-04',newInstallations:2,jobsStarted:1,jobsCompleted:1,jobsFailed:0},
+    {day:'2026-11-05',newInstallations:0,jobsStarted:4,jobsCompleted:2,jobsFailed:1},
+  ]);
+  assert.ok(!JSON.stringify(result).includes('returning'));
+  await db.query('INSERT INTO service_flags(key,value,updated_at) VALUES($1,\'false\',$2)',[HIDE_INTERNAL_FLAG,now]);
+  const including=await marketingUsageDetails(2,now);assert.equal(including.repeatAnalyzers,2);assert.equal(including.jobsFailed,3);
+  await assert.rejects(marketingUsageDetails(91,now));
+  await assert.rejects(marketingUsageDetails(7,'bad'));
 });

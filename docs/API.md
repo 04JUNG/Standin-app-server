@@ -1601,13 +1601,22 @@ Converter 코드·모델·라이브러리 자산 변경은 필요 없다.
 소재별 건수 API와 `campaignCounts` 응답은 [CAMPAIGN_COUNTS.md](CAMPAIGN_COUNTS.md)를 따른다. 한국시간 2026-11-05 수신분부터 0을 포함한 건수를 반환한다. 이전 기간과 겹치면 이전 건수는 기존 5건 기준을 적용한 `previousPeriod`로 분리한다. 기존 설치별 연결은 계속 선택 동의를 요구한다.
 
 `GET /v1/admin/marketing?days=7` (1–90, 기본 7), 기존 X-Beta-Admin-Token 인증 및 private/no-store 적용.
-응답은 `windowDays`, `queriedAt`, `since`, `acquisition`(기존 광고 연결 설치 코호트), `usage`(전체 운영 합계), `meta`를 포함한다.
+응답은 `windowDays`, `queriedAt`, `since`, `acquisition`(기존 광고 연결 설치 코호트), `usage`(전체 운영 합계), `usageDetails`(일별·반복 이용), `meta`를 포함한다.
 앱은 조회 시점 이전 N×24시간 내 등록한 설치 기준이며 철회·삭제 요청 설치를 제외한다. 개발자 제외 설정은 `acquisition`과 `usage` 모두에 적용한다.
 설치는 첫 실행 서버 등록 식별자이며 설치 프로그램 완료/고유 사람 수가 아니다. 소재별 이용은 연결 동의 이후만 집계한다.
-Meta는 KRW/Asia/Seoul 광고계정의 오늘 포함 N개 달력 날짜, 지정된 포스터 A·영상 A 광고 ID로 조회한다.
+Meta는 KRW/Asia/Seoul 광고계정의 오늘 포함 N개 달력 날짜, 지정된 포스터 A·영상 A 광고 4개와 서포터즈 모집 광고 1개 ID로 조회한다. 계정 전체 실적을 뜻하지 않는다.
 `meta.status`: ready / unconfigured / unavailable / stale. `snapshot`은 없으면 null, 있으면
-since/until/fetchedAt/rows(creative, adId, phase: landing|download, spend, impressions, clicks, landingViews, downloadClicks)를 제공한다.
+since/until/fetchedAt/rows(creative, adId, phase: landing|download|supporters, spend, impressions, clicks, landingViews, downloadClicks, reach, frequency, saves, shares, videoViews)를 제공한다.
 기존 LPV 광고 2개와 다운로드 전환 광고 2개를 별도 행으로 제공한다. `downloadClicks`는 맞춤 전환 `offsite_conversion.custom.1680558963511586`만 읽으며 다른 맞춤 이벤트 합계는 사용하지 않는다. 2026-10-31 생성 전 전환은 소급 집계하지 않고, 설치·파일 다운로드 완료로 해석하지 않는다. 미게재 초안의 행도 0일 수 있다. 앱 귀속 키는 동일 소재의 광고 단계를 구분하지 않으므로 단계별 설치 전환율을 계산하지 않는다.
+
+2026-11-05 확장:
+- 서포터즈 행: `creative=supporters-poster`, `phase=supporters`, ad `52573071176169`. 서포터즈 방문은 Google Forms 방문이며 지원서 제출이 아니다. 베타 다운로드와 합쳐 지원 전환으로 표시하지 않는다.
+- `reach`/`frequency`는 Meta 추정치, 필드 미제공 시 null. 고유 도달을 소재별/일별로 합산하지 않는다. `saves`는 `onsite_conversion.post_save`, `shares`는 `post`, `videoViews`는 3초 재생 `video_view` 액션. 영상 외 소재는 UI에서 재생을 해당 없음으로 표시한다.
+- `meta.daily`: 독립 `status` + `snapshot`(since/until/fetchedAt/rows). 행은 기존 광고 지표에 `day`를 추가한다. `time_increment=1`의 한국 날짜, 오늘 포함. 동일 소재의 다른 날은 별개이며 동일 광고·날짜 중복 또는 범위 밖 날짜는 실패 처리한다. 응답이 정상이고 기록이 없는 날짜만 UI에서 0으로 채운다.
+- `meta.supporters`: 독립 `status` + `snapshot`(fetchedAt, adsetId, effectiveStatus, start, end, lifetimeBudget, remainingBudget, lifetime, since, until). 광고세트 `52573071175969`를 읽고 account_id를 검증한다. 예산은 원화 원 단위이며 `/100` 환산하지 않는다. `lifetime`은 `insights.date_preset(maximum)`으로 받은 **광고세트 전체 기간** 지표이며 선택한 `days`의 지출과 구분한다. `remainingBudget`은 Meta 광고세트 잔여 예산이지 계정 현금 잔액이 아니다. 누적 조회 기간은 since/until이며 실적 없음은 null이다.
+- 일별/서포터즈 API만 실패하면 합계는 유지하고 해당 보고서만 unavailable/stale로 표시한다. 기존 같은 기간 캐시가 있으면 조회 시각과 함께 stale로 남기며 0으로 대체하지 않는다. 기간 변경 시 다른 기간의 합계/일별 캐시를 재사용하지 않는다.
+- 요약 CTR=링크 클릭/노출, CPM=광고비×1,000/노출, 링크 CPC=광고비/링크 클릭, 방문당/다운로드 클릭당 비용=광고비/각 액션. 분모 0이면 `—`. A/B 문구는 같은 목표 내 관측 비용 비교이며 통계 검정·승자 판정이 아니다.
+- Google Analytics 4 상세 보고서와 Google Forms 실제 제출 수는 서버 API 자동 연결 전이다. 현재 대시보드는 상태 및 해당 원본 보고서 링크를 제공한다. 임의 값이나 과거 수동 확인값을 실시간 제출 수로 표시하지 않으며 지원당 비용/ROAS를 추정하지 않는다.
 Meta가 명시적으로 API 접근 차단을 반환하면 `meta.reason: access_blocked`를 추가한다. 원시 오류나 자격증명은 반환하지 않는다.
 오류는 0으로 바꾸지 않는다. stale은 동일 기간의 마지막 성공값이며 기간 변경 시 다른 기간 캐시는 사용하지 않는다.
 관리자 대시보드 마케팅 탭은 보이는 동안 30초마다 조회하며 Meta 호출은 프로세스별 60초 캐시와 중복 요청 병합을 적용한다.
@@ -1620,6 +1629,14 @@ Meta 보고 지연과 설치 코호트 시간축 차이 때문에 두 표를 합
 - `startedInstallations`, `completedInstallations`, `jobsStarted`, `jobsCompleted`: 기간 내 시작된 작업 기준 설치 수/작업 수. 성공은 조회 시점의 completed 상태이며 완료 시각 코호트가 아니다.
 - `hideInternal`: 적용한 개발자 제외 설정.
 광고 연결 미동의 설치의 이용은 이 전체 운영 합계에만 포함하며 `acquisition`의 출처 미확인 이용 수는 표시하지 않는다. 서버 등록/통신이 없는 다운로드, 오프라인 실행, 로컬 저장 완료를 전체 이용으로 추정하지 않는다. 서버 요청 실패도 성과 0으로 처리하지 않는다.
+
+`usageDetails`도 같은 집계 전용 뷰와 개발자/철회/삭제 필터만 사용한다. 새 이벤트, 원본 콘텐츠, OS/개별 설치 이력/광고 출처 조인은 추가하지 않는다. 확장 조회가 실패하면 `null`로 반환하고 기존 usage는 유지한다.
+- `since`/`until`: 기존 usage와 같은 최근 N×24시간. 한국 날짜로 나눈 `trend`는 N+1 날짜를 포함할 수 있으며 첫날/마지막 날은 부분 날짜다.
+- `trend`: day, newInstallations, jobsStarted, jobsCompleted, jobsFailed. 날짜는 서버 등록/작업 시작 기준이며 완료/실패는 조회 시점 상태다. 정상 조회 시 기록이 없는 날짜는 0.
+- `repeatAnalyzers`: 기간 내 서로 다른 한국 날짜 2일 이상에 분석을 시작한 설치 수. 동일 날짜 반복 요청은 한 날짜로만 세며 고유 사람 수/D1·D7 리텐션과 다르다.
+- `jobsFailed`/`jobsPending`: 기간에 시작한 작업 중 현재 failed / queued 또는 running인 건수.
+
+화면의 전체/베타/다운로드/랜딩/서포터즈 필터는 Meta 표와 추이에 적용한다. 소재별 앱 건수는 광고 단계 구분을 할 수 없어 베타 관련 화면에서 동일한 범위를 유지하며 별도 날짜를 표시한다. 서포터즈 전용 보기에서는 베타 앱 표를 숨긴다.
 
 서버만 META_MARKETING_TOKEN(ads_read), META_MARKETING_VERSION, META_MARKETING_ACCOUNT_ID를 읽는다.
 토큰은 ECS Secrets로 주입하며 브라우저·소스·로그에 기록하지 않는다. API 버전은 앱에서 확인한 지원 버전을 명시한다.

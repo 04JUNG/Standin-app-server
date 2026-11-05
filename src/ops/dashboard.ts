@@ -13,6 +13,7 @@ import {
   JOINT_SCORE_FAINT,
   PERSON_COLORS,
 } from "./skeleton.js";
+import { MARKETING_ANALYTICS_SCRIPT } from "./marketingDashboard.js";
 
 // 뼈대 상수는 TypeScript 모듈 하나에만 둔다. 화면용 사본을 따로 적으면 관절 순서가
 // 조용히 어긋나므로, 여기서 JSON으로 심어 브라우저와 테스트가 같은 값을 쓰게 한다.
@@ -134,6 +135,19 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
   .kpi .hint { font-size:11px; color:var(--muted); margin-top:2px; }
   .kpi.warn .value { color:var(--warn); }
   .kpi.bad .value { color:var(--bad); }
+  .marketing-section { border-top:1px solid var(--line); padding-top:16px; margin-top:24px; }
+  .marketing-section.supporters { border:1px solid var(--line); border-left:4px solid var(--c-down); border-radius:10px; padding:16px; background:var(--bg); }
+  .marketing-section h3 { margin-top:0; }
+  .marketing-progress { height:8px; background:var(--line); border-radius:4px; margin-top:16px; overflow:hidden; }
+  .marketing-progress span { display:block; height:100%; background:var(--c-down); }
+  .marketing-note { border-top:1px solid var(--line); padding-top:12px; font-size:13px; }
+  .marketing-note p { margin:4px 0; }
+  #tab-marketing a { color:var(--c-down); }
+  #tab-marketing details { margin:12px 0; }
+  #tab-marketing summary { cursor:pointer; font-size:13px; }
+  #tab-marketing th, #tab-marketing td { white-space:nowrap; }
+  #tab-marketing .marketing-chart { width:100%; height:auto; min-width:0; }
+  .marketing-chart text { font:12px system-ui,sans-serif; fill:var(--muted); }
   .grid2 { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); }
   .card h2 .ghost { float:right; }
   tbody tr:hover { background:color-mix(in srgb,var(--accent) 6%,transparent); }
@@ -329,9 +343,9 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
     </section>
     <section class="tab" id="tab-marketing">
       <div class="card">
-        <h2>포스터 A · 영상 A 성과</h2>
+        <h2>마케팅·광고 분석</h2>
         <p class="sub">화면을 보고 있는 동안 30초마다 서버 집계를 확인합니다. Meta는 최대 1분 간격으로 조회하며 원본 보고 자체에 지연·보정이 있을 수 있습니다.</p>
-        <button id="marketingRefresh">지금 새로고침</button>
+        <div class="controls"><label for="marketingScope">광고 보기</label><select id="marketingScope"><option value="all">전체 · 베타 + 서포터즈</option><option value="supporters">서포터즈 모집</option><option value="beta">베타 · 포스터 A + 영상 A</option><option value="download">베타 · 다운로드 최적화</option><option value="landing">베타 · 랜딩 최적화</option></select><button id="marketingRefresh">지금 새로고침</button></div>
         <p id="marketingMsg" class="sub" role="status"></p>
         <div id="marketingOut"></div>
       </div>
@@ -1695,27 +1709,21 @@ function campaignCountsBlock(counts) {
     '<p class="sub">v0.2.8 전용 설치 파일은 새 설치 후 바로 실행해도 소재를 전달합니다. 일반 파일은 새 등록 후 24시간 내 앱 열기 링크로 받은 첫 소재를 사용합니다. 등록 후 최대 7일 내 첫 이미지 분석 성공을 셉니다. 설치·작업 식별자 없이 앱이 보낸 건수이며 실제 사람 수·설치 완료 수·서버 검증 전환이 아닙니다. 두 이벤트는 각각 수신 날짜 기준이므로 성공률을 계산하지 않습니다. 기존 버전·일반 파일의 직접 실행·통신 실패는 빠질 수 있고 공유된 파일·재설치·위조 요청은 중복 또는 다른 경로를 포함할 수 있습니다. 개발자 설치 제외 설정은 적용하지 않습니다.</p>';
 }
 
-function marketingRender(data) {
-  const meta = data.meta;
-  const labels = {ready:'연결됨',unconfigured:'API 연결 대기',unavailable:'조회 실패',stale:'갱신 실패 · 이전 데이터'};
-  let html = '<h3>Meta 광고 성과 · ' + esc(labels[meta.status] || '상태 확인 필요') + '</h3>';
-  if (meta.reason === 'access_blocked') html += '<p class="sub">Meta가 API 접근을 차단했습니다. Meta 개발자 계정의 확인 안내를 처리해야 광고 조회가 재개됩니다. 성과가 0이라는 뜻은 아닙니다.</p>';
-  if (meta.snapshot) {
-    const snap = meta.snapshot;
-    html += '<p class="sub">광고계정 한국 시간 ' + esc(snap.since) + ' ~ ' + esc(snap.until) + ' (오늘 포함) · Meta 조회 ' + esc(when(snap.fetchedAt)) + '</p>';
-    html += '<div class="scroll"><table><thead><tr><th>단계 / 소재</th><th>광고비 (원)</th><th>노출</th><th>링크 클릭</th><th>랜딩 방문</th><th>다운로드 클릭</th><th>다운로드 클릭당 비용 (원)</th><th>클릭률</th><th>방문당 비용 (원)</th></tr></thead><tbody>';
-    const names = {'meta-poster-a':'포스터 A','meta-hook-a':'영상 A'};
-    html += snap.rows.map(r => '<tr><td>' + esc((r.phase === 'download' ? '다운로드 최적화 / ' : '랜딩 최적화 / ') + (names[r.creative] || r.creative)) + '</td>' +
-      [r.spend,r.impressions,r.clicks,r.landingViews,r.downloadClicks ?? '—',r.downloadClicks ? (r.spend/r.downloadClicks).toFixed(0) : '—',r.impressions ? (100*r.clicks/r.impressions).toFixed(2)+'%' : '—',r.landingViews ? (r.spend/r.landingViews).toFixed(0) : '—'].map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>').join('') + '</tbody></table></div>';
-    html += '<p class="sub">다운로드 클릭은 2026-10-31 생성한 Standin | DownloadClick 맞춤 전환에 Meta가 귀속한 수입니다. 생성 전 기록은 소급 집계하지 않으며 다운로드 완료·설치·사용 수와 다릅니다. 미게재 초안의 행도 0으로 표시될 수 있습니다. 최적화 목표가 다른 두 단계의 비용을 합쳐 A/B 승자를 판단하지 않습니다.</p>';
-  } else html += '<p class="sub">광고 수치를 아직 가져오지 못했습니다. 아래 앱 집계는 별도로 갱신됩니다. 미연결·조회 실패는 성과 0을 의미하지 않습니다.</p>';
+${MARKETING_ANALYTICS_SCRIPT}
+function marketingRender(data,scope) {
+  scope = scope || 'all';
+  let html = marketingMetaBlock(data.meta,scope);
+  if (scope !== 'supporters') {
   html += '<p class="sub">앱 조회 ' + esc(when(data.queriedAt)) + ' · 신규 설치 범위: ' + esc(when(data.since)) + ' 이후 최근 ' + esc(data.windowDays) + '일(이동 구간). 광고 달력 날짜 범위와 다르므로 두 표를 나누어 비교하세요.</p>';
   html += marketingUsageBlock(data.usage);
+  html += marketingUsageDetailsBlock(data.usageDetails,data.usage);
   html += campaignCountsBlock(data.campaignCounts);
   html += acquisitionBlock(data.acquisition);
   html += '<p class="sub">신규 설치는 설치 파일 다운로드나 설치 프로그램 완료가 아니라 앱 첫 실행 후 서버에 등록된 설치 식별자 수입니다. 개발자 제외 설정은 서버 기록·선택 연결 집계에 적용합니다. 설치별 이용 연결은 동의한 기록만 비교하며 소재별 건수 통계와 합산하지 않습니다. 같은 소재의 랜딩·다운로드 광고 단계는 앱 출처에서 구분되지 않으므로 전체 광고 전환율·단계별 A/B 승자 판정으로 해석하지 않습니다.</p>';
-  return html;
+  }
+  return html + marketingSourcesBlock(data);
 }
+let marketingData = null;
 let marketingRequest = 0;
 let marketingController = null;
 async function marketingGo() {
@@ -1725,6 +1733,7 @@ async function marketingGo() {
   marketingController = controller;
   const sequence = ++marketingRequest;
   const days = $("period").value;
+  if (marketingData && marketingData.windowDays !== Number(days)) marketingData = null;
   const timer = setTimeout(() => controller.abort(), 20000);
   $("marketingMsg").textContent = '최신 집계 조회 중…';
   try {
@@ -1732,7 +1741,8 @@ async function marketingGo() {
     if (!res.ok) throw new Error('조회 실패 (' + res.status + ')');
     const data = await res.json();
     if (sequence !== marketingRequest) return;
-    $("marketingOut").innerHTML = marketingRender(data);
+    marketingData = data;
+    $("marketingOut").innerHTML = marketingRender(data,$("marketingScope").value);
     $("marketingMsg").textContent = '서버 응답 ' + when(data.queriedAt) + ' · 자동 갱신 켜짐';
   } catch (error) {
     if (sequence !== marketingRequest) return;
@@ -1743,6 +1753,9 @@ async function marketingGo() {
   }
 }
 $("marketingRefresh").addEventListener('click', marketingGo);
+$("marketingScope").addEventListener('change', () => {
+  if (marketingData) $("marketingOut").innerHTML = marketingRender(marketingData,$("marketingScope").value);
+});
 setInterval(() => {
   if (!document.hidden && $("tab-marketing").classList.contains('on') && !marketingController) marketingGo();
 }, 30000);
