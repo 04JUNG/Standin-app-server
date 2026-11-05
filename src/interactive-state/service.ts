@@ -1,9 +1,11 @@
+import { nonzeroAppearance, type Appearance } from "../appearance/model.js";
 import { parsePacket, parseReceipt } from "./packet.js";
 import { sha256Hex } from "../converter/client.js";
 import { decodeFrame, type ClientFrame } from "./clientFrame.js";
 import {
   InteractiveError,
   active,
+  hash,
   type Location,
   type Operation,
   type Prepare,
@@ -24,7 +26,13 @@ export interface PosterStorage {
     sha256: string,
   ): Promise<void>;
 }
+export interface OutlineArtifacts {
+  check(selection: ResolvedSelection): Promise<void>;
+  prepare(op: Operation, selection: ResolvedSelection, source: Uint8Array, signal: AbortSignal): Promise<Record<string, unknown>>;
+  file(op: Operation, selection: ResolvedSelection, signal?: AbortSignal): Promise<Uint8Array>;
+}
 export interface InteractiveDeps {
+  outline?: OutlineArtifacts;
   store: OperationStore;
   resolve(l: Location, candidateId: string): Promise<ResolvedSelection>;
   worker: InteractiveWorker;
@@ -60,8 +68,14 @@ export class InteractiveService {
       throw error;
     }
   }
+  private async resolve(l: Location, candidateId: string, appearance?: Appearance) {
+    const selection = await this.deps.resolve(l, candidateId);
+    const normalized = nonzeroAppearance(appearance);
+    return normalized ? { ...selection, selectionHash: hash({ baseSelectionHash: selection.selectionHash, appearance: normalized }) } : selection;
+  }
   async prepare(l: Location, input: Prepare) {
-    const selection = await this.deps.resolve(l, input.candidateId);
+    const selection = await this.resolve(l, input.candidateId, input.appearance);
+    if (input.appearance) await this.outline().check(selection);
     const prepared = await this.deps.store.prepare(
       l,
       input,
@@ -75,11 +89,16 @@ export class InteractiveService {
     }
     return prepared;
   }
-  async head(l: Location, candidateId: string) {
-    const selection = await this.deps.resolve(l, candidateId),
+  async head(l: Location, candidateId: string, appearance?: Appearance) {
+    const selection = await this.resolve(l, candidateId, appearance),
       head = await this.deps.store.currentHead(l);
+    let appearanceAvailable = false;
+    if (this.deps.outline) {
+      try { await this.deps.outline.check(selection); appearanceAvailable = true; } catch { /* Fail closed capability only. */ }
+    }
     return {
       schemaVersion: "standin.interactive-http.v1",
+      appearanceExport: { version: "fbx-outline-v1", available: appearanceAvailable },
       currentRevision: head?.revision ?? 0,
       currentStateHash: head?.stateHash ?? null,
       operation:
@@ -98,7 +117,7 @@ export class InteractiveService {
     return op;
   }
   async revalidate(op: Operation) {
-    const selection = await this.deps.resolve(op, op.candidateId);
+    const selection = await this.resolve(op, op.candidateId, op.appearance);
     if (selection.selectionHash !== op.selectionHash) {
       await this.cancel(op, true);
       throw new InteractiveError("INTERACTIVE_SUPERSEDED");
@@ -154,8 +173,13 @@ export class InteractiveService {
   async file(op: Operation, signal?: AbortSignal) {
     if (!active(op) || op.exportState !== "ready" || !op.receipt)
       throw new InteractiveError("INTERACTIVE_NOT_READY");
-    await this.revalidate(op);
-    const bytes = await this.verifiedFile(op, signal);
+    const selection = await this.revalidate(op);
+    // Preserve the existing Converter handle/expiry fence even when final bytes are privately cached.
+    if (op.appearance) await this.verifiedFile(op, signal);
+    const bytes = op.appearance
+      ? await this.consume(op, () => this.outline().file(op, selection, signal))
+      : await this.verifiedFile(op, signal);
+    if (op.appearance) this.verifyOutlineBytes(bytes, op.outlineReceipt);
     await this.assertDeliverable(op);
     // This is HTTP delivery, not native disk persistence or an export-completed event.
     this.deps.metric("artifact_download_delivered", "download", 0);
@@ -221,12 +245,12 @@ export class InteractiveService {
   async historyFrame(l: Location) {
     const op = await this.deps.store.frame(l);
     if (!op) throw new InteractiveError("NOT_FOUND", 404);
-    const selection = await this.deps.resolve(l, op.candidateId);
+    const selection = await this.resolve(l, op.candidateId, op.appearance);
     if (selection.selectionHash !== op.selectionHash)
       throw new InteractiveError("NOT_FOUND", 404);
     const bytes = await this.deps.posters.read(op);
     const current = await this.deps.store.frame(l),
-      fresh = await this.deps.resolve(l, op.candidateId);
+      fresh = await this.resolve(l, op.candidateId, op.appearance);
     if (
       !bytes ||
       current?.revision !== op.revision ||
@@ -234,6 +258,17 @@ export class InteractiveService {
     )
       throw new InteractiveError("NOT_FOUND", 404);
     return { op, bytes };
+  }
+  private verifyOutlineBytes(bytes: Uint8Array, receipt?: Record<string, unknown>) {
+    const signature = Buffer.from(bytes.subarray(0, 23));
+    if (!receipt || bytes.length > 30 * 1024 * 1024 ||
+        bytes.length !== receipt.artifactBytes || sha256Hex(bytes) !== receipt.artifactSha256 ||
+        !(signature.equals(Buffer.from("Kaydara FBX Binary  \0\x1a\0")) || signature.subarray(0, 5).toString("ascii") === "; FBX"))
+      throw new InteractiveError("OUTLINE_INTEGRITY_ERROR");
+  }
+  private outline() {
+    if (!this.deps.outline) throw new InteractiveError("OUTLINE_DISABLED", 503);
+    return this.deps.outline;
   }
   private async verifiedFile(op: Operation, signal?: AbortSignal) {
     const bytes = await this.consume(op, () =>
@@ -343,14 +378,23 @@ export class InteractiveService {
         );
         if (controller.signal.aborted) return;
         await this.revalidate(op);
+        const outlineReceipt = op.appearance
+          ? await this.outline().prepare({ ...op, receipt }, selection,
+              await this.verifiedFile({ ...op, receipt }, controller.signal), controller.signal)
+          : undefined;
+        if (controller.signal.aborted) return;
+        await this.revalidate(op);
         const published = await this.deps.store.update(
           op,
-          { exportState: "ready", receipt },
+          { exportState: "ready", receipt, ...(outlineReceipt ? { outlineReceipt } : {}) },
           claim.leaseId,
         );
         if (!published) throw new InteractiveError("INTERACTIVE_SUPERSEDED");
       } else {
-        const bytes = await this.verifiedFile(op, controller.signal);
+        const bytes = op.appearance
+          ? await this.consume(op, () => this.outline().file(op, selection, controller.signal))
+          : await this.verifiedFile(op, controller.signal);
+        if (op.appearance) this.verifyOutlineBytes(bytes, op.outlineReceipt);
         const png = await this.deps.renderPoster(op, bytes, controller.signal);
         if (controller.signal.aborted) return;
         await this.revalidate(op);

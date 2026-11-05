@@ -1,3 +1,4 @@
+import { legacyAppearanceError } from "../appearance/legacy.js";
 import { renderFinalPreview } from "../converter/finalPreview.js";
 import { candidatePathId, candidateSourceBytes } from "../candidate-source.js";
 import { refinableLibraryCandidate } from "../refine/eligibility.js";
@@ -74,6 +75,8 @@ export function createFramingRoutes(
       code: string,
       message: string,
     ) => c.json(errorEnvelope(code, message, c.get("requestId")), status);
+    const appearanceError = legacyAppearanceError(c);
+    if (appearanceError) return appearanceError;
     const installationId = c.get("installationId")!;
     const jobId = c.req.query("jobId") ?? "",
       candidateId = c.req.query("candidateId") ?? "";

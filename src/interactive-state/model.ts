@@ -1,6 +1,7 @@
 /** Additive HTTP contract. Client requests contain identifiers, never authoritative geometry. */
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { appearanceSchema, nonzeroAppearance, type Appearance } from "../appearance/model.js";
 export const HTTP_SCHEMA = "standin.interactive-http.v1";
 export const SHA = /^[a-f0-9]{64}$/;
 export class InteractiveError extends Error {
@@ -15,6 +16,7 @@ export const prepareSchema = z
   .object({
     schemaVersion: z.literal(HTTP_SCHEMA),
     candidateId: z.string().min(1).max(200),
+    appearance: appearanceSchema.optional(),
     revision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
     expectedRevision: z
       .number()
@@ -25,8 +27,12 @@ export const prepareSchema = z
     mutationId: z.string().regex(/^[A-Za-z0-9_-]{8,128}$/),
   })
   .strict()
-  .refine((v) => v.revision > v.expectedRevision);
-export type Prepare = z.infer<typeof prepareSchema>;
+  .refine((v) => v.revision > v.expectedRevision)
+  .transform(({ appearance, ...rest }) => {
+    const normalized = nonzeroAppearance(appearance);
+    return normalized ? { ...rest, appearance: normalized } : rest;
+  });
+export type Prepare = Omit<z.infer<typeof prepareSchema>, "appearance"> & { appearance?: Appearance };
 export interface Location {
   installationId: string;
   jobId: string;
@@ -49,6 +55,9 @@ export type ExportState =
 export interface Operation extends Location {
   operationId: string;
   candidateId: string;
+  appearance?: Appearance;
+  /** Separately verified postprocess proof; base receipt stays unchanged. */
+  outlineReceipt?: Record<string, unknown>;
   revision: number;
   /** Stable request identity; includes server preferences, no clocks/paths/display names. */
   selectionHash: string;
@@ -98,6 +107,7 @@ export function publicOperation(op: Operation) {
     schemaVersion: HTTP_SCHEMA,
     operationId: op.operationId,
     candidateId: op.candidateId,
+    ...(op.appearance ? { appearance: op.appearance } : {}),
     revision: op.revision,
     selectionHash: op.selectionHash,
     stateHash: op.stateHash,
@@ -106,17 +116,18 @@ export function publicOperation(op: Operation) {
     eventSequence: op.eventSequence,
     expiresAt: op.expiresAt,
     modelUrl: active(op) && op.stateHash ? `${base}/model` : null,
-    fileUrl: active(op) && op.exportState === "ready" ? `${base}/file` : null,
+    fileUrl: active(op) && (!op.appearance || op.outlineReceipt) && op.exportState === "ready" ? `${base}/file` : null,
     posterUrl: active(op) && op.poster ? `${base}/poster` : null,
     exportReceipt:
-      active(op) && op.exportState === "ready" && op.receipt
+      active(op) && (!op.appearance || op.outlineReceipt) && op.exportState === "ready" && op.receipt
         ? {
             schema: "interactive-fbx-receipt-v1",
             operationId: op.operationId,
             revision: op.revision,
             stateHash: op.stateHash,
-            artifactSha256: op.receipt.artifactSha256,
-            artifactBytes: op.receipt.artifactBytes,
+            artifactSha256: op.appearance ? op.outlineReceipt?.artifactSha256 : op.receipt.artifactSha256,
+            artifactBytes: op.appearance ? op.outlineReceipt?.artifactBytes : op.receipt.artifactBytes,
+            ...(op.appearance ? { appearance: op.appearance, outline: op.outlineReceipt } : {}),
             runtimeRevision: op.receipt.runtimeRevision,
             packetModelSha256: op.receipt.packetModelSha256,
             solverVersion: "chain-transport-v3.2.5",

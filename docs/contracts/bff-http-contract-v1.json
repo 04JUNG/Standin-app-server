@@ -1,7 +1,7 @@
 {
   "schemaVersion": "standin.interactive-http.v1",
   "status": "implemented-opt-in-local-real-verified",
-  "updatedAt": "2026-11-04",
+  "updatedAt": "2026-11-05",
   "source": {
     "repository": "04JUNG/Standin-app-server",
     "baseCommit": "37adaa616b21ac49933974f73b56fbc5c575b0c2",
@@ -45,7 +45,7 @@
     "POST /{operationId}/export": "202 same-state idempotent export preparation",
     "GET /{operationId}/file": "200 verified FBX only; latest revision + full release/current-state recheck",
     "GET /{operationId}/poster": "200 server-authoritative static PNG or 404; never blocks list/export",
-    "GET /?candidateId={candidateId}": "200 {schemaVersion,currentRevision,currentStateHash,operation|null}; recovers monotonic head even after artifact expiry; owned current candidate required",
+    "GET /?candidateId={candidateId}": "200 {schemaVersion,currentRevision,currentStateHash,appearanceExport:{version:fbx-outline-v1,available:boolean},operation|null}; optional URL-encoded appearance JSON matches head; current candidate ownership required",
     "POST /{operationId}/client-frame": {
       "request": "ClientFrame JSON schema below; max 1 MiB PNG / 1.5 MB HTTP body",
       "response": "201 auxiliary UI-only acknowledgement; same-hash retry idempotent; never accuracy/file safety evidence; never authoritative history poster"
@@ -67,7 +67,8 @@
     "posterUrl": null,
     "errorCode": null,
     "selectionHash": "sha256 canonical server selection identity (immutable from prepare)",
-    "exportReceipt": "null before ready; {schema,operationId,revision,stateHash,artifactSha256,artifactBytes,runtimeRevision,packetModelSha256,solverVersion,validationVersion,initialFbxRequired:true,nativeSaved:false} after validated receipt"
+    "exportReceipt": "null before ready; {schema,operationId,revision,stateHash,artifactSha256,artifactBytes,runtimeRevision,packetModelSha256,solverVersion,validationVersion,initialFbxRequired:true,nativeSaved:false} after validated receipt",
+    "appearance": "optional nonzero versioned appearance; zero omitted"
   },
   "rules": [
     "Persist body/hand/scope/refine and confirmed candidate using existing routes before prepare; request never mutates these selections",
@@ -86,7 +87,8 @@
     "Aligned snapshot hash semantics to Converter solved_state.py: no synthetic geometry hash before solve; separate selectionHash.",
     "Implemented durable polling/head recovery/cancel/queue, strict canonical packet+receipt+file checks, server history archive and auxiliary frame upload; actual Converter HTTP transport and full camera mapping remain blocked.",
     "Pinned BFF implementation 7dcfcfd and Converter draft implementation 3fa41e71; confirmed no HTTP transport and no frozen/activated integration.",
-    "Real-model v2 integration: authenticated internal HTTP, normalized search projection, strict file-canonical display/export correspondence, prebuilt 5/5 local Top5 and bounded verified hand tables. Default flags remain off."
+    "Real-model v2 integration: authenticated internal HTTP, normalized search projection, strict file-canonical display/export correspondence, prebuilt 5/5 local Top5 and bounded verified hand tables. Default flags remain off.",
+    "Strict appearance-bound final export boundary; rejected CSP hull remains unavailable, zero legacy unchanged."
   ],
   "implementationStatus": "implemented private Converter HTTP/camera/static/verified-hand transport; local real-asset and full-wire tests pass; disabled by default",
   "schemas": {
@@ -127,6 +129,24 @@
         "mutationId": {
           "type": "string",
           "pattern": "^[A-Za-z0-9_-]{8,128}$"
+        },
+        "appearance": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "const": "fbx-outline-v1"
+            },
+            "width": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            }
+          },
+          "required": [
+            "version",
+            "width"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -223,5 +243,15 @@
     "capability": "interactive-preview-capability-v1 only when all returned candidates have prebuilt source/character/scope coverage",
     "scopeOfProof": "5/5 local candidates, not global library"
   },
-  "documentation": "docs/INTERACTIVE_STATE_V1.md"
+  "documentation": "docs/INTERACTIVE_STATE_V1.md",
+  "appearanceExport": {
+    "version": "fbx-outline-v1",
+    "status": "current expression rejected by actual CSP; unavailable even with env/upstream certificate",
+    "documentation": "docs/OUTLINE_EXPORT_APPEARANCE.md",
+    "environmentFlag": "OUTLINE_EXPORT_ENABLED=false",
+    "zero": "omit before identity hash; preserve existing bytes",
+    "selectionIdentity": "nonzero appearance + complete current server selection; base Converter packet schema unchanged",
+    "receipt": "separate final outlined-fbx-receipt-v1 proof, base receipt retained; no ready URL without both",
+    "finalByteLimit": 31457280
+  }
 }
