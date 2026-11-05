@@ -31,7 +31,7 @@ function fixture() {
       thickness_m: .002625, culling: "CullingOnCCW", base: { typed_fbx_values_preserved: true,
         maxPositionErrorM: 0, maxMatrixError: 0, maxWeightError: 0, maxNormalError: 0 },
       outline: { manifest: { objects: Object.fromEntries(Array.from({ length: 6 }, (_, i) => [String(i + 1), hash(i)])), connections: [sha], culling: "CullingOnCCW", meshes: 1 },
-        skin_verified: true, blender_import_backface_culling: [false] }, file_verified: true,
+        skin_verified: true, displacement_verified: true, max_displacement_error_m: 0, blender_import_backface_culling: [false] }, file_verified: true,
       csp_certified: true, verification_seconds: 0 } };
 }
 test("rejected expression cannot be enabled by env/upstream certification booleans", async () => {
@@ -59,6 +59,8 @@ test("proof parser binds exact bytes/settings and separate immutable body proof,
     { base: { ...fixture().receipt.base, typed_fbx_values_preserved: false } },
     { base: { ...fixture().receipt.base, maxWeightError: .00001 } },
     { outline: { ...fixture().receipt.outline, skin_verified: false } },
+    { outline: { ...fixture().receipt.outline, displacement_verified: false } },
+    { outline: { ...fixture().receipt.outline, max_displacement_error_m: .000002 } },
     { outline: { ...fixture().receipt.outline, manifest: { ...fixture().receipt.outline.manifest, objects: {} } } },
     { extraUnsupported: true }])
     assert.throws(() => parseOutlinedArtifact({ ...fixture(), receipt: { ...fixture().receipt, ...patch } }, op, selection, 1.75, contract), /OUTLINE_INTEGRITY_ERROR/);
