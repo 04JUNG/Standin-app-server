@@ -12,6 +12,7 @@ export interface ProgressPerson {
   searchMode?: "pose" | "description" | "combined" | "upper_body";
   candidates?: Preview[];
   refinement?: { candidateId: string; status: "running" | "improved" | "unchanged" | "reverted" | "skipped";
+    activeJoints?: number[];
     before?: Overlay; after?: Overlay; beforeThumbnailUrl?: string; afterThumbnailUrl?: string };
 }
 export interface AnalysisProgress {
@@ -72,6 +73,25 @@ function preview(raw: unknown): Preview | undefined {
   return { id: p.id, rank: p.rank, thumbnailUrl: poseThumbnailUrl(pose, view) };
 }
 
+/** Exact producer declarations only; never infer activity from limbs or point deltas. */
+function refinement(raw: unknown): ProgressPerson["refinement"] {
+  const r = dict(raw);
+  if (!r || typeof r.candidateId !== "string" || !r.candidateId.trim() || r.candidateId.length > 160 ||
+      !["running", "improved", "unchanged", "reverted", "skipped"].includes(r.status as string)) return;
+  const result: NonNullable<ProgressPerson["refinement"]> = {
+    candidateId: r.candidateId, status: r.status as NonNullable<ProgressPerson["refinement"]>["status"],
+  };
+  const joints = r.activeJoints;
+  if (Array.isArray(joints) && joints.length <= 12 &&
+      joints.every(joint => index(joint) && joint >= 5 && joint <= 16) &&
+      new Set(joints).size === joints.length) {
+    result.activeJoints = [...joints];
+  }
+  // Existing before/after/thumbnail paths remain unconnected; this extension
+  // does not add a projection/renderer or infer that a refinement was run.
+  return result;
+}
+
 export function sanitizeProgress(raw: unknown): AnalysisProgress | undefined {
   const p = dict(raw);
   if (!p || p.version !== "pose-analysis-progress.v1" || !index(p.sequence) || p.sequence < 1 || !stage(p.stage) || !Array.isArray(p.people) || p.people.length > 20) return;
@@ -92,8 +112,10 @@ export function sanitizeProgress(raw: unknown): AnalysisProgress | undefined {
       const candidates = row.candidates.slice(0, 5).map(preview).filter((c): c is Preview => !!c && !ids.has(c.id) && !!ids.add(c.id));
       if (candidates.length) person.candidates = candidates.sort((a, b) => a.rank - b.rank);
     }
-    // No automatic refinement runs in the current analyze producer. Do not accept
-    // arbitrary refinement URLs or manufacture running/before/after from eligibility.
+    // No automatic refinement runs in analyze. Only an explicit, valid producer
+    // record can supply this optional metadata; eligibility never manufactures it.
+    const declaredRefinement = refinement(row.refinement);
+    if (declaredRefinement) person.refinement = declaredRefinement;
     people.push(person);
   }
   const completedStages = codes(p.completedStages), skippedStages = codes(p.skippedStages);

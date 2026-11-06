@@ -2,7 +2,7 @@
 
 Shared contract: `/Users/dowon/.codex/worktrees/pose-search-film-loading/Standin-client/docs/POSE_ANALYSIS_PROGRESS_V1.md`.
 
-- BFF: `/Users/dowon/.codex/worktrees/eef0/Standin-app-server`, branch `codex/pose-analysis-progress-v1`, base `origin/develop` at `37adaa6`.
+- BFF: `/private/tmp/standin-pose-progress-bff`, branch `codex/pose-analysis-progress-v1`, base `origin/develop` at `37adaa6`.
 - Producer: `/Users/dowon/.codex/worktrees/eef0/Standin-server`, branch `codex/pose-analysis-progress-producer`, base `f23dfdd0f`.
 - Producer milestone details: sibling `Standin-server/docs/POSE_ANALYSIS_PROGRESS_V1.md`.
 - Original dirty checkouts were not edited. No merge, deployment or production analysis was performed.
@@ -66,3 +66,14 @@ For HTTP/client work using this BFF's real routes/auth and an embedded local Pos
 4. For the full visual sequence including refine variants, use the client's explicitly labelled DEV replay with the fixtures above. This is separate from actual inference integration.
 
 Deployment order when separately authorized: migrate/start BFF normally (idempotent schema), roll producer/BFF independently; old JSON fallback remains compatible. Intermediaries must permit unbuffered NDJSON for actual live updates. A buffered proxy can collapse progress into the final response without affecting result correctness; no fake fallback stages are generated.
+
+
+## Optional activeJoints extension (2026-11-06)
+
+The previous BFF checkout under `eef0` was removed after the original handoff. This dedicated branch has been reopened at `/private/tmp/standin-pose-progress-bff`; the original dirty checkout remains untouched.
+
+`ProgressPerson.refinement.activeJoints?: number[]` is now accepted from an explicit valid producer refinement record (`candidateId` + known `status`). Values must be unique COCO17 body indices 5..16, with at most 12 entries. The whole optional field is omitted when missing, malformed, duplicated, out of range, fractional or nonfinite; no filtering/deduplication guesses activity. An explicitly provided empty array is valid. Valid arrays are copied and retain producer order through storage/public projection. Private refinement fields remain stripped; before/after/thumbnail production remains unconnected.
+
+The existing image analyze producer still skips auto-refine and emits no activeJoints. No new refinement, model call, rendering, timer, coordinate-delta inference or eligibility-derived declaration was added. Actual running metadata and changed before/after positions remain distinct concepts for the client.
+
+Validation: `npm run test:progress` (12 passed), full `npm test` (985 passed, 2 existing opt-in skips), and the existing 39 snapshots accepted by the client's production parser. Existing fixture files were not changed. Client source and inference producer files were not changed by this extension.

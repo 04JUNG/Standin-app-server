@@ -154,3 +154,43 @@ test("stored malformed progress cannot break status or expose private fields", (
   assert.deepEqual(value,safe);
   assert.equal(Object.hasOwn(value!,"private_prompt"),false);
 });
+
+
+test("refinement activeJoints allowlists only exact explicit COCO17 body declarations", () => {
+  const snapshot = (refinement?: unknown) => sanitizeProgress({ ...base(), stage: "refining",
+    people: [{ personIndex: 0, ...(refinement === undefined ? {} : {refinement}) }] })!.people[0];
+  const declared = { candidateId: "fixture_pose::front", status: "running" };
+  assert.equal(snapshot().refinement, undefined);
+  assert.deepEqual(snapshot(declared).refinement, declared);
+  assert.equal(Object.hasOwn(snapshot(declared).refinement!, "activeJoints"), false);
+  for (const joints of [[], [5, 16], Array.from({length: 12}, (_, i) => i + 5)]) {
+    const value = { ...declared, activeJoints: joints };
+    const source = [...joints];
+    const result = snapshot({...value, activeJoints: source, prompt:"private", debug:{reasoning:"secret"}}).refinement!;
+    assert.deepEqual(result,value);
+    source.push(6);
+    assert.deepEqual(result.activeJoints,joints);
+  }
+  for (const activeJoints of [null,"5,6",[4],[17],[-1],[5.5],[NaN],[Infinity],["5"],[true],[5,5],Array(13).fill(5)]) {
+    const result = snapshot({...declared,activeJoints}).refinement!;
+    assert.deepEqual(result,declared);
+    assert.equal(Object.hasOwn(result,"activeJoints"),false);
+  }
+  for (const status of ["running","improved","unchanged","reverted","skipped"]) {
+    assert.deepEqual(snapshot({...declared,status,activeJoints:[7,9]}).refinement,
+      {...declared,status,activeJoints:[7,9]});
+  }
+  for (const malformed of [{activeJoints:[5]},{...declared,status:"eligible"},{...declared,candidateId:""}]) {
+    assert.equal(snapshot(malformed).refinement,undefined);
+  }
+});
+
+test("active joints survive public storage projection without deriving or copying private fields", () => {
+  const p = sanitizeProgress({...base(),stage:"refining",people:[{personIndex:0,
+    refinement:{candidateId:"fixture_pose::front",status:"running",activeJoints:[5,7,9],reasoning:"private"}}]})!;
+  assert.deepEqual(publicProgress("running",p),p);
+  const absent = sanitizeProgress({...base(),people:[{personIndex:0,refineAllowed:true,
+    refinableLimbs:["left_arm"],activeJoints:[5,7,9]}]})!;
+  assert.equal(absent.people[0].refinement,undefined);
+  assert.equal(publicProgress("completed",p),undefined);
+});
