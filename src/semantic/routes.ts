@@ -1,3 +1,4 @@
+import { interactiveEnabled } from "../interactive-state/runtime.js";
 import { randomUUID } from "node:crypto";
 import { inferenceStatus } from "../inference.js";
 import {
@@ -40,7 +41,14 @@ const defaults = {
   createJob: createSemanticJob,
   persist: persistAnalysisRecords,
   updateJob,
-  capabilities: currentCapabilities,
+  capabilities: async (): Promise<
+    Awaited<ReturnType<typeof currentCapabilities>> & {
+      selectionPreview?: boolean;
+    }
+  > => ({
+    ...(await currentCapabilities()),
+    ...(interactiveEnabled() ? { selectionPreview: true } : {}),
+  }),
   library: inferenceStatus,
   saveSnapshot,
   readPage,

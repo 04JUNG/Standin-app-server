@@ -1,5 +1,5 @@
 import { createInteractiveRoutes } from "./interactive-state/routes.js";
-import { interactiveService, interactiveEnabled } from "./interactive-state/runtime.js";
+import { interactiveService, interactiveEnabled, selectionPreviewService } from "./interactive-state/runtime.js";
 import { createSemanticRoutes } from "./semantic/routes.js";
 // Standin BFF (앱 서버) 엔트리포인트.
 // 경계: [Tauri] ──/v1──> [BFF: 이 서버] ──HTTP──> [도원 추론 서버]
@@ -197,7 +197,7 @@ const artifactWitness=replayArtifactWitness(replayService,()=>log.warn({type:"re
 app.use("/v1/pose-candidates/*",artifactWitness);
 app.use("/v1/analysis/jobs/:jobId/scene",artifactWitness);
 app.route("/v1/users", usersRoutes);
-app.route("/v1/analysis/jobs", createInteractiveRoutes(interactiveService, interactiveEnabled));
+app.route("/v1/analysis/jobs", createInteractiveRoutes(interactiveService, interactiveEnabled, selectionPreviewService));
 app.route("/v1/analysis/jobs", jobsRoutes);
 app.use("/v1/analysis/jobs/:jobId/scene", bodyLimit({ maxSize: 32768 }));
 app.route("/v1/analysis/jobs", createSceneRoutes((request) => app.fetch(request)));

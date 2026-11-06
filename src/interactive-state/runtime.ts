@@ -1,5 +1,6 @@
 import { createSkinArtifacts } from "../converter/skin.js";
 import { finalReceipt } from "./model.js";
+import { SelectionPreviewService } from "./selectionPreview.js";
 import { createOutlineArtifacts } from "../converter/outline.js";
 /** Activation intentionally gated on an agreed, implemented Converter transport. */
 import { config } from "../config.js";
@@ -41,3 +42,8 @@ export const interactiveService = new InteractiveService({
 });
 export const interactiveEnabled = () =>
   config.interactiveStateEnabled && converterTransportAvailable;
+
+export const selectionPreviewService = new SelectionPreviewService(
+  createSelectionResolver({}, "preview"),
+  worker,
+);
