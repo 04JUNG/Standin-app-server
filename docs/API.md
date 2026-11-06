@@ -1793,3 +1793,7 @@ and scene contracts retain their established safety/release rules.
 role이 있는 카탈로그의 공통 남성 폴백은 `defaultCharacterId`로 명시한 유일한 `gender=male,role=default` 자산이다. 기존 `male-base-*`는 `previous_default` 카드로 남고 새 ID/자산을 가리키도록 덮어쓰지 않는다. role 없는 카탈로그의 기존 남성 기본형 탐색 및 last_used/auto 정책은 유지한다. 작업 시작에 BodyRef를 고정하고, 과거 폴백 선택에 캡처 필드가 없더라도 저장된 BodyRef가 있으면 그 ID/해시/revision을 보존한다. 신규 자산 누락은 다른 BASE로 대체하지 않고 unavailable로 닫는다.
 
 새 비율·실제 hash·기존형 보존·캐시/포스터·병행 PR 경계는 [통합 계약](BODY_DEFAULT_ROLLOUT_20261104.md)을 따른다. 이 코드 변경은 자산 승인이나 배포/활성화를 뜻하지 않는다.
+
+### Final FBX appearance boundary (2026-11-06, scoped native v2 support)
+
+The strict optional `appearance:{version:"fbx-outline-v1",width:0..2}` on interactive prepare, owned capability/head recovery, exact target-width support, separate base/outline proofs and final byte binding are documented in [OUTLINE_EXPORT_APPEARANCE.md](./OUTLINE_EXPORT_APPEARANCE.md). Current approved male/female defaults support full continuous0<width<=2 and cropped width2 under the live posed-FBX-import contract. BFF independently pins those targets; an upstream boolean alone cannot enable them. Omission/zero preserves legacy identity and bytes. Old opaque v1 remains rejected. `.clip`/CSP-internal posing are outside present scope; default flags remain off and this is not deployment.

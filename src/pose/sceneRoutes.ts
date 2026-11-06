@@ -1,3 +1,5 @@
+import { legacyAppearanceError, unsupportedSceneAppearance } from "../appearance/legacy.js";
+import { outlineMessage } from "../appearance/model.js";
 import { SCENE_MANIFEST_VERSION, sceneManifest, scenePeople, type SceneManifest } from "./sceneManifest.js";
 import { log } from "../log.js";
 import { SCENE_SAVE_CONTRACT, SCENE_REVIEW_VERSION, SCENE_REVIEW_TTL_MS, SceneError, sceneErrorDetails, type SceneStage, sceneErrorStatus, sceneSaveContract } from "./sceneContract.js";
@@ -111,6 +113,10 @@ export function createSceneRoutes(
     } catch {
       return fail(400, "INVALID_INPUT", "저장할 인물을 다시 선택해 주세요.");
     }
+    const queryAppearanceError = legacyAppearanceError(c);
+    if (queryAppearanceError) return queryAppearanceError;
+    const appearanceError = unsupportedSceneAppearance(value);
+    if (appearanceError) return fail(appearanceError === "INVALID_OUTLINE" ? 400 : 409, appearanceError, outlineMessage(appearanceError));
     const input = value as {
       parts?: unknown;
       cameraContractVersion?: unknown;

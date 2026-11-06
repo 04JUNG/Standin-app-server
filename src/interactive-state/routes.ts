@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { appearanceSchema, outlineMessage } from "../appearance/model.js";
 import { clientFrameSchema } from "./clientFrame.js";
 import { staticFile } from "./static.js";
 import { sha256Hex } from "../converter/client.js";
@@ -27,7 +29,7 @@ export function createInteractiveRoutes(
     return c.json(
       errorEnvelope(
         code,
-        "선택한 결과를 다시 확인해 주세요.",
+        code.startsWith("OUTLINE_") ? outlineMessage(code) : "선택한 결과를 다시 확인해 주세요.",
         c.get("requestId"),
       ),
       status,
@@ -65,7 +67,7 @@ export function createInteractiveRoutes(
     }),
   );
   const l = (c: {
-    req: { param(name: string): string };
+    req: { param(name: string): string; query(): Record<string, string> };
     get(name: "installationId"): string | undefined;
   }) => {
     if (!enabled()) throw new InteractiveError("INTERACTIVE_DISABLED", 503);
@@ -100,7 +102,15 @@ export function createInteractiveRoutes(
       candidateId = c.req.query("candidateId");
     if (!candidateId || candidateId.length > 200)
       throw new InteractiveError("INVALID_INPUT", 400);
-    return c.json(await service.head(location, candidateId), 200, {
+    const raw = c.req.queries("appearance");
+    if (raw && raw.length !== 1) throw new InteractiveError("INVALID_INPUT", 400);
+    let appearance;
+    if (raw) {
+      const value = appearanceSchema.safeParse(await Promise.resolve().then(() => JSON.parse(raw[0])).catch(() => null));
+      if (!value.success) throw new InteractiveError("INVALID_INPUT", 400);
+      appearance = value.data;
+    }
+    return c.json(await service.head(location, candidateId, appearance), 200, {
       "Cache-Control": "private, no-store",
     });
   });
@@ -137,6 +147,9 @@ export function createInteractiveRoutes(
       id = c.req.param("operationId");
     if (!/^op_[a-f0-9-]{36}$/.test(id))
       throw new InteractiveError("NOT_FOUND", 404);
+    // Settings are immutable on prepare; do not silently ignore appearance on a file/export URL.
+    if (Object.keys(c.req.query()).some(k => /^(outline|appearance)/i.test(k)))
+      throw new InteractiveError("INVALID_INPUT", 400);
     return service.current(location, id);
   };
   r.get(`${INTERACTIVE_PATH}/:operationId`, async (c) =>
@@ -160,12 +173,22 @@ export function createInteractiveRoutes(
       "Cache-Control": "private, no-store",
     });
   });
-  r.post(`${INTERACTIVE_PATH}/:operationId/export`, async (c) =>
-    c.json(publicOperation(await service.requestExport(await op(c))), 202, {
+  r.post(`${INTERACTIVE_PATH}/:operationId/export`, async (c) => {
+    const operation = await op(c), raw = await c.req.text();
+    // Old clients send no body; current clients bind the expected immutable snapshot.
+    if (raw.length) {
+      let value: unknown;
+      try { value = JSON.parse(raw); } catch { throw new InteractiveError("INVALID_INPUT", 400); }
+      const parsed = z.object({ revision: z.number().int().positive(), stateHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict().safeParse(value);
+      if (!parsed.success) throw new InteractiveError("INVALID_INPUT", 400);
+      if (parsed.data.revision !== operation.revision || parsed.data.stateHash !== operation.stateHash)
+        throw new InteractiveError("INTERACTIVE_SUPERSEDED");
+    }
+    return c.json(publicOperation(await service.requestExport(operation)), 202, {
       "Cache-Control": "private, no-store",
       "Retry-After": "1",
-    }),
-  );
+    });
+  });
   r.get(`${INTERACTIVE_PATH}/:operationId/variants`, async (c) => {
     const operation = await op(c),
       bytes = await service.variants(operation, c.req.raw.signal);
@@ -204,9 +227,9 @@ export function createInteractiveRoutes(
           ...(kind === "file"
             ? {
                 "Content-Disposition": `attachment; filename="pose-r${operation.revision}.fbx"`,
-                "X-Standin-Artifact-Contract": "interactive-fbx-receipt-v1",
+                "X-Standin-Artifact-Contract": operation.appearance ? "outlined-fbx-v1" : "interactive-fbx-receipt-v1",
                 "X-Standin-Artifact-SHA256": String(
-                  operation.receipt!.artifactSha256,
+                  operation.appearance ? operation.outlineReceipt!.artifactSha256 : operation.receipt!.artifactSha256,
                 ),
               }
             : {}),

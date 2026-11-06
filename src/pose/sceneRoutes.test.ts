@@ -556,3 +556,17 @@ test("manifest contract rejects unknown versions and invalid exclusions", async 
     assert.equal(f.state.composed, 0);
   }
 });
+
+test("scene root/person appearance cannot silently produce an unoutlined scene", async () => {
+  const s = setup();
+  const appearance = { version: "fbx-outline-v1", width: 1 };
+  for (const extra of [{ appearance }, { persons: s.rows.map((p, i) => i ? p : { ...p, appearance }) }]) {
+    const r = await s.send(extra);
+    assert.equal(r.status, 409);
+    assert.equal(((await r.json()) as { error: { code: string } }).error.code, "OUTLINE_UNSUPPORTED");
+  }
+  assert.equal((await s.send({ appearance: { ...appearance, width: "1" } })).status, 400);
+  assert.equal(s.state.composed, 0);
+  assert.equal((await s.send({ appearance: { ...appearance, width: 0 } })).status, 200);
+  assert.equal(s.state.composed, 1);
+});
