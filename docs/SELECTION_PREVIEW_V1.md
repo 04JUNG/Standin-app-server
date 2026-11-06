@@ -18,3 +18,11 @@ The BFF adds the SHA of the server-validated original BVH as
 already carry it. This preserves rotation/projection and does not claim that a
 fixed preview camera matches a searched projection. Converter must explicitly
 support this descriptor; older search-only Converter versions reject it closed.
+
+Unshaped registered bodies may still use a server-approved default shape recipe.
+The resolver binds its rules version from the trusted body catalog only when both
+character ID and asset SHA match, and includes that authority in the selection
+hash. Packet validation uses explicit shape-source rules first; for a null shape
+only, it can use those trusted default rules. A non-null shape without explicit
+source provenance cannot use this fallback. Packet-provided rules never establish
+expected authority.
