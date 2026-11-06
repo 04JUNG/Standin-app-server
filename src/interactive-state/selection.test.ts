@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createSelectionResolver } from "./selection.js";
+import { bindInteractiveCamera, createSelectionResolver } from "./selection.js";
 import { sha256Hex } from "../converter/client.js";
 import type { Job } from "../jobs/store.js";
 import type { BodySelection } from "../body-selection/model.js";
@@ -170,4 +170,10 @@ test("operation metadata cannot change the exact location ownership binding duri
   assert.equal(revalidated.selectionHash, initial.selectionHash);
   assert.notEqual((await resolve({ installationId: "inst_other" })).identity.ownerBinding, initial.identity.ownerBinding);
   assert.notEqual((await resolve({ jobId: "job_other" })).identity.ownerBinding, initial.identity.ownerBinding);
+});
+
+test("manual preview camera receives exact validated source without changing its projection", () => {
+  const camera = { version: "pose-preview-camera-v1", projection: "perspective", distance_torso: 8, rotation: [[1,0,0],[0,1,0],[0,0,1]] };
+  assert.deepEqual(bindInteractiveCamera(camera, sha), { ...camera, source_bvh_sha256: sha });
+  assert.equal("source_bvh_sha256" in camera, false);
 });

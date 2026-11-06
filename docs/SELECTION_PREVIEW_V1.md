@@ -11,3 +11,10 @@ The common worker solves in an isolated service-instance/owned-job namespace wit
 Verification: full BFF suite 1,005 passed / 2 optional skips; build/typecheck. New tests cover unconfirmed/preview-only boundaries, quarantine/ownership, strict request/body size/flag, missing stored file authority, old revision, rapid replacement, in-flight mutation and cleanup. Actual shared local Converter run returned a validated approved male/full packet (9,430,240 response bytes), zero export calls and two successful cleanup calls in 6,506 / 4,122 ms (two consecutive local requests). That check injects an owned-selection resolver; it does not certify production PostgreSQL, native saving, Windows/CSP or instantaneous cold shape preparation. Existing initial/intermediate FBX dependencies stay intact. No deployment/merge/paid API calls.
 
 Rollout remains off by default and both PRs stay Draft pending UI/integration review. This service uses the existing private single-instance transport assumptions; distributed admission control is outside the scope of the underlying #154/#167 contract.
+
+Manual reviewed candidates keep their explicit `pose-preview-camera-v1` descriptor.
+The BFF adds the SHA of the server-validated original BVH as
+`source_bvh_sha256` in the private interactive selection, just as search cameras
+already carry it. This preserves rotation/projection and does not claim that a
+fixed preview camera matches a searched projection. Converter must explicitly
+support this descriptor; older search-only Converter versions reject it closed.

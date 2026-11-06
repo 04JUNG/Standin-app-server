@@ -23,6 +23,9 @@ import { checkCharacter } from "../characters/service.js";
 import { sha256Hex } from "../converter/client.js";
 import { resolvePersonOutputScope } from "../output-scope/model.js";
 import { InteractiveError, hash, type Location } from "./model.js";
+export function bindInteractiveCamera<T extends object>(camera: T, sourceSha256: string) {
+  return { ...camera, source_bvh_sha256: sourceSha256 };
+}
 const defaults = {
   getOwnedJob,
   validateExportCandidate,
@@ -156,7 +159,8 @@ export function createSelectionResolver(
       shapeSource: body.shapeSource ?? null,
       hands,
       scope: resolvePersonOutputScope(person).resolved,
-      camera,
+      // Bind both search and server-resolved manual preview cameras to the exact source.
+      camera: bindInteractiveCamera(camera, originalSha),
       mirror: false,
       runtime,
       model,
