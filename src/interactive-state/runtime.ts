@@ -1,4 +1,5 @@
 import { SelectionPreviewService } from "./selectionPreview.js";
+import { createOutlineArtifacts } from "../converter/outline.js";
 /** Activation intentionally gated on an agreed, implemented Converter transport. */
 import { config } from "../config.js";
 import { renderFinalPreview } from "../converter/finalPreview.js";
@@ -15,12 +16,13 @@ export const converterTransportAvailable =
 const worker = createInteractiveWorker();
 export const interactiveService = new InteractiveService({
   store: new OperationStore(),
+  outline: createOutlineArtifacts(),
   resolve: createSelectionResolver(),
   worker,
   posters: new PrivatePosters(),
   renderPoster: (op, fbx, signal) =>
     renderFinalPreview(
-      { fbx, artifactSha256: String(op.receipt!.artifactSha256) },
+      { fbx, artifactSha256: String(op.appearance ? op.outlineReceipt!.artifactSha256 : op.receipt!.artifactSha256) },
       false,
       {},
       false,

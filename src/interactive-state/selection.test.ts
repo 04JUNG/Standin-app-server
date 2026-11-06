@@ -101,9 +101,9 @@ function setup(purpose: "export" | "preview" = "export") {
   );
   return {
     s,
-    resolve: () =>
+    resolve: (extraLocation: Record<string, unknown> = {}) =>
       resolver(
-        { installationId: "inst_owner", jobId: "job_fixture", personIndex: 0 },
+        { installationId: "inst_owner", jobId: "job_fixture", personIndex: 0, ...extraLocation },
         "candidate",
       ),
   };
@@ -159,4 +159,15 @@ test("preview-only body permission never becomes export authority", async () => 
   preview.s.previewOnly = exporting.s.previewOnly = true;
   await preview.resolve();
   await assert.rejects(exporting.resolve, /BODY_PREVIEW_STALE/);
+});
+
+test("operation metadata cannot change the exact location ownership binding during revalidation", async () => {
+  const { resolve } = setup();
+  const initial = await resolve();
+  const revalidated = await resolve({ operationId: "op_existing", revision: 7,
+    selectionHash: initial.selectionHash, stateHash: "f".repeat(64), snapshotId: "snapshot", appearance: { version: "fbx-outline-v1", width: 1 } });
+  assert.equal(revalidated.identity.ownerBinding, initial.identity.ownerBinding);
+  assert.equal(revalidated.selectionHash, initial.selectionHash);
+  assert.notEqual((await resolve({ installationId: "inst_other" })).identity.ownerBinding, initial.identity.ownerBinding);
+  assert.notEqual((await resolve({ jobId: "job_other" })).identity.ownerBinding, initial.identity.ownerBinding);
 });

@@ -1,3 +1,4 @@
+import { legacyAppearanceError } from "../appearance/legacy.js";
 import { createHumanThumbnailRoutes } from "../human-thumbnail.js";
 import { createHumanReferenceRoutes } from "../human-reference.js";
 import { refinableLibraryCandidate } from "../refine/eligibility.js";
@@ -98,6 +99,8 @@ function converterMessage(code: ConverterErrorCode): string {
 // 다른 바이트가 끼어들 수 없게, converter가 돌려준 SHA를 우리가 계산한 값과 대조한다.
 // TODO(Phase 1): requireAuth 적용
 poseRoutes.get("/:id/export", async (c) => {
+  const appearanceError = legacyAppearanceError(c);
+  if (appearanceError) return appearanceError;
   const poseId = c.req.param("id");
   const candidateId = c.req.query("candidateId") ?? "";
   const jobId = c.req.query("jobId") ?? "";

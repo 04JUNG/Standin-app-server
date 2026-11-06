@@ -135,7 +135,7 @@ export function createSelectionResolver(
       throw new InteractiveError("INTERACTIVE_CAMERA_UNSUPPORTED");
     const identity = {
       schema: "interactive-selection-v1",
-      ownerBinding: hash(location),
+      ownerBinding: hash({ installationId, jobId, personIndex }),
       candidateId,
       source: {
         originalBvhSha256: originalSha,
