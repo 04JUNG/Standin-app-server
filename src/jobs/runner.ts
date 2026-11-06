@@ -1,3 +1,5 @@
+import { progressWriter } from "./progressStream.js";
+import { beginProgress, writeProgress, type ProgressFence } from "./progressStore.js";
 import { analysisFailureDetails } from "./failure.js";
 // BFF의 핵심 역할: 동기 추론(/analyze)을 백그라운드로 호출해 Job으로 감싼다.
 // ⚠ Phase 0: 프로세스 내 비동기 실행(await 하지 않고 fire-and-forget).
@@ -52,24 +54,37 @@ export async function runAnalysisJob(
   file: Blob,
   hint = "",
   alreadyRunning = false,
+  progressFence?: ProgressFence,
 ): Promise<void> {
   const startedAt = Date.now();
-  if (!(await getJob(jobId))) return;
+  const initial = await getJob(jobId);
+  if (!initial || initial.status === "completed" || initial.status === "failed") return;
+  if (progressFence && initial.attemptCount !== progressFence.attempt) return;
   // fire-and-forget으로 불리므로 요청 컨텍스트가 이미 끊겼을 수 있다. jobId만은
   // 반드시 물고 가야 이 Job의 로그가 하나로 이어진다.
   amendContext({ jobId });
   if (!alreadyRunning) await updateJob(jobId, { status: "running" });
   try {
-    const cut = await analyze(file, hint);
+    const run = await beginProgress(jobId, progressFence).catch(() => undefined);
+    const writer = run ? progressWriter(p => writeProgress(run, p)) : undefined;
+    let cut;
+    try { cut = await analyze(file, hint, writer?.push); }
+    finally { writer?.close(); }
     const result = mapCutResult(jobId, cut);
-    await persistAnalysisRecords(
+    const persisted = await persistAnalysisRecords(
       jobId,
       result,
       extractRefineContexts(cut),
       extractPersonSignals(cut),
       extractCutSummary(cut),
+      true,
+      progressFence,
     );
-    await updateJob(jobId, { status: "completed", result });
+    if (persisted === false) {
+      log.info({ type: "analysis_job", jobId, phase: "analysis", jobStatus: "ignored",
+        durationMs: Date.now() - startedAt, errorCode: "JOB_NOT_CURRENT" });
+      return;
+    }
     logQualityMetrics(jobId, result);
     log.info({ type: "analysis_job", jobId, phase: "analysis", jobStatus: "completed", durationMs: Date.now() - startedAt });
   } catch (error) {
@@ -79,7 +94,7 @@ export async function runAnalysisJob(
     // 상태 기록까지 실패하면 Job이 running에 머문다. 로그로 남겨 추적 가능하게 한다.
     // 상류가 요청을 받아주지 않아 분석이 아예 수행되지 않았으면 하루 쿼터도 돌려준다.
     const refundQuota = shouldRefundQuota(errorCode);
-    await failJob(jobId, errorCode, { refundQuota }).catch((persistError) =>
+    await failJob(jobId, errorCode, { refundQuota, fence: progressFence }).catch((persistError) =>
       log.error({
         type: "analysis_job",
         jobId,

@@ -1,3 +1,4 @@
+import { readAnalysisStream, ProgressStreamError } from "./jobs/progressStream.js";
 import { SceneError } from "./pose/sceneContract.js";
 import { SemanticError } from "./semantic/contract.js";
 // 도원 추론 서버 호출을 한 곳에 격리한다(계약이 바뀌어도 여기만 수정).
@@ -222,30 +223,40 @@ function authHeaders(): Record<string, string> {
 }
 
 // POST /analyze (멀티파트 PNG) → CutResult
-export async function analyze(file: Blob, hint = ""): Promise<CutResult> {
+export async function analyze(file: Blob, hint = "", onProgress?: (value: unknown) => void): Promise<CutResult> {
   const form = new FormData();
   form.append("file", file, "cut.png");
   if (hint) form.append("hint", hint);
 
   // 상한이 없으면 추론이 멈췄을 때 Job이 running에 영원히 남는다. 동시 분석 한도가
   // 1이라 그 설치는 스위퍼가 돌 때까지(수 분) 아무것도 못 한다.
+  const signal = AbortSignal.timeout(config.analysisTimeoutMs);
   let res: Response;
   try {
     res = await fetch(`${config.inferenceBaseUrl}/analyze`, {
       method: "POST",
       body: form,
-      headers: authHeaders(),
-      signal: AbortSignal.timeout(config.analysisTimeoutMs),
+      headers: { ...authHeaders(), ...(onProgress ? { Accept: "application/x-ndjson" } : {}) },
+      signal,
     });
   } catch (error) {
-    if (isAbortTimeout(error))
+    if (isAbortTimeout(error) || (signal.aborted && isAbortTimeout(signal.reason)))
       throw new InferenceTimeoutError(config.analysisTimeoutMs);
     throw error;
   }
   if (!res.ok) {
     throw new InferenceError(res.status, await safeText(res));
   }
-  return (await res.json()) as CutResult;
+  try {
+    if (onProgress && res.headers.get("content-type")?.includes("application/x-ndjson")) {
+      return await readAnalysisStream<CutResult>(res, onProgress);
+    }
+    return (await res.json()) as CutResult;
+  } catch (error) {
+    if (error instanceof ProgressStreamError) throw new InferenceError(error.status, error.detail);
+    if (isAbortTimeout(error) || (signal.aborted && isAbortTimeout(signal.reason))) throw new InferenceTimeoutError(config.analysisTimeoutMs);
+    throw error;
+  }
 }
 
 // ── 포즈 미세조정(refine) ─────────────────────────────────────────────
