@@ -227,7 +227,7 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
       <span id="reviewer">—</span> · 갱신 <span id="updated">—</span>
     </span>
   </header>
-  <nav class="tabs" id="tabs">
+  <nav class="tabs" id="tabs" role="tablist" aria-label="관리 대시보드">
     <button data-tab="overview" class="on">개요</button>
     <button data-tab="jobs">작업</button>
     <button data-tab="installs">설치</button>
@@ -235,6 +235,7 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
     <button data-tab="metrics">지표</button>
     <button data-tab="bodies">커스텀 체형</button>
     <button data-tab="ops">운영</button>
+    <button data-tab="replay">리플레이</button>
   </nav>
   <main>
     <section class="tab on" id="tab-overview">
@@ -322,7 +323,6 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
     </section>
     <section class="tab" id="tab-metrics">
     ${JOURNEY_PANEL_HTML}
-    ${REPLAY_PANEL_HTML}
     <div class="card">
       <h2>제품 지표 — 퍼널 · 코호트 · 이탈 신호</h2>
       <div class="lookup">
@@ -356,6 +356,7 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
       태스크별 p95를 평균 내면 p95가 아니게 되므로 값 대신 분포를 저장한다.
     </p>
     </section>
+    <section class="tab" id="tab-replay">${REPLAY_PANEL_HTML}</section>
   </main>
 </div>
 
@@ -2199,13 +2200,25 @@ ${CUSTOM_BODIES_SCRIPT}
 const TAB_KEY = "standin.adminTab";
 const loadedTabs = new Set(["overview", "ops"]);
 
-function selectTab(name) {
+function selectTab(name, writeHistory = true) {
+  if (!/^[a-z]+$/.test(name)) return;
+  if (!document.querySelector('#tabs button[data-tab="' + name + '"]')) return;
+  if (writeHistory && location.hash !== '#' + name) history.pushState(null, '', '#' + name);
   document.querySelectorAll("#tabs button").forEach((button) => {
-    button.classList.toggle("on", button.dataset.tab === name);
+    const selected = button.dataset.tab === name;
+    button.classList.toggle("on", selected);
+    button.id = 'tab-button-' + button.dataset.tab;
+    button.setAttribute('role','tab');
+    button.setAttribute('aria-controls','tab-' + button.dataset.tab);
+    button.setAttribute('aria-selected',String(selected));
+    button.tabIndex = selected ? 0 : -1;
   });
   document.querySelectorAll("section.tab").forEach((section) => {
     section.classList.toggle("on", section.id === "tab-" + name);
+    section.setAttribute('role','tabpanel');
+    section.setAttribute('aria-labelledby','tab-button-' + section.id.slice(4));
   });
+  if (name !== 'replay' && $('replayDialog').open) replayClose();
   try { localStorage.setItem(TAB_KEY, name); } catch (error) { /* 저장 못 해도 동작은 같다 */ }
   if (loadedTabs.has(name)) return;
   loadedTabs.add(name);
@@ -2214,6 +2227,7 @@ function selectTab(name) {
   if (name === "metrics") productGo();
   if (name === "gallery") galleryGo();
   if (name === "bodies") customBodiesGo(null);
+  if (name === "replay") replayListGo();
 }
 
 document.querySelectorAll("#tabs button").forEach((button) => {
@@ -2223,9 +2237,20 @@ document.querySelectorAll("button[data-goto]").forEach((button) => {
   button.addEventListener("click", () => selectTab(button.dataset.goto));
 });
 
+function restoreTabHash(){const name=location.hash.slice(1);if(/^[a-z]+$/.test(name))selectTab(name,false);}
+window.addEventListener('popstate',restoreTabHash);
+window.addEventListener('hashchange',restoreTabHash);
+$('tabs').addEventListener('keydown',event=>{
+ const buttons=[...document.querySelectorAll('#tabs button')],index=buttons.indexOf(document.activeElement);
+ if(index<0||!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
+ event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?buttons.length-1:(index+(event.key==='ArrowRight'?1:-1)+buttons.length)%buttons.length;
+ selectTab(buttons[next].dataset.tab);buttons[next].focus();
+});
+
 $("period").addEventListener("change", () => {
   overviewGo();
   if (loadedTabs.has("metrics")) productGo();
+  if (loadedTabs.has("replay")) replayListGo();
 });
 
 $("drawerClose").addEventListener("click", closeDrawer);
@@ -2244,12 +2269,13 @@ async function boot() {
   await tick();
   if (overviewLoaded || $("app").classList.contains("hide")) return;
   overviewLoaded = true;
-  internalLoad();
+  await internalLoad();
   overviewGo();
   activityGo();
   let saved = null;
   try { saved = localStorage.getItem(TAB_KEY); } catch (error) { saved = null; }
-  if (saved && saved !== "overview" && document.getElementById("tab-" + saved)) selectTab(saved);
+  const hash = location.hash.slice(1);
+  selectTab(/^[a-z]+$/.test(hash) && document.querySelector('#tabs button[data-tab="' + hash + '"]') ? hash : saved && document.getElementById('tab-' + saved) ? saved : 'overview', false);
 }
 
 $("enter").addEventListener("click", () => {

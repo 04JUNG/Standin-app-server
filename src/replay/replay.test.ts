@@ -5,6 +5,7 @@ import { mkdtemp, readFile, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
+import vm from "node:vm";
 import { spawnSync } from "node:child_process";
 import { resolveReplayEnvironment } from "./environment.js";
 import { PGlite } from "@electric-sql/pglite";
@@ -30,6 +31,7 @@ import { createRequireInstallation } from "../installations/middleware.js";
 import { sanitizeReplay } from "./sanitize.js";
 import type { AppEnv } from "../env.js";
 import { DASHBOARD_HTML } from "../ops/dashboard.js";
+import { REPLAY_PANEL_SCRIPT } from "../ops/replayDashboard.js";
 const now = Date.now(),
   id = randomUUID(),
   inst = "inst_replay_test";
@@ -851,4 +853,118 @@ test("real export witness binds CSP hashes and a replay failure cannot fail file
   } finally {
     await f.db.close();
   }
+});
+
+test("replay browser searches all authorized IDs and facets beyond the first page, with global audience scope", async () => {
+  const f = await fixture();
+  try {
+    const ids = [randomUUID(), randomUUID(), randomUUID()];
+    for (let n = 0; n < ids.length; n++) await f.service.create(inst, { ...create(ids[n], `browser-session-${n}`), appVersion: `0.2.${n}`, os: n === 1 ? "windows" : "macos" });
+    await f.db.query(`INSERT INTO jobs(id,user_id,installation_id,status,source,created_at,updated_at) VALUES('job_browser_alpha','',$1,'completed','capture',$2,$2)`, [inst, new Date(now).toISOString()]);
+    await f.service.chunk(inst, ids[0], "app", 0, makeChunk({ jobId: "job_browser_alpha", failed: true, saveState: "saved", endedOffsetMs: 9000 }));
+    await f.service.chunk(inst, ids[1], "bar", 0, makeChunk({ surface: "bar", endedOffsetMs: 12000 }));
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==", "base64");
+    await f.service.asset(inst, ids[0], hash(png), { contentType: "image/png", dataBase64: png.toString("base64"), kind: "rough", snapshotVersion: "browser-input" });
+    const first = await f.service.list({ limit: "1" });
+    assert.equal(first.items.length, 1);
+    assert.equal((await f.service.facets({})).facets.versions.length, 3);
+    const match = (await f.service.list({ q: "browser_alpha" })).items;
+    assert.equal(match.length, 1);
+    assert.equal(match[0].replayId, ids[0]);
+    assert.deepEqual(match[0].jobIds, ["job_browser_alpha"]);
+    assert.equal(match[0].durationMs, 9000);
+    assert.equal(match[0].hasError, true);
+    assert.deepEqual(match[0].surfaces, ["app"]);
+    assert.equal(match[0].preview?.contentHash, hash(png));
+    assert.equal((await f.service.list({ q: ids[1].slice(0, 16) })).items[0].replayId, ids[1]);
+    assert.equal((await f.service.list({ q: inst })).items.length, 3);
+    assert.equal((await f.service.list({ q: "browser-session-1", os: "windows", surface: "bar" })).items.length, 1);
+    const disjunctive = await f.service.facets({ appVersion: "0.2.0" });
+    assert.equal(disjunctive.facets.versions.length, 3);
+    assert.deepEqual(disjunctive.facets.surfaces, [{ value: "app", count: 1 }]);
+    await f.db.query("INSERT INTO internal_installations(id,added_at) VALUES($1,$2)", [inst, new Date(now).toISOString()]);
+    assert.equal((await f.service.list({ audience: "all" })).items.length, 0);
+    assert.equal((await f.service.facets({})).facets.versions.length, 0);
+    await f.db.query("INSERT INTO service_flags(key,value,updated_at) VALUES('hide_internal_installations','false',$1) ON CONFLICT(key) DO UPDATE SET value='false'", [new Date(now).toISOString()]);
+    assert.equal((await f.service.list({ audience: "internal" })).items.length, 3);
+    assert.equal((await f.service.list({ audience: "unclassified" })).items.length, 0);
+    assert.equal((await f.service.list({})).scope.hideInternal, false);
+    await f.db.query("UPDATE replay_sessions SET expires_at=$2 WHERE id=$1", [ids[2], new Date(now - 1).toISOString()]);
+    assert.equal((await f.service.facets({})).facets.versions.length, 2);
+  } finally { await f.db.close(); }
+});
+
+test("browser cursor preserves sub-millisecond ordering, equal-time IDs and bounded filters", async () => {
+  const f = await fixture();
+  try {
+    const ids = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+    for (let n = 0; n < ids.length; n++) {
+      await f.service.create(inst, create(ids[n], `precision-${n}`));
+      const stamp = new Date(now - 1000).toISOString().replace(/\.\d{3}Z$/, n < 2 ? ".123456Z" : ".123455Z");
+      await f.db.query("UPDATE replay_sessions SET created_at=$2 WHERE id=$1", [ids[n], stamp]);
+    }
+    let before: string | undefined; const seen: string[] = [];
+    do { const page = await f.service.list({ limit: "1", before }); seen.push(...page.items.map(i => i.replayId)); before = page.nextBefore ?? undefined; } while (before);
+    assert.equal(seen.length, 4); assert.equal(new Set(seen).size, 4);
+    for (const filters of [{ q: "' OR 1=1" }, { q: "x".repeat(129) }, { limit: "1.5" }, { audience: "invalid" }, { surface: "desktop-video" }, { before: "x".repeat(513) }, { from: new Date(now - 91 * 86400000).toISOString(), to: new Date(now).toISOString() }])
+      await assert.rejects(f.service.list(filters), /REPLAY_INVALID/);
+    f.service.policy.environment = "production";
+    await assert.rejects(f.service.facets({}), /REPLAY_AUTHORIZATION_DENIED/);
+  } finally { await f.db.close(); }
+});
+
+test("job replay links open the dedicated tab, refresh their filter and leave other tabs usable", () => {
+  const node = (id: string, tab?: string) => {
+    const classes = new Set<string>();
+    return {
+      id, dataset: { tab }, open: false, tabIndex: 0,
+      attributes: {} as Record<string, string>,
+      classList: {
+        contains: (name: string) => classes.has(name),
+        toggle: (name: string, on: boolean) => on ? classes.add(name) : classes.delete(name),
+      },
+      setAttribute(name: string, value: string) { this.attributes[name] = value; },
+      scrollIntoView() {},
+    };
+  };
+  const buttons = ["overview", "metrics", "ops", "replay"].map(tab => node("", tab));
+  const sections = buttons.map(b => node("tab-" + b.dataset.tab));
+  const elements = new Map(["replayDialog", "drawer", "replayPanel"].map(id => [id, node(id)]));
+  const location = { hash: "#metrics" };
+  const loadedTabs = new Set(["overview", "ops", "metrics"]);
+  let requests = 0, metricRequests = 0, closed = 0, persisted = 0;
+  const context = vm.createContext({
+    loadedTabs, location, TAB_KEY: "standin.adminTab", replayFilters: {},
+    $: (id: string) => elements.get(id),
+    document: {
+      querySelector: (selector: string) => buttons.find(b => selector.includes('data-tab="' + b.dataset.tab + '"')),
+      querySelectorAll: (selector: string) => selector === "section.tab" ? sections : buttons,
+    },
+    history: { pushState: (_: unknown, __: string, hash: string) => { location.hash = hash; } },
+    localStorage: { setItem() {} },
+    replayListGo: () => { requests++; }, productGo: () => { metricRequests++; },
+    replayPersist: () => { persisted++; }, closeDrawer() {},
+    replayClose: () => { closed++; elements.get("replayDialog")!.open = false; },
+  });
+  const start = DASHBOARD_HTML.indexOf("function selectTab(");
+  const end = DASHBOARD_HTML.indexOf('\ndocument.querySelectorAll("#tabs button").forEach', start);
+  assert.ok(start >= 0 && end > start);
+  vm.runInContext(DASHBOARD_HTML.slice(start, end), context);
+  const linkStart = REPLAY_PANEL_SCRIPT.indexOf("function replayForJob(");
+  const linkEnd = REPLAY_PANEL_SCRIPT.indexOf('\n$("replaySearch").value', linkStart);
+  assert.ok(linkStart >= 0 && linkEnd > linkStart);
+  vm.runInContext(REPLAY_PANEL_SCRIPT.slice(linkStart, linkEnd), context);
+  vm.runInContext("replayForJob('job_first'); replayForJob('job_second')", context);
+  assert.equal(location.hash, "#replay");
+  assert.equal(requests, 2);
+  assert.equal(persisted, 2);
+  assert.equal(vm.runInContext("replayFilters.jobId", context), "job_second");
+  assert.deepEqual(sections.filter(s => s.classList.contains("on")).map(s => s.id), ["tab-replay"]);
+  assert.equal(buttons.at(-1)!.attributes["aria-selected"], "true");
+  elements.get("replayDialog")!.open = true;
+  vm.runInContext("selectTab('metrics'); selectTab('missing'); selectTab('replay]')", context);
+  assert.equal(location.hash, "#metrics");
+  assert.equal(closed, 1);
+  assert.equal(metricRequests, 0);
+  assert.equal(requests, 2);
 });

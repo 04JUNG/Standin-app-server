@@ -1745,6 +1745,10 @@ Existing recordings keep their stored `expiresAt`.
 - `POST /v1/replays/:id/finish`: declare final sequences; complete vs incomplete manifest.
 - `DELETE /v1/replays/:id`: remove own recording. `DELETE /v1/replays`: withdraw and purge own replay data.
 - `GET /v1/admin/replays`: authorized filtered list; `nextBefore` is an opaque cursor.
+- `GET /v1/admin/replays/facets`: authorized filter choices and counts for version, OS,
+  surface, error, save state, recording state and installation audience. Each facet omits
+  its own selected value while keeping the other filters. At most 100 choices per facet;
+  `truncated` names any facet with additional choices.
 - `GET /v1/admin/replays/:id/manifest`: stream descriptors, immutable assets, gaps and existing timeline.
 - `GET /v1/admin/replays/:id/streams/:window/chunks/:sequence`: authenticated decoded events.
 - `GET /v1/admin/replays/:id/assets/:hash`: authenticated binary, private/no-store, no presigned URL.
@@ -1753,6 +1757,23 @@ Existing recordings keep their stored `expiresAt`.
 Exact requests/responses/errors/limits: [replay-contract.v1.json](replay-contract.v1.json).
 Configuration, deletion scope, local real-BFF runner and playback boundaries:
 [SESSION_REPLAY.md](SESSION_REPLAY.md). Infrastructure proposal: [REPLAY_INFRASTRUCTURE.md](REPLAY_INFRASTRUCTURE.md).
+
+### Dedicated replay browser (2026-11-06)
+
+The existing dashboard now exposes **리플레이** next to **운영**, with a recent-first
+scrollable/draggable list, incremental loading and authenticated lazy image previews.
+One `q` field searches replay, installation, app-session and linked job IDs by substring
+(1–128 ASCII identifier characters). Version/OS/surface/status choices are separate tags.
+The list and facets share the dashboard period and global developer-installation exclusion.
+Default range is the last seven days; explicit `from`/`to` ranges are limited to 90 days.
+List `limit` defaults to 50, is capped at 100, and the dashboard requests 18 at a time.
+Keep `from`/`to` unchanged while following `nextBefore` to preserve pagination scope.
+List items additionally include linked job IDs/count, surfaces, duration, error/save state
+and an optional authenticated preview asset descriptor. Existing authorization, consent,
+expiry, deletion and private/no-store asset guards still apply to both endpoints.
+`#replay` opens the tab directly, and existing job/metric replay links use this tab.
+Playback has a shared timeline, speed control and optional automatic window switching;
+3D is still recorded image frames, not a reconstruction of unrecorded interaction.
 
 ## CSP 장면 metadata·부분 저장·입력 identity (2026-10-28)
 
