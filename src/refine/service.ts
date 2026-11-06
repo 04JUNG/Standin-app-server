@@ -1,3 +1,4 @@
+import { preparedSelectionSource } from "../candidate-preparation/selection-source.js";
 import { refineLineage } from "./lineage.js";
 // 선택 후보 refine 오케스트레이션(BFF-05 ~ BFF-07).
 //
@@ -59,6 +60,7 @@ export function isRefineFailure(
  * S3 없이 검증할 수 있어야 실제로 검증된다. 기본값은 진짜 구현이므로 호출부는 신경 쓰지 않는다.
  */
 export interface RefineDeps {
+  preparedSource?: typeof preparedSelectionSource;
   featureEnabled(): boolean;
   storageAvailable(): boolean;
   loadCandidate: typeof loadCandidate;
@@ -71,6 +73,7 @@ export interface RefineDeps {
 }
 
 const defaultDeps: RefineDeps = {
+  preparedSource: preparedSelectionSource,
   featureEnabled: () => config.refineFeatureEnabled,
   storageAvailable: refinedStorageAvailable,
   loadCandidate,
@@ -146,6 +149,10 @@ export async function runRefine(
 
   const candidate = await deps.loadCandidate(jobId, personIndex, candidateId);
   if (!candidate) return { error: "JOB_CANDIDATE_MISMATCH" };
+
+  const prepared = await deps.preparedSource?.(jobId, personIndex, candidateId);
+  if (prepared) return { refined: prepared.candidate.status === "ready_refined", reasonCode: prepared.candidate.reasonCode,
+    adjustedLimbs: [], poseId: candidate.poseId, thumbnailAvailable: false };
 
   // 같은 선택을 다시 눌러도 추론을 다시 호출하지 않고 S3 객체도 늘어나지 않는다(BFF-07).
   const existing = await deps.findRefinedArtifact(
@@ -339,10 +346,20 @@ export async function resolveExportArtifact(
   jobId: string,
   personIndex: number,
   candidateId: string,
-): Promise<
+): Promise<(
   | { variant: "refined"; bytes: Uint8Array }
   | { variant: "base"; fallbackReason: string | null }
-> {
+) & { prepared?: { refined: boolean; reason: string; lineage: import("./lineage.js").RefineLineage } }> {
+  const prepared = await preparedSelectionSource(jobId, personIndex, candidateId);
+  if (prepared) {
+    const engine = prepared.result.engine;
+    if (typeof engine.code_version !== "string" || typeof engine.config_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(engine.config_sha256))
+      throw new Error("PREPARATION_LINEAGE_UNAVAILABLE");
+    const proof = { refined: prepared.candidate.status === "ready_refined", reason: prepared.candidate.reasonCode,
+      lineage: { version: engine.code_version, configSha256: engine.config_sha256, baseSha256: prepared.candidate.sourceSha256 } };
+    return proof.refined ? { variant: "refined", bytes: prepared.bytes, prepared: proof }
+      : { variant: "base", fallbackReason: null, prepared: proof };
+  }
   const artifact = await findRefinedArtifact(jobId, personIndex, candidateId);
   if (!artifact?.refined || !artifact.objectKey) {
     return { variant: "base", fallbackReason: null };

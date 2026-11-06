@@ -1,0 +1,36 @@
+{
+  "kind": "real-bff-sql-hono-to-real-engine-http-source-solver",
+  "fixtureType": "synthetic",
+  "people": 1,
+  "candidates": 5,
+  "statuses": [
+    "ready_refined",
+    "ready_base",
+    "ready_base",
+    "ready_base",
+    "ready_base"
+  ],
+  "qualityScope": "source_only",
+  "sourceAdapterCalls": 5,
+  "selectedSourceSolverCalls": 0,
+  "pngCalls": 0,
+  "bodyTargetCalls": 0,
+  "modelBytes": 2090,
+  "modelHashMatches": true,
+  "targetApplicationRequired": true,
+  "finalFileVerified": false,
+  "engine": {
+    "codeVersion": "v2.5.4",
+    "configSha256": "e10e1e024b5c4079be129abb0a97cc42dc6933d2799612c18256e372ee9ad658"
+  },
+  "limits": [
+    "Synthetic registry/observations, no captured-user accuracy evidence",
+    "No target mesh, FBX or production deployment",
+    "Not a resource-normalized latency benchmark"
+  ],
+  "fixtureConfiguration": {
+    "refine_v2_enabled": true,
+    "refine_observability_gate": false,
+    "purpose": "synthetic geometry wire fixture, not production-default acceptance"
+  }
+}

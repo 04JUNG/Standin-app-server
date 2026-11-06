@@ -14,6 +14,7 @@ function setup() {
     member: true,
     quarantine: false,
     refined: false,
+    preparedBase: false,
     hand: null as HandBake | null,
     bodyRevision: 1,
     scope: "full",
@@ -79,7 +80,9 @@ function setup() {
     resolveExportArtifact: async () =>
       s.refined
         ? { variant: "refined", bytes: Buffer.from("refine") }
-        : { variant: "base", fallbackReason: null },
+        : { variant: "base", fallbackReason: null, ...(s.preparedBase ? { prepared: {
+            refined: false, reason: "no_gain", lineage: { version: "v2.5.4", configSha256: "a".repeat(64), baseSha256: sha },
+          } } : {}) },
     findRefinedArtifact: async () => null,
     runtime: async () => ({
       schemaVersion: "body-preview-runtime.v1",
@@ -135,4 +138,14 @@ test("resolver binds real current server source/body/hands/runtime and catches q
   s.member = true;
   s.owner = false;
   await assert.rejects(resolve(), /NOT_FOUND/);
+});
+
+test("prepared base provenance takes precedence over legacy per-candidate metadata", async () => {
+  const { s, resolve } = setup();
+  s.preparedBase = true;
+  const selected = await resolve();
+  assert.equal(selected.identity.source.variant, "base");
+  assert.equal(selected.identity.source.refine?.refined, false);
+  assert.equal(selected.identity.source.refine?.reason, "no_gain");
+  assert.equal(selected.identity.source.refine?.lineage?.baseSha256, sha);
 });

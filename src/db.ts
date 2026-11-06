@@ -55,6 +55,7 @@ export async function transaction<T>(fn: (client: PoolClient) => Promise<T>): Pr
   }
 }
 
+import { CANDIDATE_PREPARATION_SCHEMA } from "./candidate-preparation/schema.js";
 import { INTERACTIVE_SCHEMA } from "./interactive-state/schema.js";
 import { REPLAY_SCHEMA } from "./replay/schema.js";
 import { QUALITY_CONSENT_SCHEMA } from "./installations/qualityConsent.js";
@@ -411,6 +412,7 @@ export const SCHEMA = `
   ${QUALITY_CONSENT_SCHEMA}
   ${REPLAY_SCHEMA}
   ${INTERACTIVE_SCHEMA}
+  ${CANDIDATE_PREPARATION_SCHEMA}
 
   CREATE OR REPLACE VIEW analytics_job_funnel AS
   SELECT

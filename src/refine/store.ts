@@ -112,22 +112,22 @@ export async function loadCandidate(
     pose_id: string;
     view: string;
     distance: number | null;
+    preparation_camera_json: CandidateCamera | null;
   }>(
-    `SELECT pose_id, view, distance FROM analysis_candidates
+    `SELECT pose_id, view, distance, preparation_camera_json FROM analysis_candidates
      WHERE job_id = $1 AND person_index = $2 AND candidate_id = $3`,
     [jobId, personIndex, candidateId],
   );
   if (!row) return null;
-  const job = await queryOne<{ result_json: string | null }>(
-    "SELECT result_json FROM jobs WHERE id = $1",
-    [jobId],
-  );
-  const result = job?.result_json
-    ? (JSON.parse(job.result_json) as AnalysisResult)
-    : null;
-  const camera = result?.candidatesByPerson
-    .find((p) => p.personIndex === personIndex)
-    ?.candidates.find((c) => c.id === candidateId)?.camera;
+  let camera = row.preparation_camera_json ?? undefined;
+  if (!camera) {
+    // Read-only compatibility for rows created before the authoritative camera migration.
+    const job = await queryOne<{ result_json: string | null }>("SELECT result_json FROM jobs WHERE id = $1", [jobId]);
+    try {
+      const result = job?.result_json ? JSON.parse(job.result_json) as AnalysisResult : null;
+      camera = result?.candidatesByPerson.find(p => p.personIndex === personIndex)?.candidates.find(c => c.id === candidateId)?.camera;
+    } catch { /* A damaged historical result cannot supply camera authority. */ }
+  }
   return {
     poseId: row.pose_id,
     view: row.view,

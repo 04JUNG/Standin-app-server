@@ -706,8 +706,8 @@ export async function persistAnalysisRecords(
         await client.query(
           `INSERT INTO analysis_candidates
             (job_id, person_index, candidate_id, pose_id, rank, view, distance,
-             rerank_score, match_level, tags_json, pose_library_version)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+             rerank_score, match_level, tags_json, pose_library_version, preparation_camera_json)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
           [
             jobId,
             person.personIndex,
@@ -720,6 +720,7 @@ export async function persistAnalysisRecords(
             candidate.matchLevel,
             JSON.stringify(candidate.tags),
             result.inferenceMetadata.poseLibraryVersion,
+            candidate.camera ? JSON.stringify(candidate.camera) : null,
           ],
         );
       }

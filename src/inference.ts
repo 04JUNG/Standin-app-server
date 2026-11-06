@@ -710,3 +710,38 @@ async function privateSceneWorkerRequest(path: string, method: "GET" | "POST", v
     reader.releaseLock();
   }
 }
+
+/** Private, bounded candidate batch transport. Public clients never supply these bodies. */
+export function createCandidateRefineTransport(overrides: Partial<{
+  baseUrl: string; token: string; fetch: typeof fetch;
+}> = {}) {
+  const deps = { baseUrl: config.inferenceBaseUrl, token: config.candidateRefineToken, fetch, ...overrides };
+  async function request(route: string, body?: unknown, signal?: AbortSignal): Promise<unknown> {
+    if (deps.token.length < 32) throw new InferenceError(503, "CANDIDATE_REFINE_DISABLED");
+    const response = await deps.fetch(`${deps.baseUrl.replace(/\/+$/, "")}/internal/candidate-refine/v1/${route}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers: { ...authHeaders(), Authorization: `Bearer ${deps.token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      signal: AbortSignal.any([AbortSignal.timeout(body === undefined ? 5000 : 125000), ...(signal ? [signal] : [])]),
+    });
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new InferenceError(response.status, "CANDIDATE_REFINE_UNAVAILABLE");
+    }
+    const reader = response.body?.getReader();
+    if (!reader) throw new InferenceError(502, "CANDIDATE_REFINE_INVALID");
+    const chunks: Uint8Array[] = []; let size = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read(); if (done) break;
+        size += value.length;
+        if (size > (body === undefined ? 65536 : 24 * 1024 * 1024)) throw new InferenceError(502, "CANDIDATE_REFINE_TOO_LARGE");
+        chunks.push(value);
+      }
+      return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+    } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+  }
+  return { capabilities: () => request("capabilities"),
+    prepare: (body: import("./candidate-preparation/model.js").EngineInput, signal?: AbortSignal) => request("prepare", body, signal),
+    reuse: (body: Record<string, unknown>, signal?: AbortSignal) => request("reuse", body, signal) };
+}
