@@ -55,6 +55,7 @@ export function appCors(origins: string[]) {
       "X-Standin-Preview-Revision",
       "X-Standin-Model-Revision",
       "X-Standin-Artifact-SHA256",
+      "X-Skin-Asset-SHA256",
       "X-Standin-Artifact-Contract",
       "X-Standin-Person-Count",
       "X-Standin-Scene-Version",

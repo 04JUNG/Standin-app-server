@@ -17,8 +17,7 @@ export function createReplayPlayer(frame, data) {
   doc.body.appendChild(root);
   const capture = doc.createElement("div");
   capture.id = "capture";
-  capture.innerHTML =
-    '<img alt="캡처 배경"><div id="selection"></div><div id="cursor"></div>';
+  capture.innerHTML = '<img alt="캡처 배경"><div id="selection"></div><div id="cursor"></div>';
   doc.body.appendChild(capture);
   capture.hidden = true;
   const canvasFrame = doc.createElement("img");
@@ -34,15 +33,15 @@ export function createReplayPlayer(frame, data) {
   );
   function overlay(time) {
     data.onTime?.(time);
-    const custom = events.filter(
-      (e) => e.type === 5 && e.timestamp <= base + time,
-    );
-    const c = custom.filter((e) => e.data?.tag === "capture_overlay").at(-1)
-      ?.data?.payload;
+    const custom = events.filter((e) => e.type === 5 && e.timestamp <= base + time);
+    const c = custom.filter((e) => e.data?.tag === "capture_overlay").at(-1)?.data?.payload;
     capture.hidden = !c || !assets[c.backgroundAssetHash];
     if (c) {
       const url = assets[c.backgroundAssetHash];
       if (url) {
+        capture.style.maxWidth =
+          Math.max(240, (frame.clientHeight - 55) * ((c.width || 1) / (c.height || 1))) + "px";
+        capture.style.margin = "0 auto";
         capture.querySelector("img").src = url;
         const width = c.width || 1,
           height = c.height || 1,
@@ -65,8 +64,7 @@ export function createReplayPlayer(frame, data) {
           });
       } else status.textContent = "캡처 배경 미수집 · 좌표 이벤트만 기록됨";
     }
-    const f = custom.filter((e) => e.data?.tag === "canvas_frame").at(-1)
-      ?.data?.payload;
+    const f = custom.filter((e) => e.data?.tag === "canvas_frame").at(-1)?.data?.payload;
     canvasFrame.hidden = !f || !assets[f.assetHash];
     if (!canvasFrame.hidden) canvasFrame.src = assets[f.assetHash];
   }
@@ -76,7 +74,11 @@ export function createReplayPlayer(frame, data) {
     ? "창 기록 재생 · " + data.surface
     : "DOM 기록 없음 · 캡처/프레임과 타임라인만 사용 가능";
   let delta = 0;
-  if (snapshots.length && clean.length >= 2) {
+  if (
+    snapshots.length &&
+    clean.length >= 2 &&
+    !(data.surface === "capture" && events.some((e) => e.data?.tag === "capture_overlay"))
+  ) {
     const first = clean[0].timestamp;
     delta = first - base;
     const shifted = clean.map((e) => ({
@@ -90,7 +92,8 @@ export function createReplayPlayer(frame, data) {
         width: Math.max(400, frame.clientWidth - 16),
         height: 440,
         autoPlay: false,
-        skipInactive: true,
+        skipInactive: !data.externalControls,
+        showController: !data.externalControls,
         UNSAFE_replayCanvas: false,
         showWarning: false,
         showDebug: false,
@@ -109,16 +112,15 @@ export function createReplayPlayer(frame, data) {
     label,
     lastTick = 0;
   const duration = Math.max(0, ...events.map((e) => e.timestamp - base));
-  function seek(offset) {
+  function seek(offset, continuePlaying = false) {
     time = Math.max(0, Math.min(duration, offset));
-    player?.goto(Math.max(0, time - delta), false);
+    player?.goto(Math.max(0, time - delta), continuePlaying);
     overlay(time);
     if (range) range.value = String(time);
     if (label)
-      label.textContent =
-        (time / 1000).toFixed(1) + " / " + (duration / 1000).toFixed(1) + "s";
+      label.textContent = (time / 1000).toFixed(1) + " / " + (duration / 1000).toFixed(1) + "s";
   }
-  if (!player) {
+  if (!player && !data.externalControls) {
     const controls = doc.createElement("div");
     controls.style.padding = "12px";
     const toggle = doc.createElement("button");
@@ -149,8 +151,7 @@ export function createReplayPlayer(frame, data) {
       toggle.textContent = playing ? "일시정지" : "재생";
       if (playing) {
         if (time >= duration) seek(0);
-        if (time < events[0]?.timestamp - base)
-          seek(events[0].timestamp - base);
+        if (time < events[0]?.timestamp - base) seek(events[0].timestamp - base);
         lastTick = performance.now();
       }
     };
@@ -166,9 +167,37 @@ export function createReplayPlayer(frame, data) {
       }
     }, 50);
   }
+  if (!player && data.externalControls) {
+    timer = setInterval(() => {
+      if (!playing) return;
+      const now = performance.now();
+      const next = Math.min(duration, time + (now - lastTick) * speed);
+      lastTick = now;
+      seek(next);
+      if (time >= duration) playing = false;
+    }, 50);
+  }
   seek(data.seekMs ?? 0);
   return {
     seek,
+    play(rate = 1) {
+      speed = rate;
+      if (player) {
+        player.$set({ speed: rate });
+        player.goto(Math.max(0, time - delta), true);
+      } else {
+        playing = true;
+        lastTick = performance.now();
+      }
+    },
+    pause() {
+      playing = false;
+      player?.pause();
+    },
+    setSpeed(rate) {
+      speed = rate;
+      player?.$set({ speed: rate });
+    },
     destroy() {
       clearInterval(timer);
       player?.$destroy();

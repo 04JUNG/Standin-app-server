@@ -1,0 +1,255 @@
+{
+  "schema": "standin.skin-bff-http-qa.v1",
+  "completedAt": "2026-11-06T03:24:20.122Z",
+  "method": "actual TCP Hono + installation middleware + PGlite operation/owned selection SQL + production selection resolver + actual interactive Converter/Blender + live approved skin/native-v2 postprocess HTTP + strict final-byte/receipt checks; fixture installation authentication driver/source/BVH selection and memory private storage, not production PG/S3/native/CSP UI proof",
+  "controlledDrivers": [
+    "installation auth SQL fixture using real middleware",
+    "owned source/confirmation/body SQL using production resolver",
+    "PGlite with advisory-lock substitution",
+    "private in-memory immutable artifact storage"
+  ],
+  "actualComponents": [
+    "TCP Hono HTTP",
+    "production BFF service/selection/packet/proof parsers",
+    "new-source private interactive Converter/Blender worker",
+    "private certified skin and native-outline postprocess HTTP",
+    "actual final downloaded FBX bytes and normalized receipt chain",
+    "owned UV/2048 PNG download SHA/bytes"
+  ],
+  "assetManifestSha256": "1fb0fa382d4fa7d27233b6139cba9c5f1ec575c6b8f86b7deac2a3dc4d447386",
+  "assetVersion": "current-neutral-uv-20261106-v1",
+  "cases": [
+    {
+      "name": "male-default",
+      "skin": "default",
+      "width": 0,
+      "sha256": "368e9124eabdd9a0f9a7079eead5d83c63289a3088528caab5c18b1f74901376",
+      "bytes": 2008700,
+      "elapsedMs": 24.671625000002678
+    },
+    {
+      "name": "male-flesh-guide-only",
+      "skin": "flesh-guide",
+      "width": 0,
+      "sha256": "0f9416506370b3296ab4adc0b691d6221db528381dddb430d68ba9894980d9c8",
+      "bytes": 3196156,
+      "elapsedMs": 75.90366599999834
+    },
+    {
+      "name": "owned operation uv preview asset",
+      "sha256": "ef2f7f29d100645affec83214383f66a62eb2073b9d80229fc2d3c32e9ac146c",
+      "bytes": 1420163
+    },
+    {
+      "name": "owned operation texture preview asset",
+      "sha256": "91895941a63de68e7cf0eab9387aeb645df79e830c264e5360437f3c55ab819d",
+      "bytes": 280324
+    },
+    {
+      "name": "male-flesh-guide-outline2",
+      "skin": "flesh-guide",
+      "width": 2,
+      "sha256": "1eef3007979039cd7fb64ff83e82bb79b30ed00a561e5366aeac9cbb15460715",
+      "bytes": 5105708,
+      "binding": "c301a16b2555b35ab48f471fa359a17048af6cda70707ef9039bd788d1818d65",
+      "sourceArtifactSha256": "b6e861bd3d974e6bf6cb278395f89a41f65ed2e8a35f5d79e582b6ac19312d8a",
+      "elapsedMs": 522.0429169999989
+    },
+    {
+      "name": "actual late final download blocked after skin change",
+      "status": 409
+    },
+    {
+      "name": "actual late textured response cannot publish after selected skin changed",
+      "status": 409
+    },
+    {
+      "name": "male-gray-guide-only",
+      "skin": "gray-guide",
+      "width": 0,
+      "sha256": "28a8a9c14e71c863c3dd3fefa875026d8740bf83ea0e0f114aa856ffc360df60",
+      "bytes": 3187692,
+      "elapsedMs": 76.96091699998942
+    },
+    {
+      "name": "female-flesh-guide-outline2",
+      "skin": "flesh-guide",
+      "width": 2,
+      "sha256": "579cd138fdaeff942e383c6033b9a81c22bec94a0b5391c43e06624c80ad5a2c",
+      "bytes": 4551660,
+      "binding": "0f4f4449704aeaf8528f8d8acdc80996bb17faec7a1f79e8cb975b5f865abe47",
+      "sourceArtifactSha256": "b135f718c84178139b410a00a849871221c394569da5309bf00a7cc00358bbf7",
+      "elapsedMs": 118.4604999999865
+    },
+    {
+      "name": "mixed people/installations/wrong credential denied",
+      "statuses": [
+        404,
+        404,
+        401
+      ]
+    },
+    {
+      "name": "male-default-restored",
+      "skin": "default",
+      "width": 0,
+      "sha256": "071e0e55b8e1fe4ee37df64dca1b3dc2d5a285bcc95866800e4ab58cae3aa6cc",
+      "bytes": 2008700,
+      "elapsedMs": 19.626875000016298
+    },
+    {
+      "name": "default+zero restored exact current base file without either postprocess; canonical geometry unchanged",
+      "sha256": "071e0e55b8e1fe4ee37df64dca1b3dc2d5a285bcc95866800e4ab58cae3aa6cc",
+      "packetModelSha256": "12103183208ddd1b1f2652c4bb36bb32edf6b5f556aa27f483a8ca5e69528c78"
+    },
+    {
+      "name": "partial UV lineage unsupported before work",
+      "status": 409
+    }
+  ],
+  "counters": {
+    "solve": 7,
+    "export": 7,
+    "outlinePost": 2,
+    "skinPost": 5,
+    "publications": 7
+  },
+  "tests": {
+    "total": 1035,
+    "pass": 1033,
+    "skip": 2,
+    "fail": 0
+  },
+  "limits": [
+    "not production auth/PG/S3 verification",
+    "native/CSP import is separate client-owned evidence, not a single production UI transaction",
+    "full current male/female, skin-only or exact width2 combined; default path unchanged",
+    "no .clip/CSP-internal posing claim"
+  ],
+  "downloadProofs": [
+    {
+      "name": "male-default",
+      "artifactSha256": "368e9124eabdd9a0f9a7079eead5d83c63289a3088528caab5c18b1f74901376",
+      "artifactBytes": 2008700,
+      "revision": 1,
+      "stateHash": "7fe5738a187a7c5064a877d9d8c56093085bc2d73464f4b1764acc02e8d4b092",
+      "packetModelSha256": "12103183208ddd1b1f2652c4bb36bb32edf6b5f556aa27f483a8ca5e69528c78"
+    },
+    {
+      "name": "male-flesh-guide-only",
+      "artifactSha256": "0f9416506370b3296ab4adc0b691d6221db528381dddb430d68ba9894980d9c8",
+      "artifactBytes": 3196156,
+      "revision": 2,
+      "stateHash": "29947d496b4345dd8cfe2f7b06c1fdbd98d41ec9862faefbc1cf14db2a036e1a",
+      "packetModelSha256": "12103183208ddd1b1f2652c4bb36bb32edf6b5f556aa27f483a8ca5e69528c78",
+      "skinBindingSha256": "308406a97b1b8ec2a41c136e776bb035e0d8b384f752ea3dc508c872da383134",
+      "skinSourceSha256": "1ad8b69e1cb04427b69adbae27a5ca6b48648ea6e15dd629d7fd9cd918bf483b",
+      "skinArtifactSha256": "0f9416506370b3296ab4adc0b691d6221db528381dddb430d68ba9894980d9c8",
+      "skinRuntimeRevision": "aeebc9f63136509a3d8b001a9ebf60ee7acd1ac715e00757b30d32f761fbae6a",
+      "skinBaseErrors": {
+        "maxMatrixError": 0,
+        "maxNormalError": 0,
+        "maxWeightError": 0,
+        "maxPositionErrorM": 0,
+        "typed_fbx_values_preserved": true,
+        "approved_surface_changes_only": true
+      },
+      "uvSha256": "ef2f7f29d100645affec83214383f66a62eb2073b9d80229fc2d3c32e9ac146c",
+      "finalTextureSha256": "11ea27f724646374c384a0a742ca5745052b67ba1570d750f8bac47e63e390a5"
+    },
+    {
+      "name": "male-flesh-guide-outline2",
+      "artifactSha256": "1eef3007979039cd7fb64ff83e82bb79b30ed00a561e5366aeac9cbb15460715",
+      "artifactBytes": 5105708,
+      "revision": 3,
+      "stateHash": "d995c3deef07dc00a3cc34f94c45663d2c3deeae78f9e20b544a1d4ae5567d5c",
+      "packetModelSha256": "12103183208ddd1b1f2652c4bb36bb32edf6b5f556aa27f483a8ca5e69528c78",
+      "skinBindingSha256": "9ac9a59c178a47623e7f1fc046bcf362655ebfa1be2a70dc88c7ef3340e4b6d2",
+      "skinSourceSha256": "5d14cc371b400cb0ad3a0d0ed83d662639525e0b083055bad480eef87884a326",
+      "skinArtifactSha256": "b6e861bd3d974e6bf6cb278395f89a41f65ed2e8a35f5d79e582b6ac19312d8a",
+      "skinRuntimeRevision": "aeebc9f63136509a3d8b001a9ebf60ee7acd1ac715e00757b30d32f761fbae6a",
+      "skinBaseErrors": {
+        "maxMatrixError": 0,
+        "maxNormalError": 0,
+        "maxWeightError": 0,
+        "maxPositionErrorM": 0,
+        "typed_fbx_values_preserved": true,
+        "approved_surface_changes_only": true
+      },
+      "uvSha256": "ef2f7f29d100645affec83214383f66a62eb2073b9d80229fc2d3c32e9ac146c",
+      "finalTextureSha256": "11ea27f724646374c384a0a742ca5745052b67ba1570d750f8bac47e63e390a5",
+      "outlineBindingSha256": "c301a16b2555b35ab48f471fa359a17048af6cda70707ef9039bd788d1818d65",
+      "outlineSourceSha256": "b6e861bd3d974e6bf6cb278395f89a41f65ed2e8a35f5d79e582b6ac19312d8a",
+      "outlineRuntimeRevision": "292a41a2bfa1e4398f0033be57004961161653a9f8e0114f325d9c3fcae281c4",
+      "outlineBaseErrors": {
+        "maxMatrixError": 0,
+        "maxNormalError": 0,
+        "maxWeightError": 0,
+        "maxPositionErrorM": 0,
+        "typed_fbx_values_preserved": true
+      }
+    },
+    {
+      "name": "male-gray-guide-only",
+      "artifactSha256": "28a8a9c14e71c863c3dd3fefa875026d8740bf83ea0e0f114aa856ffc360df60",
+      "artifactBytes": 3187692,
+      "revision": 5,
+      "stateHash": "7aa60f5b46ad2332325b5ae2c09e8ca44896e95fb32a63f66bc4ff298aee921b",
+      "packetModelSha256": "12103183208ddd1b1f2652c4bb36bb32edf6b5f556aa27f483a8ca5e69528c78",
+      "skinBindingSha256": "b2c8625e917fdb77dfc20fd2d44efeec11328542394389a09097e3acc7513a85",
+      "skinSourceSha256": "0cce2e7954d0debe919cd57f127eb6690fe6a275b8ceb00734980ac93e7f6e56",
+      "skinArtifactSha256": "28a8a9c14e71c863c3dd3fefa875026d8740bf83ea0e0f114aa856ffc360df60",
+      "skinRuntimeRevision": "aeebc9f63136509a3d8b001a9ebf60ee7acd1ac715e00757b30d32f761fbae6a",
+      "skinBaseErrors": {
+        "maxMatrixError": 0,
+        "maxNormalError": 0,
+        "maxWeightError": 0,
+        "maxPositionErrorM": 0,
+        "typed_fbx_values_preserved": true,
+        "approved_surface_changes_only": true
+      },
+      "uvSha256": "ef2f7f29d100645affec83214383f66a62eb2073b9d80229fc2d3c32e9ac146c",
+      "finalTextureSha256": "4c7089217111004a2d581f3367c3265c334fac2932df8a6875a279ab45f5b293"
+    },
+    {
+      "name": "female-flesh-guide-outline2",
+      "artifactSha256": "579cd138fdaeff942e383c6033b9a81c22bec94a0b5391c43e06624c80ad5a2c",
+      "artifactBytes": 4551660,
+      "revision": 1,
+      "stateHash": "2bc8d3b8fa673bae106cab72966e35987cbd6f56129db8db03bc5503687e87a5",
+      "packetModelSha256": "095e7b28ee04dc8e6773f8bd3fc95870eca5e74eb26e4edf072b57e231652264",
+      "skinBindingSha256": "35ab499f791e9f6028f2dc89166167a8a51ba76453e1e2c5b644c8b03ef34939",
+      "skinSourceSha256": "ddd22e127a46850f2b3866627bc08311b4fe3082685a2a422758be6475bb0f6f",
+      "skinArtifactSha256": "b135f718c84178139b410a00a849871221c394569da5309bf00a7cc00358bbf7",
+      "skinRuntimeRevision": "aeebc9f63136509a3d8b001a9ebf60ee7acd1ac715e00757b30d32f761fbae6a",
+      "skinBaseErrors": {
+        "maxMatrixError": 0,
+        "maxNormalError": 0,
+        "maxWeightError": 0,
+        "maxPositionErrorM": 0,
+        "typed_fbx_values_preserved": true,
+        "approved_surface_changes_only": true
+      },
+      "uvSha256": "e4afff362ded41e19883371bd1d92766267ba8fe8a726d76a04b70c0ccb09022",
+      "finalTextureSha256": "37cc35a4f48740be2a059ef3d3c8a6b9dc64a8301fa101fe9f09fec8d9f60b13",
+      "outlineBindingSha256": "0f4f4449704aeaf8528f8d8acdc80996bb17faec7a1f79e8cb975b5f865abe47",
+      "outlineSourceSha256": "b135f718c84178139b410a00a849871221c394569da5309bf00a7cc00358bbf7",
+      "outlineRuntimeRevision": "292a41a2bfa1e4398f0033be57004961161653a9f8e0114f325d9c3fcae281c4",
+      "outlineBaseErrors": {
+        "maxMatrixError": 0,
+        "maxNormalError": 0,
+        "maxWeightError": 0,
+        "maxPositionErrorM": 0,
+        "typed_fbx_values_preserved": true
+      }
+    },
+    {
+      "name": "male-default-restored",
+      "artifactSha256": "071e0e55b8e1fe4ee37df64dca1b3dc2d5a285bcc95866800e4ab58cae3aa6cc",
+      "artifactBytes": 2008700,
+      "revision": 6,
+      "stateHash": "4e7bbed08300ee8ac5a8034a81802065fada9c4b3aa6c6b628d72f8fb4845cd7",
+      "packetModelSha256": "12103183208ddd1b1f2652c4bb36bb32edf6b5f556aa27f483a8ca5e69528c78"
+    }
+  ]
+}

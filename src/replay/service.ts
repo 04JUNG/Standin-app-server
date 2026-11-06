@@ -1,3 +1,4 @@
+import { listReplays, replayFacets } from "./browse.js";
 import { z } from "zod";
 import type { ReplayStorage } from "./storage.js";
 import {
@@ -668,121 +669,10 @@ export class ReplayService {
     }
   }
   async list(filters: Record<string, string | undefined>) {
-    checkPolicy(this.policy, this.policy.consentMode);
-    const values: unknown[] = [this.policy.environment];
-    const conditions = [
-      `s.environment=$1`,
-      `s.expires_at>now()`,
-      `i.revoked_at IS NULL`,
-      `i.deletion_requested_at IS NULL`,
-      `i.replay_withdrawn_at IS NULL`,
-      "COALESCE((SELECT personal_data AND content_license FROM quality_consent_receipts qr WHERE qr.subject_hash=encode(sha256(convert_to(i.id,'UTF8')),'hex') ORDER BY recorded_at DESC,receipt_id DESC LIMIT 1),true)",
-    ];
-    const add = (sql: string, v: unknown) => {
-      values.push(v);
-      conditions.push(sql.replace("?", `$${values.length}`));
-    };
-    if (this.policy.consentMode === "assumed")
-      conditions.push("s.authorization_mode='assumed'");
-    else
-      conditions.push(
-        "s.authorization_mode='explicit' AND i.quality_personal_data AND i.quality_content_license AND s.consent_id=i.quality_consent_id",
-      );
-    for (const [key, column] of Object.entries({
-      installationId: "installation_id",
-      environment: "environment",
-      os: "os",
-      appVersion: "app_version",
-      appSessionId: "app_session_id",
-    }))
-      if (filters[key]) add(`s.${column}=?`, filters[key]);
-    for (const key of ["from", "to"])
-      if (filters[key]) {
-        if (!Number.isFinite(Date.parse(filters[key]!)))
-          return fail("REPLAY_INVALID");
-        add(
-          `s.created_at ${key === "from" ? ">=" : "<"} ?::timestamptz`,
-          filters[key],
-        );
-      }
-    if (filters.before) {
-      let cursor: unknown;
-      try {
-        cursor = JSON.parse(
-          Buffer.from(filters.before, "base64url").toString("utf8"),
-        );
-      } catch {
-        return fail("REPLAY_INVALID");
-      }
-      if (
-        !Array.isArray(cursor) ||
-        cursor.length !== 2 ||
-        !Number.isFinite(Date.parse(cursor[0])) ||
-        typeof cursor[1] !== "string" ||
-        cursor[1].length > 128
-      )
-        return fail("REPLAY_INVALID");
-      values.push(cursor[0], cursor[1]);
-      conditions.push(
-        `(s.created_at,s.id)<($${values.length - 1}::timestamptz,$${values.length}::text)`,
-      );
-    }
-    if (filters.jobId)
-      add(
-        "EXISTS(SELECT 1 FROM replay_job_links l WHERE l.replay_id=s.id AND l.job_id=?)",
-        filters.jobId,
-      );
-    if (filters.audience === "internal")
-      conditions.push(
-        "EXISTS(SELECT 1 FROM internal_installations x WHERE x.id=s.installation_id)",
-      );
-    else if (filters.audience === "unclassified")
-      conditions.push(
-        "NOT EXISTS(SELECT 1 FROM internal_installations x WHERE x.id=s.installation_id)",
-      );
-    for (const key of ["screen", "feature", "saveState"])
-      if (filters[key])
-        add(
-          `EXISTS(SELECT 1 FROM replay_chunks c WHERE c.replay_id=s.id AND c.metadata->>'${key}'=?)`,
-          filters[key],
-        );
-    if (filters.failed === "true")
-      conditions.push(
-        "EXISTS(SELECT 1 FROM replay_chunks c WHERE c.replay_id=s.id AND c.metadata->>'failed'='true')",
-      );
-    if (filters.failed === "false")
-      conditions.push(
-        "NOT EXISTS(SELECT 1 FROM replay_chunks c WHERE c.replay_id=s.id AND c.metadata->>'failed'='true')",
-      );
-    if (filters.surface)
-      add(
-        "EXISTS(SELECT 1 FROM replay_streams st WHERE st.replay_id=s.id AND st.surface=?)",
-        filters.surface,
-      );
-    const limit = Math.max(1, Math.min(Number(filters.limit) || 50, 100));
-    values.push(limit + 1);
-    const rows = (
-      await this.db.query<Session & { created_at: Date | string }>(
-        `SELECT s.* FROM replay_sessions s JOIN installations i ON i.id=s.installation_id WHERE ${conditions.join(" AND ")} ORDER BY s.created_at DESC,s.id DESC LIMIT $${values.length}`,
-        values,
-      )
-    ).rows;
-    return {
-      protocolVersion: PROTOCOL,
-      items: rows.slice(0, limit).map((s) => ({
-        ...this.summary(s),
-        createdAt: new Date(s.created_at).toISOString(),
-      })),
-      nextBefore:
-        rows.length > limit
-          ? Buffer.from(
-              JSON.stringify([
-                new Date(rows[limit - 1].created_at).toISOString(),
-                rows[limit - 1].id,
-              ]),
-            ).toString("base64url")
-          : null,
-    };
+    return listReplays(this.db, this.policy, this.now(), filters);
+  }
+  async facets(filters: Record<string, string | undefined>) {
+    return replayFacets(this.db, this.policy, this.now(), filters);
   }
   async manifest(id: string) {
     return this.transaction(async (db) => {

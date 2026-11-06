@@ -148,3 +148,13 @@ test("real outline adapter validates multipart, reuses owned cache and rejects c
     await assert.rejects(adapter.file(ready, selection), /OUTLINE_BINDING_MISMATCH/);
   } finally { op.receipt!.artifactSha256 = originalSource; }
 });
+
+test("skin cache namespace cannot collide with outline or other owner/person bindings", async () => {
+  const { skinObjectKey } = await import("./storage.js");
+  const binding = hash("approved material identity");
+  assert.notEqual(skinObjectKey(op, binding), outlineObjectKey(op, binding));
+  assert.notEqual(skinObjectKey(op, binding), skinObjectKey({ ...op, personIndex: 1 }, binding));
+  assert.notEqual(skinObjectKey(op, binding), skinObjectKey({ ...op, installationId: "other" }, binding));
+  assert.throws(() => skinObjectKey({ ...op, jobId: "../other" }, binding), /SKIN_BINDING_MISMATCH/);
+  assert.throws(() => skinObjectKey(op, "../manifest"), /SKIN_BINDING_MISMATCH/);
+});

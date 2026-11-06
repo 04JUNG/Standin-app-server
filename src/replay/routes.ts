@@ -147,6 +147,11 @@ export function createAdminReplayRoutes(
     await audit(c.get("reviewer")!, undefined, c.get("requestId"));
     return c.json(result);
   });
+  r.get("/facets", async (c) => {
+    const result = await service.facets(c.req.query());
+    await audit(c.get("reviewer")!, undefined, c.get("requestId"));
+    return c.json(result);
+  });
   r.get("/:id/manifest", async (c) => {
     const id = parse(replayId, c.req.param("id"));
     const data = await service.manifest(id);
