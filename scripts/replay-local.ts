@@ -31,7 +31,8 @@ const raw = async (sql: string, params?: unknown[]) => {
     : (await db.exec(sql)).at(-1)!;
   return {
     rows: result.rows,
-    rowCount: result.affectedRows ?? result.rows.length,
+    // SELECT reports affectedRows=0 even when rows were returned. Match pg.
+    rowCount: result.rows.length || result.affectedRows || 0,
     fields: [],
     command: "",
     oid: 0,

@@ -71,7 +71,7 @@ export async function runAnalysisJob(
     try { cut = await analyze(file, hint, writer?.push); }
     finally { writer?.close(); }
     const result = mapCutResult(jobId, cut);
-    await persistAnalysisRecords(
+    const persisted = await persistAnalysisRecords(
       jobId,
       result,
       extractRefineContexts(cut),
@@ -80,6 +80,11 @@ export async function runAnalysisJob(
       true,
       progressFence,
     );
+    if (persisted === false) {
+      log.info({ type: "analysis_job", jobId, phase: "analysis", jobStatus: "ignored",
+        durationMs: Date.now() - startedAt, errorCode: "JOB_NOT_CURRENT" });
+      return;
+    }
     logQualityMetrics(jobId, result);
     log.info({ type: "analysis_job", jobId, phase: "analysis", jobStatus: "completed", durationMs: Date.now() - startedAt });
   } catch (error) {

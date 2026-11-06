@@ -642,14 +642,14 @@ export async function persistAnalysisRecords(
   cutSummary: CutSummary | null = null,
   complete = false,
   fence?: ProgressFence,
-): Promise<void> {
+): Promise<boolean | void> {
   const contextByPerson = new Map(
     refineContexts.map((ctx) => [ctx.personIndex, ctx]),
   );
   const signalsByPerson = new Map(
     signals.map((signal) => [signal.personIndex, signal]),
   );
-  await transaction(async (client) => {
+  return transaction(async (client) => {
     // 분석 중에 동의 철회로 작업이 지워졌으면 결과를 쓰지 않는다. FK가 없어 그대로 INSERT하면
     // 존재하지 않는 job_id의 관절 행이 남고, 어떤 삭제 경로도 그 행을 다시 찾지 못한다.
     // 삭제 쪽(retention.ts::deleteJobs)도 같은 행을 먼저 잠그므로 둘은 차례로만 지나간다.
@@ -658,7 +658,7 @@ export async function persistAnalysisRecords(
        AND ($2::text IS NULL OR (status='running' AND lease_owner=$2 AND attempt_count=$3 AND lease_expires_at > $4)) FOR UPDATE`,
       [jobId, fence?.workerId ?? null, fence?.attempt ?? null, new Date().toISOString()],
     );
-    if (job.rowCount === 0) return;
+    if (job.rows.length === 0) return false;
     const qualityAllowed = Boolean(job.rows[0].quality_consent_id);
     await client.query("DELETE FROM analysis_candidates WHERE job_id = $1", [
       jobId,
@@ -760,6 +760,7 @@ export async function persistAnalysisRecords(
         qualityAllowed && cutSummary ? JSON.stringify(cutSummary) : null,
       ],
     );
+    return true;
   });
 }
 
