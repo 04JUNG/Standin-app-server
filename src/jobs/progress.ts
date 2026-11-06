@@ -23,6 +23,7 @@ export interface AnalysisProgress {
   completedStages: Stage[];
   skippedStages: Stage[];
   activePersonIndex?: number;
+  focus?: { id: string; skeleton: Overlay; observations?: ProgressPerson["observations"]; searchMode?: ProgressPerson["searchMode"] };
   people: ProgressPerson[];
 }
 const dict = (x: unknown): Record<string, unknown> | undefined =>
@@ -56,6 +57,20 @@ export function overlay(raw: unknown): Overlay | undefined {
   // Facial details are intentionally omitted in public progress.
   points.fill(null, 0, 5);
   return { format: "coco17", coordinateSpace: "image-normalized", points };
+}
+
+/** Temporary observation identity only, never a final person/candidate association. */
+function focus(raw: unknown): AnalysisProgress["focus"] {
+  const f = dict(raw);
+  if (!f || typeof f.id !== "string" || !f.id || f.id.length > 160 ||
+      f.id !== f.id.trim() || /[\x00-\x1f\x7f]/.test(f.id)) return;
+  const skeleton = overlay(f.skeleton);
+  if (!skeleton || !skeleton.points.some(point => point !== null)) return;
+  const result: NonNullable<AnalysisProgress["focus"]> = { id: f.id, skeleton };
+  const observations = translateObservations(f.observations);
+  if (observations.length) result.observations = observations;
+  if (["pose", "description", "combined", "upper_body"].includes(f.searchMode as string)) result.searchMode = f.searchMode as ProgressPerson["searchMode"];
+  return result;
 }
 
 /** Only existing static library thumbnails. Never aligned/render-on-demand URLs. */
@@ -120,8 +135,10 @@ export function sanitizeProgress(raw: unknown): AnalysisProgress | undefined {
   }
   const completedStages = codes(p.completedStages), skippedStages = codes(p.skippedStages);
   if (completedStages.some(s => skippedStages.includes(s))) return;
+  const observationFocus = people.length === 0 ? focus(p.focus) : undefined;
   return { version: "pose-analysis-progress.v1", sequence: p.sequence, stage: p.stage,
     updatedAt: new Date().toISOString(), completedStages, skippedStages,
+    ...(observationFocus ? { focus: observationFocus } : {}),
     ...(index(p.activePersonIndex) && seen.has(p.activePersonIndex) ? { activePersonIndex: p.activePersonIndex } : {}),
     people: people.sort((a, b) => a.personIndex - b.personIndex) };
 }

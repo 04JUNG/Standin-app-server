@@ -106,7 +106,8 @@ test("owned Job status GET exposes live snapshots and terminal status takes prec
   t.mock.method(pool, "query", (async (sql: string, values?: unknown[]) => {
     const r = await db.query(sql, values); return {rows:r.rows,rowCount:r.rows.length||r.affectedRows||0};
   }) as typeof pool.query);
-  const p = sanitizeProgress(base())!;
+  const points=Array(17).fill(null);points[5]=[.25,.4];
+  const p = sanitizeProgress({...base(),focus:{id:"focus_http",skeleton:{format:"coco17",coordinateSpace:"image-normalized",points}}})!;
   await db.query("INSERT INTO jobs(id,status,created_at,updated_at,installation_id,progress_json) VALUES ('job_http','running','today','today','owner',$1::jsonb)", [JSON.stringify(p)]);
   const app = new Hono<import("../env.js").AppEnv>();
   app.use("*", async (c,next) => { c.set("installationId", c.req.header("x-owner") ?? ""); c.set("requestId", "req_test"); await next(); });
@@ -193,4 +194,43 @@ test("active joints survive public storage projection without deriving or copyin
     refinableLimbs:["left_arm"],activeJoints:[5,7,9]}]})!;
   assert.equal(absent.people[0].refinement,undefined);
   assert.equal(publicProgress("completed",p),undefined);
+});
+
+test("focus allowlists a temporary identity and validated body overlay without person associations", () => {
+  const points: ([number,number]|null)[] = Array(17).fill(null); points[5]=[.25,.4];points[7]=[.35,.5];
+  const skeleton={format:"coco17",coordinateSpace:"image-normalized",points};
+  const declared={id:"focus_observation",skeleton};
+  const p=sanitizeProgress({...base(),focus:{...declared,personIndex:7,candidateId:"not-final",observations:[{label:"private"}],prompt:"secret"}})!;
+  assert.deepEqual(p.focus,declared);
+  assert.deepEqual(p.people,[]);
+  assert.equal(p.activePersonIndex,undefined);
+  assert.deepEqual(publicProgress("running",p),p);
+  assert.equal(publicProgress("completed",p),undefined);
+  assert.equal(publicProgress("failed",p),undefined);
+  points[5]=null;
+  assert.deepEqual(p.focus?.skeleton.points[5],[.25,.4]);
+  for (const malformed of [null,{}, {...declared,id:""}, {...declared,id:123}, {...declared,id:" padded "},
+    {...declared,id:"a".repeat(161)}, {...declared,id:"focus\u0000"}, {...declared,skeleton:{...skeleton,points:[]}},
+    {...declared,skeleton:{...skeleton,coordinateSpace:"crop-local"}},
+    {...declared,skeleton:{...skeleton,points:Array(17).fill(null)}},
+    {...declared,skeleton:{...skeleton,points:[[.2,.3],...Array(16).fill(null)]}}]) {
+    assert.equal(sanitizeProgress({...base(),focus:malformed})!.focus,undefined);
+  }
+  assert.equal(sanitizeProgress({...base(),people:[{personIndex:0}],focus:declared})!.focus,undefined);
+  assert.equal(sanitizeProgress(base())!.focus,undefined);
+});
+
+test("focus observations and actual mode use the same public allowlist and survive storage projection", () => {
+  const points=Array(17).fill(null);points[5]=[.2,.3];
+  const raw={...base(),focus:{id:"focus_same_slot",skeleton:{format:"coco17",coordinateSpace:"image-normalized",points},
+    observations:{arms:"raised",knees:"unknown",prompt:"secret"},searchMode:"upper_body",debug:{reasoning:"private"}}};
+  const safe=sanitizeProgress(raw)!;
+  assert.deepEqual(safe.focus?.observations,[{id:"arms:raised",label:"올린 팔"}]);
+  assert.equal(safe.focus?.searchMode,"upper_body");
+  assert.deepEqual(publicProgress("running",safe),safe);
+  assert.doesNotMatch(JSON.stringify(safe),/secret|private|debug|reasoning|personIndex/);
+  const absent=sanitizeProgress({...raw,focus:{...raw.focus,observations:undefined,searchMode:"planned_route"},
+    observations:{torso:"forward"},searchMode:"description"})!;
+  assert.equal(absent.focus?.observations,undefined);
+  assert.equal(absent.focus?.searchMode,undefined);
 });

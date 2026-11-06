@@ -26,7 +26,7 @@ Stage connection:
 | refining | **not run by image analysis** | skipped; no before/after or running state. Selected-result `/refine` stays a separate user action |
 | ranking | existing final person order and API asset binding | exact presentation IDs; missing static thumbnail => omitted preview |
 
-Multi-person payloads wait for final crop-retry/person ordering; stage updates still stream earlier. Single-person skeleton, observations and route can arrive earlier. Global completed means at least one person actually ran that stage; skipped on another person cannot conflict with completed. A mixed pose/description fixture and explicit overlap test cover this.
+Multi-person people payloads wait for final crop-retry/person ordering; stage updates and a temporary focus overlay now stream earlier (see the focus extension below). Single-person skeleton, observations and route can arrive earlier. Global completed means at least one person actually ran that stage; skipped on another person cannot conflict with completed. A mixed pose/description fixture and explicit overlap test cover this.
 
 The producer itself buffers only its newest cumulative event; terminal cannot be overwritten by late progress. BFF storage also keeps at most one in-flight write and one newest pending snapshot per Job. No progress write is awaited at completion, and closing the writer drops pending telemetry. Job completion and result rows now publish together under the existing job lock.
 
@@ -77,3 +77,27 @@ The previous BFF checkout under `eef0` was removed after the original handoff. T
 The existing image analyze producer still skips auto-refine and emits no activeJoints. No new refinement, model call, rendering, timer, coordinate-delta inference or eligibility-derived declaration was added. Actual running metadata and changed before/after positions remain distinct concepts for the client.
 
 Validation: `npm run test:progress` (12 passed), full `npm test` (985 passed, 2 existing opt-in skips), and the existing 39 snapshots accepted by the client's production parser. Existing fixture files were not changed. Client source and inference producer files were not changed by this extension.
+
+
+## Early multi-person focus extension (2026-11-06)
+
+Optional public shape:
+
+```ts
+focus?: {
+  id: string; // temporary Job observation, NOT personIndex/candidateId
+  skeleton: Overlay;
+  observations?: { id: string; label: string }[];
+  searchMode?: 'pose' | 'description' | 'combined' | 'upper_body';
+}
+```
+
+Producer publishes one actual validated multi-person skeleton after existing crop/rescue/repair and before routing/search. It never assigns a provisional person index. Exact internal slot identity binds any already available explicit body observations and actual search mode; unknown association is omitted. No words/route from another slot are copied. Public allowlist strips internal IDs/prompts/debug and uses the existing fixed Korean translation and searchMode whitelist.
+
+Focus requires a nonempty trimmed ID (max 160, no control characters), normalized COCO17 shape, and at least one valid body point after masking face/invalid coordinates. Missing/malformed/empty focus is omitted without failing analysis. Final nonempty people takes precedence and removes focus. Owner/sequence/lease/terminal predicates are unchanged; the real owned status GET test now round-trips focus and still rejects other owners/terminal progress.
+
+`fixtures/analysis-progress/focus-v1.json` contains 39 new offline production-pipeline/sanitizer snapshots, including combined/description single/multi and mixed legacy paths. Fully rough/invalid multi-person cases correctly omit focus. Valid multi-person cases show extracting focus, then same-slot observation/search metadata, then sorted people without focus. `pipeline-v1.json` and `contract-cases-v1.json` retain the original 39 snapshots unchanged.
+
+Regenerate separately to preserve the baseline: from the producer worktree, `python -m scripts.analysis_progress_fixture /tmp/pose-focus-producer.json`; then here `node --import tsx scripts/progress-fixture.mts /tmp/pose-focus-producer.json fixtures/analysis-progress/focus-v1.json`.
+
+Validation: `npm run test:progress` includes 14 tests; full BFF suite 987 passed / 2 existing opt-in skips. `scripts/check-progress-client.mts` validates all 78 snapshots with the production client parser and checks that focus fields are retained, not stripped. Producer selected suite: 124 passed / 3 pre-existing Gemini cases excluded for missing google-genai. Its tests observe actual multi-person focus before search proceeds and verify final result and VLM/pose/search call-count equivalence. No client source, new refinement, model invocation, renderer, search or phase timer was added by this work.

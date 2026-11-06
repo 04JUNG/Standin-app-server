@@ -39,7 +39,12 @@ export function publicProgress(status: string, value: unknown): AnalysisProgress
   const p = value as AnalysisProgress;
   if (p.version !== "pose-analysis-progress.v1" || !Number.isSafeInteger(p.sequence) || !Array.isArray(p.people)) return;
   try {
-  const internal = { ...p, people: p.people.map(person => ({ ...person,
+  const internal = { ...p,
+    ...(p.focus ? {focus:{...p.focus,observations:Object.fromEntries((p.focus.observations ?? []).flatMap(o => {
+      if (!o || typeof o.id !== "string") return [];
+      const [key,val] = o.id.split(":"); return key && val ? [[key,val]] : [];
+    }))}} : {}),
+    people: p.people.map(person => ({ ...person,
     observations: Object.fromEntries((person.observations ?? []).flatMap(o => {
       if (!o || typeof o.id !== "string") return [];
       const [key, val] = o.id.split(":"); return key && val ? [[key,val]] : [];
