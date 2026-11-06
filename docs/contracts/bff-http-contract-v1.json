@@ -45,13 +45,14 @@
     "POST /{operationId}/export": "202 same-state idempotent export preparation",
     "GET /{operationId}/file": "200 verified FBX only; latest revision + full release/current-state recheck",
     "GET /{operationId}/poster": "200 server-authoritative static PNG or 404; never blocks list/export",
-    "GET /?candidateId={candidateId}": "200 {schemaVersion,currentRevision,currentStateHash,appearanceExport:{version:fbx-outline-v1,available:boolean},operation|null}; optional URL-encoded appearance JSON matches head; current candidate ownership required",
+    "GET /?candidateId={candidateId}": "200 {schemaVersion,currentRevision,currentStateHash,appearanceExport:{version:fbx-outline-v1,available:boolean},skinExport:{version:fbx-skin-v1,available:boolean,supportedIds:string[]},operation|null}; optional URL-encoded appearance/skin JSON matches exact head; current candidate ownership required",
     "POST /{operationId}/client-frame": {
       "request": "ClientFrame JSON schema below; max 1 MiB PNG / 1.5 MB HTTP body",
       "response": "201 auxiliary UI-only acknowledgement; same-hash retry idempotent; never accuracy/file safety evidence; never authoritative history poster"
     },
     "GET /v1/analysis/jobs/{jobId}/people/{personIndex}/interactive-frame": "200 archived current-selection server PNG; separate from operation/file expiry, same owned-job retention/source checks",
-    "GET /{operationId}/variants": "200 bounded exact previously verified owner-bound hand variants; current ready operation required"
+    "GET /{operationId}/variants": "200 bounded exact previously verified owner-bound hand variants; current ready operation required",
+    "GET /{operationId}/skin-assets/{sha256}": "200 bounded approved application/gzip UV or image/png preview after installation/current operation/selection/asset revalidation; private/no-store, exact SHA/bytes; no arbitrary hashes/URLs"
   },
   "Operation": {
     "schemaVersion": "standin.interactive-http.v1",
@@ -146,6 +147,30 @@
           "required": [
             "version",
             "width"
+          ],
+          "additionalProperties": false
+        },
+        "skin": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "string",
+              "const": "fbx-skin-v1"
+            },
+            "id": {
+              "type": "string",
+              "enum": [
+                "default",
+                "gray-guide",
+                "flesh",
+                "flesh-guide",
+                "muscle"
+              ]
+            }
+          },
+          "required": [
+            "version",
+            "id"
           ],
           "additionalProperties": false
         }
@@ -266,5 +291,46 @@
       "croppedWidth": "exactly 2",
       "check": "live supported_targets exact row + requested width + independently pinned BFF matrix; summary lists/booleans insufficient"
     }
+  },
+  "skinExport": {
+    "version": "fbx-skin-v1",
+    "status": "scoped full skin-only and combined-width2 support, independently pinned; default off",
+    "documentation": "docs/SKIN_EXPORT.md",
+    "environmentFlag": "SKIN_EXPORT_ENABLED=false",
+    "request": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "string",
+          "const": "fbx-skin-v1"
+        },
+        "id": {
+          "type": "string",
+          "enum": [
+            "default",
+            "gray-guide",
+            "flesh",
+            "flesh-guide",
+            "muscle"
+          ]
+        }
+      },
+      "required": [
+        "version",
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "default": "omit before request and selection hashing; identical legacy file path when outline also zero/omitted",
+    "selectionIdentity": "base server selection + optional nonzero appearance + nondefault skin + digest of exact approved asset version/manifest/model/UV/texture/runtime/target",
+    "pipeline": "canonical base FBX -> skin -> optional native-v2 outline",
+    "proof": "separate base receipt + normalized skinProof + optional outline; base.final=skin.source and skin.final=outline.source",
+    "support": "exact current #168 male/female full, four nondefault IDs, outline0/omission or exact2; partial UV lineage, personal/previous models, scene/VRM unsupported",
+    "headers": {
+      "skinOnly": "textured-fbx-v1",
+      "skinAndOutline": "outlined-fbx-v1"
+    },
+    "assetManifestSha256": "1fb0fa382d4fa7d27233b6139cba9c5f1ec575c6b8f86b7deac2a3dc4d447386",
+    "preview": "optional authoritative Operation.skinPreview, exact neutral topology/UV and prebuilt2048 PNG; owned operation skin-assets/{sha256} paths, final4096 texture SHA separate"
   }
 }

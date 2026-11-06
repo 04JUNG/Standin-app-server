@@ -10,6 +10,7 @@ export const config = {
   /** Additive operation API; also requires a frozen implemented Converter transport. */
   interactiveConverterToken: env("CONVERTER_INTERACTIVE_TOKEN"),
   /** Requires separately CSP-certified Converter capability; never enabled by this flag alone. */
+  skinExportEnabled: env("SKIN_EXPORT_ENABLED", "false") === "true",
   outlineExportEnabled: env("OUTLINE_EXPORT_ENABLED", "false") === "true",
   interactiveStateEnabled: env("INTERACTIVE_STATE_ENABLED", "false") === "true",
   replayEnabled: env("REPLAY_ENABLED", "true") === "true",

@@ -407,6 +407,7 @@ jobsRoutes.get("/:id/result", async (c) => {
       })),
     })),
     capabilities: {
+      selectionPreview: interactiveEnabled(),
       ...(top5Ready
         ? {
             interactivePreview: {

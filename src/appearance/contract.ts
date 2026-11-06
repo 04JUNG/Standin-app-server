@@ -55,6 +55,7 @@ export function outlineBinding(op: Operation, selection: ResolvedSelection, stat
     operation: op.operationId, revision: op.revision, candidateId: op.candidateId,
     selectionHash: op.selectionHash, stateHash: op.stateHash, snapshotProof: op.snapshotProof,
     sourceArtifactSha256: op.receipt.artifactSha256, appearance: op.appearance,
+    ...(op.skin ? { skinReceiptSha256: hash(op.skinReceipt) } : {}),
     characterId: selection.characterId, characterSha256: selection.body.resolvedBody!.assetSha256,
     outputScope: selection.scope, statureM,
     acceptanceScope: contract.acceptance_scope, expression: contract.expression, mapping: contract.mapping, runtimeRevision: contract.runtime_revision });

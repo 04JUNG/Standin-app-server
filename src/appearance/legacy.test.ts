@@ -22,3 +22,20 @@ test("owned legacy BVH/FBX routes reject requested outline before reading/conver
   const zero = await request("bvh", { version: "fbx-outline-v1", width: 0 });
   assert.equal(zero.status, 200); assert.equal(await zero.text(), "HIERARCHY MOTION");
 });
+
+test("legacy routes explicitly reject skin requests/paths, while default retains original BVH", async () => {
+  const { legacyAppearanceError, unsupportedSceneAppearance } = await import("./legacy.js");
+  const app = new Hono<AppEnv>(); let reads = 0;
+  app.get("/file", c => legacyAppearanceError(c) ?? (reads++, c.text("original")));
+  const skin = { version: "fbx-skin-v1", id: "flesh" };
+  assert.equal((await app.request("/file?" + new URLSearchParams({ skin: JSON.stringify(skin) }))).status, 409);
+  for (const query of ["skinUrl=https://untrusted.invalid", "skinPath=../skin.png", "skin={}&skin={}"])
+    assert.equal((await app.request(`/file?${query}`)).status, 400);
+  assert.equal(reads, 0);
+  const original = await app.request("/file?" + new URLSearchParams({ skin: JSON.stringify({ ...skin, id: "default" }), appearance: JSON.stringify({ version: "fbx-outline-v1", width: 0 }) }));
+  assert.equal(original.status, 200); assert.equal(await original.text(), "original");
+  for (const value of [{ skin }, { persons: [{ skin }] }]) assert.equal(unsupportedSceneAppearance(value), "SKIN_UNSUPPORTED");
+  for (const value of [{ skinUrl: "external" }, { persons: [{ skin: { ...skin, texture: "external" } }] }])
+    assert.equal(unsupportedSceneAppearance(value), "INVALID_SKIN");
+  assert.equal(unsupportedSceneAppearance({ persons: [{ skin: { ...skin, id: "default" } }] }), undefined);
+});

@@ -1,3 +1,6 @@
+import { createSkinArtifacts } from "../converter/skin.js";
+import { finalReceipt } from "./model.js";
+import { SelectionPreviewService } from "./selectionPreview.js";
 import { createOutlineArtifacts } from "../converter/outline.js";
 /** Activation intentionally gated on an agreed, implemented Converter transport. */
 import { config } from "../config.js";
@@ -16,12 +19,13 @@ const worker = createInteractiveWorker();
 export const interactiveService = new InteractiveService({
   store: new OperationStore(),
   outline: createOutlineArtifacts(),
+  skin: createSkinArtifacts(),
   resolve: createSelectionResolver(),
   worker,
   posters: new PrivatePosters(),
   renderPoster: (op, fbx, signal) =>
     renderFinalPreview(
-      { fbx, artifactSha256: String(op.appearance ? op.outlineReceipt!.artifactSha256 : op.receipt!.artifactSha256) },
+      { fbx, artifactSha256: String(finalReceipt(op)!.artifactSha256) },
       false,
       {},
       false,
@@ -38,3 +42,8 @@ export const interactiveService = new InteractiveService({
 });
 export const interactiveEnabled = () =>
   config.interactiveStateEnabled && converterTransportAvailable;
+
+export const selectionPreviewService = new SelectionPreviewService(
+  createSelectionResolver({}, "preview"),
+  worker,
+);
