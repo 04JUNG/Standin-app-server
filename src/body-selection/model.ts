@@ -1,5 +1,6 @@
 /** Body choices are independent of pose selection. No inference is performed here. */
 import { automaticRecommendation } from "./childPolicy.js";
+import { validPickerVisibility, type PickerVisibility } from "./pickerVisibility.js";
 import {
   bodyShape,
   type BodyShape,
@@ -76,6 +77,8 @@ export interface BodyPreferences {
   scope: "installation";
   /** Last hand-picked body, or the common male base when none is usable. */
   mode: "auto" | "last_used";
+  /** Installation-owned list visibility, independent of saved cards and selection. */
+  pickerVisibility?: PickerVisibility;
   /** Absent on rows written before cards existed (see `cardsOf`). */
   cards?: BodyCard[];
   /** Written by manual body selections, not by preference writes. Never bumps `revision`. */
@@ -320,6 +323,9 @@ export function normalizePreferences(value: BodyPreferences): BodyPreferences {
     version: "body-preferences.v1",
     scope: "installation",
     mode: old.mode === "auto" ? "auto" : "last_used",
+    ...(validPickerVisibility(value.pickerVisibility)
+      ? { pickerVisibility: structuredClone(value.pickerVisibility) }
+      : {}),
     cards,
     lastUsed: value.lastUsed ?? null,
     revision: value.revision,

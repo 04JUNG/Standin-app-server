@@ -1336,7 +1336,7 @@ BVH downloads and final FBX/refined/cropped export contracts are unchanged.
 
 `BODY_SELECTION_ENABLED=true`인 새 작업에서 선택적 body 추천·선택 저장 계약을 제공한다. 기본은 off다.
 
-- GET/PUT `/v1/installations/current/body-preferences`: 설치별 last_used/auto 모드와 체형 카드. PUT 본문은 `{ mode, expectedRevision, mutationId }`만 받는다. 과거 사용자 기본값 필드/모드의 새 쓰기는 `400 INVALID_INPUT`이다.
+- GET/PUT `/v1/installations/current/body-preferences`: 설치별 last_used/auto 모드와 체형 카드. PUT 본문은 `{ mode?, pickerVisibility?, expectedRevision, mutationId }`를 받으며 mode 또는 pickerVisibility 중 하나 이상이 필요하다. 과거 사용자 기본값 필드/모드의 새 쓰기는 `400 INVALID_INPUT`이다.
 - GET/PUT `/v1/analysis/jobs/{jobId}/people/{personIndex}/body-selection`: inherit/manual/auto 선택 저장·조회.
 - GET 같은 인물 경로의 `/body-options`: 적용 가능한 승인 체형 목록.
 - GET result에 person별 bodyRecommendation/bodySelection 추가. 기존 포즈 후보는 유지한다.
@@ -1822,3 +1822,15 @@ The strict optional `appearance:{version:"fbx-outline-v1",width:0..2}` on intera
 ### Final FBX skin extension (2026-11-06, default off)
 
 Interactive prepare/head accept separate strict `skin:{version:"fbx-skin-v1",id:"default"|"gray-guide"|"flesh"|"flesh-guide"|"muscle"}`. Existing strict `fbx-outline-v1` is unchanged. Default/omission preserves legacy identity; nondefault skin binds approved asset identity and the complete current selection. The owned head adds `skinExport:{version,available,supportedIds}`; unsupported assets never silently fall back. Base→skin→outline receipts and download SHA remain separate, and stale/cancelled results are fenced. See [SKIN_EXPORT.md](./SKIN_EXPORT.md) for exact scope and validation status. Approved current male/female full individual files support skin-only or exact outline2 combinations under pinned manifest1fb0fa38 and actual CSP import evidence. Owned operation skinPreview assets use exact compressed-UV and prebuilt2048 PNG hashes; final FBX retains the approved4096 image. Runtime flags remain default off; this does not deploy or enable skin globally.
+
+
+### 체형 더보기 표시 설정 (2026-11-07)
+
+GET `/v1/installations/current/body-preferences`는 `pickerVisibility: { hiddenPresetIds: string[], hiddenCardIds: string[] }`를 추가로 반환한다. 과거 설치의 기본값은 두 빈 배열(모두 표시)이다. PUT은 mode 변경 없이 pickerVisibility만 갱신할 수 있고, 기존 mode-only 클라이언트와 idempotency payload는 유지된다.
+
+- 표시 설정은 설치별 기존 preferences JSON에 저장한다. 새 테이블이나 데이터 마이그레이션은 없다.
+- preset ID 최대 256개, card ID 최대 48개. 중복·빈 ID·알 수 없는 키·잘못된 타입은 400이다.
+- 동일 preferences revision·mutationId 규칙을 사용한다. 충돌은 409, 재전송은 기존 응답을 반환한다.
+- 숨김은 카드 삭제·자동 추천·last_used·진행 중 인물 선택·FBX 허용 범위를 바꾸지 않는다. 실제 카드 삭제 시 그 카드의 숨김 ID만 정리한다.
+- BFF를 먼저 배포한 뒤 해당 필드를 읽는 클라이언트를 배포한다. 구 BFF에는 새 클라이언트가 표시 체크를 노출하지 않는다.
+- 클라의 CSP 실험용 중복 20종 제거는 제품 목록 정책이다. 계산 자산/카탈로그 ID를 폐기하지 않아 기존 카드와 작업의 원본 연결을 유지한다.
