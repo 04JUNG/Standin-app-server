@@ -107,7 +107,7 @@ test("owned Job status GET exposes live snapshots and terminal status takes prec
     const r = await db.query(sql, values); return {rows:r.rows,rowCount:r.rows.length||r.affectedRows||0};
   }) as typeof pool.query);
   const points=Array(17).fill(null);points[5]=[.25,.4];
-  const p = sanitizeProgress({...base(),focus:{id:"focus_http",skeleton:{format:"coco17",coordinateSpace:"image-normalized",points}}})!;
+  const p = sanitizeProgress({...base(),scene:{shot:"bust",view:"side",personCount:2},focus:{id:"focus_http",skeleton:{format:"coco17",coordinateSpace:"image-normalized",points}}})!;
   await db.query("INSERT INTO jobs(id,status,created_at,updated_at,installation_id,progress_json) VALUES ('job_http','running','today','today','owner',$1::jsonb)", [JSON.stringify(p)]);
   const app = new Hono<import("../env.js").AppEnv>();
   app.use("*", async (c,next) => { c.set("installationId", c.req.header("x-owner") ?? ""); c.set("requestId", "req_test"); await next(); });
@@ -233,4 +233,25 @@ test("focus observations and actual mode use the same public allowlist and survi
     observations:{torso:"forward"},searchMode:"description"})!;
   assert.equal(absent.focus?.observations,undefined);
   assert.equal(absent.focus?.searchMode,undefined);
+});
+
+test("scene independently allowlists only declared cut shot/view/count with no defaults or private data", () => {
+  const read = (scene:unknown) => sanitizeProgress({...base(),scene})!;
+  for (const shot of ["full_half","bust","face"]) for (const view of ["front","side","back","three_quarter"]) {
+    const scene={shot,view,personCount:2};
+    assert.deepEqual(read({...scene,prompt:"secret",dialogue:"private",box:[1,2,3,4],reasoning:"hidden"}).scene,scene);
+  }
+  for (const personCount of [0,20]) assert.deepEqual(read({personCount}).scene,{personCount});
+  for (const personCount of [null,true,false,-1,21,1.5,"2",[],{},NaN,Infinity]) {
+    assert.deepEqual(read({shot:"bust",view:"side",personCount}).scene,{shot:"bust",view:"side"});
+  }
+  assert.deepEqual(read({shot:"unknown",view:"back",personCount:0}).scene,{view:"back",personCount:0});
+  assert.deepEqual(read({shot:"face",view:"top",personCount:"3"}).scene,{shot:"face"});
+  for (const scene of [null,[],"full_half",{}, {shot:"unknown",view:"unknown",personCount:-1}]) {
+    assert.equal(read(scene).scene,undefined);
+  }
+  assert.equal(sanitizeProgress({...base(),people:[{personIndex:0},{personIndex:1}],shot:"face",view:"back"})?.scene,undefined);
+  const p=read({shot:"face",view:"back",personCount:2});
+  assert.deepEqual(publicProgress("running",p),p);
+  assert.equal(publicProgress("completed",p),undefined);
 });

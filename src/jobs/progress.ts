@@ -15,6 +15,11 @@ export interface ProgressPerson {
     activeJoints?: number[];
     before?: Overlay; after?: Overlay; beforeThumbnailUrl?: string; afterThumbnailUrl?: string };
 }
+export interface ProgressScene {
+  shot?: "full_half" | "bust" | "face";
+  view?: "front" | "side" | "back" | "three_quarter";
+  personCount?: number;
+}
 export interface AnalysisProgress {
   version: "pose-analysis-progress.v1";
   sequence: number;
@@ -23,6 +28,7 @@ export interface AnalysisProgress {
   completedStages: Stage[];
   skippedStages: Stage[];
   activePersonIndex?: number;
+  scene?: ProgressScene;
   focus?: { id: string; skeleton: Overlay; observations?: ProgressPerson["observations"]; searchMode?: ProgressPerson["searchMode"] };
   people: ProgressPerson[];
 }
@@ -57,6 +63,17 @@ export function overlay(raw: unknown): Overlay | undefined {
   // Facial details are intentionally omitted in public progress.
   points.fill(null, 0, 5);
   return { format: "coco17", coordinateSpace: "image-normalized", points };
+}
+
+/** Cut-level declarations only. Invalid/missing fields are independently omitted. */
+function scene(raw: unknown): ProgressScene | undefined {
+  const s = dict(raw);
+  if (!s) return;
+  const result: ProgressScene = {};
+  if (["full_half", "bust", "face"].includes(s.shot as string)) result.shot = s.shot as ProgressScene["shot"];
+  if (["front", "side", "back", "three_quarter"].includes(s.view as string)) result.view = s.view as ProgressScene["view"];
+  if (index(s.personCount) && s.personCount <= 20) result.personCount = s.personCount;
+  return Object.keys(result).length ? result : undefined;
 }
 
 /** Temporary observation identity only, never a final person/candidate association. */
@@ -136,9 +153,11 @@ export function sanitizeProgress(raw: unknown): AnalysisProgress | undefined {
   const completedStages = codes(p.completedStages), skippedStages = codes(p.skippedStages);
   if (completedStages.some(s => skippedStages.includes(s))) return;
   const observationFocus = people.length === 0 ? focus(p.focus) : undefined;
+  const observedScene = scene(p.scene);
   return { version: "pose-analysis-progress.v1", sequence: p.sequence, stage: p.stage,
     updatedAt: new Date().toISOString(), completedStages, skippedStages,
     ...(observationFocus ? { focus: observationFocus } : {}),
+    ...(observedScene ? { scene: observedScene } : {}),
     ...(index(p.activePersonIndex) && seen.has(p.activePersonIndex) ? { activePersonIndex: p.activePersonIndex } : {}),
     people: people.sort((a, b) => a.personIndex - b.personIndex) };
 }

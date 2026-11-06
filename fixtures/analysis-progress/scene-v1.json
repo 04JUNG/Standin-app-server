@@ -1,0 +1,1794 @@
+{
+  "fixtureOnly": true,
+  "description": "Offline mock-pipeline milestones passed through production BFF sanitizer. No provider/render calls for UI.",
+  "cases": [
+    {
+      "name": "full-half-global-view-2p",
+      "providerCalls": 2,
+      "snapshots": [
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 1,
+          "stage": "analyzing",
+          "updatedAt": "2026-11-06T06:03:04.706Z",
+          "completedStages": [],
+          "skippedStages": [],
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 2,
+          "stage": "extracting",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing"
+          ],
+          "skippedStages": [],
+          "scene": {
+            "shot": "full_half",
+            "view": "three_quarter",
+            "personCount": 2
+          },
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 3,
+          "stage": "extracting",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing"
+          ],
+          "skippedStages": [],
+          "focus": {
+            "id": "focus_380bc69423d84e24861cac9c87aada0c",
+            "skeleton": {
+              "format": "coco17",
+              "coordinateSpace": "image-normalized",
+              "points": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                [
+                  0.1441029453277588,
+                  0.30258474349975584
+                ],
+                [
+                  0.4081344985961914,
+                  0.3004777908325195
+                ],
+                [
+                  0.10161624908447266,
+                  0.43806861877441405
+                ],
+                [
+                  0.4693830108642578,
+                  0.44143795013427733
+                ],
+                [
+                  0.11226842880249023,
+                  0.5739443588256836
+                ],
+                [
+                  0.49231773376464844,
+                  0.5765683746337891
+                ],
+                [
+                  0.1920238494873047,
+                  0.5278472137451172
+                ],
+                [
+                  0.4118362045288086,
+                  0.5257614898681641
+                ],
+                [
+                  0.18265531539916993,
+                  0.7200340270996094
+                ],
+                [
+                  0.39788482666015623,
+                  0.7292835998535157
+                ],
+                [
+                  0.17024417877197265,
+                  0.9080556488037109
+                ],
+                [
+                  0.41082054138183594,
+                  0.914130859375
+                ]
+              ]
+            }
+          },
+          "scene": {
+            "shot": "full_half",
+            "view": "three_quarter",
+            "personCount": 2
+          },
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 4,
+          "stage": "understanding",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing",
+            "extracting"
+          ],
+          "skippedStages": [],
+          "focus": {
+            "id": "focus_380bc69423d84e24861cac9c87aada0c",
+            "skeleton": {
+              "format": "coco17",
+              "coordinateSpace": "image-normalized",
+              "points": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                [
+                  0.1441029453277588,
+                  0.30258474349975584
+                ],
+                [
+                  0.4081344985961914,
+                  0.3004777908325195
+                ],
+                [
+                  0.10161624908447266,
+                  0.43806861877441405
+                ],
+                [
+                  0.4693830108642578,
+                  0.44143795013427733
+                ],
+                [
+                  0.11226842880249023,
+                  0.5739443588256836
+                ],
+                [
+                  0.49231773376464844,
+                  0.5765683746337891
+                ],
+                [
+                  0.1920238494873047,
+                  0.5278472137451172
+                ],
+                [
+                  0.4118362045288086,
+                  0.5257614898681641
+                ],
+                [
+                  0.18265531539916993,
+                  0.7200340270996094
+                ],
+                [
+                  0.39788482666015623,
+                  0.7292835998535157
+                ],
+                [
+                  0.17024417877197265,
+                  0.9080556488037109
+                ],
+                [
+                  0.41082054138183594,
+                  0.914130859375
+                ]
+              ]
+            }
+          },
+          "scene": {
+            "shot": "full_half",
+            "view": "three_quarter",
+            "personCount": 2
+          },
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 5,
+          "stage": "searching",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing",
+            "extracting",
+            "understanding"
+          ],
+          "skippedStages": [],
+          "focus": {
+            "id": "focus_380bc69423d84e24861cac9c87aada0c",
+            "skeleton": {
+              "format": "coco17",
+              "coordinateSpace": "image-normalized",
+              "points": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                [
+                  0.1441029453277588,
+                  0.30258474349975584
+                ],
+                [
+                  0.4081344985961914,
+                  0.3004777908325195
+                ],
+                [
+                  0.10161624908447266,
+                  0.43806861877441405
+                ],
+                [
+                  0.4693830108642578,
+                  0.44143795013427733
+                ],
+                [
+                  0.11226842880249023,
+                  0.5739443588256836
+                ],
+                [
+                  0.49231773376464844,
+                  0.5765683746337891
+                ],
+                [
+                  0.1920238494873047,
+                  0.5278472137451172
+                ],
+                [
+                  0.4118362045288086,
+                  0.5257614898681641
+                ],
+                [
+                  0.18265531539916993,
+                  0.7200340270996094
+                ],
+                [
+                  0.39788482666015623,
+                  0.7292835998535157
+                ],
+                [
+                  0.17024417877197265,
+                  0.9080556488037109
+                ],
+                [
+                  0.41082054138183594,
+                  0.914130859375
+                ]
+              ]
+            }
+          },
+          "scene": {
+            "shot": "full_half",
+            "view": "three_quarter",
+            "personCount": 2
+          },
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 6,
+          "stage": "searching",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing",
+            "extracting",
+            "understanding"
+          ],
+          "skippedStages": [],
+          "focus": {
+            "id": "focus_380bc69423d84e24861cac9c87aada0c",
+            "skeleton": {
+              "format": "coco17",
+              "coordinateSpace": "image-normalized",
+              "points": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                [
+                  0.1441029453277588,
+                  0.30258474349975584
+                ],
+                [
+                  0.4081344985961914,
+                  0.3004777908325195
+                ],
+                [
+                  0.10161624908447266,
+                  0.43806861877441405
+                ],
+                [
+                  0.4693830108642578,
+                  0.44143795013427733
+                ],
+                [
+                  0.11226842880249023,
+                  0.5739443588256836
+                ],
+                [
+                  0.49231773376464844,
+                  0.5765683746337891
+                ],
+                [
+                  0.1920238494873047,
+                  0.5278472137451172
+                ],
+                [
+                  0.4118362045288086,
+                  0.5257614898681641
+                ],
+                [
+                  0.18265531539916993,
+                  0.7200340270996094
+                ],
+                [
+                  0.39788482666015623,
+                  0.7292835998535157
+                ],
+                [
+                  0.17024417877197265,
+                  0.9080556488037109
+                ],
+                [
+                  0.41082054138183594,
+                  0.914130859375
+                ]
+              ]
+            },
+            "searchMode": "pose"
+          },
+          "scene": {
+            "shot": "full_half",
+            "view": "three_quarter",
+            "personCount": 2
+          },
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 7,
+          "stage": "searching",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing",
+            "extracting",
+            "understanding"
+          ],
+          "skippedStages": [],
+          "focus": {
+            "id": "focus_380bc69423d84e24861cac9c87aada0c",
+            "skeleton": {
+              "format": "coco17",
+              "coordinateSpace": "image-normalized",
+              "points": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                [
+                  0.1441029453277588,
+                  0.30258474349975584
+                ],
+                [
+                  0.4081344985961914,
+                  0.3004777908325195
+                ],
+                [
+                  0.10161624908447266,
+                  0.43806861877441405
+                ],
+                [
+                  0.4693830108642578,
+                  0.44143795013427733
+                ],
+                [
+                  0.11226842880249023,
+                  0.5739443588256836
+                ],
+                [
+                  0.49231773376464844,
+                  0.5765683746337891
+                ],
+                [
+                  0.1920238494873047,
+                  0.5278472137451172
+                ],
+                [
+                  0.4118362045288086,
+                  0.5257614898681641
+                ],
+                [
+                  0.18265531539916993,
+                  0.7200340270996094
+                ],
+                [
+                  0.39788482666015623,
+                  0.7292835998535157
+                ],
+                [
+                  0.17024417877197265,
+                  0.9080556488037109
+                ],
+                [
+                  0.41082054138183594,
+                  0.914130859375
+                ]
+              ]
+            },
+            "searchMode": "pose"
+          },
+          "scene": {
+            "shot": "full_half",
+            "view": "three_quarter",
+            "personCount": 2
+          },
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 8,
+          "stage": "ranking",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing",
+            "extracting",
+            "understanding",
+            "searching"
+          ],
+          "skippedStages": [
+            "refining"
+          ],
+          "scene": {
+            "shot": "full_half",
+            "view": "three_quarter",
+            "personCount": 2
+          },
+          "people": [
+            {
+              "personIndex": 0,
+              "skeleton": {
+                "format": "coco17",
+                "coordinateSpace": "image-normalized",
+                "points": [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  [
+                    0.1441029453277588,
+                    0.30258474349975584
+                  ],
+                  [
+                    0.4081344985961914,
+                    0.3004777908325195
+                  ],
+                  [
+                    0.10161624908447266,
+                    0.43806861877441405
+                  ],
+                  [
+                    0.4693830108642578,
+                    0.44143795013427733
+                  ],
+                  [
+                    0.11226842880249023,
+                    0.5739443588256836
+                  ],
+                  [
+                    0.49231773376464844,
+                    0.5765683746337891
+                  ],
+                  [
+                    0.1920238494873047,
+                    0.5278472137451172
+                  ],
+                  [
+                    0.4118362045288086,
+                    0.5257614898681641
+                  ],
+                  [
+                    0.18265531539916993,
+                    0.7200340270996094
+                  ],
+                  [
+                    0.39788482666015623,
+                    0.7292835998535157
+                  ],
+                  [
+                    0.17024417877197265,
+                    0.9080556488037109
+                  ],
+                  [
+                    0.41082054138183594,
+                    0.914130859375
+                  ]
+                ]
+              },
+              "searchMode": "pose"
+            },
+            {
+              "personIndex": 1,
+              "searchMode": "description"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "bust-side-1p",
+      "providerCalls": 2,
+      "snapshots": [
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 1,
+          "stage": "analyzing",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [],
+          "skippedStages": [],
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 2,
+          "stage": "extracting",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing"
+          ],
+          "skippedStages": [],
+          "scene": {
+            "shot": "bust",
+            "view": "side",
+            "personCount": 1
+          },
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 3,
+          "stage": "understanding",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing",
+            "extracting"
+          ],
+          "skippedStages": [],
+          "scene": {
+            "shot": "bust",
+            "view": "side",
+            "personCount": 1
+          },
+          "people": [
+            {
+              "personIndex": 0
+            }
+          ]
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 4,
+          "stage": "searching",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing",
+            "extracting",
+            "understanding"
+          ],
+          "skippedStages": [],
+          "scene": {
+            "shot": "bust",
+            "view": "side",
+            "personCount": 1
+          },
+          "people": [
+            {
+              "personIndex": 0
+            }
+          ]
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 5,
+          "stage": "searching",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing",
+            "extracting",
+            "understanding"
+          ],
+          "skippedStages": [],
+          "scene": {
+            "shot": "bust",
+            "view": "side",
+            "personCount": 1
+          },
+          "activePersonIndex": 0,
+          "people": [
+            {
+              "personIndex": 0,
+              "searchMode": "description"
+            }
+          ]
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 6,
+          "stage": "ranking",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing",
+            "extracting",
+            "understanding",
+            "searching"
+          ],
+          "skippedStages": [
+            "refining"
+          ],
+          "scene": {
+            "shot": "bust",
+            "view": "side",
+            "personCount": 1
+          },
+          "activePersonIndex": 0,
+          "people": [
+            {
+              "personIndex": 0,
+              "searchMode": "description"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "face-back-1p",
+      "providerCalls": 1,
+      "snapshots": [
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 1,
+          "stage": "analyzing",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [],
+          "skippedStages": [],
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 2,
+          "stage": "extracting",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing"
+          ],
+          "skippedStages": [],
+          "scene": {
+            "shot": "face",
+            "view": "back",
+            "personCount": 1
+          },
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 3,
+          "stage": "extracting",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing"
+          ],
+          "skippedStages": [
+            "extracting",
+            "understanding",
+            "searching",
+            "refining",
+            "ranking"
+          ],
+          "scene": {
+            "shot": "face",
+            "view": "back",
+            "personCount": 1
+          },
+          "people": []
+        }
+      ]
+    },
+    {
+      "name": "explicit-zero-people",
+      "providerCalls": 1,
+      "snapshots": [
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 1,
+          "stage": "analyzing",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [],
+          "skippedStages": [],
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 2,
+          "stage": "extracting",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing"
+          ],
+          "skippedStages": [],
+          "scene": {
+            "shot": "face",
+            "view": "front",
+            "personCount": 0
+          },
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 3,
+          "stage": "extracting",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing"
+          ],
+          "skippedStages": [
+            "extracting",
+            "understanding",
+            "searching",
+            "refining",
+            "ranking"
+          ],
+          "scene": {
+            "shot": "face",
+            "view": "front",
+            "personCount": 0
+          },
+          "people": []
+        }
+      ]
+    },
+    {
+      "name": "missing-count-invalid-labels-no-defaults",
+      "providerCalls": 2,
+      "snapshots": [
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 1,
+          "stage": "analyzing",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [],
+          "skippedStages": [],
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 2,
+          "stage": "extracting",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing"
+          ],
+          "skippedStages": [],
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 3,
+          "stage": "extracting",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing"
+          ],
+          "skippedStages": [],
+          "focus": {
+            "id": "focus_03f034bcb91945cea9f500810fd61f1b",
+            "skeleton": {
+              "format": "coco17",
+              "coordinateSpace": "image-normalized",
+              "points": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                [
+                  0.1441029453277588,
+                  0.30258474349975584
+                ],
+                [
+                  0.4081344985961914,
+                  0.3004777908325195
+                ],
+                [
+                  0.10161624908447266,
+                  0.43806861877441405
+                ],
+                [
+                  0.4693830108642578,
+                  0.44143795013427733
+                ],
+                [
+                  0.11226842880249023,
+                  0.5739443588256836
+                ],
+                [
+                  0.49231773376464844,
+                  0.5765683746337891
+                ],
+                [
+                  0.1920238494873047,
+                  0.5278472137451172
+                ],
+                [
+                  0.4118362045288086,
+                  0.5257614898681641
+                ],
+                [
+                  0.18265531539916993,
+                  0.7200340270996094
+                ],
+                [
+                  0.39788482666015623,
+                  0.7292835998535157
+                ],
+                [
+                  0.17024417877197265,
+                  0.9080556488037109
+                ],
+                [
+                  0.41082054138183594,
+                  0.914130859375
+                ]
+              ]
+            }
+          },
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 4,
+          "stage": "understanding",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing",
+            "extracting"
+          ],
+          "skippedStages": [],
+          "focus": {
+            "id": "focus_03f034bcb91945cea9f500810fd61f1b",
+            "skeleton": {
+              "format": "coco17",
+              "coordinateSpace": "image-normalized",
+              "points": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                [
+                  0.1441029453277588,
+                  0.30258474349975584
+                ],
+                [
+                  0.4081344985961914,
+                  0.3004777908325195
+                ],
+                [
+                  0.10161624908447266,
+                  0.43806861877441405
+                ],
+                [
+                  0.4693830108642578,
+                  0.44143795013427733
+                ],
+                [
+                  0.11226842880249023,
+                  0.5739443588256836
+                ],
+                [
+                  0.49231773376464844,
+                  0.5765683746337891
+                ],
+                [
+                  0.1920238494873047,
+                  0.5278472137451172
+                ],
+                [
+                  0.4118362045288086,
+                  0.5257614898681641
+                ],
+                [
+                  0.18265531539916993,
+                  0.7200340270996094
+                ],
+                [
+                  0.39788482666015623,
+                  0.7292835998535157
+                ],
+                [
+                  0.17024417877197265,
+                  0.9080556488037109
+                ],
+                [
+                  0.41082054138183594,
+                  0.914130859375
+                ]
+              ]
+            }
+          },
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 5,
+          "stage": "searching",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing",
+            "extracting",
+            "understanding"
+          ],
+          "skippedStages": [],
+          "focus": {
+            "id": "focus_03f034bcb91945cea9f500810fd61f1b",
+            "skeleton": {
+              "format": "coco17",
+              "coordinateSpace": "image-normalized",
+              "points": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                [
+                  0.1441029453277588,
+                  0.30258474349975584
+                ],
+                [
+                  0.4081344985961914,
+                  0.3004777908325195
+                ],
+                [
+                  0.10161624908447266,
+                  0.43806861877441405
+                ],
+                [
+                  0.4693830108642578,
+                  0.44143795013427733
+                ],
+                [
+                  0.11226842880249023,
+                  0.5739443588256836
+                ],
+                [
+                  0.49231773376464844,
+                  0.5765683746337891
+                ],
+                [
+                  0.1920238494873047,
+                  0.5278472137451172
+                ],
+                [
+                  0.4118362045288086,
+                  0.5257614898681641
+                ],
+                [
+                  0.18265531539916993,
+                  0.7200340270996094
+                ],
+                [
+                  0.39788482666015623,
+                  0.7292835998535157
+                ],
+                [
+                  0.17024417877197265,
+                  0.9080556488037109
+                ],
+                [
+                  0.41082054138183594,
+                  0.914130859375
+                ]
+              ]
+            }
+          },
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 6,
+          "stage": "searching",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing",
+            "extracting",
+            "understanding"
+          ],
+          "skippedStages": [],
+          "focus": {
+            "id": "focus_03f034bcb91945cea9f500810fd61f1b",
+            "skeleton": {
+              "format": "coco17",
+              "coordinateSpace": "image-normalized",
+              "points": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                [
+                  0.1441029453277588,
+                  0.30258474349975584
+                ],
+                [
+                  0.4081344985961914,
+                  0.3004777908325195
+                ],
+                [
+                  0.10161624908447266,
+                  0.43806861877441405
+                ],
+                [
+                  0.4693830108642578,
+                  0.44143795013427733
+                ],
+                [
+                  0.11226842880249023,
+                  0.5739443588256836
+                ],
+                [
+                  0.49231773376464844,
+                  0.5765683746337891
+                ],
+                [
+                  0.1920238494873047,
+                  0.5278472137451172
+                ],
+                [
+                  0.4118362045288086,
+                  0.5257614898681641
+                ],
+                [
+                  0.18265531539916993,
+                  0.7200340270996094
+                ],
+                [
+                  0.39788482666015623,
+                  0.7292835998535157
+                ],
+                [
+                  0.17024417877197265,
+                  0.9080556488037109
+                ],
+                [
+                  0.41082054138183594,
+                  0.914130859375
+                ]
+              ]
+            },
+            "searchMode": "pose"
+          },
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 7,
+          "stage": "searching",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing",
+            "extracting",
+            "understanding"
+          ],
+          "skippedStages": [],
+          "focus": {
+            "id": "focus_03f034bcb91945cea9f500810fd61f1b",
+            "skeleton": {
+              "format": "coco17",
+              "coordinateSpace": "image-normalized",
+              "points": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                [
+                  0.1441029453277588,
+                  0.30258474349975584
+                ],
+                [
+                  0.4081344985961914,
+                  0.3004777908325195
+                ],
+                [
+                  0.10161624908447266,
+                  0.43806861877441405
+                ],
+                [
+                  0.4693830108642578,
+                  0.44143795013427733
+                ],
+                [
+                  0.11226842880249023,
+                  0.5739443588256836
+                ],
+                [
+                  0.49231773376464844,
+                  0.5765683746337891
+                ],
+                [
+                  0.1920238494873047,
+                  0.5278472137451172
+                ],
+                [
+                  0.4118362045288086,
+                  0.5257614898681641
+                ],
+                [
+                  0.18265531539916993,
+                  0.7200340270996094
+                ],
+                [
+                  0.39788482666015623,
+                  0.7292835998535157
+                ],
+                [
+                  0.17024417877197265,
+                  0.9080556488037109
+                ],
+                [
+                  0.41082054138183594,
+                  0.914130859375
+                ]
+              ]
+            },
+            "searchMode": "pose"
+          },
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 8,
+          "stage": "ranking",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing",
+            "extracting",
+            "understanding",
+            "searching"
+          ],
+          "skippedStages": [
+            "refining"
+          ],
+          "people": [
+            {
+              "personIndex": 0,
+              "skeleton": {
+                "format": "coco17",
+                "coordinateSpace": "image-normalized",
+                "points": [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  [
+                    0.1441029453277588,
+                    0.30258474349975584
+                  ],
+                  [
+                    0.4081344985961914,
+                    0.3004777908325195
+                  ],
+                  [
+                    0.10161624908447266,
+                    0.43806861877441405
+                  ],
+                  [
+                    0.4693830108642578,
+                    0.44143795013427733
+                  ],
+                  [
+                    0.11226842880249023,
+                    0.5739443588256836
+                  ],
+                  [
+                    0.49231773376464844,
+                    0.5765683746337891
+                  ],
+                  [
+                    0.1920238494873047,
+                    0.5278472137451172
+                  ],
+                  [
+                    0.4118362045288086,
+                    0.5257614898681641
+                  ],
+                  [
+                    0.18265531539916993,
+                    0.7200340270996094
+                  ],
+                  [
+                    0.39788482666015623,
+                    0.7292835998535157
+                  ],
+                  [
+                    0.17024417877197265,
+                    0.9080556488037109
+                  ],
+                  [
+                    0.41082054138183594,
+                    0.914130859375
+                  ]
+                ]
+              },
+              "searchMode": "pose"
+            },
+            {
+              "personIndex": 1,
+              "searchMode": "description"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "independent-valid-shot-only",
+      "providerCalls": 1,
+      "snapshots": [
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 1,
+          "stage": "analyzing",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [],
+          "skippedStages": [],
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 2,
+          "stage": "extracting",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing"
+          ],
+          "skippedStages": [],
+          "scene": {
+            "shot": "face"
+          },
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 3,
+          "stage": "extracting",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing"
+          ],
+          "skippedStages": [
+            "extracting",
+            "understanding",
+            "searching",
+            "refining",
+            "ranking"
+          ],
+          "scene": {
+            "shot": "face"
+          },
+          "people": []
+        }
+      ]
+    },
+    {
+      "name": "independent-valid-view-only",
+      "providerCalls": 2,
+      "snapshots": [
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 1,
+          "stage": "analyzing",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [],
+          "skippedStages": [],
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 2,
+          "stage": "extracting",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing"
+          ],
+          "skippedStages": [],
+          "scene": {
+            "view": "back"
+          },
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 3,
+          "stage": "extracting",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing"
+          ],
+          "skippedStages": [],
+          "focus": {
+            "id": "focus_37ed1bc0ed4b44dc9eb1d42a401de820",
+            "skeleton": {
+              "format": "coco17",
+              "coordinateSpace": "image-normalized",
+              "points": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                [
+                  0.1441029453277588,
+                  0.30258474349975584
+                ],
+                [
+                  0.4081344985961914,
+                  0.3004777908325195
+                ],
+                [
+                  0.10161624908447266,
+                  0.43806861877441405
+                ],
+                [
+                  0.4693830108642578,
+                  0.44143795013427733
+                ],
+                [
+                  0.11226842880249023,
+                  0.5739443588256836
+                ],
+                [
+                  0.49231773376464844,
+                  0.5765683746337891
+                ],
+                [
+                  0.1920238494873047,
+                  0.5278472137451172
+                ],
+                [
+                  0.4118362045288086,
+                  0.5257614898681641
+                ],
+                [
+                  0.18265531539916993,
+                  0.7200340270996094
+                ],
+                [
+                  0.39788482666015623,
+                  0.7292835998535157
+                ],
+                [
+                  0.17024417877197265,
+                  0.9080556488037109
+                ],
+                [
+                  0.41082054138183594,
+                  0.914130859375
+                ]
+              ]
+            }
+          },
+          "scene": {
+            "view": "back"
+          },
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 4,
+          "stage": "understanding",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing",
+            "extracting"
+          ],
+          "skippedStages": [],
+          "focus": {
+            "id": "focus_37ed1bc0ed4b44dc9eb1d42a401de820",
+            "skeleton": {
+              "format": "coco17",
+              "coordinateSpace": "image-normalized",
+              "points": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                [
+                  0.1441029453277588,
+                  0.30258474349975584
+                ],
+                [
+                  0.4081344985961914,
+                  0.3004777908325195
+                ],
+                [
+                  0.10161624908447266,
+                  0.43806861877441405
+                ],
+                [
+                  0.4693830108642578,
+                  0.44143795013427733
+                ],
+                [
+                  0.11226842880249023,
+                  0.5739443588256836
+                ],
+                [
+                  0.49231773376464844,
+                  0.5765683746337891
+                ],
+                [
+                  0.1920238494873047,
+                  0.5278472137451172
+                ],
+                [
+                  0.4118362045288086,
+                  0.5257614898681641
+                ],
+                [
+                  0.18265531539916993,
+                  0.7200340270996094
+                ],
+                [
+                  0.39788482666015623,
+                  0.7292835998535157
+                ],
+                [
+                  0.17024417877197265,
+                  0.9080556488037109
+                ],
+                [
+                  0.41082054138183594,
+                  0.914130859375
+                ]
+              ]
+            }
+          },
+          "scene": {
+            "view": "back"
+          },
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 5,
+          "stage": "searching",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing",
+            "extracting",
+            "understanding"
+          ],
+          "skippedStages": [],
+          "focus": {
+            "id": "focus_37ed1bc0ed4b44dc9eb1d42a401de820",
+            "skeleton": {
+              "format": "coco17",
+              "coordinateSpace": "image-normalized",
+              "points": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                [
+                  0.1441029453277588,
+                  0.30258474349975584
+                ],
+                [
+                  0.4081344985961914,
+                  0.3004777908325195
+                ],
+                [
+                  0.10161624908447266,
+                  0.43806861877441405
+                ],
+                [
+                  0.4693830108642578,
+                  0.44143795013427733
+                ],
+                [
+                  0.11226842880249023,
+                  0.5739443588256836
+                ],
+                [
+                  0.49231773376464844,
+                  0.5765683746337891
+                ],
+                [
+                  0.1920238494873047,
+                  0.5278472137451172
+                ],
+                [
+                  0.4118362045288086,
+                  0.5257614898681641
+                ],
+                [
+                  0.18265531539916993,
+                  0.7200340270996094
+                ],
+                [
+                  0.39788482666015623,
+                  0.7292835998535157
+                ],
+                [
+                  0.17024417877197265,
+                  0.9080556488037109
+                ],
+                [
+                  0.41082054138183594,
+                  0.914130859375
+                ]
+              ]
+            }
+          },
+          "scene": {
+            "view": "back"
+          },
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 6,
+          "stage": "searching",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing",
+            "extracting",
+            "understanding"
+          ],
+          "skippedStages": [],
+          "focus": {
+            "id": "focus_37ed1bc0ed4b44dc9eb1d42a401de820",
+            "skeleton": {
+              "format": "coco17",
+              "coordinateSpace": "image-normalized",
+              "points": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                [
+                  0.1441029453277588,
+                  0.30258474349975584
+                ],
+                [
+                  0.4081344985961914,
+                  0.3004777908325195
+                ],
+                [
+                  0.10161624908447266,
+                  0.43806861877441405
+                ],
+                [
+                  0.4693830108642578,
+                  0.44143795013427733
+                ],
+                [
+                  0.11226842880249023,
+                  0.5739443588256836
+                ],
+                [
+                  0.49231773376464844,
+                  0.5765683746337891
+                ],
+                [
+                  0.1920238494873047,
+                  0.5278472137451172
+                ],
+                [
+                  0.4118362045288086,
+                  0.5257614898681641
+                ],
+                [
+                  0.18265531539916993,
+                  0.7200340270996094
+                ],
+                [
+                  0.39788482666015623,
+                  0.7292835998535157
+                ],
+                [
+                  0.17024417877197265,
+                  0.9080556488037109
+                ],
+                [
+                  0.41082054138183594,
+                  0.914130859375
+                ]
+              ]
+            },
+            "searchMode": "pose"
+          },
+          "scene": {
+            "view": "back"
+          },
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 7,
+          "stage": "searching",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing",
+            "extracting",
+            "understanding"
+          ],
+          "skippedStages": [],
+          "focus": {
+            "id": "focus_37ed1bc0ed4b44dc9eb1d42a401de820",
+            "skeleton": {
+              "format": "coco17",
+              "coordinateSpace": "image-normalized",
+              "points": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                [
+                  0.1441029453277588,
+                  0.30258474349975584
+                ],
+                [
+                  0.4081344985961914,
+                  0.3004777908325195
+                ],
+                [
+                  0.10161624908447266,
+                  0.43806861877441405
+                ],
+                [
+                  0.4693830108642578,
+                  0.44143795013427733
+                ],
+                [
+                  0.11226842880249023,
+                  0.5739443588256836
+                ],
+                [
+                  0.49231773376464844,
+                  0.5765683746337891
+                ],
+                [
+                  0.1920238494873047,
+                  0.5278472137451172
+                ],
+                [
+                  0.4118362045288086,
+                  0.5257614898681641
+                ],
+                [
+                  0.18265531539916993,
+                  0.7200340270996094
+                ],
+                [
+                  0.39788482666015623,
+                  0.7292835998535157
+                ],
+                [
+                  0.17024417877197265,
+                  0.9080556488037109
+                ],
+                [
+                  0.41082054138183594,
+                  0.914130859375
+                ]
+              ]
+            },
+            "searchMode": "pose"
+          },
+          "scene": {
+            "view": "back"
+          },
+          "people": []
+        },
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 8,
+          "stage": "ranking",
+          "updatedAt": "2026-11-06T06:03:04.707Z",
+          "completedStages": [
+            "analyzing",
+            "extracting",
+            "understanding",
+            "searching"
+          ],
+          "skippedStages": [
+            "refining"
+          ],
+          "scene": {
+            "view": "back"
+          },
+          "people": [
+            {
+              "personIndex": 0,
+              "skeleton": {
+                "format": "coco17",
+                "coordinateSpace": "image-normalized",
+                "points": [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  [
+                    0.1441029453277588,
+                    0.30258474349975584
+                  ],
+                  [
+                    0.4081344985961914,
+                    0.3004777908325195
+                  ],
+                  [
+                    0.10161624908447266,
+                    0.43806861877441405
+                  ],
+                  [
+                    0.4693830108642578,
+                    0.44143795013427733
+                  ],
+                  [
+                    0.11226842880249023,
+                    0.5739443588256836
+                  ],
+                  [
+                    0.49231773376464844,
+                    0.5765683746337891
+                  ],
+                  [
+                    0.1920238494873047,
+                    0.5278472137451172
+                  ],
+                  [
+                    0.4118362045288086,
+                    0.5257614898681641
+                  ],
+                  [
+                    0.18265531539916993,
+                    0.7200340270996094
+                  ],
+                  [
+                    0.39788482666015623,
+                    0.7292835998535157
+                  ],
+                  [
+                    0.17024417877197265,
+                    0.9080556488037109
+                  ],
+                  [
+                    0.41082054138183594,
+                    0.914130859375
+                  ]
+                ]
+              },
+              "searchMode": "pose"
+            },
+            {
+              "personIndex": 1,
+              "searchMode": "description"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
