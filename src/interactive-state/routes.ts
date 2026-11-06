@@ -199,6 +199,15 @@ export function createInteractiveRoutes(
       "Retry-After": "1",
     });
   });
+  r.get(`${INTERACTIVE_PATH}/:operationId/skin-assets/:digest`, async c => {
+    const operation = await op(c), digest = c.req.param("digest");
+    if (!/^[a-f0-9]{64}$/.test(digest)) throw new InteractiveError("NOT_FOUND", 404);
+    const asset = await service.skinAsset(operation, digest, c.req.raw.signal);
+    return new Response(asset.bytes, { headers: { "Content-Type": asset.contentType,
+      "Content-Length": String(asset.bytes.length), "Cache-Control": "private, no-store",
+      "X-Skin-Asset-SHA256": digest, "X-Standin-State-Hash": operation.stateHash!,
+      "X-Standin-Revision": String(operation.revision) } });
+  });
   r.get(`${INTERACTIVE_PATH}/:operationId/variants`, async (c) => {
     const operation = await op(c),
       bytes = await service.variants(operation, c.req.raw.signal);

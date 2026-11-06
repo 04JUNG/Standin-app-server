@@ -2,6 +2,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { appearanceSchema, nonzeroAppearance, type Appearance } from "../appearance/model.js";
+import type { SkinPreview } from "../appearance/skin-preview.js";
 import { skinSchema, nondefaultSkin, type Skin } from "../appearance/skin.js";
 export const HTTP_SCHEMA = "standin.interactive-http.v1";
 export const SHA = /^[a-f0-9]{64}$/;
@@ -61,6 +62,7 @@ export interface Operation extends Location {
   appearance?: Appearance;
   skin?: Skin;
   skinReceipt?: Record<string, unknown>;
+  skinPreview?: SkinPreview;
   /** Separately verified postprocess proof; base receipt stays unchanged. */
   outlineReceipt?: Record<string, unknown>;
   revision: number;
@@ -128,6 +130,9 @@ export function publicOperation(op: Operation) {
     candidateId: op.candidateId,
     ...(op.appearance ? { appearance: op.appearance } : {}),
     ...(op.skin ? { skin: op.skin } : {}),
+    ...(op.skin && op.skinPreview && active(op) && op.stateHash ? { skinPreview: { ...op.skinPreview,
+      uv: { ...op.skinPreview.uv, url: `${base}/skin-assets/${op.skinPreview.uv.sha256}` },
+      texture: { ...op.skinPreview.texture, url: `${base}/skin-assets/${op.skinPreview.texture.sha256}` } } } : {}),
     revision: op.revision,
     selectionHash: op.selectionHash,
     stateHash: op.stateHash,

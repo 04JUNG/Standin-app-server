@@ -1,3 +1,4 @@
+import { createSkinArtifacts } from "../converter/skin.js";
 import { finalReceipt } from "./model.js";
 import { createOutlineArtifacts } from "../converter/outline.js";
 /** Activation intentionally gated on an agreed, implemented Converter transport. */
@@ -17,6 +18,7 @@ const worker = createInteractiveWorker();
 export const interactiveService = new InteractiveService({
   store: new OperationStore(),
   outline: createOutlineArtifacts(),
+  skin: createSkinArtifacts(),
   resolve: createSelectionResolver(),
   worker,
   posters: new PrivatePosters(),

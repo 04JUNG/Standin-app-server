@@ -1,3 +1,4 @@
+import { checkSkinPreviewModel, type SkinPreview } from "../appearance/skin-preview.js";
 import { nondefaultSkin, type Skin } from "../appearance/skin.js";
 import { nonzeroAppearance, type Appearance } from "../appearance/model.js";
 import { parsePacket, parseReceipt } from "./packet.js";
@@ -38,8 +39,10 @@ export interface SkinApproval {
   /** Digest of exact manifest/version/model/UV/texture/runtime + certified target. */
   identity: string;
   supportedIds: Skin["id"][];
+  preview?: SkinPreview;
 }
 export interface SkinArtifacts {
+  asset?(op: Operation, selection: ResolvedSelection, digest: string, signal?: AbortSignal): Promise<{ bytes: Uint8Array; contentType: string }>;
   check(selection: ResolvedSelection, skin?: Skin, appearance?: Appearance): Promise<SkinApproval>;
   prepare(op: Operation, selection: ResolvedSelection, source: Uint8Array, signal: AbortSignal): Promise<Record<string, unknown>>;
   file(op: Operation, selection: ResolvedSelection, signal?: AbortSignal): Promise<Uint8Array>;
@@ -89,8 +92,8 @@ export class InteractiveService {
     const approval = material ? await this.skin().check(selection, material, normalized) : undefined;
     return this.withAppearance(selection, normalized, material, approval);
   }
-  private withAppearance(selection: ResolvedSelection, appearance?: Appearance, skin?: Skin, approval?: SkinApproval) {
-    return appearance || skin ? { ...selection, selectionHash: hash({ baseSelectionHash: selection.selectionHash, ...(appearance ? { appearance } : {}), ...(skin ? { skin, skinAssetIdentity: approval!.identity } : {}) }) } : selection;
+  private withAppearance(selection: ResolvedSelection, appearance?: Appearance, skin?: Skin, approval?: SkinApproval): ResolvedSelection & { skinPreview?: SkinPreview } {
+    return appearance || skin ? { ...selection, ...(skin && approval?.preview ? { skinPreview: approval.preview } : {}), selectionHash: hash({ baseSelectionHash: selection.selectionHash, ...(appearance ? { appearance } : {}), ...(skin ? { skin, skinAssetIdentity: approval!.identity } : {}) }) } : selection;
   }
   async prepare(l: Location, input: Prepare) {
     const selection = await this.resolve(l, input.candidateId, input.appearance, input.skin);
@@ -99,6 +102,7 @@ export class InteractiveService {
       l,
       input,
       selection.selectionHash,
+      "skinPreview" in selection ? selection.skinPreview : undefined,
     );
     try {
       await this.revalidate(prepared.op);
@@ -143,6 +147,10 @@ export class InteractiveService {
   }
   async revalidate(op: Operation) {
     const selection = await this.resolve(op, op.candidateId, op.appearance, op.skin);
+    if (op.skin && hash(op.skinPreview ?? null) !== hash(selection.skinPreview ?? null)) {
+      await this.cancel(op, true);
+      throw new InteractiveError("SKIN_BINDING_MISMATCH");
+    }
     if (selection.selectionHash !== op.selectionHash) {
       await this.cancel(op, true);
       throw new InteractiveError("INTERACTIVE_SUPERSEDED");
@@ -191,7 +199,8 @@ export class InteractiveService {
     } catch {
       throw new InteractiveError("CONVERTER_INTEGRITY");
     }
-    parsePacket(packet, op, selection);
+    const parsed = parsePacket(packet, op, selection);
+    checkSkinPreviewModel(op.skinPreview, parsed.payload.model);
     await this.assertDeliverable(op);
     return bytes;
   }
@@ -208,6 +217,14 @@ export class InteractiveService {
     // This is HTTP delivery, not native disk persistence or an export-completed event.
     this.deps.metric("artifact_download_delivered", "download", 0);
     return bytes;
+  }
+  async skinAsset(op: Operation, digest: string, signal?: AbortSignal) {
+    if (!active(op) || !op.stateHash || !op.skin || !op.skinPreview || !this.deps.skin?.asset)
+      throw new InteractiveError("INTERACTIVE_NOT_READY");
+    const selection = await this.revalidate(op);
+    const asset = await this.consume(op, () => this.skin().asset!(op, selection, digest, signal));
+    await this.assertDeliverable(op);
+    return asset;
   }
   async variants(op: Operation, signal?: AbortSignal) {
     if (!active(op) || op.exportState !== "ready" || !this.deps.worker.variants)
@@ -394,6 +411,7 @@ export class InteractiveService {
         if (!/^[A-Za-z0-9_-]{1,128}$/.test(solved.snapshotId))
           throw new InteractiveError("CONVERTER_INTEGRITY");
         const validated = parsePacket(solved.packet, op, selection);
+        checkSkinPreviewModel(op.skinPreview, validated.payload.model);
         if (controller.signal.aborted) return;
         await this.revalidate(op);
         const published = await this.deps.store.update(
@@ -437,6 +455,8 @@ export class InteractiveService {
           this.verifyAppearanceBytes(source, skinReceipt, "SKIN_INTEGRITY_ERROR");
           outlineSourceOperation(processed);
         }
+        if (controller.signal.aborted) return;
+        await this.revalidate(op);
         const outlineReceipt = op.appearance
           ? await this.outline().prepare(outlineSourceOperation(processed), selection, source!, controller.signal)
           : undefined;

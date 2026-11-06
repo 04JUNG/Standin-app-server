@@ -18,7 +18,7 @@ export class OperationStore {
     readonly tx: Transaction = (fn) => transaction((c) => fn(c)),
     readonly clock = Date.now,
   ) {}
-  async prepare(l: Location, input: Prepare, selectionHash: string) {
+  async prepare(l: Location, input: Prepare, selectionHash: string, skinPreview?: Operation["skinPreview"]) {
     return this.tx(async (db) => {
       // Same parent-row lock as selection/retention prevents resurrection during deletion.
       if (
@@ -86,7 +86,7 @@ export class OperationStore {
         ...l,
         candidateId: input.candidateId,
         ...(input.appearance ? { appearance: input.appearance } : {}),
-        ...(input.skin ? { skin: input.skin } : {}),
+        ...(input.skin ? { skin: input.skin, ...(skinPreview ? { skinPreview } : {}) } : {}),
         operationId: `op_${randomUUID()}`,
         revision: input.revision,
         selectionHash,
