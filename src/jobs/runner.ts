@@ -68,8 +68,8 @@ export async function runAnalysisJob(
       extractRefineContexts(cut),
       extractPersonSignals(cut),
       extractCutSummary(cut),
+      true, // observations, candidates, exact cameras and publication commit atomically
     );
-    await updateJob(jobId, { status: "completed", result });
     logQualityMetrics(jobId, result);
     log.info({ type: "analysis_job", jobId, phase: "analysis", jobStatus: "completed", durationMs: Date.now() - startedAt });
   } catch (error) {

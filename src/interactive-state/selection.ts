@@ -113,11 +113,14 @@ export function createSelectionResolver(
     )
       throw new InteractiveError("POSE_UNAVAILABLE");
     const bvhBytes = artifact.variant === "refined" ? artifact.bytes : base;
-    const refine = await deps.findRefinedArtifact(
+    const legacyRefine = await deps.findRefinedArtifact(
       jobId,
       personIndex,
       candidateId,
     );
+    const refine = artifact.prepared
+      ? { refined: artifact.prepared.refined, reason: artifact.prepared.reason, limbs: [], lineage: artifact.prepared.lineage }
+      : legacyRefine;
     if (
       artifact.variant === "refined" &&
       (!refine?.lineage || refine.lineage.baseSha256 !== originalSha)

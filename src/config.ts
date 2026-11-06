@@ -7,6 +7,8 @@ function env(key: string, def = ""): string {
 }
 
 export const config = {
+  candidatePreparationEnabled: env("CANDIDATE_PREPARATION_ENABLED", "false") === "true",
+  candidateRefineToken: env("CANDIDATE_REFINE_TOKEN"),
   /** Additive operation API; also requires a frozen implemented Converter transport. */
   interactiveConverterToken: env("CONVERTER_INTERACTIVE_TOKEN"),
   interactiveStateEnabled: env("INTERACTIVE_STATE_ENABLED", "false") === "true",

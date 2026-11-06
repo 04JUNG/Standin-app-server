@@ -1,3 +1,4 @@
+import { candidatePreparationAvailable } from "../candidate-preparation/runtime.js";
 import { interactiveEnabled } from "../interactive-state/runtime.js";
 import { staticAssets } from "../interactive-state/static.js";
 import { historyFrames } from "../interactive-state/history.js";
@@ -322,8 +323,9 @@ jobsRoutes.get("/:id/result", async (c) => {
     job.result,
   );
   const availability = sceneAvailability(job);
+  const candidatePreparation = result.source !== "semantic" && await candidatePreparationAvailable();
   const interactiveAssets = new Map<string, Map<string, unknown>>();
-  if (interactiveEnabled() && result.source !== "semantic") {
+  if (!candidatePreparation && interactiveEnabled() && result.source !== "semantic") {
     await Promise.all(
       result.candidatesByPerson.map(async (person) => {
         const body = person.bodySelection;
@@ -407,6 +409,7 @@ jobsRoutes.get("/:id/result", async (c) => {
       })),
     })),
     capabilities: {
+      candidatePreparation,
       ...(top5Ready
         ? {
             interactivePreview: {

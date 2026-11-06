@@ -1793,3 +1793,74 @@ and scene contracts retain their established safety/release rules.
 role이 있는 카탈로그의 공통 남성 폴백은 `defaultCharacterId`로 명시한 유일한 `gender=male,role=default` 자산이다. 기존 `male-base-*`는 `previous_default` 카드로 남고 새 ID/자산을 가리키도록 덮어쓰지 않는다. role 없는 카탈로그의 기존 남성 기본형 탐색 및 last_used/auto 정책은 유지한다. 작업 시작에 BodyRef를 고정하고, 과거 폴백 선택에 캡처 필드가 없더라도 저장된 BodyRef가 있으면 그 ID/해시/revision을 보존한다. 신규 자산 누락은 다른 BASE로 대체하지 않고 unavailable로 닫는다.
 
 새 비율·실제 hash·기존형 보존·캐시/포스터·병행 PR 경계는 [통합 계약](BODY_DEFAULT_ROLLOUT_20261104.md)을 따른다. 이 코드 변경은 자산 승인이나 배포/활성화를 뜻하지 않는다.
+
+## Source-only candidate preparation (opt-in)
+
+`capabilities.candidatePreparation` on the completed image result is true only when
+`CANDIDATE_PREPARATION_ENABLED=true`, a dedicated `CANDIDATE_REFINE_TOKEN` (32+ chars)
+is configured and the private source engine is available. Both default to disabled.
+Text search keeps its existing path. Older clients keep selected-only refinement.
+
+Under `/v1/analysis/jobs/:jobId/candidate-preparation` (existing installation/device
+authentication), POST `{schemaVersion:"standin.candidate-preparation.v1",
+mutationId,expectedRevision}` prepares every registered candidate. Initial revision
+is0. Same-context requests join the same durable batch across fullscreen/bar and
+replicas. The response is202 for new work,200 for replay. GET current or `/:batchId`
+returns status; one batch poll with `afterSequence` returns204 when unchanged.
+GET `/capabilities` provides the additive capability independently. DELETE
+`/:batchId` cancels; switching between fullscreen/bar must not cancel.
+
+The public DTO contains `batchId,revision,contextHash,candidateSetRevision,
+eventSequence,status,terminal,total,top5Ready,expiresAt,retryAfter,capabilities` and
+ordered `candidates[]`. Each row contains `personIndex,candidateId,resultId,
+contextHash,status,reasonCode,qualityScope,sourceSha256,outputSha256,modelUrl,
+previewAsset,validationReceipt,engine,timing`. Engine exposes bounded version/hash fields; timing
+retains actual engine queue/execution/cache observations. States are queued/running/ready_refined/ready_base/
+unsupported/failed_retryable/invalidated/cancelled. `top5Ready` waits for every row
+to be terminal, preserving unavailable rows and source rank. A genuine safety
+no-gain result is ready_base; timeout is failed_retryable with a5-second retry delay.
+No missing or unverified source bytes are marked ready_refined.
+
+`previewAsset` is `{schemaVersion:"candidate-source-preview-v1",format:"bvh",url,
+sha256,bytes,contextHash,sourceSha256,displayOnly:true,camera}`. Camera is the exact
+registered search camera. GET `/:batchId/people/:personIndex/candidates/:candidateId/model`
+returns SHA-checked exact UTF-8 BVH, private/no-store, with artifact/source SHA and
+context headers. A common display model is display-only. This stage applies no
+user body, shape, hands, scope or appearance; those changes never invalidate or
+recompute source. There is no target loading, retarget/mesh solve, PNG or FBX bake
+before selection. Source receipts explicitly say `qualityScope:"source_only",
+skinSafe:false,finalFileVerified:false`.
+
+POST `/:batchId/reuse` accepts `{schemaVersion,selections:[{personIndex,candidateId,
+resultId}]}`. Actual latest confirmed selections and full current source authority
+are required. It returns `selections[]` with result/context/output SHA, sourceUrl,
+sourceReceipt and RefineOutcome-compatible `refined,reasonCode,adjustedLimbs,
+thumbnailUrl,exportUrl`, plus `targetApplicationRequired:true,finalFileVerified:false`.
+It never records a selection or an exposure, consumes analysis quota, or runs a
+source solver. Existing selected-only body/hand/framed/interactive routes consume
+these prepared bytes before legacy artifacts and retain their final FBX checks.
+A source receipt is not FBX permission or skin-safety certification.
+
+The BFF supports at most64 candidates (current engine prepared working-set bound),5 per person (explicit400 above bounds),
+with sequential private chunks of at most10 under one job head and one durable
+global BFF lease, at most2 pending jobs/installation and20 globally. A120-second whole-batch budget includes queue wait. Internal
+engine admission separately bounds actual CPU work; HTTP cancellation does not
+free its running slots. The BFF never fans out5N requests. Statuses and source bytes
+are fenced by owner/job/source/observations/camera/policy/config/library/code hashes.
+Old context409, expiry410; engine restart/eviction invalidates ephemeral prepared
+IDs rather than silently substituting/re-solving. Transient failures can be retried
+with a new mutation ID and current revision; no-gain source cache is reusable.
+
+Migration is additive/idempotent: `analysis_candidates.preparation_camera_json` is
+written atomically with observations and completed result publication. Historical
+rows retain a read-only result JSON fallback. New `candidate_preparation_batches`,
+`candidate_preparation_heads` and `candidate_preparation_mutations` cascade on job
+and installation deletion. Legacy `refined_artifacts` is untouched and never serves
+as target revision authority. Private prepared data expires for access after9minutes
+and follows the parent job's data retention. Engine prepared-cache working-set/TTL
+limits and competing jobs can invalidate prepared results; no performance or production SLA is claimed.
+
+Validation: `npm run test:candidate-preparation` uses real Hono + PGlite and a
+controlled source engine. `node scripts/candidate-preparation-local-wire.mjs` runs
+a disposable127.0.0.1 fixture (3people/15candidates by default) for client wire tests;
+it is not production authentication, actual inference or final FBX evidence.
