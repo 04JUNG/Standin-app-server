@@ -1,6 +1,6 @@
 /** All source geometry, camera and policy inputs originate on the server. No selection is fabricated. */
 import { getOwnedJob } from "../jobs/store.js";
-import { loadRefineContext } from "../refine/store.js";
+import { loadRefineContext, type StoredRefineContext } from "../refine/store.js";
 import { candidateRefineAllowed } from "../refine/eligibility.js";
 import { hash, PreparationError, type Owner, type EngineInput, ENGINE_CONTRACT } from "./model.js";
 // Only source authority participates. Body, shape, hands, scope and appearance belong after selection.
@@ -12,6 +12,17 @@ function sourceCandidates(candidates: import("../types.js").PoseCandidate[]) {
     refineAllowed: c.refineAllowed ?? null, lookupAllowed: c.lookupAllowed ?? null,
     manualExportAllowed: c.manualExportAllowed ?? null, reviewRequired: c.reviewRequired ?? null,
     notExactMatch: c.notExactMatch ?? null }));
+}
+/** The final engine contract requires original, finite observations and complete policy lineage. */
+function sourceObservation(stored: StoredRefineContext | null) {
+  if (!stored || !Array.isArray(stored.keypoints) || stored.keypoints.length !== 17 ||
+    stored.keypoints.some(p => !Array.isArray(p) || p.length !== 2 || p.some(v => !Number.isFinite(v))) ||
+    !Array.isArray(stored.scores) || stored.scores.length !== 17 ||
+    stored.scores.some(v => !Number.isFinite(v) || v < 0) ||
+    [stored.skeletonState, stored.coverageClass, stored.slotOrigin, stored.skeletonSource]
+      .some(v => typeof v !== "string" || v.length === 0)) return null;
+  const { refineV3: _shadow, ...source } = stored;
+  return source;
 }
 const defaults = { getOwnedJob, loadRefineContext };
 export function createPreparationResolver(overrides: Partial<typeof defaults> = {}) {
@@ -31,11 +42,12 @@ export function createPreparationResolver(overrides: Partial<typeof defaults> = 
     // Deliberately bounded: no 5N network/body-model fanout.
     for (const person of people) {
       const stored = await deps.loadRefineContext(l.jobId, person.personIndex);
-      const observation = stored ? (({ refineV3: _shadow, ...source }) => source)(stored) : null;
+      const observation = sourceObservation(stored);
       bindings.push({ personIndex: person.personIndex, observation, candidates: sourceCandidates(person.candidates) });
       for (const c of person.candidates) {
         const source = c.sourceBvhSha256 ?? c.camera?.source_bvh_sha256;
-        if (!candidateRefineAllowed(c) || !observation || !source || !/^[a-f0-9]{64}$/.test(source) || !c.camera || !c.poseId) {
+        if (!candidateRefineAllowed(c) || !observation || !source || !/^[a-f0-9]{64}$/.test(source) || !c.camera || c.camera.source_bvh_sha256 !== source || !c.poseId ||
+          !/^[A-Za-z0-9_.:-]{1,128}$/.test(c.id)) {
           unsupported.push({ personIndex: person.personIndex, candidateId: c.id, sourceSha256: source ?? "",
             reason: !candidateRefineAllowed(c) ? "candidate_policy" : "authoritative_input_unavailable" });
           continue;

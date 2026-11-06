@@ -29,7 +29,7 @@ export async function setupFixture(people = 1) {
   const rows = Array.from({ length: people }, (_, person) => Array.from({ length: 5 }, (_, i) => ({
     person_id: String(person), candidate_id: `candidate_${person}_${i}`, source_sha256: sha(bvh),
     request: { pose_id: `pose_${person}_${i}`, view: "front", render_thumbnail: false, keypoints: Array(17).fill([1, 2]),
-      scores: null, search_distance: 0.1, refine_allowed: true, refinable_limbs: ["left_arm"], skeleton_state: "full",
+      scores: Array<number>(17).fill(1), search_distance: 0.1, refine_allowed: true, refinable_limbs: ["left_arm"], skeleton_state: "full",
       coverage_class: "full", slot_origin: "vlm", skeleton_source: "full_image", lower_body_observed: false },
   }))).flat() satisfies EngineInput["candidates"];
   const make = (c: EngineInput["candidates"][number]): EngineResult => ({ person_id: c.person_id, candidate_id: c.candidate_id,

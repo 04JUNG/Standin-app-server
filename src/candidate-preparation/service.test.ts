@@ -105,7 +105,7 @@ test("public mutation rejects untrusted geometry/targets and capability is owned
 
 test("real authority resolver excludes body, shape, hands, appearance and shadow from source keys", async () => {
   let body = 1, hand = 1, shadow = 1, source = 1;
-  const context = { keypoints: Array(17).fill([1, 2]), scores: null, refineAllowed: true, refinableLimbs: ["left_arm"],
+  const context = { keypoints: Array(17).fill([1, 2]), scores: Array<number>(17).fill(1), refineAllowed: true, refinableLimbs: ["left_arm"],
     skeletonState: "full", coverageClass: "full", slotOrigin: "vlm", skeletonSource: "full_image", lowerBodyObserved: false };
   const resolver = createPreparationResolver({ getOwnedJob: async () => ({ status: "completed", result: { source: "capture",
     candidatesByPerson: [{ personIndex: 0, bodySelection: { selectionRevision: body }, handSelection: { revision: hand },
@@ -173,4 +173,27 @@ test("lease renewal/expiry fences an old worker; swapped candidate results never
     assert.ok(b.candidates.filter((_, n) => n !== 2).every(c => c.status === "failed_retryable" && !c.bvh));
     assert.equal(b.candidates[2].status, "ready_base"); // unchanged middle result is still valid
   } finally { await s.pg.close(); }
+});
+
+test("missing final engine score/policy authority is unsupported locally without poisoning valid people", async () => {
+  const sha256 = sha(bvh);
+  const person = (personIndex: number) => ({ personIndex, candidates: [{ id: `source_${personIndex}`, poseId: "pose", rank: 1,
+    view: "front", sourceBvhSha256: sha256, camera: { source_bvh_sha256: sha256 } }] });
+  let missing: "scores" | "policy" = "scores";
+  const resolve = createPreparationResolver({
+    getOwnedJob: async () => ({ status: "completed", result: { source: "capture", candidatesByPerson: [person(0), person(1)] } }) as unknown as Job,
+    loadRefineContext: async (_j, personIndex) => ({ keypoints: Array(17).fill([1, 2]),
+      scores: personIndex === 1 && missing === "scores" ? null : Array<number>(17).fill(1), refineAllowed: true,
+      refinableLimbs: ["left_arm"], skeletonState: personIndex === 1 && missing === "policy" ? null : "valid",
+      coverageClass: "full", slotOrigin: "vlm", skeletonSource: "full_image", lowerBodyObserved: false }),
+  });
+  for (const field of ["scores", "policy"] as const) {
+    missing = field;
+    const context = await resolve(owner, { version: 1 });
+    assert.equal(context.candidates.length, 1);
+    assert.equal(context.candidates[0].person_id, "0");
+    assert.deepEqual(context.candidates[0].request.scores, Array<number>(17).fill(1));
+    assert.deepEqual(context.unsupported.map(c => [c.personIndex, c.reason]), [[1, "authoritative_input_unavailable"]]);
+    assert.equal(context.order.length, 2);
+  }
 });
