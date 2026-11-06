@@ -479,3 +479,16 @@ test("no-hand conversion still discards an output scope changed while rendering"
   assert.equal(r.status, 409);
   assert.equal((await r.json() as { error: { code: string } }).error.code, "OUTPUT_SCOPE_CHANGED");
 });
+
+test("legacy framed routes preserve zero and refuse nonzero/unknown outline input without conversion", async () => {
+  const s = setup();
+  const appearance = (width: unknown) => JSON.stringify({ version: "fbx-outline-v1", width });
+  for (const format of ["preview", "model", "ready", "fbx"]) {
+    assert.equal((await s.request({ format, appearance: appearance(1) })).status, 409);
+    assert.equal((await s.request({ format, appearance: appearance("1") })).status, 400);
+  }
+  assert.equal((await s.request({ outlineWidth: "1" })).status, 400);
+  assert.equal(s.state.calls, 0);
+  assert.equal((await s.request({ appearance: appearance(0) })).status, 200);
+  assert.equal(s.state.calls, 1);
+});
