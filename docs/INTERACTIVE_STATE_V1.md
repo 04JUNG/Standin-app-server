@@ -37,3 +37,21 @@ Converter's local private store is single-instance with TTL/capacity/byte budget
 - Actual recorded v2.5.4 refine and hand change match final FBX exactly; 13 male/female/scope/extreme/mirror cases have zero joint/vertex/skin/normal error.
 - Actual five Top5 GLBs prebuilt and hash-verified. Cached hand input-to-GPU-complete p95 19.6ms, 40 warm samples in one local Chrome run; excludes server/network/display presentation. This is not an uncached export latency improvement claim.
 - No licensed source/output asset, source controller, secret or private observation bytes are included in git.
+
+## Staging activation (2026-11-07)
+
+Staging uses a dedicated Secrets Manager `standin/staging/converter-interactive-token`
+reference as `CONVERTER_INTERACTIVE_TOKEN` on both BFF and Converter. Each staging
+execution role has GetSecretValue for that exact ARN only. Converter additionally
+requires `CONVERTER_INTERACTIVE_ENABLED=true` and a private writable
+`CONVERTER_INTERACTIVE_ROOT=/tmp/standin-interactive-private`. Its local snapshots
+are intentionally revoked on task restart; no shared volume or distributed worker
+claim is made. Enable BFF `INTERACTIVE_STATE_ENABLED=true` only after provisioning
+the Converter. Static Top5 assets remain optional; selection preview solves on demand.
+
+The BFF staging deployment preserves task secret wiring and, when environment variable
+`INTERACTIVE_STATE_ENABLED` is explicitly configured, validates private URL/secret
+wiring before setting the flag. An absent variable preserves the current task flag.
+The Converter workflow also inherits its live task environment/secret references.
+Production defaults and deployment configuration are unchanged. Rollback disables the
+BFF flag first, then the Converter flag; retained secret references are harmless.
