@@ -1,4 +1,5 @@
 import { legacyAppearanceError, unsupportedSceneAppearance } from "../appearance/legacy.js";
+import { skinMessage } from "../appearance/skin.js";
 import { outlineMessage } from "../appearance/model.js";
 import { SCENE_MANIFEST_VERSION, sceneManifest, scenePeople, type SceneManifest } from "./sceneManifest.js";
 import { log } from "../log.js";
@@ -116,7 +117,7 @@ export function createSceneRoutes(
     const queryAppearanceError = legacyAppearanceError(c);
     if (queryAppearanceError) return queryAppearanceError;
     const appearanceError = unsupportedSceneAppearance(value);
-    if (appearanceError) return fail(appearanceError === "INVALID_OUTLINE" ? 400 : 409, appearanceError, outlineMessage(appearanceError));
+    if (appearanceError) return fail(appearanceError.startsWith("INVALID") ? 400 : 409, appearanceError, appearanceError.includes("SKIN") ? skinMessage(appearanceError) : outlineMessage(appearanceError));
     const input = value as {
       parts?: unknown;
       cameraContractVersion?: unknown;

@@ -34,6 +34,7 @@ export function fixturePacket(op: Operation) {
   const typed = JSON.parse(protocolFixture.packet.canonicalState);
   typed.identity.selection.operation = op.operationId;
   typed.identity.selection.revision = op.revision;
+  typed.identity.selection.person = String(op.personIndex);
   const canonicalState = JSON.stringify(typed),
     stateHash = sha256Hex(Buffer.from(canonicalState));
   return {

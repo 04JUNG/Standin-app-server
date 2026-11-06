@@ -1,3 +1,4 @@
+import { finalReceipt } from "./model.js";
 import { createOutlineArtifacts } from "../converter/outline.js";
 /** Activation intentionally gated on an agreed, implemented Converter transport. */
 import { config } from "../config.js";
@@ -21,7 +22,7 @@ export const interactiveService = new InteractiveService({
   posters: new PrivatePosters(),
   renderPoster: (op, fbx, signal) =>
     renderFinalPreview(
-      { fbx, artifactSha256: String(op.appearance ? op.outlineReceipt!.artifactSha256 : op.receipt!.artifactSha256) },
+      { fbx, artifactSha256: String(finalReceipt(op)!.artifactSha256) },
       false,
       {},
       false,

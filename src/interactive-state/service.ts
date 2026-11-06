@@ -1,3 +1,4 @@
+import { nondefaultSkin, type Skin } from "../appearance/skin.js";
 import { nonzeroAppearance, type Appearance } from "../appearance/model.js";
 import { parsePacket, parseReceipt } from "./packet.js";
 import { sha256Hex } from "../converter/client.js";
@@ -10,6 +11,8 @@ import {
   type Operation,
   type Prepare,
   publicOperation,
+  finalReceipt,
+  outlineSourceOperation,
 } from "./model.js";
 import { OperationStore, type Stage } from "./store.js";
 import type { ResolvedSelection } from "./selection.js";
@@ -31,7 +34,18 @@ export interface OutlineArtifacts {
   prepare(op: Operation, selection: ResolvedSelection, source: Uint8Array, signal: AbortSignal): Promise<Record<string, unknown>>;
   file(op: Operation, selection: ResolvedSelection, signal?: AbortSignal): Promise<Uint8Array>;
 }
+export interface SkinApproval {
+  /** Digest of exact manifest/version/model/UV/texture/runtime + certified target. */
+  identity: string;
+  supportedIds: Skin["id"][];
+}
+export interface SkinArtifacts {
+  check(selection: ResolvedSelection, skin?: Skin, appearance?: Appearance): Promise<SkinApproval>;
+  prepare(op: Operation, selection: ResolvedSelection, source: Uint8Array, signal: AbortSignal): Promise<Record<string, unknown>>;
+  file(op: Operation, selection: ResolvedSelection, signal?: AbortSignal): Promise<Uint8Array>;
+}
 export interface InteractiveDeps {
+  skin?: SkinArtifacts;
   outline?: OutlineArtifacts;
   store: OperationStore;
   resolve(l: Location, candidateId: string): Promise<ResolvedSelection>;
@@ -68,13 +82,18 @@ export class InteractiveService {
       throw error;
     }
   }
-  private async resolve(l: Location, candidateId: string, appearance?: Appearance) {
+  private async resolve(l: Location, candidateId: string, appearance?: Appearance, skin?: Skin) {
     const selection = await this.deps.resolve(l, candidateId);
     const normalized = nonzeroAppearance(appearance);
-    return normalized ? { ...selection, selectionHash: hash({ baseSelectionHash: selection.selectionHash, appearance: normalized }) } : selection;
+    const material = nondefaultSkin(skin);
+    const approval = material ? await this.skin().check(selection, material, normalized) : undefined;
+    return this.withAppearance(selection, normalized, material, approval);
+  }
+  private withAppearance(selection: ResolvedSelection, appearance?: Appearance, skin?: Skin, approval?: SkinApproval) {
+    return appearance || skin ? { ...selection, selectionHash: hash({ baseSelectionHash: selection.selectionHash, ...(appearance ? { appearance } : {}), ...(skin ? { skin, skinAssetIdentity: approval!.identity } : {}) }) } : selection;
   }
   async prepare(l: Location, input: Prepare) {
-    const selection = await this.resolve(l, input.candidateId, input.appearance);
+    const selection = await this.resolve(l, input.candidateId, input.appearance, input.skin);
     if (input.appearance) await this.outline().check(selection, input.appearance);
     const prepared = await this.deps.store.prepare(
       l,
@@ -89,20 +108,26 @@ export class InteractiveService {
     }
     return prepared;
   }
-  async head(l: Location, candidateId: string, appearance?: Appearance) {
-    const selection = await this.resolve(l, candidateId, appearance),
-      head = await this.deps.store.currentHead(l);
+  async head(l: Location, candidateId: string, appearance?: Appearance, skin?: Skin) {
+    let selection = await this.deps.resolve(l, candidateId);
+    const head = await this.deps.store.currentHead(l), normalized = nonzeroAppearance(appearance), material = nondefaultSkin(skin);
     let appearanceAvailable = false;
     if (this.deps.outline) {
       try { await this.deps.outline.check(selection, nonzeroAppearance(appearance)); appearanceAvailable = true; } catch { /* Fail closed capability only. */ }
     }
+    let approval: SkinApproval | undefined;
+    if (this.deps.skin) {
+      try { approval = await this.deps.skin.check(selection, material, normalized); } catch { /* Fail closed capability only. */ }
+    }
+    if (!material || approval) selection = this.withAppearance(selection, normalized, material, approval);
     return {
       schemaVersion: "standin.interactive-http.v1",
+      skinExport: { version: "fbx-skin-v1", available: !!approval, supportedIds: approval?.supportedIds ?? ["default"] },
       appearanceExport: { version: "fbx-outline-v1", available: appearanceAvailable },
       currentRevision: head?.revision ?? 0,
       currentStateHash: head?.stateHash ?? null,
       operation:
-        head &&
+        head && (!material || approval) &&
         head.selectionHash === selection.selectionHash &&
         active(head) &&
         Date.parse(head.expiresAt) > this.deps.store.clock()
@@ -117,7 +142,7 @@ export class InteractiveService {
     return op;
   }
   async revalidate(op: Operation) {
-    const selection = await this.resolve(op, op.candidateId, op.appearance);
+    const selection = await this.resolve(op, op.candidateId, op.appearance, op.skin);
     if (selection.selectionHash !== op.selectionHash) {
       await this.cancel(op, true);
       throw new InteractiveError("INTERACTIVE_SUPERSEDED");
@@ -175,11 +200,10 @@ export class InteractiveService {
       throw new InteractiveError("INTERACTIVE_NOT_READY");
     const selection = await this.revalidate(op);
     // Preserve the existing Converter handle/expiry fence even when final bytes are privately cached.
-    if (op.appearance) await this.verifiedFile(op, signal);
-    const bytes = op.appearance
-      ? await this.consume(op, () => this.outline().file(op, selection, signal))
+    if (op.appearance || op.skin) await this.verifiedFile(op, signal);
+    const bytes = op.appearance || op.skin
+      ? await this.postprocessedFile(op, selection, signal)
       : await this.verifiedFile(op, signal);
-    if (op.appearance) this.verifyOutlineBytes(bytes, op.outlineReceipt);
     await this.assertDeliverable(op);
     // This is HTTP delivery, not native disk persistence or an export-completed event.
     this.deps.metric("artifact_download_delivered", "download", 0);
@@ -245,12 +269,12 @@ export class InteractiveService {
   async historyFrame(l: Location) {
     const op = await this.deps.store.frame(l);
     if (!op) throw new InteractiveError("NOT_FOUND", 404);
-    const selection = await this.resolve(l, op.candidateId, op.appearance);
+    const selection = await this.resolve(l, op.candidateId, op.appearance, op.skin);
     if (selection.selectionHash !== op.selectionHash)
       throw new InteractiveError("NOT_FOUND", 404);
     const bytes = await this.deps.posters.read(op);
     const current = await this.deps.store.frame(l),
-      fresh = await this.resolve(l, op.candidateId, op.appearance);
+      fresh = await this.resolve(l, op.candidateId, op.appearance, op.skin);
     if (
       !bytes ||
       current?.revision !== op.revision ||
@@ -259,12 +283,34 @@ export class InteractiveService {
       throw new InteractiveError("NOT_FOUND", 404);
     return { op, bytes };
   }
-  private verifyOutlineBytes(bytes: Uint8Array, receipt?: Record<string, unknown>) {
+  private verifyAppearanceBytes(bytes: Uint8Array, receipt: Record<string, unknown> | undefined, code: string) {
     const signature = Buffer.from(bytes.subarray(0, 23));
     if (!receipt || bytes.length > 30 * 1024 * 1024 ||
         bytes.length !== receipt.artifactBytes || sha256Hex(bytes) !== receipt.artifactSha256 ||
         !(signature.equals(Buffer.from("Kaydara FBX Binary  \0\x1a\0")) || signature.subarray(0, 5).toString("ascii") === "; FBX"))
-      throw new InteractiveError("OUTLINE_INTEGRITY_ERROR");
+      throw new InteractiveError(code);
+  }
+  private skin() {
+    if (!this.deps.skin) throw new InteractiveError("SKIN_DISABLED", 503);
+    return this.deps.skin;
+  }
+  private async postprocessedFile(op: Operation, selection: ResolvedSelection, signal?: AbortSignal) {
+    let bytes: Uint8Array | undefined;
+    if (op.skin) {
+      bytes = await this.consume(op, () => this.skin().file(op, selection, signal));
+      this.verifyAppearanceBytes(bytes, op.skinReceipt, "SKIN_INTEGRITY_ERROR");
+      outlineSourceOperation(op); // Enforce base → skin lineage even for skin-only downloads.
+    }
+    if (op.appearance) {
+      const source = outlineSourceOperation(op);
+      if (op.skin && op.outlineReceipt?.sourceArtifactSha256 !== source.receipt?.artifactSha256)
+        throw new InteractiveError("SKIN_BINDING_MISMATCH");
+      bytes = await this.consume(op, () => this.outline().file(source, selection, signal));
+      this.verifyAppearanceBytes(bytes, op.outlineReceipt, "OUTLINE_INTEGRITY_ERROR");
+    }
+    if (!bytes) throw new InteractiveError("INTERACTIVE_NOT_READY");
+    this.verifyAppearanceBytes(bytes, finalReceipt(op) ?? undefined, op.appearance ? "OUTLINE_INTEGRITY_ERROR" : "SKIN_INTEGRITY_ERROR");
+    return bytes;
   }
   private outline() {
     if (!this.deps.outline) throw new InteractiveError("OUTLINE_DISABLED", 503);
@@ -378,23 +424,36 @@ export class InteractiveService {
         );
         if (controller.signal.aborted) return;
         await this.revalidate(op);
-        const outlineReceipt = op.appearance
-          ? await this.outline().prepare({ ...op, receipt }, selection,
-              await this.verifiedFile({ ...op, receipt }, controller.signal), controller.signal)
+        let processed = { ...op, receipt }, source: Uint8Array | undefined;
+        if (op.skin || op.appearance) source = await this.verifiedFile(processed, controller.signal);
+        const skinReceipt = op.skin
+          ? await this.skin().prepare(processed, selection, source!, controller.signal)
           : undefined;
+        if (controller.signal.aborted) return;
+        await this.revalidate(op);
+        if (skinReceipt) {
+          processed = { ...processed, skinReceipt };
+          source = await this.skin().file(processed, selection, controller.signal);
+          this.verifyAppearanceBytes(source, skinReceipt, "SKIN_INTEGRITY_ERROR");
+          outlineSourceOperation(processed);
+        }
+        const outlineReceipt = op.appearance
+          ? await this.outline().prepare(outlineSourceOperation(processed), selection, source!, controller.signal)
+          : undefined;
+        if (op.skin && outlineReceipt && outlineReceipt.sourceArtifactSha256 !== skinReceipt?.artifactSha256)
+          throw new InteractiveError("SKIN_BINDING_MISMATCH");
         if (controller.signal.aborted) return;
         await this.revalidate(op);
         const published = await this.deps.store.update(
           op,
-          { exportState: "ready", receipt, ...(outlineReceipt ? { outlineReceipt } : {}) },
+          { exportState: "ready", receipt, ...(outlineReceipt ? { outlineReceipt } : {}), ...(skinReceipt ? { skinReceipt } : {}) },
           claim.leaseId,
         );
         if (!published) throw new InteractiveError("INTERACTIVE_SUPERSEDED");
       } else {
-        const bytes = op.appearance
-          ? await this.consume(op, () => this.outline().file(op, selection, controller.signal))
+        const bytes = op.appearance || op.skin
+          ? await this.postprocessedFile(op, selection, controller.signal)
           : await this.verifiedFile(op, controller.signal);
-        if (op.appearance) this.verifyOutlineBytes(bytes, op.outlineReceipt);
         const png = await this.deps.renderPoster(op, bytes, controller.signal);
         if (controller.signal.aborted) return;
         await this.revalidate(op);

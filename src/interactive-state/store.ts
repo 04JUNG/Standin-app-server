@@ -86,6 +86,7 @@ export class OperationStore {
         ...l,
         candidateId: input.candidateId,
         ...(input.appearance ? { appearance: input.appearance } : {}),
+        ...(input.skin ? { skin: input.skin } : {}),
         operationId: `op_${randomUUID()}`,
         revision: input.revision,
         selectionHash,
@@ -183,6 +184,7 @@ export class OperationStore {
         | "snapshotProof"
         | "receipt"
         | "outlineReceipt"
+        | "skinReceipt"
         | "poster"
         | "uiFrame"
         | "errorCode"
@@ -235,7 +237,7 @@ export class OperationStore {
         eventSequence: current.eventSequence + 1,
       });
       if (patch.poster) {
-        const frame = { ...updated, receipt: null, outlineReceipt: undefined, uiFrame: undefined };
+        const frame = { ...updated, receipt: null, outlineReceipt: undefined, skinReceipt: undefined, uiFrame: undefined };
         await db.query(
           `INSERT INTO interactive_history_frames(job_id,installation_id,person_index,revision,value) VALUES($1,$2,$3,$4,$5::jsonb)
           ON CONFLICT(job_id,person_index) DO UPDATE SET revision=$4,value=$5::jsonb WHERE interactive_history_frames.revision<$4`,
@@ -327,7 +329,7 @@ export class OperationStore {
     // Keep per-person monotonic revision heads until the parent job is deleted.
     await this.tx((db) =>
       db.query(
-        `UPDATE interactive_operations SET value=(value-'receipt'-'poster'-'outlineReceipt')||'{"receipt":null,"poster":null,"previewState":"cancelled","exportState":"cancelled"}'::jsonb WHERE (value->>'expiresAt')::timestamptz<now() AND value->>'previewState' NOT IN ('cancelled','superseded')`,
+        `UPDATE interactive_operations SET value=(value-'receipt'-'poster'-'outlineReceipt'-'skinReceipt')||'{"receipt":null,"poster":null,"previewState":"cancelled","exportState":"cancelled"}'::jsonb WHERE (value->>'expiresAt')::timestamptz<now() AND value->>'previewState' NOT IN ('cancelled','superseded')`,
       ),
     );
   }

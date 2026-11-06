@@ -1,33 +1,37 @@
 /** Legacy file formats never silently discard requested appearance. */
-import { appearanceSchema, outlineMessage } from "./model.js";
+import { appearanceSchema, nonzeroAppearance, outlineMessage } from "./model.js";
+import { skinSchema, nondefaultSkin, skinMessage } from "./skin.js";
 import { errorEnvelope } from "../mapping.js";
 import type { Context } from "hono";
 import type { AppEnv } from "../env.js";
+type AppearanceError = "INVALID_OUTLINE" | "OUTLINE_UNSUPPORTED" | "INVALID_SKIN" | "SKIN_UNSUPPORTED";
+function fieldError(key: string, value: unknown): AppearanceError | undefined {
+  if (/^skin/i.test(key)) {
+    const parsed = key === "skin" ? skinSchema.safeParse(value) : undefined;
+    if (!parsed?.success) return "INVALID_SKIN";
+    if (nondefaultSkin(parsed.data)) return "SKIN_UNSUPPORTED";
+  } else if (/^(outline|appearance)/i.test(key)) {
+    const parsed = key === "appearance" ? appearanceSchema.safeParse(value) : undefined;
+    if (!parsed?.success) return "INVALID_OUTLINE";
+    if (nonzeroAppearance(parsed.data)) return "OUTLINE_UNSUPPORTED";
+  }
+}
 export function legacyAppearanceError(c: Context<AppEnv>) {
-  const query = c.req.query();
-  if (Object.keys(query).some(k => /^(outline|appearance)/i.test(k) && k !== "appearance"))
-    return c.json(errorEnvelope("INVALID_OUTLINE", outlineMessage("INVALID_OUTLINE"), c.get("requestId")), 400);
-  const raw = c.req.queries("appearance");
-  if (!raw) return;
-  let value: unknown;
-  try { value = raw.length === 1 ? JSON.parse(raw[0]) : null; } catch { value = null; }
-  const parsed = appearanceSchema.safeParse(value);
-  if (!parsed.success)
-    return c.json(errorEnvelope("INVALID_OUTLINE", outlineMessage("INVALID_OUTLINE"), c.get("requestId")), 400);
-  if (parsed.data.width > 0)
-    return c.json(errorEnvelope("OUTLINE_UNSUPPORTED", outlineMessage("OUTLINE_UNSUPPORTED"), c.get("requestId")), 409);
+  for (const key of Object.keys(c.req.query())) {
+    if (!/^(outline|appearance|skin)/i.test(key)) continue;
+    const raw = c.req.queries(key); let value: unknown;
+    try { value = raw?.length === 1 ? JSON.parse(raw[0]) : null; } catch { value = null; }
+    const code = fieldError(key, value);
+    if (code) return c.json(errorEnvelope(code, code.includes("SKIN") ? skinMessage(code) : outlineMessage(code), c.get("requestId")), code.startsWith("INVALID") ? 400 : 409);
+  }
 }
 /** Check explicit root/person fields without changing the established scene contract. */
-export function unsupportedSceneAppearance(value: unknown): "INVALID_OUTLINE" | "OUTLINE_UNSUPPORTED" | undefined {
+export function unsupportedSceneAppearance(value: unknown): AppearanceError | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return;
   const object = value as Record<string, unknown>;
-  for (const key of Object.keys(object)) {
-    if (/^(outline|appearance)/i.test(key)) {
-      if (key !== "appearance") return "INVALID_OUTLINE";
-      const parsed = appearanceSchema.safeParse(object[key]);
-      if (!parsed.success) return "INVALID_OUTLINE";
-      if (parsed.data.width > 0) return "OUTLINE_UNSUPPORTED";
-    }
+  for (const [key, item] of Object.entries(object)) {
+    const error = fieldError(key, item);
+    if (error) return error;
   }
   if (Array.isArray(object.persons)) {
     for (const person of object.persons) {
