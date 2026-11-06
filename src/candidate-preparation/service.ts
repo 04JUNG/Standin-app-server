@@ -102,6 +102,7 @@ export class PreparationService {
       b = await this.deps.store.update(b, current => ({ ...current, status: "running",
         candidates: current.candidates.map(c => c.status === "queued" ? { ...c, status: "running" } : c) }), claim.leaseId) ?? b;
       const identity = await this.identity();
+      this.deps.metric("started", { queueWaitMs: Math.max(0, Date.now() - Date.parse(b.createdAt)), candidates: b.candidates.length, globalBffConcurrency: 1 });
       // Internal limit10 is a chunk bound, never a product person limit or a truncation rule.
       const deadline = Date.parse(b.createdAt) + 120000;
       for (let i = 0; i < b.input.candidates.length; i += 10) {

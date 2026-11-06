@@ -70,6 +70,12 @@ export function publicBatch(b: Batch) {
       return { personIndex: c.personIndex, candidateId: c.candidateId, resultId: c.resultId,
         contextHash: c.contextHash, status: c.status, reasonCode: c.reasonCode, qualityScope: c.qualityScope,
         sourceSha256: c.sourceSha256, outputSha256: c.outputSha256,
+        engine: c.engineResult ? Object.fromEntries([
+          "adapter_version", "policy_version", "selector_version", "code_version", "config_sha256",
+          "source_revision", "pose_library_version",
+        ].flatMap(key => typeof c.engineResult!.engine[key] === "string" && (c.engineResult!.engine[key] as string).length <= 200
+          ? [[key, c.engineResult!.engine[key]]] : [])) : null,
+        timing: c.engineResult?.timing ?? null,
         modelUrl: ready ? `${route}/model` : null,
         previewAsset: ready ? { schemaVersion: "candidate-source-preview-v1", format: "bvh",
           url: `${route}/model`, sha256: c.outputSha256, bytes: c.modelBytes,

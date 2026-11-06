@@ -1814,7 +1814,8 @@ The public DTO contains `batchId,revision,contextHash,candidateSetRevision,
 eventSequence,status,terminal,total,top5Ready,expiresAt,retryAfter,capabilities` and
 ordered `candidates[]`. Each row contains `personIndex,candidateId,resultId,
 contextHash,status,reasonCode,qualityScope,sourceSha256,outputSha256,modelUrl,
-previewAsset,validationReceipt`. States are queued/running/ready_refined/ready_base/
+previewAsset,validationReceipt,engine,timing`. Engine exposes bounded version/hash fields; timing
+retains actual engine queue/execution/cache observations. States are queued/running/ready_refined/ready_base/
 unsupported/failed_retryable/invalidated/cancelled. `top5Ready` waits for every row
 to be terminal, preserving unavailable rows and source rank. A genuine safety
 no-gain result is ready_base; timeout is failed_retryable with a5-second retry delay.
