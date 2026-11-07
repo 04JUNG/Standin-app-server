@@ -1,4 +1,5 @@
 /** Re-resolve all server authority at prepare, poll, publication and byte delivery. */
+import { loadBodyCatalog } from "../body-selection/catalog.js";
 import { getOwnedJob } from "../jobs/store.js";
 import {
   validateExportCandidate,
@@ -23,8 +24,12 @@ import { checkCharacter } from "../characters/service.js";
 import { sha256Hex } from "../converter/client.js";
 import { resolvePersonOutputScope } from "../output-scope/model.js";
 import { InteractiveError, hash, type Location } from "./model.js";
+export function bindInteractiveCamera<T extends object>(camera: T, sourceSha256: string) {
+  return { ...camera, source_bvh_sha256: sourceSha256 };
+}
 const defaults = {
   getOwnedJob,
+  loadBodyCatalog,
   validateExportCandidate,
   validateConfirmedSelection,
   getPoseBvh,
@@ -133,6 +138,12 @@ export function createSelectionResolver(
     // Camera mapping belongs to Converter. Legacy yaw-only cameras lack projection; refuse capability.
     if (!camera || !("projection" in camera))
       throw new InteractiveError("INTERACTIVE_CAMERA_UNSUPPORTED");
+    const defaultShapeRules = !body.shape
+      ? deps.loadBodyCatalog().assets.find((asset) =>
+          asset.characterId === characterId &&
+          asset.assetSha256 === body.resolvedBody!.assetSha256
+        )?.shapeRuntime?.rules ?? null
+      : null;
     const identity = {
       schema: "interactive-selection-v1",
       ownerBinding: hash({ installationId, jobId, personIndex }),
@@ -154,9 +165,11 @@ export function createSelectionResolver(
       bodyRevision: body.selectionRevision,
       shape: body.shape ?? null,
       shapeSource: body.shapeSource ?? null,
+      defaultShapeRules,
       hands,
       scope: resolvePersonOutputScope(person).resolved,
-      camera,
+      // Bind both search and server-resolved manual preview cameras to the exact source.
+      camera: bindInteractiveCamera(camera, originalSha),
       mirror: false,
       runtime,
       model,
@@ -171,6 +184,7 @@ export function createSelectionResolver(
       scope: identity.scope,
       camera,
       originalSha,
+      defaultShapeRules,
       sourceSha: sha256Hex(bvhBytes),
       runtime,
       model,

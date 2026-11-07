@@ -109,6 +109,12 @@ jobs:
         if: github.ref != 'refs/heads/main'
         run: node scripts/configure-staging-scene-export.mjs taskdef.json
 
+      - name: Configure staging private interactive transport
+        if: github.ref != 'refs/heads/main'
+        env:
+          STAGING_INTERACTIVE_STATE_ENABLED: ${{ vars.INTERACTIVE_STATE_ENABLED }}
+        run: node scripts/configure-staging-interactive.mjs taskdef.json
+
       - name: Refresh BFF body initializer runtime
         env:
           DEPLOY_IMAGE: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.image.outputs.digest }}

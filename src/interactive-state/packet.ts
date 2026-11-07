@@ -228,7 +228,7 @@ export function checkIdentity(
     i.body.characterId !== selection.characterId ||
     i.body.characterSha256 !== selection.body.resolvedBody!.assetSha256 ||
     i.shape.sha256 !== (selection.body.shape?.shapeSha256 ?? null) ||
-    i.shape.rulesVersion !== (selection.body.shapeSource?.rules ?? "none") ||
+    i.shape.rulesVersion !== (selection.body.shapeSource?.rules ?? (!selection.body.shape ? selection.defaultShapeRules : null) ?? "none") ||
     i.hands.left !== (selection.hands?.left ?? null) ||
     i.hands.right !== (selection.hands?.right ?? null) ||
     (selection.hands &&

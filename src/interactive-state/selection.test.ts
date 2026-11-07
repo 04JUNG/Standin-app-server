@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createSelectionResolver } from "./selection.js";
+import { bindInteractiveCamera, createSelectionResolver } from "./selection.js";
 import { sha256Hex } from "../converter/client.js";
 import type { Job } from "../jobs/store.js";
 import type { BodySelection } from "../body-selection/model.js";
@@ -20,6 +20,7 @@ function setup(purpose: "export" | "preview" = "export") {
     scope: "full",
     character: "ok",
     runtime: "a".repeat(64),
+    catalogSha: "c".repeat(64),
     source: source,
   };
   const body = () =>
@@ -37,6 +38,7 @@ function setup(purpose: "export" | "preview" = "export") {
     }) as BodySelection;
   const resolver = createSelectionResolver(
     {
+      loadBodyCatalog: () => ({ version: "test", defaultCharacterId: null, assets: [{ characterId: "registered", assetSha256: s.catalogSha, shapeRuntime: { rules: "standin-body-0.7.2" } }] }) as never,
       getOwnedJob: async () =>
         s.owner
           ? ({
@@ -170,4 +172,21 @@ test("operation metadata cannot change the exact location ownership binding duri
   assert.equal(revalidated.selectionHash, initial.selectionHash);
   assert.notEqual((await resolve({ installationId: "inst_other" })).identity.ownerBinding, initial.identity.ownerBinding);
   assert.notEqual((await resolve({ jobId: "job_other" })).identity.ownerBinding, initial.identity.ownerBinding);
+});
+
+test("manual preview camera receives exact validated source without changing its projection", () => {
+  const camera = { version: "pose-preview-camera-v1", projection: "perspective", distance_torso: 8, rotation: [[1,0,0],[0,1,0],[0,0,1]] };
+  assert.deepEqual(bindInteractiveCamera(camera, sha), { ...camera, source_bvh_sha256: sha });
+  assert.equal("source_bvh_sha256" in camera, false);
+});
+
+test("default shape rules are bound only from an exact trusted catalog body", async () => {
+ const {s,resolve}=setup("preview");
+ const first=await resolve();
+ assert.equal(first.defaultShapeRules,"standin-body-0.7.2");
+ assert.equal(first.identity.defaultShapeRules,"standin-body-0.7.2");
+ s.catalogSha="d".repeat(64);
+ const changed=await resolve();
+ assert.equal(changed.defaultShapeRules,null);
+ assert.notEqual(first.selectionHash,changed.selectionHash);
 });
