@@ -1,4 +1,5 @@
 import { bodyPresentation } from "./presentation.js";
+import { defaultPickerVisibility, type PickerVisibility } from "./pickerVisibility.js";
 import { shapeRuntimeMetadata } from "./shapeRuntime.js";
 import { automaticRecommendation, isChildBody } from "./childPolicy.js";
 import { neutralMetadata } from "./neutral.js";
@@ -46,7 +47,8 @@ export interface Mutation {
   mutationId: string;
 }
 export interface PreferenceChange extends Mutation {
-  mode: BodyPreferences["mode"];
+  mode?: BodyPreferences["mode"];
+  pickerVisibility?: PickerVisibility;
 }
 /** Card edits. Each bumps the preferences revision like any other preference write. */
 export type CardChange = Mutation &
@@ -106,8 +108,10 @@ export function presentPreferences(
   value: BodyPreferences,
   catalog: BodyCatalog = loadBodyCatalog(),
 ): PresentedPreferences {
+  const normalized = normalizePreferences(value);
   return {
-    ...normalizePreferences(value),
+    ...normalized,
+    pickerVisibility: normalized.pickerVisibility ?? defaultPickerVisibility(),
     cards: cardsOf(value),
     lastUsed: value.lastUsed ?? null,
     shapeEditable: presentShapeEditable(catalog),
@@ -186,17 +190,20 @@ export async function writePreferences(
     [owner],
   );
   if (!lock.rows.length) throw new BodyError("NOT_FOUND", 404);
-  const previous = await replay(db, owner, "preferences", change, [
-    change.mode,
-    change.expectedRevision,
-  ]);
+  // Keep legacy mode-write hashes stable. New visibility writes have their own payload.
+  const payload = [change.mode ?? null, change.expectedRevision];
+  const previous = await replay(
+    db, owner, "preferences", change,
+    change.pickerVisibility === undefined ? payload : [...payload, change.pickerVisibility],
+  );
   if (previous.value)
     return normalizePreferences(previous.value as BodyPreferences);
   const current = await readPreferences(db, owner);
   expect(current.revision, change.expectedRevision, "BODY_PREFERENCE_CONFLICT");
   const value: BodyPreferences = {
     ...current,
-    mode: change.mode,
+    mode: change.mode ?? current.mode,
+    ...(change.pickerVisibility ? { pickerVisibility: structuredClone(change.pickerVisibility) } : {}),
     revision: current.revision + 1,
   };
   await db.query(
@@ -315,6 +322,13 @@ export async function writeCards(
   const value: BodyPreferences = {
     ...current,
     cards: next,
+    ...(current.pickerVisibility ? {
+      pickerVisibility: {
+        ...current.pickerVisibility,
+        hiddenCardIds: current.pickerVisibility.hiddenCardIds.filter((id) =>
+          next.some((card) => card.cardId === id)),
+      },
+    } : {}),
     revision: current.revision + 1,
   };
   await storePreferences(db, owner, value);
