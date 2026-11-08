@@ -58,7 +58,6 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
   .pill.ok { background:color-mix(in srgb,var(--ok) 18%,transparent); color:var(--ok); }
   .pill.warn { background:color-mix(in srgb,var(--warn) 18%,transparent); color:var(--warn); }
   .pill.bad { background:color-mix(in srgb,var(--bad) 18%,transparent); color:var(--bad); }
-  #internalToggle.on { border-color:var(--c-users); color:var(--c-users); font-weight:700; }
   .pill.search { background:color-mix(in srgb,var(--c-down) 16%,transparent); color:var(--c-down); }
   .searchq { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:4px; font-family:inherit; }
   .searchq .q { color:var(--text); font-size:12.5px; word-break:break-all; }
@@ -234,7 +233,6 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
         <option value="90">90일</option>
       </select>
     </label>
-    <button class="ghost" id="internalToggle" title="개발자로 표시한 설치를 목록·숫자·모아 보기에서 빼거나 넣는다">개발자 —</button>
     <span class="sub" title="열람 기록이 이 이름으로 남는다">
       <span id="reviewer">—</span> · 갱신 <span id="updated">—</span>
     </span>
@@ -492,23 +490,17 @@ async function tick() {
 }
 
 // ── 개발자 설치 ──────────────────────────────────────────────
-// 표시한 설치는 "개발자 제외"가 켜져 있으면 서버의 관리자 뷰가 통째로 뺀다. 화면이 따로
-// 거르지 않으므로, 바꾼 뒤에는 새로고침해서 모든 숫자를 같은 기준으로 다시 받는다.
-let internal = { hide: true, ids: new Set() };
+// 표시한 설치는 서버의 관리자 뷰가 목록·숫자·모아 보기에서 늘 뺀다. 그 Job은 작업 탭의
+// 개발자 Job에서 본다. 표시를 바꾸면 모든 숫자를 같은 기준으로 다시 받도록 새로고침한다.
+let internal = { ids: new Set() };
 
 async function internalLoad() {
   try {
     const res = await fetch("/v1/admin/internal-installations", { headers: { "X-Beta-Admin-Token": token } });
     if (!res.ok) return;
     const data = await res.json();
-    internal = { hide: data.hide, ids: new Set(data.items.map((item) => item.installationId)) };
-  } catch (error) { /* 스위치를 못 읽어도 나머지 화면은 그대로 쓴다 */ }
-  internalRender();
-}
-
-function internalRender() {
-  $("internalToggle").textContent = "개발자 " + (internal.hide ? "제외 중" : "포함 중") + " · " + internal.ids.size + "곳";
-  $("internalToggle").classList.toggle("on", internal.hide);
+    internal = { ids: new Set(data.items.map((item) => item.installationId)) };
+  } catch (error) { /* 표시를 못 읽어도 나머지 화면은 그대로 쓴다 */ }
 }
 
 async function internalPut(path, body) {
@@ -521,19 +513,12 @@ async function internalPut(path, body) {
   location.reload();
 }
 
-$("internalToggle").addEventListener("click", () => {
-  const next = !internal.hide;
-  if (confirm(next ? "개발자 설치 " + internal.ids.size + "곳을 목록·숫자·모아 보기에서 뺄까요?" : "개발자 설치도 다시 보이게 할까요?")) {
-    internalPut("hide", { hide: next });
-  }
-});
-
 // 설치 조회 머리말의 버튼. 그 영역은 다시 그려지므로 위임으로 받는다.
 document.addEventListener("click", (event) => {
   const button = event.target.closest && event.target.closest("button[data-internal]");
   if (!button) return;
   const on = button.dataset.on === "1";
-  const note = on && internal.hide ? " 지금은 개발자 제외가 켜져 있어 이 설치가 바로 화면에서 사라집니다." : "";
+  const note = on ? " 이 설치는 목록·숫자·모아 보기에서 빠지고, 작업 탭의 개발자 Job에서 볼 수 있습니다." : "";
   if (confirm((on ? "개발자 설치로 표시할까요?" : "개발자 표시를 해제할까요?") + note)) {
     internalPut(encodeURIComponent(button.dataset.internal), { internal: on });
   }
@@ -1132,12 +1117,10 @@ function recentRender() {
     '<td class="mono">' + esc(item.jobId) + searchNote(item) + "</td>" +
     '<td class="sub">' + when(item.createdAt) + "</td>" +
     '<td class="num">' + took(item) + "</td>" +
-    "<td>" + (recent.scope === "developer" && item.installationId
-      ? '<span class="sub" title="' + esc(item.installationId) + '">' + esc(item.developerLabel || "개발자") + " · " +
-        esc(String(item.installationId).slice(0, 13)) + "…</span>"
-      : item.installationId
+    "<td>" + (item.installationId
       ? '<button class="ghost mono" data-inst="' + esc(item.installationId) + '" title="' +
-        esc(item.installationId) + '">' + esc(String(item.installationId).slice(0, 13)) + "…</button>"
+        esc(item.installationId) + '">' + (recent.scope === "developer" ? esc(item.developerLabel || "개발자") + " · " : "") +
+        esc(String(item.installationId).slice(0, 13)) + "…</button>"
       : '<span class="sub">—</span>') + "</td>" +
     '<td class="num">' + (item.personCount === null || item.personCount === undefined ? "—" : item.personCount) + "</td>" +
     '<td class="num">' + (item.selectionCount === null || item.selectionCount === undefined ? "—" : item.selectionCount) + "</td>" +

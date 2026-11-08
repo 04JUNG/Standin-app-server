@@ -332,7 +332,7 @@ export const SCHEMA = `
     updated_at TEXT NOT NULL
   );
 
-  -- 개발자(팀원) 설치. 대시보드의 "개발자 제외" 스위치가 켜져 있으면 관리자 뷰에서 빠진다.
+  -- 개발자(팀원) 설치. 관리자 목록·숫자·모아 보기에서 늘 빠진다.
   -- 데이터 처리에는 영향이 없다 — 관리자 화면에서 보이느냐만 정한다.
   CREATE TABLE IF NOT EXISTS internal_installations (
     id         TEXT PRIMARY KEY,
@@ -624,6 +624,21 @@ async function refreshAggregatesAndRetention(client: PoolClient): Promise<void> 
   await client.query("DELETE FROM journey_visitors WHERE expires_at <= now()");
   await client.query("DELETE FROM journey_links WHERE expires_at <= now()");
   await client.query("DELETE FROM journey_handoffs WHERE expires_at <= now()");
+  // 일별 집계는 UPSERT라, 개발자 Job만 있던 날의 줄은 저절로 고쳐지지 않는다. 원본이 남아 있는
+  // 날만 지운다 — 원본이 만료된 지난날은 이 표가 유일한 기록이다.
+  await client.query(`
+    DELETE FROM daily_analytics_aggregates d
+     WHERE EXISTS (SELECT 1 FROM quality_review_all_jobs a WHERE left(a.created_at, 10) = d.day)
+       AND NOT EXISTS (SELECT 1 FROM quality_review_jobs u
+                        WHERE left(u.created_at, 10) = d.day AND u.installation_id IS NOT NULL)
+  `);
+  await client.query(`
+    DELETE FROM daily_library_aggregates d
+     WHERE EXISTS (SELECT 1 FROM quality_review_all_jobs a WHERE left(a.created_at, 10) = d.day)
+       AND NOT EXISTS (SELECT 1 FROM library_observations_v1 o
+                        WHERE o.day = d.day AND o.pose_library_version = d.pose_library_version
+                          AND o.coverage_class = d.coverage_class)
+  `);
   await client.query(`
     INSERT INTO daily_analytics_aggregates (
       day, jobs_started, jobs_completed, jobs_failed, confirmed_selections,

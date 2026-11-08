@@ -352,7 +352,7 @@ export async function listJobHistory(
     `SELECT j.id, j.status, j.created_at, j.completed_at, j.error_code, j.source,
             j.input_width, j.input_height, (j.input_s3_key IS NOT NULL) AS has_input,
             p.person_count, s.selection_count, t.thumb_pose_id, t.thumb_view
-     FROM ${reviewOnly ? "quality_review_jobs" : "jobs"} j
+     FROM ${reviewOnly ? "quality_review_all_jobs" : "jobs"} j
      LEFT JOIN LATERAL (
        SELECT count(*)::int AS person_count
        FROM analysis_people ap WHERE ap.job_id = j.id
@@ -571,8 +571,7 @@ export type RecentJobsScope = "users" | "developer";
 
 export async function listRecentJobs(
   params: HistoryQuery,
-  // 작업 탭은 scope를 넘겨 "개발자 제외" 스위치와 상관없이 늘 같은 대상을 받는다. 지정하지
-  // 않으면(개요의 최근 Job) 스위치를 따른다.
+  // developer는 개발자 Job만, 그 외에는 개발자를 뺀 사용자 Job만 돌려준다.
   scope?: RecentJobsScope,
 ): Promise<Array<JobHistoryRow & { installation_id: string; developer_label: string | null }>> {
   const developer = scope === "developer";

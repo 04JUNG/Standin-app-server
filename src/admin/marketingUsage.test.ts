@@ -4,7 +4,6 @@ import { PGlite } from '@electric-sql/pglite';
 import { pool, SCHEMA } from '../db.js';
 import { marketingUsage, marketingUsageDetails } from './marketingUsage.js';
 import { acquisitionSummary } from '../installations/acquisition.js';
-import { HIDE_INTERNAL_FLAG } from '../installations/qualityConsent.js';
 
 test('operational aggregates count non-consenting use, deduplicate installs and respect deletion/internal filters', async t => {
   const db = new PGlite();
@@ -36,9 +35,6 @@ test('operational aggregates count non-consenting use, deduplicate installs and 
   assert.equal(attribution[0].creative,'unknown');
   assert.equal(attribution[0].installations,2);
   assert.equal(attribution[0].analyzed,0,'unconsented use remains unlinked to advertising');
-  await db.query('INSERT INTO service_flags(key,value,updated_at) VALUES($1,\'false\',$2)',[HIDE_INTERNAL_FLAG,now]);
-  const withInternal=await marketingUsage(7,now);
-  assert.equal(withInternal.newInstallations,3); assert.equal(withInternal.newCompleted,2); assert.equal(withInternal.hideInternal,false);
   const empty=await marketingUsage(7,new Date(Date.parse(now)+30*86400000).toISOString());
   assert.equal(empty.newInstallations,0);assert.equal(empty.newCompleted,0);assert.equal(empty.jobsStarted,0);
 });
@@ -70,8 +66,6 @@ test('daily operational report uses KST and counts repeat analysis days without 
     {day:'2026-11-05',newInstallations:0,jobsStarted:4,jobsCompleted:2,jobsFailed:1},
   ]);
   assert.ok(!JSON.stringify(result).includes('returning'));
-  await db.query('INSERT INTO service_flags(key,value,updated_at) VALUES($1,\'false\',$2)',[HIDE_INTERNAL_FLAG,now]);
-  const including=await marketingUsageDetails(2,now);assert.equal(including.repeatAnalyzers,2);assert.equal(including.jobsFailed,3);
   await assert.rejects(marketingUsageDetails(91,now));
   await assert.rejects(marketingUsageDetails(7,'bad'));
 });

@@ -62,9 +62,7 @@ import { GALLERY_PAGE, parseGalleryQuery, parseGroup, STATUS_ORDER } from "./gal
 import { galleryFolders, galleryItems } from "./galleryStore.js";
 import { SEMANTIC_SOURCE, searchQueries, searchQueryOf } from "./searchQueries.js";
 import {
-  hideInternalInstallations,
   listInternalInstallations,
-  setHideInternalInstallations,
   setInternalInstallation,
 } from "./internalInstallations.js";
 import { notify } from "../notify.js";
@@ -255,26 +253,12 @@ adminRoutes.put("/flags/analysis_enabled", async (c) => {
 });
 
 /**
- * GET /v1/admin/internal-installations — 개발자 설치 목록과 "개발자 제외" 스위치.
+ * GET /v1/admin/internal-installations — 개발자 설치 목록.
  *
- * 스위치가 켜져 있으면 표시된 설치는 목록·상세·숫자·모아 보기에서 모두 빠진다(뷰가 거른다).
+ * 표시된 설치는 목록·숫자·모아 보기에서 늘 빠진다(뷰가 거른다).
  */
 adminRoutes.get("/internal-installations", async (c) => {
-  return c.json({
-    hide: await hideInternalInstallations(),
-    items: await listInternalInstallations(),
-  });
-});
-
-/** PUT /v1/admin/internal-installations/hide — body {hide:boolean}. */
-adminRoutes.put("/internal-installations/hide", async (c) => {
-  const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
-  if (typeof body?.hide !== "boolean") {
-    return c.json(errorEnvelope("INVALID_INPUT", "hide(boolean)이 필요합니다.", c.get("requestId")), 400);
-  }
-  await setHideInternalInstallations(body.hide);
-  await audit(c, body.hide ? "hide_internal_installations" : "show_internal_installations");
-  return c.json({ hide: body.hide });
+  return c.json({ items: await listInternalInstallations() });
 });
 
 /** PUT /v1/admin/internal-installations/:id — body {internal:boolean, label?:string}. 개발자 설치 표시·해제. */
