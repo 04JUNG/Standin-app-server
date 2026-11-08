@@ -32,12 +32,14 @@ import { requireInstallation } from "./installations/middleware.js";
 import { rateLimitByIp } from "./limits/middleware.js";
 import { adminRoutes } from "./admin/routes.js";
 import { CAMPAIGN_COUNT_PATH, createCampaignCountRoutes } from "./marketingCounts.js";
+import { createWebJourneyRoutes } from "./journey/routes.js";
 
 const app = new Hono<AppEnv>();
 
 // Terminate shared-label counts before request IDs, identity-aware logging,
 // authentication and IP-based limits. This route cannot access service records.
 app.route(CAMPAIGN_COUNT_PATH, createCampaignCountRoutes());
+app.route('/v1/web-analytics', createWebJourneyRoutes());
 
 /**
  * requestId 부여 + 요청 로그 한 줄(오류봉투·집계·알림의 공통 입구).

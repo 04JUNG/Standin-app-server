@@ -14,6 +14,7 @@ import {
   PERSON_COLORS,
 } from "./skeleton.js";
 import { MARKETING_ANALYTICS_SCRIPT } from "./marketingDashboard.js";
+import { JOURNEY_DASHBOARD_SCRIPT } from "./journeyDashboard.js";
 
 // 뼈대 상수는 TypeScript 모듈 하나에만 둔다. 화면용 사본을 따로 적으면 관절 순서가
 // 조용히 어긋나므로, 여기서 JSON으로 심어 브라우저와 테스트가 같은 값을 쓰게 한다.
@@ -1710,6 +1711,7 @@ function campaignCountsBlock(counts) {
 }
 
 ${MARKETING_ANALYTICS_SCRIPT}
+${JOURNEY_DASHBOARD_SCRIPT}
 function marketingRender(data,scope) {
   scope = scope || 'all';
   let html = marketingMetaBlock(data.meta,scope);
@@ -1717,6 +1719,7 @@ function marketingRender(data,scope) {
   html += '<p class="sub">앱 조회 ' + esc(when(data.queriedAt)) + ' · 신규 설치 범위: ' + esc(when(data.since)) + ' 이후 최근 ' + esc(data.windowDays) + '일(이동 구간). 광고 달력 날짜 범위와 다르므로 두 표를 나누어 비교하세요.</p>';
   html += marketingUsageBlock(data.usage);
   html += marketingUsageDetailsBlock(data.usageDetails,data.usage);
+  html += journeyBlock(data.journeys);
   html += campaignCountsBlock(data.campaignCounts);
   html += acquisitionBlock(data.acquisition);
   html += '<p class="sub">신규 설치는 설치 파일 다운로드나 설치 프로그램 완료가 아니라 앱 첫 실행 후 서버에 등록된 설치 식별자 수입니다. 개발자 제외 설정은 서버 기록·선택 연결 집계에 적용합니다. 설치별 이용 연결은 동의한 기록만 비교하며 소재별 건수 통계와 합산하지 않습니다. 같은 소재의 랜딩·다운로드 광고 단계는 앱 출처에서 구분되지 않으므로 전체 광고 전환율·단계별 A/B 승자 판정으로 해석하지 않습니다.</p>';

@@ -56,6 +56,7 @@ export async function transaction<T>(fn: (client: PoolClient) => Promise<T>): Pr
 }
 
 import { QUALITY_CONSENT_SCHEMA } from "./installations/qualityConsent.js";
+import { JOURNEY_SCHEMA } from "./journey/schema.js";
 
 export const SCHEMA = `
   CREATE TABLE IF NOT EXISTS campaign_daily_counts (
@@ -410,6 +411,7 @@ export const SCHEMA = `
   CREATE INDEX IF NOT EXISTS ops_metrics_bucket ON ops_metrics (bucket_at);
 
   ${QUALITY_CONSENT_SCHEMA}
+  ${JOURNEY_SCHEMA}
 
   CREATE OR REPLACE VIEW analytics_job_funnel AS
   SELECT
@@ -619,6 +621,9 @@ export async function initDb(): Promise<void> {
 }
 
 async function refreshAggregatesAndRetention(client: PoolClient): Promise<void> {
+  await client.query("DELETE FROM journey_visitors WHERE expires_at <= now()");
+  await client.query("DELETE FROM journey_links WHERE expires_at <= now()");
+  await client.query("DELETE FROM journey_handoffs WHERE expires_at <= now()");
   await client.query(`
     INSERT INTO daily_analytics_aggregates (
       day, jobs_started, jobs_completed, jobs_failed, confirmed_selections,
