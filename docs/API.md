@@ -1,5 +1,7 @@
 # API 계약 — BFF가 클라(Tauri)에 노출하는 `/v1`
 
+웹 방문·앱 이용 경로의 새 선택 동의 계약(2026-11-09)은 [JOURNEY_ANALYTICS.md](JOURNEY_ANALYTICS.md)를 참조합니다. 운영 대시보드 `/v1/admin/marketing`의 `journeys` 필드는 미동의 설치를 개별 마케팅 경로로 반환하지 않습니다.
+
 ## Top5 수평 8방향 미리보기 2026-10-21
 
 기존 일반 후보와 동적 `pose-previews`의 `/poster` URL에 `variant=rough-yaw8-v1`을 추가하면, BFF가 저장된 후보별 `render_camera`에서 가장 가까운 45도 방향을 고릅니다. 중간값은 증가 방향으로 선택하며 원본 검색·내보내기 카메라는 보존합니다. 임의 query `view`는 저장된 선택과 불일치하면 409입니다. legacy 카메라는 검증된 변환이 없으면 정면 참고로 둡니다.

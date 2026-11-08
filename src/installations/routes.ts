@@ -17,7 +17,9 @@ import {
   revokeAndDeleteInstallationData,
 } from "./store.js";
 
+import { createAppJourneyRoutes } from '../journey/routes.js';
 export const installationRoutes = new Hono<AppEnv>();
+installationRoutes.route('/current/journey', createAppJourneyRoutes());
 installationRoutes.route("/current/acquisition", acquisitionRoutes);
 installationRoutes.use("/current/body-preferences", requireInstallation);
 installationRoutes.use("/current/body-preferences/*", requireInstallation);
