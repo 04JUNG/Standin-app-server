@@ -188,53 +188,56 @@ const NOT_HIDDEN_INTERNAL = `(
  * 개발자 설치(`internal_installations`)는 "개발자 제외" 스위치가 켜져 있으면 어느 범위든 뺀다.
  */
 export function qualityReviewViews(withoutConsent: boolean): string {
-  if (withoutConsent) {
-    return `
-  CREATE OR REPLACE VIEW quality_review_installations AS
-    SELECT * FROM installations WHERE revoked_at IS NULL AND deletion_requested_at IS NULL
-      AND ${NOT_HIDDEN_INTERNAL};
-  CREATE OR REPLACE VIEW quality_review_jobs AS
-    SELECT j.* FROM jobs j JOIN quality_review_installations i ON i.id=j.installation_id
-    WHERE j.created_at::timestamptz > now() - interval '365 days';
-  CREATE OR REPLACE VIEW quality_review_analytics_events AS
-    SELECT e.* FROM analytics_events e JOIN quality_review_installations i ON i.id=e.installation_id
-    WHERE e.occurred_at::timestamptz > now() - interval '365 days'
-      AND (e.job_id IS NULL OR EXISTS (SELECT 1 FROM quality_review_jobs j WHERE j.id=e.job_id));
-  ${JOB_SCOPED_VIEWS}`;
-  }
-  return `
-  CREATE OR REPLACE VIEW quality_review_installations AS
-    SELECT * FROM installations WHERE quality_personal_data AND quality_content_license
-      AND quality_consent_id IS NOT NULL AND revoked_at IS NULL AND deletion_requested_at IS NULL
-      AND ${NOT_HIDDEN_INTERNAL};
-  CREATE OR REPLACE VIEW quality_review_jobs AS
-    SELECT j.* FROM jobs j JOIN quality_review_installations i ON i.id=j.installation_id
-    WHERE j.quality_consent_id=i.quality_consent_id
-      AND j.created_at::timestamptz > now() - interval '365 days';
-  CREATE OR REPLACE VIEW quality_review_analytics_events AS
-    SELECT e.* FROM analytics_events e JOIN quality_review_installations i ON i.id=e.installation_id
-    WHERE e.quality_consent_id=i.quality_consent_id
-      AND e.occurred_at::timestamptz > now() - interval '365 days'
-      AND (e.job_id IS NULL OR EXISTS (SELECT 1 FROM quality_review_jobs j WHERE j.id=e.job_id));
-  ${JOB_SCOPED_VIEWS}`;
+  return (
+    reviewScopeViews("quality_review", withoutConsent, `AND ${NOT_HIDDEN_INTERNAL}`) +
+    reviewScopeViews("quality_review_all", withoutConsent, "")
+  );
 }
 
-/** Job에 딸린 표는 어느 범위든 quality_review_jobs를 따라간다. */
-const JOB_SCOPED_VIEWS = [
+/**
+ * 같은 동의 범위를 이름과 설치 조건만 달리해 만든다.
+ *
+ * `quality_review_*`는 목록·숫자용이라 "개발자 제외" 스위치를 따른다.
+ * `quality_review_all_*`는 Job 한 건 열람과 개발자 Job 목록용이다. 동의 조건은 같고 개발자
+ * 설치만 빼지 않으므로, 스위치를 건드리지 않아도 개발자 Job을 열 수 있다.
+ */
+function reviewScopeViews(prefix: string, withoutConsent: boolean, installationFilter: string): string {
+  const consent = withoutConsent
+    ? { installation: "", job: "", event: "" }
+    : {
+        installation: "quality_personal_data AND quality_content_license\n      AND quality_consent_id IS NOT NULL AND ",
+        job: "j.quality_consent_id=i.quality_consent_id\n      AND ",
+        event: "e.quality_consent_id=i.quality_consent_id\n      AND ",
+      };
+  const jobScoped = JOB_SCOPED_TABLES.map(
+    (table) => `
+  CREATE OR REPLACE VIEW ${prefix}_${table} AS
+    SELECT t.* FROM ${table} t JOIN ${prefix}_jobs j ON j.id=t.job_id;
+  `,
+  ).join("\n");
+  return `
+  CREATE OR REPLACE VIEW ${prefix}_installations AS
+    SELECT * FROM installations WHERE ${consent.installation}revoked_at IS NULL AND deletion_requested_at IS NULL
+      ${installationFilter};
+  CREATE OR REPLACE VIEW ${prefix}_jobs AS
+    SELECT j.* FROM jobs j JOIN ${prefix}_installations i ON i.id=j.installation_id
+    WHERE ${consent.job}j.created_at::timestamptz > now() - interval '365 days';
+  CREATE OR REPLACE VIEW ${prefix}_analytics_events AS
+    SELECT e.* FROM analytics_events e JOIN ${prefix}_installations i ON i.id=e.installation_id
+    WHERE ${consent.event}e.occurred_at::timestamptz > now() - interval '365 days'
+      AND (e.job_id IS NULL OR EXISTS (SELECT 1 FROM ${prefix}_jobs j WHERE j.id=e.job_id));
+  ${jobScoped}`;
+}
+
+/** Job에 딸린 표는 어느 범위든 그 범위의 jobs 뷰를 따라간다. */
+const JOB_SCOPED_TABLES = [
   "analysis_people",
   "analysis_candidates",
   "confirmed_selections",
   "job_feedback",
   "export_events",
   "refined_artifacts",
-]
-  .map(
-    (table) => `
-  CREATE OR REPLACE VIEW quality_review_${table} AS
-    SELECT t.* FROM ${table} t JOIN quality_review_jobs j ON j.id=t.job_id;
-  `,
-  )
-  .join("\n");
+];
 
 /**
  * 집계 전용 뷰. 품질 동의와 상관없이 "몇 곳이 몇 건 돌렸나"를 세는 데만 쓴다.
