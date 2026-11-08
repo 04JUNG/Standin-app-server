@@ -277,6 +277,10 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
     <div class="card">
       <h2>최근 Job — 설치 상관없이 들어온 순서대로</h2>
       <div class="lookup">
+        <div class="seg" id="recentScope" role="group" aria-label="누구의 Job을 볼지">
+          <button data-scope="users" class="on">사용자 Job</button>
+          <button data-scope="developer">개발자 Job</button>
+        </div>
         <select id="recentStatus">
           <option value="">전체</option>
           <option value="completed">completed</option>
@@ -1099,11 +1103,14 @@ async function openDetail(jobId, button) {
   }
 }
 
-let recent = { items: [], nextCursor: null, status: "" };
+// scope를 바꾸면 페이지를 다시 읽지 않고 이 목록만 새로 받는다. 응답이 늦게 와도 지금 고른
+// 목록을 덮지 않도록 요청 번호(seq)를 맞춰 본다.
+let recent = { items: [], nextCursor: null, status: "", scope: "users", seq: 0 };
 
-async function recentFetch(cursor) {
+async function recentFetch(cursor, scope) {
   const query = new URLSearchParams({ limit: "20" });
   if (recent.status) query.set("status", recent.status);
+  if (scope) query.set("scope", scope);
   if (cursor) query.set("cursor", cursor);
   const res = await fetch("/v1/admin/review/jobs?" + query.toString(), {
     headers: { "X-Beta-Admin-Token": token },
@@ -1114,7 +1121,9 @@ async function recentFetch(cursor) {
 
 function recentRender() {
   if (!recent.items.length) {
-    $("recentOut").innerHTML = '<p class="empty">아직 없습니다.</p>';
+    $("recentOut").innerHTML = '<p class="empty">' + (recent.scope === "developer"
+      ? "볼 수 있는 개발자 Job이 없습니다. 설치 탭에서 설치를 조회해 개발자로 표시할 수 있습니다."
+      : "아직 없습니다.") + "</p>";
     return;
   }
   const rows = recent.items.map((item) =>
@@ -1122,7 +1131,10 @@ function recentRender() {
     '<td class="mono">' + esc(item.jobId) + searchNote(item) + "</td>" +
     '<td class="sub">' + when(item.createdAt) + "</td>" +
     '<td class="num">' + took(item) + "</td>" +
-    "<td>" + (item.installationId
+    "<td>" + (recent.scope === "developer" && item.installationId
+      ? '<span class="sub" title="' + esc(item.installationId) + '">' + esc(item.developerLabel || "개발자") + " · " +
+        esc(String(item.installationId).slice(0, 13)) + "…</span>"
+      : item.installationId
       ? '<button class="ghost mono" data-inst="' + esc(item.installationId) + '" title="' +
         esc(item.installationId) + '">' + esc(String(item.installationId).slice(0, 13)) + "…</button>"
       : '<span class="sub">—</span>') + "</td>" +
@@ -1149,12 +1161,15 @@ function recentRender() {
   if (more) {
     more.addEventListener("click", async () => {
       more.disabled = true;
+      const seq = recent.seq;
       try {
-        const page = await recentFetch(recent.nextCursor);
+        const page = await recentFetch(recent.nextCursor, recent.scope);
+        if (seq !== recent.seq) return;
         recent.items = recent.items.concat(page.items);
         recent.nextCursor = page.nextCursor;
         recentRender();
       } catch (error) {
+        if (seq !== recent.seq) return;
         $("recentMsg").innerHTML = '<span class="err">' + esc(error.message) + "</span>";
         more.disabled = false;
       }
@@ -1163,15 +1178,18 @@ function recentRender() {
 }
 
 async function recentGo() {
+  const seq = ++recent.seq;
   $("recentMsg").textContent = "불러오는 중";
   try {
     recent.status = $("recentStatus").value;
-    const page = await recentFetch(null);
+    const page = await recentFetch(null, recent.scope);
+    if (seq !== recent.seq) return;
     recent.items = page.items;
     recent.nextCursor = page.nextCursor;
     $("recentMsg").textContent = "";
     recentRender();
   } catch (error) {
+    if (seq !== recent.seq) return;
     $("recentMsg").innerHTML = '<span class="err">' + esc(error.message) + "</span>";
   }
 }
@@ -1817,7 +1835,18 @@ async function productGo() {
 
 $("productGo").addEventListener("click", productGo);
 $("recentGo").addEventListener("click", recentGo);
-$("recentStatus").addEventListener("change", () => { if (recent.items.length) recentGo(); });
+$("recentStatus").addEventListener("change", recentGo);
+document.querySelectorAll("#recentScope button").forEach((button) => {
+  button.addEventListener("click", () => {
+    if (recent.scope === button.dataset.scope) return;
+    recent.scope = button.dataset.scope;
+    document.querySelectorAll("#recentScope button").forEach((item) => item.classList.toggle("on", item === button));
+    recent.items = [];
+    recent.nextCursor = null;
+    $("recentOut").innerHTML = "";
+    recentGo();
+  });
+});
 
 
 // ── 설치 명부 ────────────────────────────────────────────────

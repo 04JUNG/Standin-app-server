@@ -9,7 +9,7 @@ export async function canReviewJob(
 ): Promise<boolean> {
   return Boolean(
     await queryOne(
-      `SELECT id FROM quality_review_jobs WHERE id=$1
+      `SELECT id FROM quality_review_all_jobs WHERE id=$1
        AND ($2::boolean IS FALSE OR COALESCE(input_stored_at, created_at)::timestamptz > now() - interval '90 days')`,
       [jobId, asset],
     ),

@@ -567,14 +567,21 @@ export async function updateJob(
  * ⚠ 서명 URL은 여기서 만들지 않는다. 목록 한 번이 그 많은 사진을 한꺼번에 여는 열쇠가
  *   되면 안 된다(설치별 목록과 같은 이유).
  */
+export type RecentJobsScope = "users" | "developer";
+
 export async function listRecentJobs(
   params: HistoryQuery,
-): Promise<Array<JobHistoryRow & { installation_id: string }>> {
-  return query<JobHistoryRow & { installation_id: string }>(
+  // 작업 탭은 scope를 넘겨 "개발자 제외" 스위치와 상관없이 늘 같은 대상을 받는다. 지정하지
+  // 않으면(개요의 최근 Job) 스위치를 따른다.
+  scope?: RecentJobsScope,
+): Promise<Array<JobHistoryRow & { installation_id: string; developer_label: string | null }>> {
+  const developer = scope === "developer";
+  return query<JobHistoryRow & { installation_id: string; developer_label: string | null }>(
     `SELECT j.id, j.installation_id, j.status, j.created_at, j.completed_at, j.error_code,
             j.source, j.input_width, j.input_height, (j.input_s3_key IS NOT NULL) AS has_input,
-            p.person_count, s.selection_count, t.thumb_pose_id, t.thumb_view
-       FROM quality_review_jobs j
+            p.person_count, s.selection_count, t.thumb_pose_id, t.thumb_view,
+            ${developer ? "dev.label" : "NULL::text"} AS developer_label
+       FROM ${developer ? "quality_review_all_jobs j JOIN internal_installations dev ON dev.id = j.installation_id" : "quality_review_jobs j"}
        LEFT JOIN LATERAL (
          SELECT count(*)::int AS person_count FROM analysis_people ap WHERE ap.job_id = j.id
        ) p ON TRUE
@@ -592,6 +599,7 @@ export async function listRecentJobs(
           LIMIT 1
        ) t ON TRUE
       WHERE j.installation_id IS NOT NULL
+        ${scope === "users" ? "AND NOT EXISTS (SELECT 1 FROM internal_installations x WHERE x.id = j.installation_id)" : ""}
         AND ($1::text IS NULL OR j.status = $1)
         AND ($2::text IS NULL OR (j.created_at, j.id) < ($2, $3))
       ORDER BY j.created_at DESC, j.id DESC

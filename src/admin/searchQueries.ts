@@ -14,7 +14,7 @@ export async function searchQueries(jobIds: string[]): Promise<Map<string, strin
   if (jobIds.length === 0) return new Map();
   const rows = await query<{ id: string; q: string | null }>(
     `SELECT id, result_json::jsonb #>> '{semantic,query}' AS q
-       FROM quality_review_jobs
+       FROM quality_review_all_jobs
       WHERE id = ANY($1) AND source = '${SEMANTIC_SOURCE}' AND result_json IS NOT NULL`,
     [jobIds],
   );
