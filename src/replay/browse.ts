@@ -1,6 +1,5 @@
 import type { ReplayDb } from "./service.js";
 import { checkPolicy, fail, type ReplayPolicy, PROTOCOL } from "./policy.js";
-import { HIDE_INTERNAL_FLAG } from "../installations/qualityConsent.js";
 
 type Filters = Record<string, string | undefined>;
 const MAX_RANGE = 90 * 86400000;
@@ -31,14 +30,11 @@ async function scope(
     to > wall + 300000
   )
     return fail("REPLAY_INVALID");
-  const setting = fixed
-    ? undefined
-    : (
-        await db.query<{ value: string }>("SELECT value FROM service_flags WHERE key=$1", [
-          HIDE_INTERNAL_FLAG,
-        ])
-      ).rows[0];
-  const hideInternal = fixed ? fixed.hideInternal : setting ? setting.value === "true" : true;
+  // 개발자 세션은 평소 빠지고, 설치 구분에서 내부를 골랐을 때만 보인다. 그 선택지를 세려고
+  // 설치 구분 자신의 집계(omit)에서는 빼지 않는다.
+  const hideInternal = fixed
+    ? fixed.hideInternal
+    : omit !== "audience" && input.audience !== "internal";
   const values: unknown[] = [
     policy.environment,
     new Date(now).toISOString(),

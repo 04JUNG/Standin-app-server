@@ -992,7 +992,7 @@ FBX 변환이 실패해도 **BVH로 조용히 바꿔 내려보내지 않는다.*
 
 `GET /v1/admin/review/jobs?limit=20&cursor=&status=completed&scope=users`
 
-`scope`는 작업 탭의 구분이다. `users`는 개발자 설치를 늘 빼고, `developer`는 개발자로 표시한 설치의 Job만 돌려주며 항목에 `developerLabel`이 붙는다. 둘 다 "개발자 제외" 스위치와 상관없다. 생략하면 스위치를 따른다. 동의 범위는 어느 쪽이든 같다.
+`scope`는 작업 탭의 구분이다. `users`는 개발자 설치를 늘 빼고, `developer`는 개발자로 표시한 설치의 Job만 돌려주며 항목에 `developerLabel`이 붙는다. 생략하면 `users`와 같다. 동의 범위는 어느 쪽이든 같다.
 
 설치 id를 모르는 상태에서 "방금 들어온 분석"부터 본다. 정렬·커서·`status`는 설치별 목록과 같은 규칙이고(`(created_at, id)` 내림차순), 항목에 `installationId`가 한 칸 더 붙어 거기서 그 설치의 전체 기록으로 넘어갈 수 있다.
 
@@ -1624,7 +1624,7 @@ Converter 코드·모델·라이브러리 자산 변경은 필요 없다.
 기존 관리자 인증·접근 감사 및 `Cache-Control: private, no-store`를 따른다.
 
 - `days`: 기존 제품 지표와 동일한 1~90일 정수.
-- `audience`: `all|internal|unclassified`. 내부 표시가 없다는 이유만으로 외부 사용자로 분류하지 않는다. 기존 전체 대시보드의 개발자 제외 설정도 적용되므로 제외 중인 내부 설치는 이 API에서도 보이지 않는다.
+- `audience`: `all|internal|unclassified`. 내부 표시가 없다는 이유만으로 외부 사용자로 분류하지 않는다. 개발자로 표시한 설치는 관리자 뷰가 늘 빼므로 이 API에서도 보이지 않는다.
 - `idleMinutes`: 5~1440분 정수, 기본 30분. 이 값은 후속 기록 관찰 대기 시간이며 실제 이탈을 판정하는 값이 아니다.
 - 기준 코호트: 응답 `window.from`~`window.to` 사이에 분석 요청이 생성된 작업. 이후 행동도 동일 종료 시점까지만 관측한다. 설치 수는 사람 수가 아니다.
 - 반환: `window`, `totals`, `stages`, `transitions`, `outcomes`, `coverage`, `durations`, `audiences`, `inputs`, `segments`, `diagnostics`, `notes`.

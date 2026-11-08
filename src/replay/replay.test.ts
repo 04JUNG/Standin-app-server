@@ -885,12 +885,11 @@ test("replay browser searches all authorized IDs and facets beyond the first pag
     await f.db.query("INSERT INTO internal_installations(id,added_at) VALUES($1,$2)", [inst, new Date(now).toISOString()]);
     assert.equal((await f.service.list({ audience: "all" })).items.length, 0);
     assert.equal((await f.service.facets({})).facets.versions.length, 0);
-    await f.db.query("INSERT INTO service_flags(key,value,updated_at) VALUES('hide_internal_installations','false',$1) ON CONFLICT(key) DO UPDATE SET value='false'", [new Date(now).toISOString()]);
     assert.equal((await f.service.list({ audience: "internal" })).items.length, 3);
     assert.equal((await f.service.list({ audience: "unclassified" })).items.length, 0);
-    assert.equal((await f.service.list({})).scope.hideInternal, false);
+    assert.equal((await f.service.list({})).scope.hideInternal, true);
     await f.db.query("UPDATE replay_sessions SET expires_at=$2 WHERE id=$1", [ids[2], new Date(now - 1).toISOString()]);
-    assert.equal((await f.service.facets({})).facets.versions.length, 2);
+    assert.equal((await f.service.facets({ audience: "internal" })).facets.versions.length, 2);
   } finally { await f.db.close(); }
 });
 
