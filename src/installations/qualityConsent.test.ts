@@ -490,3 +490,50 @@ test("the operator-provided developer seed is inserted only once", async (t) => 
   await db.exec(SCHEMA); // 다음 배포
   assert.equal(await count(), 2, "an unmarked developer must not come back on redeploy");
 });
+
+test("developer jobs are listed apart and open without touching the hide switch", async (t) => {
+  const { qualityReviewViews } = await import("./qualityConsent.js");
+  const { canReviewJob } = await import("../admin/qualityAccess.js");
+  const { listRecentJobs } = await import("../jobs/store.js");
+  const { setHideInternalInstallations } = await import("../admin/internalInstallations.js");
+  const db = new PGlite();
+  t.after(() => db.close());
+  await db.exec(SCHEMA);
+  const query = async (sql: string, values?: unknown[]) => {
+    const r = await db.query(sql, values);
+    return { rows: r.rows, rowCount: r.rows.length || r.affectedRows || 0, fields: [], command: "", oid: 0 };
+  };
+  t.mock.method(pool, "query", query as typeof pool.query);
+  const now = new Date().toISOString();
+  for (const id of ["user", "dev"]) {
+    await db.query(
+      `INSERT INTO installations (id, token_hash, consent_version, consented_at, created_at, last_seen_at,
+         app_version, os_name, os_version, architecture, locale)
+       VALUES ($1, 'h', 'v', $2, $2, $2, '0', 'windows', '11', 'x64', 'ko')`,
+      ["inst_" + id, now],
+    );
+    await db.query(
+      "INSERT INTO jobs (id, installation_id, status, created_at, updated_at) VALUES ($1, $2, 'completed', $3, $3)",
+      ["job_" + id, "inst_" + id, now],
+    );
+  }
+  await db.query("INSERT INTO internal_installations (id, label, added_at) VALUES ('inst_dev', '도원', $1)", [now]);
+  const page = { limit: 20, cursor: null, status: null };
+  const ids = async (scope?: "users" | "developer") => (await listRecentJobs(page, scope)).map((row) => row.id);
+
+  // 동의가 없으면 개발자라도 열리지 않는다 — 개발자 목록은 동의 범위를 넓히지 않는다.
+  assert.deepEqual(await ids("developer"), []);
+  assert.equal(await canReviewJob("job_dev", false), false);
+
+  await db.exec(qualityReviewViews(true));
+  assert.deepEqual(await ids("users"), ["job_user"]);
+  assert.deepEqual(await ids(), ["job_user"], "default follows the hide switch");
+  const [developer] = await listRecentJobs(page, "developer");
+  assert.equal(developer.id, "job_dev");
+  assert.equal(developer.developer_label, "도원");
+  assert.equal(await canReviewJob("job_dev", false), true, "detail opens while the switch hides the job");
+
+  await setHideInternalInstallations(false);
+  assert.deepEqual((await ids()).sort(), ["job_dev", "job_user"]);
+  assert.deepEqual(await ids("users"), ["job_user"], "the user list stays separate either way");
+});
