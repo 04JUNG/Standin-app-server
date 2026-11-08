@@ -8,7 +8,6 @@ export const JOURNEY_PANEL_HTML = String.raw`
           <select id="journeyAudience">
             <option value="all">전체 열람 범위</option>
             <option value="unclassified">미분류 설치</option>
-            <option value="internal">내부 테스트</option>
           </select>
         </label>
         <label class="sub">후속 행동 관찰 시간
@@ -21,7 +20,7 @@ export const JOURNEY_PANEL_HTML = String.raw`
         <button class="ghost" id="journeyGo">불러오기</button>
         <span id="journeyMsg" class="sub" role="status" aria-live="polite"></span>
       </div>
-      <p class="sub">상단 기간과 개발자 제외 설정이 함께 적용됩니다. 미분류 설치에는 내부 테스트가 섞일 수 있으며, 설치 수는 사람 수와 다릅니다.</p>
+      <p class="sub">상단 기간이 적용되고, 개발자로 표시한 설치는 항상 빠집니다. 미분류 설치에는 내부 테스트가 섞일 수 있으며, 설치 수는 사람 수와 다릅니다.</p>
       ${JOURNEY_ADVANCED_HTML}
       <div id="journeyOut" aria-busy="false"></div>
     </div>`;
@@ -88,7 +87,7 @@ function journeyRender(data) {
     journeyTable(['기록 상태', '작업'], [
       ['새 계측 기록 있음', journeyNum(c.version2Jobs)], ['기존 계측만 있음', journeyNum(c.legacyEventJobs)],
       ['클라이언트 기록 없음', journeyNum(c.noClientEventJobs)],
-    ]) + journeyTable(['설치 구분', '작업', '설치'], data.audiences.map((a) => [a.key === 'internal' ? '내부 테스트' : a.key === 'unclassified' ? '미분류' : a.key, journeyNum(a.jobs), journeyNum(a.installations)])) +
+    ]) + journeyTable(['설치 구분', '작업', '설치'], data.audiences.filter((a) => a.key !== 'internal').map((a) => [a.key === 'internal' ? '내부 테스트' : a.key === 'unclassified' ? '미분류' : a.key, journeyNum(a.jobs), journeyNum(a.installations)])) +
     '<ul class="sub">' + data.notes.map((note) => '<li>' + esc(note) + '</li>').join('') + '</ul></details>';
 }
 let journeyRequestNumber = 0;

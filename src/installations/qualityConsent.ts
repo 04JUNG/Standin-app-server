@@ -167,16 +167,8 @@ export async function lockQualityConsent(
   };
 }
 
-/** "개발자 제외" 스위치(service_flags). 행이 없으면 켜진 것으로 본다 — 표시해 둔 개발자는 기본으로 뺀다. */
-export const HIDE_INTERNAL_FLAG = "hide_internal_installations";
-
-/**
- * installations 행이 개발자 설치로 표시돼 있고 스위치가 켜져 있으면 거짓. 뷰 안에서 쓴다.
- * 표가 작아(팀원 몇 명) 행마다 EXISTS를 돌려도 비용이 없다.
- */
-const NOT_HIDDEN_INTERNAL = `(
-      NOT EXISTS (SELECT 1 FROM internal_installations x WHERE x.id = installations.id)
-      OR coalesce((SELECT value FROM service_flags WHERE key = '${HIDE_INTERNAL_FLAG}'), 'true') <> 'true')`;
+/** installations 행이 개발자 설치로 표시돼 있으면 거짓. 뷰 안에서 쓴다. 표가 작아(팀원 몇 명) 행마다 돌려도 비용이 없다. */
+const NOT_INTERNAL = `NOT EXISTS (SELECT 1 FROM internal_installations x WHERE x.id = installations.id)`;
 
 /**
  * 관리자 열람 범위를 정하는 뷰. 관리자 SQL은 모두 이 뷰만 읽는다.
@@ -185,11 +177,11 @@ const NOT_HIDDEN_INTERNAL = `(
  * 철회·삭제 요청만 거른다. 뷰는 배포마다 다시 만들어지므로 스위치를 끄고 재배포하면
  * 원래 범위로 돌아간다.
  *
- * 개발자 설치(`internal_installations`)는 "개발자 제외" 스위치가 켜져 있으면 어느 범위든 뺀다.
+ * 개발자 설치(`internal_installations`)는 목록·숫자·모아 보기에 늘 들어가지 않는다.
  */
 export function qualityReviewViews(withoutConsent: boolean): string {
   return (
-    reviewScopeViews("quality_review", withoutConsent, `AND ${NOT_HIDDEN_INTERNAL}`) +
+    reviewScopeViews("quality_review", withoutConsent, `AND ${NOT_INTERNAL}`) +
     reviewScopeViews("quality_review_all", withoutConsent, "")
   );
 }
@@ -197,9 +189,9 @@ export function qualityReviewViews(withoutConsent: boolean): string {
 /**
  * 같은 동의 범위를 이름과 설치 조건만 달리해 만든다.
  *
- * `quality_review_*`는 목록·숫자용이라 "개발자 제외" 스위치를 따른다.
- * `quality_review_all_*`는 Job 한 건 열람과 개발자 Job 목록용이다. 동의 조건은 같고 개발자
- * 설치만 빼지 않으므로, 스위치를 건드리지 않아도 개발자 Job을 열 수 있다.
+ * `quality_review_*`는 목록·숫자용이라 개발자 설치를 뺀다.
+ * `quality_review_all_*`는 Job·설치 한 건 열람과 개발자 Job 목록용이다. 동의 조건은 같고
+ * 개발자 설치만 빼지 않는다.
  */
 function reviewScopeViews(prefix: string, withoutConsent: boolean, installationFilter: string): string {
   const consent = withoutConsent
@@ -244,13 +236,13 @@ const JOB_SCOPED_TABLES = [
  *
  * 열이 세는 데 필요한 것뿐이다 — 원본 키·결과·작업 상세가 없어 이 뷰로는 내용을 볼 수 없다.
  * 철회·삭제 요청 설치는 뺀다. 개별 설치를 화면에 늘어놓는 SQL은 이 뷰를 쓰지 않는다.
- * "개발자 제외"가 켜져 있으면 개발자 설치도 세지 않는다.
+ * 개발자 설치는 세지 않는다.
  */
 const OPS_COUNT_VIEWS = `
   CREATE OR REPLACE VIEW ops_count_installations AS
     SELECT id, created_at, last_seen_at FROM installations
     WHERE revoked_at IS NULL AND deletion_requested_at IS NULL
-      AND ${NOT_HIDDEN_INTERNAL};
+      AND ${NOT_INTERNAL};
   CREATE OR REPLACE VIEW ops_count_jobs AS
     SELECT j.id, j.installation_id, j.status, j.created_at
     FROM jobs j JOIN ops_count_installations i ON i.id = j.installation_id;

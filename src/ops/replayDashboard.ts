@@ -777,7 +777,7 @@ function replayRenderFacets(data) {
     replayEl(
       "p",
       "sub",
-      "환경 · " + data.scope.environment + " · 기간과 개발자 제외는 상단 설정을 따릅니다.",
+      "환경 · " + data.scope.environment + " · 기간은 상단 설정을 따르고, 개발자 세션은 설치 구분에서 내부를 골랐을 때만 보입니다.",
     ),
   );
   $("replayFacetNote").textContent = data.truncated.length

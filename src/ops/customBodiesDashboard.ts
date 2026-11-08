@@ -1,7 +1,7 @@
 export const CUSTOM_BODIES_HTML = String.raw`
     <section class="tab" id="tab-bodies"><div class="card">
       <h2>사용자가 저장한 커스텀 체형</h2>
-      <p class="sub">현재 품질 검토 동의가 유효한 설치의 저장 카드입니다. 상단 기간과 무관하게 현재 저장된 체형을 조회하며, 개발자 제외 설정은 적용됩니다. 설치는 사람 수와 다릅니다.</p>
+      <p class="sub">현재 품질 검토 동의가 유효한 설치의 저장 카드입니다. 상단 기간과 무관하게 현재 저장된 체형을 조회하며, 개발자로 표시한 설치는 빠집니다. 설치는 사람 수와 다릅니다.</p>
       <div class="controls"><label>설치 ID <input id="customBodyOwner" placeholder="전체 설치 또는 inst_…" autocomplete="off"></label><button class="ghost" id="customBodyGo">불러오기</button><span class="sub" id="customBodyMsg" role="status"></span></div>
       <div id="customBodyList"></div><button class="ghost" id="customBodyMore" hidden>설치 더 보기</button>
     </div></section>`;
