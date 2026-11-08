@@ -468,7 +468,6 @@ test("internal installations are hidden from review and count views while the sw
   const ids = async (sql: string) => (await db.query<{ id: string }>(sql)).rows.map((r) => r.id).sort();
   await db.query("INSERT INTO internal_installations (id, label, added_at) VALUES ('inst_dev', NULL, $1)", [now]);
 
-  // 스위치 행이 없으면 켜진 것: 개발자를 뺀다.
   assert.deepEqual(await ids("SELECT id FROM quality_review_jobs"), ["job_inst_user"]);
   assert.deepEqual(await ids("SELECT id FROM ops_count_installations"), ["inst_user"]);
 
@@ -476,8 +475,8 @@ test("internal installations are hidden from review and count views while the sw
     "INSERT INTO service_flags (key, value, updated_at) VALUES ('hide_internal_installations', 'false', $1)",
     [now],
   );
-  assert.deepEqual(await ids("SELECT id FROM quality_review_jobs"), ["job_inst_dev", "job_inst_user"], "switch off shows developers again");
-  assert.deepEqual(await ids("SELECT id FROM ops_count_jobs"), ["job_inst_dev", "job_inst_user"]);
+  assert.deepEqual(await ids("SELECT id FROM quality_review_jobs"), ["job_inst_user"], "a leftover switch row changes nothing");
+  assert.deepEqual(await ids("SELECT id FROM ops_count_jobs"), ["job_inst_user"]);
 });
 
 test("the operator-provided developer seed is inserted only once", async (t) => {
@@ -489,4 +488,98 @@ test("the operator-provided developer seed is inserted only once", async (t) => 
   await db.query("DELETE FROM internal_installations WHERE id = 'inst_cc6832df-05a9-450f-9fb5-1e5f69b1e38c'");
   await db.exec(SCHEMA); // 다음 배포
   assert.equal(await count(), 2, "an unmarked developer must not come back on redeploy");
+});
+
+test("developer jobs are listed apart and open without touching the hide switch", async (t) => {
+  const { qualityReviewViews } = await import("./qualityConsent.js");
+  const { canReviewJob } = await import("../admin/qualityAccess.js");
+  const { listRecentJobs } = await import("../jobs/store.js");
+  const db = new PGlite();
+  t.after(() => db.close());
+  await db.exec(SCHEMA);
+  const query = async (sql: string, values?: unknown[]) => {
+    const r = await db.query(sql, values);
+    return { rows: r.rows, rowCount: r.rows.length || r.affectedRows || 0, fields: [], command: "", oid: 0 };
+  };
+  t.mock.method(pool, "query", query as typeof pool.query);
+  const now = new Date().toISOString();
+  for (const id of ["user", "dev"]) {
+    await db.query(
+      `INSERT INTO installations (id, token_hash, consent_version, consented_at, created_at, last_seen_at,
+         app_version, os_name, os_version, architecture, locale)
+       VALUES ($1, 'h', 'v', $2, $2, $2, '0', 'windows', '11', 'x64', 'ko')`,
+      ["inst_" + id, now],
+    );
+    await db.query(
+      "INSERT INTO jobs (id, installation_id, status, created_at, updated_at) VALUES ($1, $2, 'completed', $3, $3)",
+      ["job_" + id, "inst_" + id, now],
+    );
+  }
+  await db.query("INSERT INTO internal_installations (id, label, added_at) VALUES ('inst_dev', '도원', $1)", [now]);
+  const page = { limit: 20, cursor: null, status: null };
+  const ids = async (scope?: "users" | "developer") => (await listRecentJobs(page, scope)).map((row) => row.id);
+
+  // 동의가 없으면 개발자라도 열리지 않는다 — 개발자 목록은 동의 범위를 넓히지 않는다.
+  assert.deepEqual(await ids("developer"), []);
+  assert.equal(await canReviewJob("job_dev", false), false);
+
+  await db.exec(qualityReviewViews(true));
+  assert.deepEqual(await ids("users"), ["job_user"]);
+  assert.deepEqual(await ids(), ["job_user"]);
+  const [developer] = await listRecentJobs(page, "developer");
+  assert.equal(developer.id, "job_dev");
+  assert.equal(developer.developer_label, "도원");
+  assert.equal(await canReviewJob("job_dev", false), true, "detail opens though lists never show the job");
+});
+
+test("daily rollups drop developer-only days but keep days whose source has expired", async (t) => {
+  const { qualityReviewViews } = await import("./qualityConsent.js");
+  const { runDataMaintenance } = await import("../db.js");
+  const db = new PGlite();
+  t.after(() => db.close());
+  await db.exec(SCHEMA);
+  await db.exec(qualityReviewViews(true));
+  const query = async (sql: string, values?: unknown[]) => {
+    const r = await db.query(sql, values);
+    return { rows: r.rows, rowCount: r.rows.length || r.affectedRows || 0, fields: [], command: "", oid: 0 };
+  };
+  t.mock.method(pool, "connect", (async () => ({ query, release() {} })) as unknown as typeof pool.connect);
+  const at = (daysAgo: number) => new Date(Date.now() - daysAgo * 86_400_000).toISOString();
+  for (const id of ["user", "dev"]) {
+    await db.query(
+      `INSERT INTO installations (id, token_hash, consent_version, consented_at, created_at, last_seen_at,
+         app_version, os_name, os_version, architecture, locale)
+       VALUES ($1, 'h', 'v', $2, $2, $2, '0', 'windows', '11', 'x64', 'ko')`,
+      ["inst_" + id, at(0)],
+    );
+  }
+  await db.query("INSERT INTO internal_installations (id, added_at) VALUES ('inst_dev', $1)", [at(0)]);
+  const job = (id: string, installationId: string, daysAgo: number) =>
+    db.query(
+      "INSERT INTO jobs (id, installation_id, status, created_at, updated_at) VALUES ($1, $2, 'completed', $3, $3)",
+      [id, installationId, at(daysAgo)],
+    );
+  await job("job_mixed_user", "inst_user", 2);
+  await job("job_mixed_dev", "inst_dev", 2);
+  await job("job_only_dev", "inst_dev", 3);
+  const stale = (daysAgo: number) =>
+    db.query(
+      `INSERT INTO daily_analytics_aggregates (day, jobs_started, jobs_completed, jobs_failed, confirmed_selections,
+         top1_selections, exports_completed, feedback_json, refreshed_at)
+       VALUES ($1, 99, 99, 0, 0, 0, 0, '{}', 'old')`,
+      [at(daysAgo).slice(0, 10)],
+    );
+  await stale(2);
+  await stale(3);
+  await stale(40); // 원본이 이미 지워진 날
+
+  await runDataMaintenance();
+
+  const rows = (await db.query<{ day: string; jobs_started: number }>(
+    "SELECT day, jobs_started FROM daily_analytics_aggregates ORDER BY day DESC",
+  )).rows;
+  assert.deepEqual(rows, [
+    { day: at(2).slice(0, 10), jobs_started: 1 },
+    { day: at(40).slice(0, 10), jobs_started: 99 },
+  ]);
 });

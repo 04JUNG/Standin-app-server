@@ -163,7 +163,7 @@ export async function getInstallationSummary(
   }>(
     `SELECT id, created_at, last_seen_at, app_version, os_name, os_version,
             locale, consent_version, revoked_at, deletion_requested_at
-     FROM quality_review_installations WHERE id = $1`,
+     FROM quality_review_all_installations WHERE id = $1`,
     [installationId],
   );
   if (!row) return null;

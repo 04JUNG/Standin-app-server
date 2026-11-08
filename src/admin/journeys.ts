@@ -1,15 +1,13 @@
 import { createHash } from 'node:crypto';
 import { query } from '../db.js';
 import { JOURNEY_VERSION } from '../journey/contract.js';
-import { HIDE_INTERNAL_FLAG } from '../installations/qualityConsent.js';
 
 // Individual paths require the new purpose-specific link consent, even if operational totals are available.
 const visibleLinks = `SELECT l.* FROM journey_links l JOIN installations i ON i.id=l.installation_id
  JOIN journey_visitors v ON v.id=l.visitor_id
  WHERE l.revoked_at IS NULL AND l.expires_at>$2 AND v.revoked_at IS NULL AND v.expires_at>$2
  AND l.consented_at<=$2 AND i.revoked_at IS NULL AND i.deletion_requested_at IS NULL
- AND (NOT EXISTS(SELECT 1 FROM internal_installations x WHERE x.id=i.id)
- OR COALESCE((SELECT value FROM service_flags WHERE key='${HIDE_INTERNAL_FLAG}'),'true')<>'true')`;
+ AND NOT EXISTS(SELECT 1 FROM internal_installations x WHERE x.id=i.id)`;
 
 const webCte = `WITH web AS (
  SELECT e.* FROM journey_web_events e JOIN journey_visitors v ON v.id=e.visitor_id

@@ -1,6 +1,5 @@
 import { query, queryOne } from '../db.js';
 import { seoulDay } from '../marketingCounts.js';
-import { HIDE_INTERNAL_FLAG } from '../installations/qualityConsent.js';
 
 /** Count existing service records only. No new telemetry, creative join or content access. */
 export interface MarketingUsage {
@@ -38,8 +37,8 @@ export async function marketingUsage(days: number, queriedAt: string): Promise<M
       (SELECT count(DISTINCT installation_id)::int FROM period_jobs WHERE status='completed') AS "completedInstallations",
       (SELECT count(*)::int FROM period_jobs) AS "jobsStarted",
       (SELECT count(*)::int FROM period_jobs WHERE status='completed') AS "jobsCompleted",
-      COALESCE((SELECT value='true' FROM service_flags WHERE key=$3),true) AS "hideInternal"
-  `, [since, queriedAt, HIDE_INTERNAL_FLAG]);
+      TRUE AS "hideInternal"
+  `, [since, queriedAt]);
   if (!result) throw new Error('marketing_usage_unavailable');
   return result;
 }

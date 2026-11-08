@@ -58,7 +58,6 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
   .pill.ok { background:color-mix(in srgb,var(--ok) 18%,transparent); color:var(--ok); }
   .pill.warn { background:color-mix(in srgb,var(--warn) 18%,transparent); color:var(--warn); }
   .pill.bad { background:color-mix(in srgb,var(--bad) 18%,transparent); color:var(--bad); }
-  #internalToggle.on { border-color:var(--c-users); color:var(--c-users); font-weight:700; }
   .pill.search { background:color-mix(in srgb,var(--c-down) 16%,transparent); color:var(--c-down); }
   .searchq { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:4px; font-family:inherit; }
   .searchq .q { color:var(--text); font-size:12.5px; word-break:break-all; }
@@ -234,7 +233,6 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
         <option value="90">90일</option>
       </select>
     </label>
-    <button class="ghost" id="internalToggle" title="개발자로 표시한 설치를 목록·숫자·모아 보기에서 빼거나 넣는다">개발자 —</button>
     <span class="sub" title="열람 기록이 이 이름으로 남는다">
       <span id="reviewer">—</span> · 갱신 <span id="updated">—</span>
     </span>
@@ -278,6 +276,10 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
     <div class="card">
       <h2>최근 Job — 설치 상관없이 들어온 순서대로</h2>
       <div class="lookup">
+        <div class="seg" id="recentScope" role="group" aria-label="누구의 Job을 볼지">
+          <button data-scope="users" class="on">사용자 Job</button>
+          <button data-scope="developer">개발자 Job</button>
+        </div>
         <select id="recentStatus">
           <option value="">전체</option>
           <option value="completed">completed</option>
@@ -488,23 +490,17 @@ async function tick() {
 }
 
 // ── 개발자 설치 ──────────────────────────────────────────────
-// 표시한 설치는 "개발자 제외"가 켜져 있으면 서버의 관리자 뷰가 통째로 뺀다. 화면이 따로
-// 거르지 않으므로, 바꾼 뒤에는 새로고침해서 모든 숫자를 같은 기준으로 다시 받는다.
-let internal = { hide: true, ids: new Set() };
+// 표시한 설치는 서버의 관리자 뷰가 목록·숫자·모아 보기에서 늘 뺀다. 그 Job은 작업 탭의
+// 개발자 Job에서 본다. 표시를 바꾸면 모든 숫자를 같은 기준으로 다시 받도록 새로고침한다.
+let internal = { ids: new Set() };
 
 async function internalLoad() {
   try {
     const res = await fetch("/v1/admin/internal-installations", { headers: { "X-Beta-Admin-Token": token } });
     if (!res.ok) return;
     const data = await res.json();
-    internal = { hide: data.hide, ids: new Set(data.items.map((item) => item.installationId)) };
-  } catch (error) { /* 스위치를 못 읽어도 나머지 화면은 그대로 쓴다 */ }
-  internalRender();
-}
-
-function internalRender() {
-  $("internalToggle").textContent = "개발자 " + (internal.hide ? "제외 중" : "포함 중") + " · " + internal.ids.size + "곳";
-  $("internalToggle").classList.toggle("on", internal.hide);
+    internal = { ids: new Set(data.items.map((item) => item.installationId)) };
+  } catch (error) { /* 표시를 못 읽어도 나머지 화면은 그대로 쓴다 */ }
 }
 
 async function internalPut(path, body) {
@@ -517,19 +513,12 @@ async function internalPut(path, body) {
   location.reload();
 }
 
-$("internalToggle").addEventListener("click", () => {
-  const next = !internal.hide;
-  if (confirm(next ? "개발자 설치 " + internal.ids.size + "곳을 목록·숫자·모아 보기에서 뺄까요?" : "개발자 설치도 다시 보이게 할까요?")) {
-    internalPut("hide", { hide: next });
-  }
-});
-
 // 설치 조회 머리말의 버튼. 그 영역은 다시 그려지므로 위임으로 받는다.
 document.addEventListener("click", (event) => {
   const button = event.target.closest && event.target.closest("button[data-internal]");
   if (!button) return;
   const on = button.dataset.on === "1";
-  const note = on && internal.hide ? " 지금은 개발자 제외가 켜져 있어 이 설치가 바로 화면에서 사라집니다." : "";
+  const note = on ? " 이 설치는 목록·숫자·모아 보기에서 빠지고, 작업 탭의 개발자 Job에서 볼 수 있습니다." : "";
   if (confirm((on ? "개발자 설치로 표시할까요?" : "개발자 표시를 해제할까요?") + note)) {
     internalPut(encodeURIComponent(button.dataset.internal), { internal: on });
   }
@@ -1100,11 +1089,14 @@ async function openDetail(jobId, button) {
   }
 }
 
-let recent = { items: [], nextCursor: null, status: "" };
+// scope를 바꾸면 페이지를 다시 읽지 않고 이 목록만 새로 받는다. 응답이 늦게 와도 지금 고른
+// 목록을 덮지 않도록 요청 번호(seq)를 맞춰 본다.
+let recent = { items: [], nextCursor: null, status: "", scope: "users", seq: 0 };
 
-async function recentFetch(cursor) {
+async function recentFetch(cursor, scope) {
   const query = new URLSearchParams({ limit: "20" });
   if (recent.status) query.set("status", recent.status);
+  if (scope) query.set("scope", scope);
   if (cursor) query.set("cursor", cursor);
   const res = await fetch("/v1/admin/review/jobs?" + query.toString(), {
     headers: { "X-Beta-Admin-Token": token },
@@ -1115,7 +1107,9 @@ async function recentFetch(cursor) {
 
 function recentRender() {
   if (!recent.items.length) {
-    $("recentOut").innerHTML = '<p class="empty">아직 없습니다.</p>';
+    $("recentOut").innerHTML = '<p class="empty">' + (recent.scope === "developer"
+      ? "볼 수 있는 개발자 Job이 없습니다. 설치 탭에서 설치를 조회해 개발자로 표시할 수 있습니다."
+      : "아직 없습니다.") + "</p>";
     return;
   }
   const rows = recent.items.map((item) =>
@@ -1125,7 +1119,8 @@ function recentRender() {
     '<td class="num">' + took(item) + "</td>" +
     "<td>" + (item.installationId
       ? '<button class="ghost mono" data-inst="' + esc(item.installationId) + '" title="' +
-        esc(item.installationId) + '">' + esc(String(item.installationId).slice(0, 13)) + "…</button>"
+        esc(item.installationId) + '">' + (recent.scope === "developer" ? esc(item.developerLabel || "개발자") + " · " : "") +
+        esc(String(item.installationId).slice(0, 13)) + "…</button>"
       : '<span class="sub">—</span>') + "</td>" +
     '<td class="num">' + (item.personCount === null || item.personCount === undefined ? "—" : item.personCount) + "</td>" +
     '<td class="num">' + (item.selectionCount === null || item.selectionCount === undefined ? "—" : item.selectionCount) + "</td>" +
@@ -1150,12 +1145,15 @@ function recentRender() {
   if (more) {
     more.addEventListener("click", async () => {
       more.disabled = true;
+      const seq = recent.seq;
       try {
-        const page = await recentFetch(recent.nextCursor);
+        const page = await recentFetch(recent.nextCursor, recent.scope);
+        if (seq !== recent.seq) return;
         recent.items = recent.items.concat(page.items);
         recent.nextCursor = page.nextCursor;
         recentRender();
       } catch (error) {
+        if (seq !== recent.seq) return;
         $("recentMsg").innerHTML = '<span class="err">' + esc(error.message) + "</span>";
         more.disabled = false;
       }
@@ -1164,15 +1162,18 @@ function recentRender() {
 }
 
 async function recentGo() {
+  const seq = ++recent.seq;
   $("recentMsg").textContent = "불러오는 중";
   try {
     recent.status = $("recentStatus").value;
-    const page = await recentFetch(null);
+    const page = await recentFetch(null, recent.scope);
+    if (seq !== recent.seq) return;
     recent.items = page.items;
     recent.nextCursor = page.nextCursor;
     $("recentMsg").textContent = "";
     recentRender();
   } catch (error) {
+    if (seq !== recent.seq) return;
     $("recentMsg").innerHTML = '<span class="err">' + esc(error.message) + "</span>";
   }
 }
@@ -1820,7 +1821,18 @@ async function productGo() {
 
 $("productGo").addEventListener("click", productGo);
 $("recentGo").addEventListener("click", recentGo);
-$("recentStatus").addEventListener("change", () => { if (recent.items.length) recentGo(); });
+$("recentStatus").addEventListener("change", recentGo);
+document.querySelectorAll("#recentScope button").forEach((button) => {
+  button.addEventListener("click", () => {
+    if (recent.scope === button.dataset.scope) return;
+    recent.scope = button.dataset.scope;
+    document.querySelectorAll("#recentScope button").forEach((item) => item.classList.toggle("on", item === button));
+    recent.items = [];
+    recent.nextCursor = null;
+    $("recentOut").innerHTML = "";
+    recentGo();
+  });
+});
 
 
 // ── 설치 명부 ────────────────────────────────────────────────

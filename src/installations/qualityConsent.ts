@@ -159,16 +159,8 @@ export async function lockQualityConsent(
   };
 }
 
-/** "개발자 제외" 스위치(service_flags). 행이 없으면 켜진 것으로 본다 — 표시해 둔 개발자는 기본으로 뺀다. */
-export const HIDE_INTERNAL_FLAG = "hide_internal_installations";
-
-/**
- * installations 행이 개발자 설치로 표시돼 있고 스위치가 켜져 있으면 거짓. 뷰 안에서 쓴다.
- * 표가 작아(팀원 몇 명) 행마다 EXISTS를 돌려도 비용이 없다.
- */
-const NOT_HIDDEN_INTERNAL = `(
-      NOT EXISTS (SELECT 1 FROM internal_installations x WHERE x.id = installations.id)
-      OR coalesce((SELECT value FROM service_flags WHERE key = '${HIDE_INTERNAL_FLAG}'), 'true') <> 'true')`;
+/** installations 행이 개발자 설치로 표시돼 있으면 거짓. 뷰 안에서 쓴다. 표가 작아(팀원 몇 명) 행마다 돌려도 비용이 없다. */
+const NOT_INTERNAL = `NOT EXISTS (SELECT 1 FROM internal_installations x WHERE x.id = installations.id)`;
 
 /**
  * 관리자 열람 범위를 정하는 뷰. 관리자 SQL은 모두 이 뷰만 읽는다.
@@ -177,69 +169,72 @@ const NOT_HIDDEN_INTERNAL = `(
  * 철회·삭제 요청만 거른다. 뷰는 배포마다 다시 만들어지므로 스위치를 끄고 재배포하면
  * 원래 범위로 돌아간다.
  *
- * 개발자 설치(`internal_installations`)는 "개발자 제외" 스위치가 켜져 있으면 어느 범위든 뺀다.
+ * 개발자 설치(`internal_installations`)는 목록·숫자·모아 보기에 늘 들어가지 않는다.
  */
 export function qualityReviewViews(withoutConsent: boolean): string {
-  if (withoutConsent) {
-    return `
-  CREATE OR REPLACE VIEW quality_review_installations AS
-    SELECT * FROM installations WHERE revoked_at IS NULL AND deletion_requested_at IS NULL
-      AND ${NOT_HIDDEN_INTERNAL};
-  CREATE OR REPLACE VIEW quality_review_jobs AS
-    SELECT j.* FROM jobs j JOIN quality_review_installations i ON i.id=j.installation_id
-    WHERE j.created_at::timestamptz > now() - interval '365 days';
-  CREATE OR REPLACE VIEW quality_review_analytics_events AS
-    SELECT e.* FROM analytics_events e JOIN quality_review_installations i ON i.id=e.installation_id
-    WHERE e.occurred_at::timestamptz > now() - interval '365 days'
-      AND (e.job_id IS NULL OR EXISTS (SELECT 1 FROM quality_review_jobs j WHERE j.id=e.job_id));
-  ${JOB_SCOPED_VIEWS}`;
-  }
-  return `
-  CREATE OR REPLACE VIEW quality_review_installations AS
-    SELECT * FROM installations WHERE quality_personal_data AND quality_content_license
-      AND quality_consent_id IS NOT NULL AND revoked_at IS NULL AND deletion_requested_at IS NULL
-      AND ${NOT_HIDDEN_INTERNAL};
-  CREATE OR REPLACE VIEW quality_review_jobs AS
-    SELECT j.* FROM jobs j JOIN quality_review_installations i ON i.id=j.installation_id
-    WHERE j.quality_consent_id=i.quality_consent_id
-      AND j.created_at::timestamptz > now() - interval '365 days';
-  CREATE OR REPLACE VIEW quality_review_analytics_events AS
-    SELECT e.* FROM analytics_events e JOIN quality_review_installations i ON i.id=e.installation_id
-    WHERE e.quality_consent_id=i.quality_consent_id
-      AND e.occurred_at::timestamptz > now() - interval '365 days'
-      AND (e.job_id IS NULL OR EXISTS (SELECT 1 FROM quality_review_jobs j WHERE j.id=e.job_id));
-  ${JOB_SCOPED_VIEWS}`;
+  return (
+    reviewScopeViews("quality_review", withoutConsent, `AND ${NOT_INTERNAL}`) +
+    reviewScopeViews("quality_review_all", withoutConsent, "")
+  );
 }
 
-/** Job에 딸린 표는 어느 범위든 quality_review_jobs를 따라간다. */
-const JOB_SCOPED_VIEWS = [
+/**
+ * 같은 동의 범위를 이름과 설치 조건만 달리해 만든다.
+ *
+ * `quality_review_*`는 목록·숫자용이라 개발자 설치를 뺀다.
+ * `quality_review_all_*`는 Job·설치 한 건 열람과 개발자 Job 목록용이다. 동의 조건은 같고
+ * 개발자 설치만 빼지 않는다.
+ */
+function reviewScopeViews(prefix: string, withoutConsent: boolean, installationFilter: string): string {
+  const consent = withoutConsent
+    ? { installation: "", job: "", event: "" }
+    : {
+        installation: "quality_personal_data AND quality_content_license\n      AND quality_consent_id IS NOT NULL AND ",
+        job: "j.quality_consent_id=i.quality_consent_id\n      AND ",
+        event: "e.quality_consent_id=i.quality_consent_id\n      AND ",
+      };
+  const jobScoped = JOB_SCOPED_TABLES.map(
+    (table) => `
+  CREATE OR REPLACE VIEW ${prefix}_${table} AS
+    SELECT t.* FROM ${table} t JOIN ${prefix}_jobs j ON j.id=t.job_id;
+  `,
+  ).join("\n");
+  return `
+  CREATE OR REPLACE VIEW ${prefix}_installations AS
+    SELECT * FROM installations WHERE ${consent.installation}revoked_at IS NULL AND deletion_requested_at IS NULL
+      ${installationFilter};
+  CREATE OR REPLACE VIEW ${prefix}_jobs AS
+    SELECT j.* FROM jobs j JOIN ${prefix}_installations i ON i.id=j.installation_id
+    WHERE ${consent.job}j.created_at::timestamptz > now() - interval '365 days';
+  CREATE OR REPLACE VIEW ${prefix}_analytics_events AS
+    SELECT e.* FROM analytics_events e JOIN ${prefix}_installations i ON i.id=e.installation_id
+    WHERE ${consent.event}e.occurred_at::timestamptz > now() - interval '365 days'
+      AND (e.job_id IS NULL OR EXISTS (SELECT 1 FROM ${prefix}_jobs j WHERE j.id=e.job_id));
+  ${jobScoped}`;
+}
+
+/** Job에 딸린 표는 어느 범위든 그 범위의 jobs 뷰를 따라간다. */
+const JOB_SCOPED_TABLES = [
   "analysis_people",
   "analysis_candidates",
   "confirmed_selections",
   "job_feedback",
   "export_events",
   "refined_artifacts",
-]
-  .map(
-    (table) => `
-  CREATE OR REPLACE VIEW quality_review_${table} AS
-    SELECT t.* FROM ${table} t JOIN quality_review_jobs j ON j.id=t.job_id;
-  `,
-  )
-  .join("\n");
+];
 
 /**
  * 집계 전용 뷰. 품질 동의와 상관없이 "몇 곳이 몇 건 돌렸나"를 세는 데만 쓴다.
  *
  * 열이 세는 데 필요한 것뿐이다 — 원본 키·결과·작업 상세가 없어 이 뷰로는 내용을 볼 수 없다.
  * 철회·삭제 요청 설치는 뺀다. 개별 설치를 화면에 늘어놓는 SQL은 이 뷰를 쓰지 않는다.
- * "개발자 제외"가 켜져 있으면 개발자 설치도 세지 않는다.
+ * 개발자 설치는 세지 않는다.
  */
 const OPS_COUNT_VIEWS = `
   CREATE OR REPLACE VIEW ops_count_installations AS
     SELECT id, created_at, last_seen_at FROM installations
     WHERE revoked_at IS NULL AND deletion_requested_at IS NULL
-      AND ${NOT_HIDDEN_INTERNAL};
+      AND ${NOT_INTERNAL};
   CREATE OR REPLACE VIEW ops_count_jobs AS
     SELECT j.id, j.installation_id, j.status, j.created_at
     FROM jobs j JOIN ops_count_installations i ON i.id = j.installation_id;

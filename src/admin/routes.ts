@@ -62,9 +62,7 @@ import { GALLERY_PAGE, parseGalleryQuery, parseGroup, STATUS_ORDER } from "./gal
 import { galleryFolders, galleryItems } from "./galleryStore.js";
 import { SEMANTIC_SOURCE, searchQueries, searchQueryOf } from "./searchQueries.js";
 import {
-  hideInternalInstallations,
   listInternalInstallations,
-  setHideInternalInstallations,
   setInternalInstallation,
 } from "./internalInstallations.js";
 import { notify } from "../notify.js";
@@ -255,26 +253,12 @@ adminRoutes.put("/flags/analysis_enabled", async (c) => {
 });
 
 /**
- * GET /v1/admin/internal-installations — 개발자 설치 목록과 "개발자 제외" 스위치.
+ * GET /v1/admin/internal-installations — 개발자 설치 목록.
  *
- * 스위치가 켜져 있으면 표시된 설치는 목록·상세·숫자·모아 보기에서 모두 빠진다(뷰가 거른다).
+ * 표시된 설치는 목록·숫자·모아 보기에서 늘 빠진다(뷰가 거른다).
  */
 adminRoutes.get("/internal-installations", async (c) => {
-  return c.json({
-    hide: await hideInternalInstallations(),
-    items: await listInternalInstallations(),
-  });
-});
-
-/** PUT /v1/admin/internal-installations/hide — body {hide:boolean}. */
-adminRoutes.put("/internal-installations/hide", async (c) => {
-  const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
-  if (typeof body?.hide !== "boolean") {
-    return c.json(errorEnvelope("INVALID_INPUT", "hide(boolean)이 필요합니다.", c.get("requestId")), 400);
-  }
-  await setHideInternalInstallations(body.hide);
-  await audit(c, body.hide ? "hide_internal_installations" : "show_internal_installations");
-  return c.json({ hide: body.hide });
+  return c.json({ items: await listInternalInstallations() });
 });
 
 /** PUT /v1/admin/internal-installations/:id — body {internal:boolean, label?:string}. 개발자 설치 표시·해제. */
@@ -557,9 +541,14 @@ adminRoutes.get("/review/jobs", async (c) => {
   if (!parsed.ok) {
     return c.json(errorEnvelope("INVALID_INPUT", parsed.message, c.get("requestId")), 400);
   }
-  const rows = await listRecentJobs(parsed.query);
+  const scope = c.req.query("scope");
+  if (scope !== undefined && scope !== "users" && scope !== "developer") {
+    return c.json(errorEnvelope("INVALID_INPUT", "scope는 users 또는 developer여야 합니다.", c.get("requestId")), 400);
+  }
+  const rows = await listRecentJobs(parsed.query, scope);
   const page = toHistoryPage(rows, parsed.query.limit);
   const installationByJob = new Map(rows.map((row) => [row.id, row.installation_id]));
+  const developerLabelByJob = new Map(rows.map((row) => [row.id, row.developer_label]));
   const queries = await searchQueries(semanticIds(page.items));
   await audit(c, "review_recent_jobs", {});
   return c.json({
@@ -567,6 +556,7 @@ adminRoutes.get("/review/jobs", async (c) => {
     items: page.items.map((item) => ({
       ...item,
       installationId: installationByJob.get(item.jobId) ?? null,
+      developerLabel: developerLabelByJob.get(item.jobId) ?? null,
       searchQuery: queries.get(item.jobId) ?? null,
     })),
   });
@@ -799,22 +789,22 @@ adminRoutes.get("/review/jobs/:id", async (c) => {
   }>(
     `SELECT id, status, created_at, input_s3_key, input_width, input_height,
             inference_metadata_json, result_json, cut_summary_json, source
-     FROM quality_review_jobs WHERE id = $1 AND installation_id IS NOT NULL`,
+     FROM quality_review_all_jobs WHERE id = $1 AND installation_id IS NOT NULL`,
     [jobId],
   );
   if (!job) return c.json(errorEnvelope("NOT_FOUND", "unknown jobId", c.get("requestId")), 404);
 
   const [peopleRows, candidates, selections, feedback, refinedRows] = await Promise.all([
     query<AnalysisPersonRow>(
-      "SELECT * FROM quality_review_analysis_people WHERE job_id = $1 ORDER BY person_index",
+      "SELECT * FROM quality_review_all_analysis_people WHERE job_id = $1 ORDER BY person_index",
       [jobId],
     ),
     query(
-      "SELECT * FROM quality_review_analysis_candidates WHERE job_id = $1 ORDER BY person_index, rank",
+      "SELECT * FROM quality_review_all_analysis_candidates WHERE job_id = $1 ORDER BY person_index, rank",
       [jobId],
     ),
-    query("SELECT * FROM quality_review_confirmed_selections WHERE job_id = $1 ORDER BY person_index", [jobId]),
-    queryOne<{ reason: string }>("SELECT reason FROM quality_review_job_feedback WHERE job_id = $1", [jobId]),
+    query("SELECT * FROM quality_review_all_confirmed_selections WHERE job_id = $1 ORDER BY person_index", [jobId]),
+    queryOne<{ reason: string }>("SELECT reason FROM quality_review_all_job_feedback WHERE job_id = $1", [jobId]),
     query<{
       person_index: number;
       candidate_id: string;
@@ -828,7 +818,7 @@ adminRoutes.get("/review/jobs/:id", async (c) => {
     }>(
       `SELECT person_index, candidate_id, pose_id, refined, reason, object_key,
               thumbnail_key, limbs_json, created_at
-       FROM quality_review_refined_artifacts WHERE job_id = $1 ORDER BY person_index, candidate_id`,
+       FROM quality_review_all_refined_artifacts WHERE job_id = $1 ORDER BY person_index, candidate_id`,
       [jobId],
     ),
   ]);
@@ -1016,7 +1006,7 @@ adminRoutes.get("/gaps/observations", async (c) => {
 // Authenticated proxies: never hand out S3 bearer URLs that outlive withdrawal.
 adminRoutes.get("/review/jobs/:id/input", async c => {
   const jobId = c.req.param("id");
-  const job = await queryOne<{ input_s3_key: string | null }>("SELECT input_s3_key FROM quality_review_jobs WHERE id=$1", [jobId]);
+  const job = await queryOne<{ input_s3_key: string | null }>("SELECT input_s3_key FROM quality_review_all_jobs WHERE id=$1", [jobId]);
   if (!job?.input_s3_key) return c.json(errorEnvelope("NOT_FOUND", "not found", c.get("requestId")), 404);
   const blob = await loadInput(job.input_s3_key);
   await audit(c, "review_input", { jobId });
@@ -1026,7 +1016,7 @@ adminRoutes.get("/review/jobs/:id/refined/:personIndex/bvh", async c => {
   const target = refinedTarget(c);
   if (!target) return c.json(errorEnvelope("INVALID_INPUT", "invalid target", c.get("requestId")), 400);
   const row = await queryOne<{ object_key: string | null }>(
-    "SELECT object_key FROM quality_review_refined_artifacts WHERE job_id=$1 AND person_index=$2 AND candidate_id=$3",
+    "SELECT object_key FROM quality_review_all_refined_artifacts WHERE job_id=$1 AND person_index=$2 AND candidate_id=$3",
     [target.jobId, target.personIndex, target.candidateId]);
   if (!row?.object_key) return c.json(errorEnvelope("NOT_FOUND", "not found", c.get("requestId")), 404);
   const blob = await loadInput(row.object_key);
