@@ -15,6 +15,7 @@ import {
 } from "./skeleton.js";
 import { MARKETING_ANALYTICS_SCRIPT } from "./marketingDashboard.js";
 import { JOURNEY_DASHBOARD_SCRIPT } from "./journeyDashboard.js";
+import { BLOG_DASHBOARD_SCRIPT } from './blogDashboard.js';
 
 // 뼈대 상수는 TypeScript 모듈 하나에만 둔다. 화면용 사본을 따로 적으면 관절 순서가
 // 조용히 어긋나므로, 여기서 JSON으로 심어 브라우저와 테스트가 같은 값을 쓰게 한다.
@@ -1713,6 +1714,7 @@ function campaignCountsBlock(counts) {
 
 ${MARKETING_ANALYTICS_SCRIPT}
 ${JOURNEY_DASHBOARD_SCRIPT}
+${BLOG_DASHBOARD_SCRIPT}
 function marketingRender(data,scope) {
   scope = scope || 'all';
   let html = marketingMetaBlock(data.meta,scope);
@@ -1720,6 +1722,7 @@ function marketingRender(data,scope) {
   html += '<p class="sub">앱 조회 ' + esc(when(data.queriedAt)) + ' · 신규 설치 범위: ' + esc(when(data.since)) + ' 이후 최근 ' + esc(data.windowDays) + '일(이동 구간). 광고 달력 날짜 범위와 다르므로 두 표를 나누어 비교하세요.</p>';
   html += marketingUsageBlock(data.usage);
   html += marketingUsageDetailsBlock(data.usageDetails,data.usage);
+  html += blogBlock(data.blog);
   html += journeyBlock(data.journeys);
   html += campaignCountsBlock(data.campaignCounts);
   html += acquisitionBlock(data.acquisition);
