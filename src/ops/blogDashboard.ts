@@ -8,7 +8,7 @@ function blogBlock(b) {
   const sourceNames={google:'Google',naver:'네이버',daum:'다음',bing:'Bing',yahoo:'Yahoo',instagram:'Instagram',facebook:'Facebook',x:'X',youtube:'YouTube',internal:'사이트 내부 이동',referral:'기타 외부 사이트',direct:'직접 / 출처 확인 불가',other:'기타 캠페인'};
   const table=(heads,rows)=>'<div class="scroll"><table><thead><tr>'+heads.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+rows.join('')+'</tbody></table></div>';
   const t=b.totals||{}, posts=b.posts||[];
-  let html='<section id="blog-analytics" class="marketing-section"><h3>블로그 유입·읽기</h3><p class="sub">'+esc(b.measurementStarted)+' 배포 이후, 분석에 동의한 브라우저만 집계합니다. 블로그 목록은 제외하고 글 3편을 비교합니다. 날짜 필터는 위 마케팅 조회 기간을 따릅니다.</p><div class="kpis">';
+  let html='<section id="blog-analytics" class="marketing-section"><h3>블로그 유입·읽기</h3><p class="sub">상세 수집 활성화 이후, 분석에 동의한 브라우저만 집계합니다. 발행부터 활성화 사이의 방문은 소급 수집하지 않습니다. 블로그 목록은 제외하고 글 3편을 비교합니다. 날짜 필터는 위 마케팅 조회 기간을 따릅니다.</p><div class="kpis">';
   for(const [label,value] of [['글 조회',n(t.views)+'회'],['방문 브라우저',n(t.visitors)],['조회당 활성 체류',seconds(t.engagedMs,t.views)],['관련 글 영역 도달',ratio(t.endViews,t.views)],['다운로드 안내 클릭',n(t.downloadCtaViews)+'조회']])html+='<div class="kpi"><div class="label">'+label+'</div><div class="value">'+value+'</div></div>';
   html+='</div><p class="sub">조회는 글을 열어 page_view가 수집된 횟수이며 재방문·새로고침은 별도 조회입니다. 방문 브라우저는 중복을 제거하지만 사람 수는 아닙니다. 같은 브라우저가 여러 글을 읽으므로 글별 방문자를 더하면 전체 방문자와 다를 수 있습니다.</p>';
   if(!t.views)html+='<p class="empty">이 기간에 수집된 블로그 조회가 없습니다. 발행 전·미동의·차단된 방문을 방문 0명으로 해석하지 마세요.</p>';

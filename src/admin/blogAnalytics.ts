@@ -46,7 +46,7 @@ export async function blogAnalytics(days: number, now = new Date().toISOString()
     query(cte + `SELECT (occurred_at AT TIME ZONE 'Asia/Seoul')::date::text AS day,COUNT(*)::int AS views,
       COUNT(DISTINCT visitor_id)::int AS visitors FROM visits GROUP BY day ORDER BY day`, params),
   ]);
-  return { status: 'ready' as const, since, until: now, timezone: 'Asia/Seoul', measurementStarted: '2026-11-09',
+  return { status: 'ready' as const, since, until: now, timezone: 'Asia/Seoul',
     totals: totals[0], posts, sources, sections, daily,
     catalog: Object.entries(BLOG_CATALOG).map(([path, post]) => ({ path, title: post.title, sections: { 'article-intro': BLOG_SHARED_SECTIONS['article-intro'], ...post.sections, 'article-sources': BLOG_SHARED_SECTIONS['article-sources'], 'article-related': BLOG_SHARED_SECTIONS['article-related'], footer: BLOG_SHARED_SECTIONS.footer, page: BLOG_SHARED_SECTIONS.page } })) };
 }
