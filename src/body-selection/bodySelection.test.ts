@@ -22,7 +22,9 @@ import {
   parsePreferenceChange,
   parseSelectionChange,
 } from "./routes.js";
-import { BodyError, bodyStore, readSelection, type BodyDb } from "./store.js";
+import {
+  BodyError, bodyStore, initializeBodySelections, presentPreferences, readSelection, type BodyDb,
+} from "./store.js";
 import { catalog, fixture, result } from "./fixtures.js";
 const recommendation = () =>
   mapBodyRecommendations(fixture(), catalog()).get(0)!;
@@ -166,11 +168,16 @@ test("partial bad person does not lose good person's recommendation; auto_defaul
   );
 });
 test("recommendation mapping leaves every pose and quality field intact", () => {
-  const old = config.bodySelectionEnabled;
+  const previous = {
+    bodySelectionEnabled: config.bodySelectionEnabled,
+    bodyRecommendationEnabled: config.bodyRecommendationEnabled,
+  };
   try {
-    Reflect.set(config, "bodySelectionEnabled", false);
+    Object.assign(config, { bodySelectionEnabled: false, bodyRecommendationEnabled: false });
     const off = result();
-    Reflect.set(config, "bodySelectionEnabled", true);
+    Object.assign(config, { bodySelectionEnabled: true });
+    assert.deepEqual(result(), off);
+    Object.assign(config, { bodyRecommendationEnabled: true });
     const on = result();
     const strip = (r: AnalysisResult) => ({
       ...r,
@@ -181,9 +188,61 @@ test("recommendation mapping leaves every pose and quality field intact", () => 
     assert.deepEqual(strip(on), off);
     assert.ok(on.candidatesByPerson[0].bodyRecommendation);
   } finally {
-    Reflect.set(config, "bodySelectionEnabled", old);
+    Object.assign(config, previous);
   }
 });
+test("the paused recommendation flag rejects old client auto actions", async (t) => {
+  const previous = config.bodyRecommendationEnabled;
+  Object.assign(config, { bodyRecommendationEnabled: false });
+  t.after(() => Object.assign(config, { bodyRecommendationEnabled: previous }));
+  const store = {
+    ...bodyStore,
+    savePreferences: async () => assert.fail("auto preference was written"),
+    saveSelection: async () => assert.fail("auto selection was written"),
+  };
+  const app = new Hono<AppEnv>();
+  app.route("/preferences", createBodyPreferenceRoutes(store, () => true));
+  app.route("/jobs", createBodySelectionRoutes(store, () => true));
+  for (const [path, change] of [
+    ["/preferences", { mode: "auto" }],
+    ["/jobs/job_test/people/0/body-selection", { intent: "auto" }],
+  ] as const) {
+    const response = await app.request(path, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...change, expectedRevision: 0, mutationId: "old-client" }),
+    });
+    assert.equal(response.status, 409);
+    assert.equal((await response.json() as { error: { code: string } }).error.code, "BODY_RECOMMENDATION_DISABLED");
+  }
+});
+
+test("an old automatic snapshot starts from the last manually used body when paused", async (t) => {
+  const previous = config.bodyRecommendationEnabled;
+  Object.assign(config, { bodyRecommendationEnabled: false });
+  t.after(() => Object.assign(config, { bodyRecommendationEnabled: previous }));
+  const c = catalog();
+  const lastUsed = { characterId: c.assets[0].characterId, controls: null, usedAt: "" };
+  const preferences = { ...defaultPreferences(), mode: "auto" as const, lastUsed };
+  const policy = snapshot(preferences, c);
+  const analysis = result();
+  const writes: ReturnType<typeof resolveBody>[] = [];
+  analysis.candidatesByPerson[0].bodyRecommendation = recommendation();
+  const db = {
+    async query(sql: string, values: unknown[]) {
+      if (sql.startsWith("SELECT")) return { rows: [{ body_policy_json: policy }] };
+      writes.push(JSON.parse(values[2] as string));
+      return { rows: [] };
+    },
+  } as BodyDb;
+  assert.equal(presentPreferences(preferences, c).mode, "last_used");
+  await initializeBodySelections(db, analysis.jobId, analysis, c);
+  assert.equal(writes[0].recommendation.status, "disabled");
+  assert.equal(writes[0].resolvedSource, "last_used");
+  assert.equal(writes[0].resolvedBody?.characterId, lastUsed.characterId);
+  assert.equal(preferences.mode, "auto");
+});
+
 test("mutations reject ambiguous modes, unknown fields and missing revision/idempotency keys", () => {
   const common = { expectedRevision: 0, mutationId: "mutation-123" };
   assert.equal(
@@ -417,7 +476,7 @@ test("preference reads and writes use the same UX gate for every flag combinatio
                   ? {
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({
-                        mode: "auto",
+                        mode: "last_used",
                         expectedRevision: 0,
                         mutationId: "test-mutation",
                       }),

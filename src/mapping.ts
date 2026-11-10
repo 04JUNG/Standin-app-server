@@ -167,7 +167,7 @@ function mapPerson(p: UpstreamPerson): AnalysisPerson {
 }
 
 export function mapCutResult(jobId: string, cut: CutResult): AnalysisResult {
-  const bodies = config.bodySelectionEnabled
+  const bodies = config.bodySelectionEnabled && config.bodyRecommendationEnabled
     ? mapBodyRecommendations(cut, loadBodyCatalog())
     : undefined;
   const result: AnalysisResult = {

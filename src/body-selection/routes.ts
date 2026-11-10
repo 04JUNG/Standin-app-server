@@ -160,14 +160,12 @@ export function createBodyPreferenceRoutes(
   app.get("/", async (c) =>
     c.json(await store.preferences(c.get("installationId")!)),
   );
-  app.put("/", async (c) =>
-    c.json(
-      await store.savePreferences(
-        c.get("installationId")!,
-        parsePreferenceChange(await c.req.json().catch(() => null)),
-      ),
-    ),
-  );
+  app.put("/", async (c) => {
+    const change = parsePreferenceChange(await c.req.json().catch(() => null));
+    if (!config.bodyRecommendationEnabled && change.mode === "auto")
+      throw new BodyError("BODY_RECOMMENDATION_DISABLED", 409);
+    return c.json(await store.savePreferences(c.get("installationId")!, change));
+  });
   // 체형 카드("주인공 A"). 응답은 GET과 같은 설정 전체(새 revision 포함).
   app.post("/cards", async (c) =>
     c.json(
@@ -226,16 +224,19 @@ export function createBodySelectionRoutes(
       ),
     ),
   );
-  app.put(`${prefix}/body-selection`, async (c) =>
-    c.json(
+  app.put(`${prefix}/body-selection`, async (c) => {
+    const change = parseSelectionChange(await c.req.json().catch(() => null));
+    if (!config.bodyRecommendationEnabled && change.intent === "auto")
+      throw new BodyError("BODY_RECOMMENDATION_DISABLED", 409);
+    return c.json(
       await store.saveSelection(
         c.get("installationId")!,
         c.req.param("jobId"),
         index(c.req.param("personIndex")),
-        parseSelectionChange(await c.req.json().catch(() => null)),
+        change,
       ),
-    ),
-  );
+    );
+  });
   app.get(`${prefix}/body-options`, async (c) =>
     c.json(
       await store.options(
