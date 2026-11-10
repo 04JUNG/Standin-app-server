@@ -38,6 +38,7 @@ export const config = {
   ),
   bodyUxEnabled: env("BODY_UX_ENABLED", "false") === "true",
   bodySelectionEnabled: env("BODY_SELECTION_ENABLED", "false") === "true",
+  bodyRecommendationEnabled: env("BODY_RECOMMENDATION_ENABLED", "false") === "true",
   bodyCatalogPath: env("BODY_CATALOG_PATH", "config/body-models.json"),
   /**
    * Numeric body controls (`body-shape.v1`). Even when on, only assets whose catalog

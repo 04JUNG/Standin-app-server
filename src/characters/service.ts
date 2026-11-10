@@ -203,7 +203,7 @@ export async function currentCapabilities(
     analyticsJourney: true,
     handSelection: await handSelectionAvailable(),
     bodySelection: config.bodySelectionEnabled,
-    bodyRecommendation: config.bodySelectionEnabled,
+    bodyRecommendation: config.bodySelectionEnabled && config.bodyRecommendationEnabled,
     bodyPreviews: bodyUxAvailable(),
     bodyPreviewAssets: config.bodySelectionEnabled && converterEnabled(),
     refine: config.refineFeatureEnabled,

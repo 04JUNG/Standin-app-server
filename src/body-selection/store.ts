@@ -30,6 +30,7 @@ import {
   type BodyIntent,
   type BodyPolicy,
   type BodyPreferences,
+  type BodyRecommendation,
   type BodySelection,
 } from "./model.js";
 export type BodyDb = Pick<PoolClient, "query">;
@@ -100,6 +101,22 @@ export function presentShapeEditable(catalog: BodyCatalog) {
     };
   });
 }
+const disabledRecommendation: BodyRecommendation = {
+  status: "disabled",
+  body: null,
+  reasonCodes: ["body_disabled"],
+};
+
+function effectivePreferences(value: BodyPreferences): BodyPreferences {
+  return config.bodyRecommendationEnabled || value.mode === "last_used"
+    ? value
+    : { ...value, mode: "last_used" };
+}
+
+function effectivePolicy(policy: BodyPolicy): BodyPolicy {
+  return { ...policy, preferences: effectivePreferences(policy.preferences) };
+}
+
 /** Preferences as the client sees them: stored value plus what the catalog allows. */
 export type PresentedPreferences = BodyPreferences & {
   shapeEditable?: ReturnType<typeof presentShapeEditable>;
@@ -108,7 +125,7 @@ export function presentPreferences(
   value: BodyPreferences,
   catalog: BodyCatalog = loadBodyCatalog(),
 ): PresentedPreferences {
-  const normalized = normalizePreferences(value);
+  const normalized = effectivePreferences(normalizePreferences(value));
   return {
     ...normalized,
     pickerVisibility: normalized.pickerVisibility ?? defaultPickerVisibility(),
@@ -367,7 +384,7 @@ export async function captureBodyPolicy(
   owner: string,
   catalog = loadBodyCatalog(),
 ): Promise<void> {
-  const policy = snapshot(await readPreferences(db, owner), catalog);
+  const policy = snapshot(effectivePreferences(await readPreferences(db, owner)), catalog);
   await db.query(
     "UPDATE jobs SET body_policy_json=$2 WHERE id=$1 AND body_policy_json IS NULL",
     [jobId, JSON.stringify(policy)],
@@ -407,12 +424,10 @@ function initialBody(
   const context = personBodyContext(person, semantic);
   return resolveBody(
     person.personIndex,
-    policy,
-    person.bodyRecommendation ?? {
-      status: "disabled",
-      body: null,
-      reasonCodes: ["body_disabled"],
-    },
+    effectivePolicy(policy),
+    config.bodyRecommendationEnabled
+      ? person.bodyRecommendation ?? disabledRecommendation
+      : disabledRecommendation,
     catalog,
     context.poses,
     "inherit",
@@ -628,8 +643,8 @@ export async function writeSelection(
   }
   const value = resolveBody(
     index,
-    policy,
-    current.recommendation,
+    effectivePolicy(policy),
+    config.bodyRecommendationEnabled ? current.recommendation : disabledRecommendation,
     catalog,
     poses,
     change.intent,
