@@ -5,6 +5,10 @@
 import assert from "node:assert/strict";
 import test, { beforeEach } from "node:test";
 import type { ConverterCharacter } from "../converter/client.js";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createHash } from "node:crypto";
 import {
   __resetCharacterCache,
   characterSelectionEnabled,
@@ -34,6 +38,27 @@ function deps(ids: string[], enabled = true) {
 
 beforeEach(() => {
   __resetCharacterCache();
+});
+
+test("new defaults carry the verified PNG for installed clients and distinguish legacy bodies", async () => {
+  const { catalog } = await import("../body-selection/fixtures.js");
+  const folder = await mkdtemp(join(tmpdir(), "model-card-"));
+  try {
+    const c = catalog(2);
+    const png = Buffer.from([137,80,78,71,13,10,26,10,1,2]);
+    const path = join(folder, "card.png");
+    await writeFile(path, png);
+    for (const a of c.assets) Object.assign(a, { role: "default", order: 10,
+      neutralPreview: {path, sha256: createHash("sha256").update(png).digest("hex"),
+        characterSha256: a.assetSha256, pose: "t_pose", framing: "body-comparison.v1"} });
+    const result = await listCharacters({ ...deps([DEFAULT_ID, "standin-female-v2-lbs", ...c.assets.map(a => a.characterId)]),
+      defaultCharacterId: c.assets[0].characterId, bodyCatalog: () => c });
+    assert.equal(result.characters[0].characterId, c.assets[0].characterId);
+    assert.equal(result.characters[0].previewUrl, `data:image/png;base64,${png.toString("base64")}`);
+    assert.equal(result.characters.find(a => a.characterId === DEFAULT_ID)?.displayName, "이전 기본 남성");
+    await writeFile(path, Buffer.concat([png, Buffer.from([3])]));
+    await assert.rejects(listCharacters({ ...deps(c.assets.map(a => a.characterId)), bodyCatalog: () => c }), /invalid preview/);
+  } finally { await rm(folder, { recursive: true, force: true }); }
 });
 
 test("retired adult and teen models cannot reappear; shape-key models and children remain selectable", async () => {
