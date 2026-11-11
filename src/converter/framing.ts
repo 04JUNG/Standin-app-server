@@ -112,10 +112,8 @@ export async function convertFramed(
     body.set("shape", JSON.stringify(input.shape));
     body.set("expected_shape_source", JSON.stringify(input.shapeSource));
   }
-  if (input.hands) {
-    body.set("hand_left", input.hands.left);
-    body.set("hand_right", input.hands.right);
-  }
+  if (input.hands?.left) body.set("hand_left", input.hands.left);
+  if (input.hands?.right) body.set("hand_right", input.hands.right);
   body.set("output_scope", input.scope);
   body.set("preview_view", "front");
   if (input.previewFormat) body.set("preview_format", input.previewFormat);
@@ -176,11 +174,13 @@ export async function convertFramed(
       if (bytes.toString("base64") !== encoded) throw new Error(key);
       return bytes;
     };
-    if (input.hands) {
-      const hands = value.hands as Record<string, unknown> | null;
-      if (!hands || hands.left !== input.hands.left || hands.right !== input.hands.right ||
-          hands.library_version !== input.hands.library_version || hands.version !== "hand-bake-v1")
+    const bakedHands = value.hands as Record<string, unknown> | null;
+    if (input.hands?.left || input.hands?.right) {
+      if (!bakedHands || bakedHands.left !== input.hands.left || bakedHands.right !== input.hands.right ||
+          bakedHands.library_version !== input.hands.library_version || bakedHands.version !== "hand-bake-v1")
         throw new Error("hand lineage");
+    } else if (input.hands && bakedHands != null) {
+      throw new Error("unexpected hand bake");
     }
     const validation = value.artifact_validation as Record<string, unknown> | undefined;
     const fbx = decode("fbx_base64"),
