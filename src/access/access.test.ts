@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { ACCESS_SCHEMA } from "./schema.js";
 import { accessCodeHash, redeemAccessCode } from "./store.js";
 import { createAccessRoutes } from "./routes.js";
+import { installationAccess } from "./policy.js";
 import { config } from "../config.js";
 import { pool } from "../db.js";
 import { createRequireInstallation } from "../installations/middleware.js";
@@ -13,13 +14,13 @@ import type { AppEnv } from "../env.js";
 
 test("closed access covers old clients, all product routes, atomic redeem and revocation", async () => {
   const db = new PGlite();
-  await db.exec("CREATE TABLE installations(id text primary key); INSERT INTO installations VALUES('old'),('supporter'),('operator'),('other')");
+  await db.exec("CREATE TABLE installations(id text primary key, created_at text NOT NULL DEFAULT '2026-10-21T00:00:00.000Z'); INSERT INTO installations(id) VALUES('old'),('supporter'),('operator'),('other'); INSERT INTO installations VALUES('new','2026-11-12T00:00:00.000Z')");
   await db.exec(ACCESS_SCHEMA);
   await db.exec(ACCESS_SCHEMA);
   const original = pool.query;
-  const flags = [config.accessGateEnabled, config.supporterAccessEnabled, config.accessOperatorInstallations] as const;
+  const flags = [config.accessGateEnabled, config.supporterAccessEnabled, config.accessOperatorInstallations, config.openBetaEndedAt] as const;
   pool.query = db.query.bind(db) as typeof pool.query;
-  Object.assign(config, { accessGateEnabled: true, supporterAccessEnabled: true, accessOperatorInstallations: new Set(["operator"]) });
+  Object.assign(config, { accessGateEnabled: true, supporterAccessEnabled: true, accessOperatorInstallations: new Set(["operator"]), openBetaEndedAt: "2026-11-11T00:00:00.000Z" });
   const authenticate = async (id: string) => id ? {
     id, consentVersion: config.consentVersion, appVersion: "0.2.3",
   } : null;
@@ -41,19 +42,40 @@ test("closed access covers old clients, all product routes, atomic redeem and re
       assert.equal((await call("old", path)).status, 403);
       assert.equal((await call("operator", path)).status, 200);
     }
-    assert.equal((await call("old", "/v1/installations/current/access")).status, 200);
+    const oldStatus = await (await call("old", "/v1/installations/current/access")).json();
+    assert.deepEqual(oldStatus, { required: true, allowed: false, role: null, codeRegistered: false, showBetaEndedNotice: true });
+    assert.deepEqual(await installationAccess("new"), { ...oldStatus, showBetaEndedNotice: false });
+    assert.equal((await installationAccess("operator")).showBetaEndedNotice, false);
+    for (const cutoff of ["", "invalid"]) {
+      Object.assign(config, { openBetaEndedAt: cutoff });
+      assert.equal((await installationAccess("old")).showBetaEndedNotice, false);
+      assert.equal((await installationAccess("new")).allowed, false);
+    }
+    Object.assign(config, { openBetaEndedAt: "2026-11-11T00:00:00.000Z" });
+    // An old app without X-App-Version is still blocked; supported old versions
+    // cannot bypass the gate by providing their version explicitly either.
+    for (const version of ["0.2.0", "0.2.2", "0.2.3"]) {
+      const response = await app.request(paths[0], { headers: {
+        "X-Installation-Id": "old", "X-Device-Token": "test", "X-App-Version": version,
+      } });
+      assert.equal(response.status, 403);
+    }
+    assert.equal((await app.request(paths[0], { headers: {
+      "X-Installation-Id": "old", "X-Device-Token": "test", "X-App-Version": "0.1.1",
+    } })).status, 426);
     const code = "STDN-12345678-12345678-12345678-12345678";
     const id = randomUUID();
     await db.query("INSERT INTO supporter_access_codes(id,code_hash,label) VALUES($1,$2,'test')", [id, accessCodeHash(code)]);
     const normalized = " stdn 12345678 12345678 12345678 12345678 ";
     const response = await call("supporter", "/v1/installations/current/access/redeem", normalized);
     assert.equal(response.status, 200);
-    assert.equal((await response.json() as { role: string }).role, "supporter");
+    assert.deepEqual(await response.json(), { required: true, allowed: true, role: "supporter", codeRegistered: true, showBetaEndedNotice: false });
     assert.equal((await call("supporter", paths[0])).status, 200);
     assert.equal((await call("supporter", "/v1/installations/current/access/redeem", code)).status, 200);
     assert.equal((await call("other", "/v1/installations/current/access/redeem", code)).status, 400);
     await db.query("UPDATE supporter_access_codes SET revoked_at=now() WHERE id=$1", [id]);
     assert.equal((await call("supporter", paths[0])).status, 403);
+    assert.deepEqual(await installationAccess("supporter"), { required: true, allowed: false, role: null, codeRegistered: true, showBetaEndedNotice: false });
     Object.assign(config, { supporterAccessEnabled: false });
     assert.equal((await call("other", "/v1/installations/current/access/redeem", code)).status, 403);
     assert.equal((await call("operator", paths[0])).status, 200);
@@ -72,7 +94,7 @@ test("closed access covers old clients, all product routes, atomic redeem and re
     assert.equal(accessCodeHash(code), createHash("sha256").update(code.replaceAll("-", "")).digest("hex"));
   } finally {
     pool.query = original;
-    Object.assign(config, { accessGateEnabled: flags[0], supporterAccessEnabled: flags[1], accessOperatorInstallations: flags[2] });
+    Object.assign(config, { accessGateEnabled: flags[0], supporterAccessEnabled: flags[1], accessOperatorInstallations: flags[2], openBetaEndedAt: flags[3] });
     await db.close();
     await pool.end();
   }

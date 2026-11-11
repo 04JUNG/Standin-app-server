@@ -1851,7 +1851,7 @@ code redemption, optional-consent management and withdrawal/deletion.
 Installation registration remains available so new supporters can redeem a code.
 
 - `GET /v1/installations/current/access` returns
-  `{required:boolean,allowed:boolean,role:"operator"|"supporter"|null}`.
+  `{required:boolean,allowed:boolean,role:"operator"|"supporter"|null,codeRegistered:boolean,showBetaEndedNotice:boolean}`.
 - `POST /v1/installations/current/access/redeem` accepts `{code:string}`.
   Codes are atomically bound to one installation. Retrying on the same
   installation is idempotent. A used, revoked or invalid code returns
@@ -1873,3 +1873,22 @@ of dashboard administrator credentials.
 Deploy the BFF and code-entry client, configure the explicit operator IDs,
 then enable the gate in the deployment environment. The BFF and worker
 workflow both preserve these environment settings on subsequent deployment.
+
+
+The open-beta thank-you and code entry are separate client screens. Only
+unredeemed installations whose server `created_at` is at or before the fixed
+`OPEN_BETA_ENDED_AT` (ISO-8601 with timezone) see the thank-you, then continue
+to code entry. New installations go directly to code entry. Missing/invalid
+cutoffs never classify new installations as beta users. Freeze this value at
+closure; do not move it forward with each deployment. A download that never
+registered, or an installation whose local identity was reset, cannot be
+identified as an old download from existing records.
+
+Operators and active redeemed installations bypass both screens. Redeemed but
+revoked/disabled installations receive an access-ended screen without code
+reentry. Registration is checked on the server on launch and subsequent
+requests; no local allow flag grants access. Old clients are denied by the same
+server middleware without an update, but need the new client to display the
+two-step UI and redeem codes. Unsupported old clients may receive the existing
+update-required response first. Preview mode and public app updates remain
+separate from installation-protected product APIs.

@@ -9,12 +9,15 @@ export function accessCodeHash(code: string): string | null {
   return createHash("sha256").update(normalized).digest("hex");
 }
 
-export async function hasSupporterAccess(installationId: string, db: Executor = pool) {
-  const result = await db.query(
-    "SELECT 1 FROM supporter_access_codes WHERE installation_id=$1 AND revoked_at IS NULL LIMIT 1",
+export async function readAccessRegistration(installationId: string, db: Executor = pool) {
+  const result = await db.query<{ created_at: string; registered: boolean; active: boolean }>(
+    `SELECT i.created_at,
+      EXISTS(SELECT 1 FROM supporter_access_codes c WHERE c.installation_id=i.id) AS registered,
+      EXISTS(SELECT 1 FROM supporter_access_codes c WHERE c.installation_id=i.id AND c.revoked_at IS NULL) AS active
+     FROM installations i WHERE i.id=$1`,
     [installationId],
   );
-  return result.rows.length > 0;
+  return result.rows[0] ?? { created_at: null, registered: false, active: false };
 }
 
 export async function consumeAccessAttempt(installationId: string, db: Executor = pool) {

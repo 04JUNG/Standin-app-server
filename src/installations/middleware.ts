@@ -54,7 +54,9 @@ export function createRequireInstallation(
       const permission = await access(installation.id);
       if (!permission.allowed)
         return c.json(errorEnvelope("ACCESS_CODE_REQUIRED",
-          "오픈베타가 종료되었습니다. 이용 코드를 등록해 주세요.",c.get("requestId")),403);
+          permission.codeRegistered ? "이용 권한이 종료되었습니다." :
+            permission.showBetaEndedNotice ? "오픈베타가 종료되었습니다. 이용 코드를 등록해 주세요." :
+              "이용 코드를 등록해 주세요.", c.get("requestId")),403);
     }
     await next();
   };
