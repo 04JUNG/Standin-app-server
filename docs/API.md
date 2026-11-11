@@ -1926,3 +1926,13 @@ The job/owner store and confirmations are fixtures; the semantic presentation,
 default body selection, routes, Converter HTTP, final FBX, PNG and hash/receipt
 checks are real. Never deploy either probe. The matching server pilot report
 records the measured sample and explicit ungenerated library coverage.
+
+The matching Converter PR also starts automatic preparation on service startup
+and when its server-owned default-model catalog changes. It warms both the exact
+semantic front-reference camera and unbaked full-body form using original hands.
+Until exact validation/registration completes, this BFF keeps the normal fallback
+and the same owned review receipt checks. Its internal read-only
+`/final-cache/prewarm-status` is operational diagnostics and is not forwarded as
+a client trigger or safety authority. No BFF API/UI change is needed for watching
+model changes. Future rollout must mount/configure the catalog, active library
+and private cache; this PR update does not deploy them.
