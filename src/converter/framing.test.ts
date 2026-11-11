@@ -457,3 +457,16 @@ test("converter rejection preserves only a bounded private protocol code for sce
   await assert.rejects(convertFramed(input, deps({ error: { code: "/operator/private" } }, 409)),
     (error: unknown) => error instanceof ConverterError && error.upstreamCode === undefined);
 });
+
+test("final cache origin is diagnostic; source and final bytes still require validation", async () => {
+  const value = { ...payload(), final_cache: { status: "hit", blender_runs: 0 } };
+  const result = await convertFramed(input, deps(value));
+  assert.deepEqual(result.finalCache, { status: "hit", blenderRuns: 0 });
+  const pair = decodeFramedPair("job-owned", encodeFramedPair("job-owned", result));
+  assert.deepEqual(pair.finalCache, result.finalCache);
+  for (const change of [{ source_bvh_sha256: "f".repeat(64) }, { fbx_sha256: "f".repeat(64) },
+    { final_cache: { status: "hit", blender_runs: 1 } }]) {
+    await assert.rejects(convertFramed(input, deps({ ...value, ...change })), { code: "CONVERTER_INTEGRITY" });
+  }
+  assert.throws(() => decodeFramedPair("other-job", encodeFramedPair("job-owned", result)));
+});

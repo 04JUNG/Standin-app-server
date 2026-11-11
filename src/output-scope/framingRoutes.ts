@@ -590,6 +590,9 @@ export function createFramingRoutes(
           "Content-Length": String(bytes.byteLength),
           "Cache-Control": "private, no-store",
           "X-Standin-Output-Scope": scope,
+          ...(result?.finalCache ? {
+            "X-Standin-Final-Artifact-Origin": result.finalCache.status,
+          } : {}),
           ...(prepared ? {
             "X-Standin-Artifact-Contract": "verified-fbx-v1",
             "X-Standin-Review-Key": reviewKey,
