@@ -1,6 +1,6 @@
 # develop → main 승격 점검 · 2026-11-12
 
-기준: main `a51f294b7ae81a7f14552d10e76978569fc6dc10`, develop `7a3dbcfa4b7493507c85f4e78a5615c82f9f48d9`.
+기준: main `a51f294b7ae81a7f14552d10e76978569fc6dc10`, develop `ee46827290fb02cecaddb29d4810bb0717cee86c`.
 
 이전 승격이 squash로 쌓여 두 브랜치를 직접 merge하면 이미 운영 중인 코드까지 충돌한다. 마지막 main→develop 동기화 당시의 main `774107918757fbda22cb6e2d51038f5bd9f55475`를 비교 기준으로 삼아 develop 변경과 main 전용 수정사항을 검토하고, 현재 main에서 분기한 승격 브랜치에 결과를 올렸다. develop/main 원본 브랜치는 수정하지 않았다.
 
@@ -28,3 +28,7 @@
 검사 시점 실제 production은 inference task revision 53, BFF revision 59, analysis-worker revision 25였다. `REFINE_ENABLED=1`/BFF 노출 true였고 RC4·v3 override는 없었다. 당시 inference 이미지의 legacy 버전은 v2.5.3이므로 **이 PR 병합·배포 전부터 live가 v2.5.4라고 해석하지 않는다**. 이 문서와 PR 생성은 배포 실행이 아니다.
 
 전체 저장소 점검: server/BFF/client/infra에 승격할 코드가 있다. 랜딩 `04JUNG/Standin`의 develop 트리 `295790a4b4670995233befcba7dd775f2e667f42`는 이미 과거 main `cb2a74bdd6d078a7200ff4d7d3819521426c8144`에 포함돼 새 승격 PR이 필요 없다. `Standin-master-docs`, `demo-repository`에는 develop이 없다.
+
+최종 재확인에서 추가된 develop의 `fix(staging): persist legacy refine rollback [skip deploy]`도 함께 반영했다. staging 역시 기본 RC4 OFF·legacy aggressive로 복구하며, production 정책과 별도 branch guard를 유지한다.
+
+최종 Node 22 전체 검사: test-concurrency=4에서 1,119 passed, 2 skipped. production refine script 2 passed. 기본 무제한 실행에서 한 번 나온 기존 60ms storage-timeout 테스트의 시간 민감성은 병렬 수를 제한한 전체 재검사로 확인했다.
