@@ -727,3 +727,32 @@ async function privateSceneWorkerRequest(path: string, method: "GET" | "POST", v
     reader.releaseLock();
   }
 }
+
+/** RC4 transport is isolated from legacy BVH refinement. No user-supplied URL is followed. */
+export async function releaseRefine(image: Blob, poseId: string): Promise<unknown> {
+  const body = new FormData(); body.append("image", image, "rough.png"); body.append("pose_id", poseId);
+  const response = await fetch(`${config.inferenceBaseUrl}/refine/release`, {
+    method: "POST", body, signal: AbortSignal.timeout(310_000), redirect: "error",
+  });
+  if (!response.ok) throw new InferenceError(response.status, "release refine failed");
+  return response.json();
+}
+export async function releaseFbx(handle: string): Promise<Uint8Array> {
+  if (!/^[a-f0-9]{32}$/.test(handle)) throw new Error("invalid release handle");
+  const response = await fetch(`${config.inferenceBaseUrl}/refine/release/${handle}/fbx`, {
+    signal: AbortSignal.timeout(30_000), redirect: "error",
+  });
+  if (!response.ok) throw new InferenceError(response.status, "release artifact unavailable");
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.length > 64 * 1024 * 1024 || bytes.length < 27) throw new Error("invalid artifact size");
+  return bytes;
+}
+
+export async function releasePreview(handle:string):Promise<Uint8Array> {
+  if(!/^[a-f0-9]{32}$/.test(handle))throw new Error("invalid handle");
+  const response=await fetch(`${config.inferenceBaseUrl}/refine/release/${handle}/preview`,{signal:AbortSignal.timeout(30_000),redirect:"error"});
+  if(!response.ok)throw new InferenceError(response.status,"preview unavailable");
+  const bytes=new Uint8Array(await response.arrayBuffer());
+  if(bytes.length>64*1024*1024 || Buffer.from(bytes.subarray(0,4)).toString()!=="glTF")throw new Error("invalid preview");
+  return bytes;
+}
