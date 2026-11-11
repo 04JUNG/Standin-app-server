@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
+import { MINIMUM_CLIENT_VERSION } from '../client-version/policy.js';
 import {pool,SCHEMA} from '../db.js';
 import {acquisitionRoutes,acquisitionSummary} from './acquisition.js';
 
@@ -15,7 +16,7 @@ test('PostgreSQL: atomic first touch, cohort deduplication, no pre-consent use, 
     const old=new Date(Date.now()-2*86_400_000).toISOString();
     for(const [id,date] of [['inst_acq_p',current],['inst_acq_v',current],['inst_acq_old',old],['inst_acq_unknown',current]]){
       await pool.query(`INSERT INTO installations(id,token_hash,consent_version,consented_at,created_at,last_seen_at,app_version,os_name,os_version,architecture,locale)
-        VALUES($1,$2,'2026-08-02',$3,$3,$3,'test','windows','test','x64','ko')`,[id,hash,date]);
+        VALUES($1,$2,'2026-08-02',$3,$3,$3,$4,'windows','test','x64','ko')`,[id,hash,date,MINIMUM_CLIENT_VERSION]);
     }
     const request=(id:string,method:string,creative='meta-poster-a')=>acquisitionRoutes.request('/',{method,headers:{'Content-Type':'application/json','X-Installation-Id':id,'X-Device-Token':token},...(method==='POST'?{body:JSON.stringify({creative,consent:true,version:'2026-10-29'})}:{})});
     assert.equal((await request('inst_acq_old','POST')).status,409);

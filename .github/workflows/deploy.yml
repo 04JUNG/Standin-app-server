@@ -52,7 +52,7 @@ jobs:
       - name: Test and build
         run: |
           npm ci
-          node --test scripts/configure-staging-scene-export.test.mjs scripts/configure-production-refine.test.mjs scripts/configure-staging-refine.test.mjs
+          node --test scripts/configure-staging-scene-export.test.mjs scripts/configure-production-refine.test.mjs scripts/configure-staging-refine.test.mjs scripts/verify-production-parity.test.mjs
           npm run typecheck
           npm run build
 
@@ -133,6 +133,10 @@ jobs:
           node scripts/prepare-staging-anatomy.mjs taskdef.json
           node scripts/verify-staging-anatomy.mjs taskdef.json
 
+      - name: Verify production product parity
+        if: github.ref == 'refs/heads/main'
+        run: node scripts/verify-production-parity.mjs taskdef.json bff
+
       - name: Pin production legacy refine
         if: github.ref == 'refs/heads/main'
         run: node scripts/configure-production-refine.mjs taskdef.json bff
@@ -158,8 +162,8 @@ jobs:
             OPEN_BETA_ENDED_AT=${{ vars.OPEN_BETA_ENDED_AT || '' }}
             ACCESS_OPERATOR_INSTALLATIONS=${{ vars.ACCESS_OPERATOR_INSTALLATIONS || '' }}
             SUPPORTER_ACCESS_ENABLED=${{ vars.SUPPORTER_ACCESS_ENABLED || 'true' }}
-            HAND_SELECTION_ENABLED=${{ vars.HAND_SELECTION_ENABLED || 'false' }}
-            SEMANTIC_SEARCH_ENABLED=${{ vars.SEMANTIC_SEARCH_ENABLED || 'false' }}
+            HAND_SELECTION_ENABLED=${{ vars.HAND_SELECTION_ENABLED || 'true' }}
+            SEMANTIC_SEARCH_ENABLED=${{ vars.SEMANTIC_SEARCH_ENABLED || 'true' }}
             SEMANTIC_SEARCH_PER_MINUTE=${{ vars.SEMANTIC_SEARCH_PER_MINUTE || '10' }}
             SEMANTIC_SEARCH_TIMEOUT_MS=${{ vars.SEMANTIC_SEARCH_TIMEOUT_MS || '30000' }}
             DEPLOYMENT_VERSION=${{ github.sha }}
@@ -204,6 +208,10 @@ jobs:
           node scripts/prepare-staging-anatomy.mjs worker-taskdef.json analysis-worker
           node scripts/verify-staging-anatomy.mjs worker-taskdef.json analysis-worker
 
+      - name: Verify production worker asset parity
+        if: env.ECS_WORKER_SERVICE != '' && github.ref == 'refs/heads/main'
+        run: node scripts/verify-production-parity.mjs worker-taskdef.json analysis-worker
+
       - name: Pin production worker legacy refine
         if: env.ECS_WORKER_SERVICE != '' && github.ref == 'refs/heads/main'
         run: node scripts/configure-production-refine.mjs worker-taskdef.json analysis-worker
@@ -223,8 +231,8 @@ jobs:
             OPEN_BETA_ENDED_AT=${{ vars.OPEN_BETA_ENDED_AT || '' }}
             ACCESS_OPERATOR_INSTALLATIONS=${{ vars.ACCESS_OPERATOR_INSTALLATIONS || '' }}
             SUPPORTER_ACCESS_ENABLED=${{ vars.SUPPORTER_ACCESS_ENABLED || 'true' }}
-            HAND_SELECTION_ENABLED=${{ vars.HAND_SELECTION_ENABLED || 'false' }}
-            SEMANTIC_SEARCH_ENABLED=${{ vars.SEMANTIC_SEARCH_ENABLED || 'false' }}
+            HAND_SELECTION_ENABLED=${{ vars.HAND_SELECTION_ENABLED || 'true' }}
+            SEMANTIC_SEARCH_ENABLED=${{ vars.SEMANTIC_SEARCH_ENABLED || 'true' }}
             SEMANTIC_SEARCH_PER_MINUTE=${{ vars.SEMANTIC_SEARCH_PER_MINUTE || '10' }}
             SEMANTIC_SEARCH_TIMEOUT_MS=${{ vars.SEMANTIC_SEARCH_TIMEOUT_MS || '30000' }}
             DEPLOYMENT_VERSION=${{ github.sha }}

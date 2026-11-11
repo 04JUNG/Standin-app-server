@@ -55,3 +55,7 @@ wiring before setting the flag. An absent variable preserves the current task fl
 The Converter workflow also inherits its live task environment/secret references.
 Production defaults and deployment configuration are unchanged. Rollback disables the
 BFF flag first, then the Converter flag; retained secret references are harmless.
+
+## Production promotion (2026-11-12)
+
+The main promotion enables the same approved product transport with `standin/production/converter-interactive-token`, provisioned by the infra PR. It uses production body manifests, the reviewed Converter image, and a single private Converter replica. The main deployment verifies the current production body/default/credential and explicit replay storage before updating tasks. Client release builds enable the interactive capability negotiation in production as well as staging. RC4 stays disabled. No staging credential or endpoint is copied. See `DEVELOP_MAIN_PROMOTION_2026-11-12.md` for rollout order.

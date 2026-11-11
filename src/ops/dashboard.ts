@@ -247,6 +247,7 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
     <button data-tab="installs">설치</button>
     <button data-tab="gallery">모아 보기</button>
     <button data-tab="metrics">지표</button>
+    <button data-tab="marketing">마케팅</button>
     <button data-tab="bodies">커스텀 체형</button>
     <button data-tab="ops">운영</button>
     <button data-tab="replay">리플레이</button>
@@ -351,6 +352,15 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
     </div>
     </section>
     ${CUSTOM_BODIES_HTML}
+    <section class="tab" id="tab-marketing">
+      <div class="card">
+        <h2>마케팅·광고 분석</h2>
+        <p class="sub">화면을 보고 있는 동안 30초마다 서버 집계를 확인합니다. Meta는 최대 1분 간격으로 조회하며 원본 보고 자체에 지연·보정이 있을 수 있습니다.</p>
+        <div class="controls"><label for="marketingScope">광고 보기</label><select id="marketingScope"><option value="all">전체 · 베타 + 서포터즈</option><option value="supporters">서포터즈 모집</option><option value="beta">베타 · 포스터 A + 영상 A</option><option value="download">베타 · 다운로드 최적화</option><option value="landing">베타 · 랜딩 최적화</option></select><button id="marketingRefresh">지금 새로고침</button></div>
+        <p id="marketingMsg" class="sub" role="status"></p>
+        <div id="marketingOut"></div>
+      </div>
+    </section>
     <section class="tab" id="tab-ops">
     <div class="row" id="cards"></div>
     <div class="card">
@@ -2373,6 +2383,7 @@ $('tabs').addEventListener('keydown',event=>{
 $("period").addEventListener("change", () => {
   overviewGo();
   if (loadedTabs.has("metrics")) productGo();
+  if (loadedTabs.has("marketing")) { $("marketingOut").innerHTML = ""; marketingGo(); }
   if (loadedTabs.has("replay")) replayListGo();
 });
 
