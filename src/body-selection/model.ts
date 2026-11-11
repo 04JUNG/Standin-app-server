@@ -204,6 +204,28 @@ export function firstUseBody(catalog: BodyCatalog): BodyRef | null {
     : catalog.assets.find((a) => /^male-base(?:-|$)/.test(a.characterId));
   return asset ? bodyRef(asset) : null;
 }
+/** Explicit anatomy release migration, not a general rewrite of historical assets. */
+export function upgradedRememberedBase(ref: BodyRef, catalog: BodyCatalog): BodyRef | null {
+  const predecessors: Record<string, string> = {
+    "body-male-base": "male-base-v0-8-0",
+    "male-base-v0-7-2": "male-base-v0-8-0",
+    "male-base-v0-7-6": "male-base-v0-8-0",
+    "body-female-base": "female-base-v0-4-0",
+    "female-base-v0-3-4": "female-base-v0-4-0",
+    "female-base-v0-3-9": "female-base-v0-4-0",
+  };
+  const target = predecessors[ref.characterId];
+  if (!target || !catalog.assets.some(a => sameBody(a, ref))) return null;
+  const asset = catalog.assets.find(a => a.characterId === target && a.role === "default");
+  return asset ? bodyRef(asset) : null;
+}
+export function currentLastUsed(
+  last: BodyPolicy["lastUsed"], catalog: BodyCatalog,
+): BodyPolicy["lastUsed"] {
+  if (!last || last.shape) return last;
+  const replacement = upgradedRememberedBase(last.body, catalog);
+  return replacement ? { body: replacement, shape: null } : last;
+}
 /**
  * The last hand-picked body as the catalog accepts it now. If its controls no longer fit
  * (spec changed, shape editing off) it is dropped rather than rendered as the plain asset.
@@ -217,7 +239,7 @@ function lastUsedBody(
     ? catalog.assets.find((a) => a.characterId === last.characterId)
     : undefined;
   if (!last || !asset) return null;
-  if (!last.controls) return { body: bodyRef(asset), shape: null };
+  if (!last.controls) return currentLastUsed({ body: bodyRef(asset), shape: null }, catalog);
   try {
     return { body: bodyRef(asset), shape: bodyShape(asset, last.controls) };
   } catch {
@@ -269,7 +291,7 @@ export function resolveBody(
   const last =
     policy.lastUsed === undefined
       ? lastUsedBody(preferences, catalog)
-      : policy.lastUsed;
+      : currentLastUsed(policy.lastUsed, catalog);
   if (intent === "inherit" && preferences.mode === "last_used") {
     if (last && bodyEligible(last.body, catalog, poses, previewOnly)) {
       try {
