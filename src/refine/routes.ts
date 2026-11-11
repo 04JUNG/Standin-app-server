@@ -1,7 +1,7 @@
 import { releaseEnabled, runRelease, downloadRelease, downloadReleasePreview } from "./release.js";
 // POST /v1/analysis/jobs/:jobId/people/:personIndex/refine — 선택 후보 refine 프록시.
 // jobsRoutes 아래에 마운트된다(경로 prefix는 /v1/analysis/jobs).
-import { candidateRefineAllowed } from "./eligibility.js";
+import { candidateRefineAllowed, releaseCandidateAllowed } from "./eligibility.js";
 import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
 import { errorEnvelope } from "../mapping.js";
@@ -95,7 +95,8 @@ export function createRefineRoutes(overrides: Partial<typeof defaults> = {}) {
     const selected = owned.result?.candidatesByPerson
       .find((p) => p.personIndex === personIndex)
       ?.candidates.find((p) => p.id === candidateId);
-    if (owned.result?.source === "semantic" || !candidateRefineAllowed(selected))
+    const useRelease = releaseEnabled() && body?.releaseVersion === "RC4";
+    if (owned.result?.source === "semantic" || !(useRelease ? owned.result?.candidatesByPerson.length === 1 && releaseCandidateAllowed(selected) : candidateRefineAllowed(selected)))
       return c.json(
         errorEnvelope(
           "CANDIDATE_REFINE_FORBIDDEN",
@@ -104,7 +105,7 @@ export function createRefineRoutes(overrides: Partial<typeof defaults> = {}) {
         ),
         409,
       );
-    if (releaseEnabled() && body?.releaseVersion === "RC4") {
+    if (useRelease) {
       if (!selected?.poseId) return c.json(errorEnvelope("INVALID_SELECTION","원본 포즈를 확인하지 못했습니다.",requestId),409);
       try {
         const release = await runRelease({installationId,jobId,personIndex,candidateId});

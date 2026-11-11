@@ -27,3 +27,12 @@ test("unowned jobs cannot trigger a real RC4 call or download",async()=>{
   assert.equal(validations,0);assert.equal(legacy,0);
  }finally{if(old===undefined)delete process.env.REFINE_RELEASE_ENABLED;else process.env.REFINE_RELEASE_ENABLED=old;}
 });
+
+import { releaseCandidateAllowed, candidateRefineAllowed } from "./eligibility.js";
+import type { PoseCandidate } from "../types.js";
+test("RC4 uses owned original asset eligibility independently of legacy skeleton camera",()=>{
+ const c={source:"library",poseId:"original",lookupAllowed:true,manualExportAllowed:true,bvhAvailable:true,sourceBvhSha256:"a".repeat(64),refineAllowed:false} as PoseCandidate;
+ assert.equal(candidateRefineAllowed(c),false);
+ assert.equal(releaseCandidateAllowed(c),true);
+ for(const change of [{source:"semantic"},{source:"generation"},{lookupAllowed:false},{manualExportAllowed:false},{bvhAvailable:false},{sourceBvhSha256:"bad"},{poseId:null}])assert.equal(releaseCandidateAllowed({...c,...change} as PoseCandidate),false);
+});
