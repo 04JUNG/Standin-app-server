@@ -1,0 +1,257 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { sanitizeProgress, translateObservations } from "./progress.js";
+import { readAnalysisStream, ProgressStreamError } from "./progressStream.js";
+import { publicProgress } from "./progressStore.js";
+
+const base = () => ({ version: "pose-analysis-progress.v1", sequence: 1, stage: "extracting",
+  completedStages: ["analyzing"], skippedStages: [], people: [] as unknown[] });
+test("allowlist masks invalid coordinates, translates only explicit observations and removes secrets", () => {
+  const p = base();
+  p.people.push({ personIndex: 0, skeleton: { format: "coco17", coordinateSpace: "image-normalized",
+    points: [[.1,.2], ...Array(4).fill(null), [.3,.4], [NaN,.4], [-1,1], ...Array(9).fill(null)] },
+    observations: { arms: "raised", torso: "forward", knees: "unknown", context: "private" },
+    searchMode: "combined", quality_trace: { prompt: "secret" },
+    candidates: [{ id: "test_pose::front", rank: 2, thumbnailUrl: "/pose/test_pose/thumbnail?view=front", raw: "private" },
+      { id: "bad::front", rank: 1, thumbnailUrl: "https://attacker.test/img" }] });
+  const safe = sanitizeProgress(p)!;
+  assert.deepEqual(safe.people[0].skeleton?.points.slice(0, 8), [null,null,null,null,null,[.3,.4],null,null]);
+  assert.deepEqual(safe.people[0].observations, [{ id: "arms:raised", label: "올린 팔" }, { id: "torso:forward", label: "앞으로 기운 상체" }]);
+  assert.equal(safe.people[0].candidates?.length, 1);
+  assert.match(safe.people[0].candidates![0].thumbnailUrl, /^\/v1\/pose-candidates\/test_pose\/thumbnail/);
+  assert.doesNotMatch(JSON.stringify(safe), /private|secret|prompt|quality_trace|attacker/);
+});
+test("unknown/malformed snapshots degrade; cumulative multi-person indexes stay explicit", () => {
+  assert.equal(sanitizeProgress({ ...base(), version: "v2" }), undefined);
+  assert.equal(sanitizeProgress({ ...base(), sequence: -1 }), undefined);
+  assert.equal(sanitizeProgress({ ...base(), skippedStages: ["analyzing"] }), undefined);
+  assert.equal(sanitizeProgress({ ...base(), people: [{ personIndex: 0 }, { personIndex: 0 }] }), undefined);
+  assert.deepEqual(sanitizeProgress({ ...base(), activePersonIndex: 3, people: [{personIndex: 3}, {personIndex: 1}] })?.people.map(p => p.personIndex), [1,3]);
+  assert.deepEqual(translateObservations({ arms: "__proto__", torso: "made up" }), []);
+  assert.equal(publicProgress("completed", sanitizeProgress(base())), undefined);
+  assert.equal(publicProgress("failed", sanitizeProgress(base())), undefined);
+});
+const response = (records: unknown[]) => new Response(records.map(r => JSON.stringify(r)+"\n").join(""));
+test("terminal result returns immediately and no late progress is accepted", async () => {
+  const seen: unknown[] = [];
+  const actual = await readAnalysisStream(response([
+    {type:"progress",progress:base()}, {type:"result",result:{ people:[] }},
+    {type:"progress",progress:{...base(), sequence:2}},
+  ]), p => seen.push(p));
+  assert.deepEqual(actual, { people: [] });
+  assert.equal(seen.length, 1);
+});
+test("sink failure cannot fail analysis; upstream 503 detail remains classifiable", async () => {
+  assert.deepEqual(await readAnalysisStream(response([{type:"progress",progress:base()}, {type:"result",result:{ok:true}}]), () => {throw Error("db down");}), {ok:true});
+  await assert.rejects(readAnalysisStream(response([{type:"error",status:503,detail:{code:"VLM_UNAVAILABLE",reason:"rate_limited"}}]), () => {}), (e: unknown) => e instanceof ProgressStreamError && e.status === 503 && e.detail.includes("rate_limited"));
+  await assert.rejects(readAnalysisStream(response([{type:"progress",progress:base()}]), () => {}), /without result/);
+});
+test("UTF8 and records can split at any byte", async () => {
+  const bytes = new TextEncoder().encode(JSON.stringify({type:"progress",progress:{text:"관측"}})+"\n"+JSON.stringify({type:"result",result:{ok:true}})+"\n");
+  let i=0; const seen: unknown[]=[];
+  const stream = new ReadableStream({pull(controller) { if (i===bytes.length) controller.close(); else controller.enqueue(bytes.slice(i,++i)); }});
+  assert.deepEqual(await readAnalysisStream(new Response(stream), p => seen.push(p)), {ok:true});
+  assert.deepEqual(seen, [{text:"관측"}]);
+});
+
+test("PostgreSQL atomic fences cover retries, reordering, lease expiry, terminal writes and ownership", async t => {
+  const { PGlite } = await import("@electric-sql/pglite");
+  const { pool, SCHEMA } = await import("../db.js");
+  const { beginProgress, writeProgress } = await import("./progressStore.js");
+  const { claimJob, getOwnedJob, updateJob, failJob } = await import("./store.js");
+  const db = new PGlite(); t.after(() => db.close());
+  await db.exec(SCHEMA); await db.exec(SCHEMA);
+  t.mock.method(pool, "query", (async (sql: string, values?: unknown[]) => {
+    const r = await db.query(sql, values);
+    return { rows: r.rows, rowCount: r.rows.length || r.affectedRows || 0 };
+  }) as typeof pool.query);
+  const now = new Date().toISOString();
+  await db.query("INSERT INTO jobs(id,status,created_at,updated_at,installation_id,input_s3_key) VALUES ('job_progress','queued',$1,$1,'owner','private/input')", [now]);
+  const first = await claimJob("job_progress", "worker-a", 60);
+  assert.equal(first?.attemptCount, 1);
+  const run = (await beginProgress("job_progress", {workerId:"worker-a",attempt:1}))!;
+  assert.ok(run);
+  assert.equal(await beginProgress("job_progress", {workerId:"worker-a",attempt:1}), undefined);
+  assert.equal(await beginProgress("job_progress", {workerId:"wrong",attempt:1}), undefined);
+  assert.equal(await writeProgress(run, {...base(),sequence:3}), true);
+  assert.equal(await writeProgress(run, {...base(),sequence:2}), false);
+  assert.equal(await writeProgress(run, {...base(),sequence:3}), false);
+  const owned = await getOwnedJob("job_progress", "owner");
+  assert.equal((owned!.progress as {sequence:number}).sequence, 1);
+  assert.equal(await getOwnedJob("job_progress", "other"), undefined);
+  await db.query("UPDATE jobs SET lease_expires_at='2000-01-01' WHERE id='job_progress'");
+  assert.equal(await writeProgress(run, {...base(),sequence:4}), false);
+  const second = await claimJob("job_progress", "worker-b", 60);
+  assert.equal(second?.attemptCount, 2);
+  const retry = (await beginProgress("job_progress", {workerId:"worker-b",attempt:2}))!;
+  assert.ok(retry);
+  await updateJob("job_progress", {status:"completed"}, {workerId:"worker-a",attempt:1});
+  assert.equal((await getOwnedJob("job_progress","owner"))?.status,"running");
+  assert.equal(await failJob("job_progress","INFERENCE_FAILED",{fence:{workerId:"worker-a",attempt:1}}),false);
+  assert.equal(await writeProgress(run, {...base(),sequence:99}), false);
+  assert.equal(await writeProgress(retry, {...base(),sequence:1}), true);
+  assert.equal(((await getOwnedJob("job_progress","owner"))!.progress as {sequence:number}).sequence, 2);
+  await db.query("UPDATE jobs SET status='completed' WHERE id='job_progress'");
+  assert.equal(await writeProgress(retry, {...base(),sequence:2}), false);
+  await db.query("UPDATE jobs SET status='failed' WHERE id='job_progress'");
+  assert.equal(await writeProgress(retry, {...base(),sequence:3}), false);
+});
+
+test("owned Job status GET exposes live snapshots and terminal status takes precedence", async t => {
+  const { PGlite } = await import("@electric-sql/pglite");
+  const { pool, SCHEMA } = await import("../db.js");
+  const { Hono } = await import("hono");
+  const { jobsRoutes } = await import("./routes.js");
+  const db = new PGlite(); t.after(() => db.close()); await db.exec(SCHEMA);
+  t.mock.method(pool, "query", (async (sql: string, values?: unknown[]) => {
+    const r = await db.query(sql, values); return {rows:r.rows,rowCount:r.rows.length||r.affectedRows||0};
+  }) as typeof pool.query);
+  const points=Array(17).fill(null);points[5]=[.25,.4];
+  const p = sanitizeProgress({...base(),scene:{shot:"bust",view:"side",personCount:2},focus:{id:"focus_http",skeleton:{format:"coco17",coordinateSpace:"image-normalized",points}}})!;
+  await db.query("INSERT INTO jobs(id,status,created_at,updated_at,installation_id,progress_json) VALUES ('job_http','running','today','today','owner',$1::jsonb)", [JSON.stringify(p)]);
+  const app = new Hono<import("../env.js").AppEnv>();
+  app.use("*", async (c,next) => { c.set("installationId", c.req.header("x-owner") ?? ""); c.set("requestId", "req_test"); await next(); });
+  app.route("/v1/analysis/jobs", jobsRoutes);
+  const url = "/v1/analysis/jobs/job_http";
+  assert.equal((await app.request(url,{headers:{"x-owner":"other"}})).status,404);
+  let body = await (await app.request(url,{headers:{"x-owner":"owner"}})).json() as Record<string, unknown>;
+  assert.deepEqual(body.progress, p);
+  assert.equal(body.status,"running");
+  for (const status of ["completed","failed"]) {
+    await db.query("UPDATE jobs SET status=$1 WHERE id='job_http'",[status]);
+    body = await (await app.request(url,{headers:{"x-owner":"owner"}})).json() as Record<string,unknown>;
+    assert.equal(body.status,status); assert.equal(Object.hasOwn(body,"progress"),false);
+  }
+});
+
+test("analyze opts into the same request and older JSON servers do not cause duplicate inference", async t => {
+  const { analyze } = await import("../inference.js");
+  let calls=0; const seen:unknown[]=[];
+  t.mock.method(globalThis,"fetch",async (_url: unknown, init?: RequestInit) => {
+    calls++; assert.equal((init?.headers as Record<string,string>).Accept,"application/x-ndjson");
+    return new Response(JSON.stringify({people:[],image:{width:10,height:10}}),{headers:{"content-type":"application/json"}});
+  });
+  const cut=await analyze(new Blob(["offline image"]),"",p=>seen.push(p));
+  assert.equal(calls,1); assert.equal(cut.people.length,0); assert.deepEqual(seen,[]);
+});
+
+test("storage writer coalesces to the newest snapshot without delaying terminal close", async () => {
+  const { progressWriter } = await import("./progressStream.js");
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => {release=resolve;});
+  const values:unknown[]=[];
+  const writer=progressWriter(async p => { values.push(p); await gate; });
+  writer.push(1); writer.push(2); writer.push(3);
+  assert.deepEqual(values,[1]);
+  writer.close(); release();
+  await Promise.resolve(); await Promise.resolve();
+  writer.push(4); assert.deepEqual(values,[1]);
+});
+
+test("stored malformed progress cannot break status or expose private fields", () => {
+  assert.equal(publicProgress("running",{...base(),people:[{personIndex:0,observations:"bad"}]}),undefined);
+  const safe=sanitizeProgress(base())!;
+  const value=publicProgress("running",{...safe,private_prompt:"secret"});
+  assert.deepEqual(value,safe);
+  assert.equal(Object.hasOwn(value!,"private_prompt"),false);
+});
+
+
+test("refinement activeJoints allowlists only exact explicit COCO17 body declarations", () => {
+  const snapshot = (refinement?: unknown) => sanitizeProgress({ ...base(), stage: "refining",
+    people: [{ personIndex: 0, ...(refinement === undefined ? {} : {refinement}) }] })!.people[0];
+  const declared = { candidateId: "fixture_pose::front", status: "running" };
+  assert.equal(snapshot().refinement, undefined);
+  assert.deepEqual(snapshot(declared).refinement, declared);
+  assert.equal(Object.hasOwn(snapshot(declared).refinement!, "activeJoints"), false);
+  for (const joints of [[], [5, 16], Array.from({length: 12}, (_, i) => i + 5)]) {
+    const value = { ...declared, activeJoints: joints };
+    const source = [...joints];
+    const result = snapshot({...value, activeJoints: source, prompt:"private", debug:{reasoning:"secret"}}).refinement!;
+    assert.deepEqual(result,value);
+    source.push(6);
+    assert.deepEqual(result.activeJoints,joints);
+  }
+  for (const activeJoints of [null,"5,6",[4],[17],[-1],[5.5],[NaN],[Infinity],["5"],[true],[5,5],Array(13).fill(5)]) {
+    const result = snapshot({...declared,activeJoints}).refinement!;
+    assert.deepEqual(result,declared);
+    assert.equal(Object.hasOwn(result,"activeJoints"),false);
+  }
+  for (const status of ["running","improved","unchanged","reverted","skipped"]) {
+    assert.deepEqual(snapshot({...declared,status,activeJoints:[7,9]}).refinement,
+      {...declared,status,activeJoints:[7,9]});
+  }
+  for (const malformed of [{activeJoints:[5]},{...declared,status:"eligible"},{...declared,candidateId:""}]) {
+    assert.equal(snapshot(malformed).refinement,undefined);
+  }
+});
+
+test("active joints survive public storage projection without deriving or copying private fields", () => {
+  const p = sanitizeProgress({...base(),stage:"refining",people:[{personIndex:0,
+    refinement:{candidateId:"fixture_pose::front",status:"running",activeJoints:[5,7,9],reasoning:"private"}}]})!;
+  assert.deepEqual(publicProgress("running",p),p);
+  const absent = sanitizeProgress({...base(),people:[{personIndex:0,refineAllowed:true,
+    refinableLimbs:["left_arm"],activeJoints:[5,7,9]}]})!;
+  assert.equal(absent.people[0].refinement,undefined);
+  assert.equal(publicProgress("completed",p),undefined);
+});
+
+test("focus allowlists a temporary identity and validated body overlay without person associations", () => {
+  const points: ([number,number]|null)[] = Array(17).fill(null); points[5]=[.25,.4];points[7]=[.35,.5];
+  const skeleton={format:"coco17",coordinateSpace:"image-normalized",points};
+  const declared={id:"focus_observation",skeleton};
+  const p=sanitizeProgress({...base(),focus:{...declared,personIndex:7,candidateId:"not-final",observations:[{label:"private"}],prompt:"secret"}})!;
+  assert.deepEqual(p.focus,declared);
+  assert.deepEqual(p.people,[]);
+  assert.equal(p.activePersonIndex,undefined);
+  assert.deepEqual(publicProgress("running",p),p);
+  assert.equal(publicProgress("completed",p),undefined);
+  assert.equal(publicProgress("failed",p),undefined);
+  points[5]=null;
+  assert.deepEqual(p.focus?.skeleton.points[5],[.25,.4]);
+  for (const malformed of [null,{}, {...declared,id:""}, {...declared,id:123}, {...declared,id:" padded "},
+    {...declared,id:"a".repeat(161)}, {...declared,id:"focus\u0000"}, {...declared,skeleton:{...skeleton,points:[]}},
+    {...declared,skeleton:{...skeleton,coordinateSpace:"crop-local"}},
+    {...declared,skeleton:{...skeleton,points:Array(17).fill(null)}},
+    {...declared,skeleton:{...skeleton,points:[[.2,.3],...Array(16).fill(null)]}}]) {
+    assert.equal(sanitizeProgress({...base(),focus:malformed})!.focus,undefined);
+  }
+  assert.equal(sanitizeProgress({...base(),people:[{personIndex:0}],focus:declared})!.focus,undefined);
+  assert.equal(sanitizeProgress(base())!.focus,undefined);
+});
+
+test("focus observations and actual mode use the same public allowlist and survive storage projection", () => {
+  const points=Array(17).fill(null);points[5]=[.2,.3];
+  const raw={...base(),focus:{id:"focus_same_slot",skeleton:{format:"coco17",coordinateSpace:"image-normalized",points},
+    observations:{arms:"raised",knees:"unknown",prompt:"secret"},searchMode:"upper_body",debug:{reasoning:"private"}}};
+  const safe=sanitizeProgress(raw)!;
+  assert.deepEqual(safe.focus?.observations,[{id:"arms:raised",label:"올린 팔"}]);
+  assert.equal(safe.focus?.searchMode,"upper_body");
+  assert.deepEqual(publicProgress("running",safe),safe);
+  assert.doesNotMatch(JSON.stringify(safe),/secret|private|debug|reasoning|personIndex/);
+  const absent=sanitizeProgress({...raw,focus:{...raw.focus,observations:undefined,searchMode:"planned_route"},
+    observations:{torso:"forward"},searchMode:"description"})!;
+  assert.equal(absent.focus?.observations,undefined);
+  assert.equal(absent.focus?.searchMode,undefined);
+});
+
+test("scene independently allowlists only declared cut shot/view/count with no defaults or private data", () => {
+  const read = (scene:unknown) => sanitizeProgress({...base(),scene})!;
+  for (const shot of ["full_half","bust","face"]) for (const view of ["front","side","back","three_quarter"]) {
+    const scene={shot,view,personCount:2};
+    assert.deepEqual(read({...scene,prompt:"secret",dialogue:"private",box:[1,2,3,4],reasoning:"hidden"}).scene,scene);
+  }
+  for (const personCount of [0,20]) assert.deepEqual(read({personCount}).scene,{personCount});
+  for (const personCount of [null,true,false,-1,21,1.5,"2",[],{},NaN,Infinity]) {
+    assert.deepEqual(read({shot:"bust",view:"side",personCount}).scene,{shot:"bust",view:"side"});
+  }
+  assert.deepEqual(read({shot:"unknown",view:"back",personCount:0}).scene,{view:"back",personCount:0});
+  assert.deepEqual(read({shot:"face",view:"top",personCount:"3"}).scene,{shot:"face"});
+  for (const scene of [null,[],"full_half",{}, {shot:"unknown",view:"unknown",personCount:-1}]) {
+    assert.equal(read(scene).scene,undefined);
+  }
+  assert.equal(sanitizeProgress({...base(),people:[{personIndex:0},{personIndex:1}],shot:"face",view:"back"})?.scene,undefined);
+  const p=read({shot:"face",view:"back",personCount:2});
+  assert.deepEqual(publicProgress("running",p),p);
+  assert.equal(publicProgress("completed",p),undefined);
+});
