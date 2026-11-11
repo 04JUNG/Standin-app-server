@@ -2,7 +2,7 @@ import { handSelectionAvailable } from "../hands/service.js";
 import { bodyUxAvailable } from "../body-selection/availability.js";
 import { loadBodyCatalog } from "../body-selection/catalog.js";
 import { readNeutral } from "../body-selection/neutral.js";
-import { bodyRef, type BodyRef, type BodyCatalog, type BodyAsset } from "../body-selection/model.js";
+import { bodyRef, upgradedRememberedBase, type BodyRef, type BodyCatalog, type BodyAsset } from "../body-selection/model.js";
 import { framingAvailable, modelPreviewIdentity } from "../converter/framing.js";
 // /v1/models 의 본체. converter의 "지금 만들 수 있는 것"과 BFF의 "어떻게 보여줄 것인가"를
 // 합쳐 클라이언트 계약(Standin-client docs/08 §8-1)으로 만든다.
@@ -140,6 +140,10 @@ export async function listCharacters(
     ? (upstream[0]?.characterId ?? "")
     : deps.defaultCharacterId;
   const characters = [...ids]
+    .filter(id => {
+      const asset = bodies.find(a => a.characterId === id);
+      return !asset || !upgradedRememberedBase(asset, bodyCatalog);
+    })
     .map((id) => {
       const a = bodies.find((asset) => asset.characterId === id);
       return toModel(
@@ -158,10 +162,10 @@ export async function listCharacters(
     });
 
   // The installed client uses <img> without installation headers for model cards.
-  // Inline only the two defaults, using the same hash-bound PNG as body selection.
+  // Current defaults and presets use the same hash-bound PNG as body selection.
   await Promise.all(characters.map(async (row) => {
     const asset = bodies.find(a => a.characterId === row.characterId);
-    if (asset?.role === "default" && asset.neutralPreview) {
+    if ((asset?.role === "default" || asset?.role === "preset") && asset.neutralPreview) {
       const bytes = await readNeutral(asset);
       row.previewUrl = `data:image/png;base64,${bytes.toString("base64")}`;
     }

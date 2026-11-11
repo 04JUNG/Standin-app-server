@@ -214,10 +214,24 @@ export function upgradedRememberedBase(ref: BodyRef, catalog: BodyCatalog): Body
     "female-base-v0-3-4": "female-base-v0-4-0",
     "female-base-v0-3-9": "female-base-v0-4-0",
   };
+  // Presets keep their proportions; only the underlying anatomy generation changes.
+  for (const [gender, versions, next, names] of [
+    ["male", ["0-7-2", "0-7-6"], "0-8-0", ["ideal83", "ideal70", "toon64", "muscular", "muscle-max", "bulk", "soft", "fat-max"]],
+    ["female", ["0-3-4", "0-3-9"], "0-4-0", ["slim", "ideal83", "ideal70", "toon64", "muscular", "muscle-max", "soft", "fat-max", "new-fat", "new-muscular"]],
+  ] as const) {
+    for (const name of names) for (const version of versions)
+      predecessors[`${gender}-${name}-v${version}`] = `${gender}-${name}-v${next}`;
+  }
   const target = predecessors[ref.characterId];
   if (!target || !catalog.assets.some(a => sameBody(a, ref))) return null;
-  const asset = catalog.assets.find(a => a.characterId === target && a.role === "default");
+  const role = target.includes("-base-") ? "default" : "preset";
+  const asset = catalog.assets.find(a => a.characterId === target && a.role === role);
   return asset ? bodyRef(asset) : null;
+}
+/** Hide superseded catalog templates, retaining historical identities for saved work. */
+export function currentPresetAssets(catalog: BodyCatalog, keep: Iterable<string> = []): BodyAsset[] {
+  const retained = new Set(keep);
+  return catalog.assets.filter(a => retained.has(a.characterId) || !upgradedRememberedBase(a, catalog));
 }
 export function currentLastUsed(
   last: BodyPolicy["lastUsed"], catalog: BodyCatalog,
