@@ -1,3 +1,4 @@
+import { createAccessRoutes } from "../access/routes.js";
 import { CLIENT_VERSION_HEADER, isSupportedClientVersion } from "../client-version/policy.js";
 import { updateRequired } from "../client-version/response.js";
 import { createBodyPreferenceRoutes } from "../body-selection/routes.js";
@@ -19,6 +20,9 @@ import {
 } from "./store.js";
 
 export const installationRoutes = new Hono<AppEnv>();
+installationRoutes.use("/current/access", requireInstallation);
+installationRoutes.use("/current/access/*", requireInstallation);
+installationRoutes.route("/current/access", createAccessRoutes());
 installationRoutes.use("/current/body-preferences", requireInstallation);
 installationRoutes.use("/current/body-preferences/*", requireInstallation);
 installationRoutes.route(

@@ -133,6 +133,10 @@ jobs:
           container-name: bff
           image: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.image.outputs.digest }}
           environment-variables: |
+            ACCESS_GATE_ENABLED=${{ vars.ACCESS_GATE_ENABLED || 'false' }}
+            OPEN_BETA_ENDED_AT=${{ vars.OPEN_BETA_ENDED_AT || '' }}
+            ACCESS_OPERATOR_INSTALLATIONS=${{ vars.ACCESS_OPERATOR_INSTALLATIONS || '' }}
+            SUPPORTER_ACCESS_ENABLED=${{ vars.SUPPORTER_ACCESS_ENABLED || 'true' }}
             HAND_SELECTION_ENABLED=${{ vars.HAND_SELECTION_ENABLED || 'false' }}
             SEMANTIC_SEARCH_ENABLED=${{ vars.SEMANTIC_SEARCH_ENABLED || 'false' }}
             SEMANTIC_SEARCH_PER_MINUTE=${{ vars.SEMANTIC_SEARCH_PER_MINUTE || '10' }}
@@ -174,6 +178,10 @@ jobs:
           container-name: analysis-worker
           image: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.image.outputs.digest }}
           environment-variables: |
+            ACCESS_GATE_ENABLED=${{ vars.ACCESS_GATE_ENABLED || 'false' }}
+            OPEN_BETA_ENDED_AT=${{ vars.OPEN_BETA_ENDED_AT || '' }}
+            ACCESS_OPERATOR_INSTALLATIONS=${{ vars.ACCESS_OPERATOR_INSTALLATIONS || '' }}
+            SUPPORTER_ACCESS_ENABLED=${{ vars.SUPPORTER_ACCESS_ENABLED || 'true' }}
             HAND_SELECTION_ENABLED=${{ vars.HAND_SELECTION_ENABLED || 'false' }}
             SEMANTIC_SEARCH_ENABLED=${{ vars.SEMANTIC_SEARCH_ENABLED || 'false' }}
             SEMANTIC_SEARCH_PER_MINUTE=${{ vars.SEMANTIC_SEARCH_PER_MINUTE || '10' }}

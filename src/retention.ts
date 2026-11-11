@@ -36,6 +36,8 @@ export const CASCADE_TABLES = ["job_outbox", "replay_job_links", "replay_artifac
  * 관리자 열람처럼 job_id가 빈 행은 작업을 따라 지워지지 않으므로 이 칸으로 지운다.
  */
 export const INSTALLATION_SCOPED_TABLES = [
+  "supporter_access_attempts",
+  "supporter_access_codes",
   "interactive_history_frames",
   "interactive_operations",
   "interactive_heads",

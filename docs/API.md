@@ -1836,3 +1836,59 @@ GET `/v1/installations/current/body-preferences`는 `pickerVisibility: { hiddenP
 - 숨김은 카드 삭제·자동 추천·last_used·진행 중 인물 선택·FBX 허용 범위를 바꾸지 않는다. 실제 카드 삭제 시 그 카드의 숨김 ID만 정리한다.
 - BFF를 먼저 배포한 뒤 해당 필드를 읽는 클라이언트를 배포한다. 구 BFF에는 새 클라이언트가 표시 체크를 노출하지 않는다.
 - 클라의 CSP 실험용 중복 20종 제거는 제품 목록 정책이다. 계산 자산/카탈로그 ID를 폐기하지 않아 기존 카드와 작업의 원본 연결을 유지한다.
+
+## Closed supporter access
+
+When `ACCESS_GATE_ENABLED=true`, every installation-protected product request
+requires an explicitly allowed operator installation or a redeemed, unrevoked
+supporter code. Existing beta installations receive HTTP 403 with
+`ACCESS_CODE_REQUIRED`. Quota exemptions and the dashboard's internal roster
+do not grant access. Operators are explicitly configured through
+`ACCESS_OPERATOR_INSTALLATIONS`.
+
+Authenticated installation management remains available for access checks,
+code redemption, optional-consent management and withdrawal/deletion.
+Installation registration remains available so new supporters can redeem a code.
+
+- `GET /v1/installations/current/access` returns
+  `{required:boolean,allowed:boolean,role:"operator"|"supporter"|null,codeRegistered:boolean,showBetaEndedNotice:boolean}`.
+- `POST /v1/installations/current/access/redeem` accepts `{code:string}`.
+  Codes are atomically bound to one installation. Retrying on the same
+  installation is idempotent. A used, revoked or invalid code returns
+  `ACCESS_CODE_INVALID` (400), and 10 attempts per 10 minutes returns
+  `ACCESS_CODE_RATE_LIMITED` (429).
+- `SUPPORTER_ACCESS_ENABLED=false` denies supporter requests and redemption
+  while retaining the explicitly configured operator installations.
+- Status responses have `Cache-Control: private, no-store`.
+  Every protected request rechecks the server's current state.
+
+Codes have no automatic expiration in this release. Operators can revoke one
+with `node scripts/access-codes.mjs revoke <code-id>` after a build. Issue
+single-device codes with
+`node scripts/access-codes.mjs issue <count> <private-output.json> [label]`.
+Plaintext codes are written only to a new mode-0600 output file. The database
+stores only SHA-256 digests. The role grants application use, independently
+of dashboard administrator credentials.
+
+Deploy the BFF and code-entry client, configure the explicit operator IDs,
+then enable the gate in the deployment environment. The BFF and worker
+workflow both preserve these environment settings on subsequent deployment.
+
+
+The open-beta thank-you and code entry are separate client screens. Only
+unredeemed installations whose server `created_at` is at or before the fixed
+`OPEN_BETA_ENDED_AT` (ISO-8601 with timezone) see the thank-you, then continue
+to code entry. New installations go directly to code entry. Missing/invalid
+cutoffs never classify new installations as beta users. Freeze this value at
+closure; do not move it forward with each deployment. A download that never
+registered, or an installation whose local identity was reset, cannot be
+identified as an old download from existing records.
+
+Operators and active redeemed installations bypass both screens. Redeemed but
+revoked/disabled installations receive an access-ended screen without code
+reentry. Registration is checked on the server on launch and subsequent
+requests; no local allow flag grants access. Old clients are denied by the same
+server middleware without an update, but need the new client to display the
+two-step UI and redeem codes. Unsupported old clients may receive the existing
+update-required response first. Preview mode and public app updates remain
+separate from installation-protected product APIs.

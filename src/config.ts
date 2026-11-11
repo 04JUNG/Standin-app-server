@@ -7,6 +7,10 @@ function env(key: string, def = ""): string {
 }
 
 export const config = {
+  accessGateEnabled: env("ACCESS_GATE_ENABLED", "false") === "true",
+  openBetaEndedAt: env("OPEN_BETA_ENDED_AT"),
+  accessOperatorInstallations: parseExemptList(env("ACCESS_OPERATOR_INSTALLATIONS")),
+  supporterAccessEnabled: env("SUPPORTER_ACCESS_ENABLED", "true") === "true",
   /** Additive operation API; also requires a frozen implemented Converter transport. */
   interactiveConverterToken: env("CONVERTER_INTERACTIVE_TOKEN"),
   /** Requires separately CSP-certified Converter capability; never enabled by this flag alone. */
