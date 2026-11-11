@@ -2,7 +2,11 @@
 export class ProgressStreamError extends Error {
   constructor(public status: number, public detail: string) { super("analysis stream error"); }
 }
-export async function readAnalysisStream<T>(res: Response, onProgress: (value: unknown) => void): Promise<T> {
+export async function readAnalysisStream<T>(
+  res: Response,
+  onProgress?: (value: unknown) => void,
+  onFallback?: (value: T) => void,
+): Promise<T> {
   if (!res.body) throw new Error("missing analysis stream");
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -28,8 +32,11 @@ export async function readAnalysisStream<T>(res: Response, onProgress: (value: u
           throw new ProgressStreamError(typeof event.status === "number" ? event.status : 500,
             JSON.stringify({ detail: event.detail }));
         }
+        if (event.type === "fallback" && event.result && typeof event.result === "object") {
+          onFallback?.(event.result as T);
+        }
         if (event.type === "progress" && line.length <= 128_000) {
-          try { onProgress(event.progress); } catch { /* optional telemetry */ }
+          try { onProgress?.(event.progress); } catch { /* optional telemetry */ }
         }
       }
       if (done) throw new Error("analysis stream ended without result");
