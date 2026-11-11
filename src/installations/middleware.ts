@@ -1,3 +1,4 @@
+import { accessManagementRequest, installationAccess } from "../access/policy.js";
 import type { MiddlewareHandler } from "hono";
 import { config } from "../config.js";
 import type { AppEnv } from "../env.js";
@@ -11,6 +12,7 @@ export const DEVICE_TOKEN_HEADER = "X-Device-Token";
 
 export function createRequireInstallation(
   authenticate: typeof authenticateInstallation = authenticateInstallation,
+  access: typeof installationAccess = installationAccess,
 ): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const installationId = c.req.header(INSTALLATION_ID_HEADER) ?? "";
@@ -48,6 +50,12 @@ export function createRequireInstallation(
       );
     }
     c.set("installationId", installation.id);
+    if (config.accessGateEnabled && !accessManagementRequest(c.req.method, c.req.path)) {
+      const permission = await access(installation.id);
+      if (!permission.allowed)
+        return c.json(errorEnvelope("ACCESS_CODE_REQUIRED",
+          "오픈베타가 종료되었습니다. 이용 코드를 등록해 주세요.",c.get("requestId")),403);
+    }
     await next();
   };
 }

@@ -55,6 +55,7 @@ export async function transaction<T>(fn: (client: PoolClient) => Promise<T>): Pr
   }
 }
 
+import { ACCESS_SCHEMA } from "./access/schema.js";
 import { INTERACTIVE_SCHEMA } from "./interactive-state/schema.js";
 import { REPLAY_SCHEMA } from "./replay/schema.js";
 import { QUALITY_CONSENT_SCHEMA } from "./installations/qualityConsent.js";
@@ -75,6 +76,8 @@ export const SCHEMA = `
     revoked_at            TEXT,
     deletion_requested_at TEXT
   );
+
+  ${ACCESS_SCHEMA}
 
   CREATE TABLE IF NOT EXISTS users (
     id             TEXT PRIMARY KEY,
