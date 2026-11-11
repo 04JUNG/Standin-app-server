@@ -74,3 +74,60 @@ test("an obsolete worker cannot publish a result or log completed after its leas
   assert.equal(messages.some(m=>m.jobStatus==="completed"),false);
   assert.ok(messages.some(m=>m.jobStatus==="ignored"&&m.errorCode==="JOB_NOT_CURRENT"));
 });
+
+for (const mode of ["fallback", "empty", "final"] as const) {
+  test(`analysis stream completes correctly with ${mode}`, async t => {
+    const db = new PGlite();
+    t.after(() => db.close());
+    await db.exec(SCHEMA);
+    const query = async (sql: string, params?: unknown[]) => {
+      const result = await db.query(sql, params);
+      return { rows: result.rows, rowCount: result.rows.length || result.affectedRows || 0 };
+    };
+    t.mock.method(pool, "query", query as typeof pool.query);
+    t.mock.method(pool, "connect", (async () => ({ query, release() {} })) as unknown as typeof pool.connect);
+    const now = new Date().toISOString();
+    await db.query("INSERT INTO jobs(id,status,created_at,updated_at,installation_id) VALUES ('job_timeout','queued',$1,$1,'owner')", [now]);
+
+    const withPose = (id: string): CutResult => ({
+      ...cut,
+      people: [{ ...cut.people[0], candidates: [{
+        pose_id: id, view: "front", distance: .25, tags: {}, rerank_score: null,
+        bvh_url: `/pose/${id}/bvh`, thumbnail_url: null,
+      }] }],
+    });
+    const timeout = new AbortController();
+    t.mock.method(AbortSignal, "timeout", () => timeout.signal);
+    t.mock.method(globalThis, "fetch", async () => {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          const send = (type: string, result: CutResult) =>
+            controller.enqueue(encoder.encode(`${JSON.stringify({ type, result })}\n`));
+          send("fallback", mode === "empty" ? cut : withPose("base_pose"));
+          if (mode === "final") {
+            send("result", withPose("reranked_pose"));
+            controller.close();
+          } else {
+            timeout.signal.addEventListener("abort", () => controller.error(timeout.signal.reason), { once: true });
+            setImmediate(() => timeout.abort(new DOMException("deadline", "TimeoutError")));
+          }
+        },
+      });
+      return new Response(stream, { headers: { "content-type": "application/x-ndjson" } });
+    });
+
+    await runAnalysisJob("job_timeout", new Blob(["offline image"]));
+    const job = await getOwnedJob("job_timeout", "owner");
+    if (mode === "empty") {
+      assert.equal(job?.status, "failed");
+      assert.equal(job?.errorCode, "ANALYSIS_TIMEOUT");
+    } else {
+      const expected = mode === "final" ? "reranked_pose" : "base_pose";
+      assert.equal(job?.status, "completed");
+      assert.equal(job?.result?.candidatesByPerson[0].candidates[0].poseId, expected);
+      const { rows } = await db.query<{ pose_id: string }>("SELECT pose_id FROM analysis_candidates WHERE job_id='job_timeout'");
+      assert.deepEqual(rows.map(row => row.pose_id), [expected]);
+    }
+  });
+}
