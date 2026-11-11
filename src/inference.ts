@@ -222,7 +222,12 @@ function authHeaders(): Record<string, string> {
 }
 
 // POST /analyze (멀티파트 PNG) → CutResult
-export async function analyze(file: Blob, hint = "", onProgress?: (value: unknown) => void): Promise<CutResult> {
+export async function analyze(
+  file: Blob,
+  hint = "",
+  onProgress?: (value: unknown) => void,
+  onFallback?: (value: CutResult) => void,
+): Promise<CutResult> {
   const form = new FormData();
   form.append("file", file, "cut.png");
   if (hint) form.append("hint", hint);
@@ -230,12 +235,13 @@ export async function analyze(file: Blob, hint = "", onProgress?: (value: unknow
   // 상한이 없으면 추론이 멈췄을 때 Job이 running에 영원히 남는다. 동시 분석 한도가
   // 1이라 그 설치는 스위퍼가 돌 때까지(수 분) 아무것도 못 한다.
   const signal = AbortSignal.timeout(config.analysisTimeoutMs);
+  const streaming = Boolean(onProgress || onFallback);
   let res: Response;
   try {
     res = await fetch(`${config.inferenceBaseUrl}/analyze`, {
       method: "POST",
       body: form,
-      headers: { ...authHeaders(), ...(onProgress ? { Accept: "application/x-ndjson" } : {}) },
+      headers: { ...authHeaders(), ...(streaming ? { Accept: "application/x-ndjson" } : {}) },
       signal,
     });
   } catch (error) {
@@ -247,8 +253,8 @@ export async function analyze(file: Blob, hint = "", onProgress?: (value: unknow
     throw new InferenceError(res.status, await safeText(res));
   }
   try {
-    if (onProgress && res.headers.get("content-type")?.includes("application/x-ndjson")) {
-      return await readAnalysisStream<CutResult>(res, onProgress);
+    if (streaming && res.headers.get("content-type")?.includes("application/x-ndjson")) {
+      return await readAnalysisStream<CutResult>(res, onProgress, onFallback);
     }
     return (await res.json()) as CutResult;
   } catch (error) {

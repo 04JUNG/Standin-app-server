@@ -3,7 +3,7 @@ import { beginProgress, writeProgress, type ProgressFence } from "./progressStor
 // BFF의 핵심 역할: 동기 추론(/analyze)을 백그라운드로 호출해 Job으로 감싼다.
 // ⚠ Phase 0: 프로세스 내 비동기 실행(await 하지 않고 fire-and-forget).
 //    Phase 3: 큐(BullMQ/Redis 등)로 교체 — 이 함수 시그니처는 유지.
-import { analyze, analysisFailureCode, shouldRefundQuota } from "../inference.js";
+import { analyze, analysisFailureCode, InferenceTimeoutError, shouldRefundQuota, type CutResult } from "../inference.js";
 import { errorFields, log } from "../log.js";
 import {
   extractCutSummary,
@@ -66,10 +66,23 @@ export async function runAnalysisJob(
   try {
     const run = await beginProgress(jobId, progressFence).catch(() => undefined);
     const writer = run ? progressWriter(p => writeProgress(run, p)) : undefined;
-    let cut;
-    try { cut = await analyze(file, hint, writer?.push); }
-    finally { writer?.close(); }
+    let fallback: CutResult | undefined;
+    let cut: CutResult;
+    let rankingTimeout: InferenceTimeoutError | undefined;
+    try {
+      cut = await analyze(file, hint, writer?.push, value => { fallback = value; });
+    } catch (error) {
+      if (!(error instanceof InferenceTimeoutError) || !fallback) throw error;
+      cut = fallback;
+      rankingTimeout = error;
+    } finally {
+      writer?.close();
+    }
     const result = mapCutResult(jobId, cut);
+    if (rankingTimeout && !result.candidatesByPerson.some(person =>
+      person.candidates.some(candidate => candidate.bvhAvailable && candidate.manualExportAllowed !== false))) {
+      throw rankingTimeout;
+    }
     const persisted = await persistAnalysisRecords(
       jobId,
       result,
@@ -85,6 +98,8 @@ export async function runAnalysisJob(
       return;
     }
     logQualityMetrics(jobId, result);
+    log.info({ type: "analysis_job", jobId, phase: "analysis", jobStatus: "completed",
+      durationMs: Date.now() - startedAt, ...(rankingTimeout ? { rankingTimedOut: true } : {}) });
   } catch (error) {
     // timeout·상류 혼잡·그 외를 구분한다 — "추론이 응답하지 않는다", "상류가 붐빈다",
     // "추론이 거절했다"는 운영 대응이 다르고, 사용자에게 줄 안내도 다르다.

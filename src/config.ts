@@ -147,7 +147,7 @@ export const config = {
    * 분석 호출 상한(OB-04). 없으면 추론이 멈췄을 때 Job이 running에 영원히 남고,
    * 동시 분석 한도가 1이라 그 설치는 스위퍼가 돌 때까지 아무것도 못 한다.
    */
-  analysisTimeoutMs: Number(process.env.ANALYSIS_TIMEOUT_MS ?? 120_000),
+  analysisTimeoutMs: Number(process.env.ANALYSIS_TIMEOUT_MS ?? 180_000),
   /** inline은 기존 프로세스 내 실행, sqs는 영속 queue/worker 실행이다. */
   jobExecutionMode: env("JOB_EXECUTION_MODE", "inline") as "inline" | "sqs",
   analysisQueueUrl: env("ANALYSIS_QUEUE_URL"),

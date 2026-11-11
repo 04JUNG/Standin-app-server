@@ -480,7 +480,7 @@ hot path이기 때문이다.
 > ⚠ 동기 추론을 감싸므로 세분 단계(`detecting`/`skeleton`/…)는 제공하지 않는다. Phase 0은 4-상태만.
 
 `error`(status=`failed`)에는 `INFERENCE_FAILED`, `ANALYSIS_TIMEOUT`, `ANALYSIS_UNAVAILABLE`, `INPUT_STORAGE_FAILED`, `ABANDONED`가 들어간다.
-`ANALYSIS_TIMEOUT`은 추론이 상한 시간(`ANALYSIS_TIMEOUT_MS`, 기본 120초) 안에 응답하지 않은 경우다 — 추론이 거절한 `INFERENCE_FAILED`와 구분한다.
+추론이 상한 시간(`ANALYSIS_TIMEOUT_MS`, 기본 180초)에 도달하면 재정렬 전에 받은 후보로 작업을 완료한다. 선택할 후보가 없으면 `ANALYSIS_TIMEOUT`으로 실패한다.
 `ANALYSIS_UNAVAILABLE`은 상류 VLM 혼잡 또는 구 서버/미지원 본문의 `503`이다.
 Standin-server #86의 `503 detail.code=VLM_UNAVAILABLE`은 `detail.reason`을 아래처럼
 기존 `error` 문자열에 구분 저장한다. 작업 기록의 `errorCode`에도 같은 값이 내려간다.
