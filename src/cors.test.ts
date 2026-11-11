@@ -7,6 +7,7 @@ import { appCors } from "./cors.js";
 for (const origin of ["tauri://localhost", "http://tauri.localhost", "http://localhost:1420"]) {
   test(`preview integrity headers are readable from ${origin}`, async () => {
     const headers = {
+      "X-Standin-Local-Preview": "fbx-v1",
       "X-Standin-Poster-Variant": "rough-yaw8-v1",
       "X-Standin-Poster-Yaw": "45",
       "X-Standin-Poster-Fallback": "none",
@@ -69,3 +70,14 @@ for (const origin of ["tauri://localhost", "http://tauri.localhost", "http://loc
     assert.ok(response.headers.get("Access-Control-Allow-Headers")?.toLowerCase().includes("x-app-version"));
   });
 }
+
+for (const origin of ["tauri://localhost", "http://tauri.localhost"])
+  test(`save-time HEAD is allowed for ${origin}`, async () => {
+    const app = new Hono().use("*", appCors([origin]));
+    const response = await app.request("/v1/pose-candidates/p/framed", {
+      method: "OPTIONS", headers: { Origin: origin,
+        "Access-Control-Request-Method": "HEAD", "Access-Control-Request-Headers": "X-Installation-Id,X-Device-Token" },
+    });
+    assert.equal(response.status, 204);
+    assert.ok(response.headers.get("Access-Control-Allow-Methods")?.split(",").includes("HEAD"));
+  });
