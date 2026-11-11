@@ -36,3 +36,29 @@ test("RC4 uses owned original asset eligibility independently of legacy skeleton
  assert.equal(releaseCandidateAllowed(c),true);
  for(const change of [{source:"semantic"},{source:"generation"},{lookupAllowed:false},{manualExportAllowed:false},{bvhAvailable:false},{sourceBvhSha256:"bad"},{poseId:null}])assert.equal(releaseCandidateAllowed({...c,...change} as PoseCandidate),false);
 });
+
+import type { Job } from "../jobs/store.js";
+test("RC4 request falls back to legacy refine when staging release gate is off", async () => {
+ const old = process.env.REFINE_RELEASE_ENABLED; process.env.REFINE_RELEASE_ENABLED = "0";
+ try {
+  const sha = "a".repeat(64);
+  const candidate = { id:"pose::front", poseId:"pose", source:"library", presentationKind:"library_match",
+   refineAllowed:true, lookupAllowed:true, manualExportAllowed:true, reviewRequired:true, notExactMatch:false,
+   sourceBvhSha256:sha, camera:{version:"candidate-camera-v2",pose_id:"pose",source_bvh_sha256:sha,query_sha256:sha} };
+  const owned = {result:{source:"capture",candidatesByPerson:[{personIndex:0,candidates:[candidate]}]}} as unknown as Job;
+  let calls = 0;
+  const app = new Hono<AppEnv>();
+  app.use("*", async(c,next)=>{c.set("installationId","inst_test");c.set("requestId","test");await next();});
+  app.route("/",createRefineRoutes({getOwnedJob:async()=>owned,validateExportCandidate:async()=>true,
+   runRefine:async(input)=>{calls++;assert.equal(input.deferPreview,true);return {
+    poseId:"pose",refined:true,reasonCode:"accepted",adjustedLimbs:["left_arm"],thumbnailAvailable:false,
+   };},
+  }));
+  const response = await app.request("/job_test/people/0/refine",{method:"POST",headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({candidateId:"pose::front",releaseVersion:"RC4",deferPreview:true})});
+  assert.equal(response.status,200);
+  const body = await response.json() as {refined:boolean;release?:unknown;exportUrl:string};
+  assert.equal(calls,1);assert.equal(body.refined,true);assert.equal(body.release,undefined);
+  assert.ok(body.exportUrl.startsWith("/v1/pose-candidates/pose/export?"));
+ } finally {if(old===undefined)delete process.env.REFINE_RELEASE_ENABLED;else process.env.REFINE_RELEASE_ENABLED=old;}
+});
