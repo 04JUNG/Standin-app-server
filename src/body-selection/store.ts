@@ -25,6 +25,7 @@ import {
   bodyEligible,
   resolveBody,
   snapshot,
+  upgradedRememberedBase,
   type BodyCard,
   type BodyCatalog,
   type BodyIntent,
@@ -130,7 +131,13 @@ export function presentPreferences(
     ...normalized,
     pickerVisibility: normalized.pickerVisibility ?? defaultPickerVisibility(),
     cards: cardsOf(value),
-    lastUsed: value.lastUsed ?? null,
+    lastUsed: (() => {
+      const last = value.lastUsed;
+      if (!last || last.controls) return last ?? null;
+      const asset = catalog.assets.find(a => a.characterId === last.characterId);
+      const replacement = asset && upgradedRememberedBase(asset, catalog);
+      return replacement ? { ...last, characterId: replacement.characterId } : last;
+    })(),
     shapeEditable: presentShapeEditable(catalog),
   };
 }
@@ -578,8 +585,38 @@ export async function readSelection(
     [jobId, index],
   );
   if (!rows[0]) throw new BodyError("BODY_SELECTION_UNSUPPORTED", 409);
-  const stored = rows[0].value;
+  const stored = await migrateRememberedSelection(db, jobId, index, rows[0].value, person, catalog, semantic);
   return revalidate(stored, person, catalog, semantic, policy);
+}
+/** Persist one revision change so previous preview/export receipts cannot reuse the old mesh. */
+async function migrateRememberedSelection(
+  db: BodyDb, jobId: string, index: number, initial: BodySelection,
+  person: AnalysisPerson, catalog: BodyCatalog, semantic: boolean,
+): Promise<BodySelection> {
+  const { poses, previewOnly } = personBodyContext(person, semantic);
+  let stored = initial;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (stored.intent !== "inherit" || stored.resolvedSource !== "last_used" ||
+        stored.shape || !stored.resolvedBody) return stored;
+    const replacement = upgradedRememberedBase(stored.resolvedBody, catalog);
+    if (!replacement || !bodyEligible(replacement, catalog, poses, previewOnly)) return stored;
+    const next: BodySelection = {
+      ...stored, resolvedBody: replacement, shape: null,
+      selectionRevision: stored.selectionRevision + 1,
+    };
+    // Compare the complete old row: a simultaneous manual selection always wins.
+    const updated = await db.query<{ value: BodySelection }>(
+      "UPDATE body_selections SET value=$3 WHERE job_id=$1 AND person_index=$2 AND value=$4::jsonb RETURNING value",
+      [jobId, index, JSON.stringify(next), JSON.stringify(stored)],
+    );
+    if (updated.rows[0]) return updated.rows[0].value;
+    const current = await db.query<{ value: BodySelection }>(
+      "SELECT value FROM body_selections WHERE job_id=$1 AND person_index=$2", [jobId, index],
+    );
+    if (!current.rows[0]) throw new BodyError("BODY_SELECTION_UNSUPPORTED", 409);
+    stored = current.rows[0].value;
+  }
+  throw new BodyError("BODY_SELECTION_CONFLICT", 409);
 }
 export async function writeSelection(
   db: BodyDb,
@@ -615,8 +652,9 @@ export async function writeSelection(
     "SELECT value FROM body_selections WHERE job_id=$1 AND person_index=$2",
     [jobId, index],
   );
-  const current = stored.rows[0]?.value;
-  if (!current) throw new BodyError("BODY_SELECTION_UNSUPPORTED", 409);
+  const original = stored.rows[0]?.value;
+  if (!original) throw new BodyError("BODY_SELECTION_UNSUPPORTED", 409);
+  const current = await migrateRememberedSelection(db, jobId, index, original, person, catalog, semantic);
   expect(
     current.selectionRevision,
     change.expectedRevision,

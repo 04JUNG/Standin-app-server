@@ -24,6 +24,7 @@ export interface HandCatalog {
   default_preset: string;
   fallback_order: string[];
   thumbnails_available: boolean;
+  thumbnail_revision?: string | null;
   categories: Array<{
     id: string;
     label: string;
@@ -118,6 +119,9 @@ export function parseCatalog(value: unknown): HandCatalog {
   )
     throw invalid();
   const ids = new Set<string>();
+  const thumbnailRevision = v.thumbnail_revision == null ? null : v.thumbnail_revision;
+  if (thumbnailRevision !== null && (typeof thumbnailRevision !== "string" || !SHA.test(thumbnailRevision)))
+    throw invalid();
   const categories = v.categories.map((raw) => {
     const c = record(raw);
     if (
@@ -149,6 +153,9 @@ export function parseCatalog(value: unknown): HandCatalog {
           thumbnails:
             v.thumbnails_available === true && p.thumbnails != null
               ? {
+                  // Released clients validate these paths exactly and revalidate
+                  // PNGs with cache: no-cache. Keep paths stable; image ETags and
+                  // the catalog revision carry the new mesh identity.
                   left: `/v1/hands/${p.id}/thumbnail?side=left`,
                   right: `/v1/hands/${p.id}/thumbnail?side=right`,
                 }
@@ -164,6 +171,7 @@ export function parseCatalog(value: unknown): HandCatalog {
     library_sha256: v.library_sha256,
     default_preset: v.default_preset,
     thumbnails_available: v.thumbnails_available === true,
+    thumbnail_revision: thumbnailRevision,
     fallback_order: Array.isArray(v.fallback_order)
       ? v.fallback_order.filter(
           (id): id is string => typeof id === "string" && ids.has(id),

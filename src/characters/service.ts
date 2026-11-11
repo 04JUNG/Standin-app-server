@@ -1,6 +1,7 @@
 import { handSelectionAvailable } from "../hands/service.js";
 import { bodyUxAvailable } from "../body-selection/availability.js";
 import { loadBodyCatalog } from "../body-selection/catalog.js";
+import { readNeutral } from "../body-selection/neutral.js";
 import { bodyRef, type BodyRef, type BodyCatalog, type BodyAsset } from "../body-selection/model.js";
 import { framingAvailable, modelPreviewIdentity } from "../converter/framing.js";
 // /v1/models 의 본체. converter의 "지금 만들 수 있는 것"과 BFF의 "어떻게 보여줄 것인가"를
@@ -109,7 +110,7 @@ function toModel(
     isDefault: characterId === defaultCharacterId,
     rigProfile: upstream?.rigProfile ?? null,
     revision: upstream?.revision ?? null,
-    // 앱이 자기가 커밋한 이미지를 먼저 쓴다. 서버 렌더는 후속 과제다.
+    // New immutable identities receive their verified neutral preview below.
     previewUrl: null,
     description: presentation.description,
   };
@@ -155,6 +156,25 @@ export async function listCharacters(
         (b.order ?? presentationFor(b.characterId, "").order);
       return order !== 0 ? order : a.characterId.localeCompare(b.characterId);
     });
+
+  // The installed client uses <img> without installation headers for model cards.
+  // Inline only the two defaults, using the same hash-bound PNG as body selection.
+  await Promise.all(characters.map(async (row) => {
+    const asset = bodies.find(a => a.characterId === row.characterId);
+    if (asset?.role === "default" && asset.neutralPreview) {
+      const bytes = await readNeutral(asset);
+      row.previewUrl = `data:image/png;base64,${bytes.toString("base64")}`;
+    }
+  }));
+  if (bodies.some(a => a.characterId === defaultCharacterId && a.role === "default")) {
+    for (const row of characters) {
+      if (!(row.characterId in CHARACTER_PRESENTATION)) continue;
+      row.displayName = row.gender === "female" ? "이전 기본 여성" : "이전 기본 남성";
+      row.role = "previous_default";
+      row.order = row.gender === "female" ? 200 : 190;
+    }
+    characters.sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.characterId.localeCompare(b.characterId));
+  }
 
   cache = { at: Date.now(), ids: new Set(byId.keys()) };
   return { characters, defaultCharacterId };
