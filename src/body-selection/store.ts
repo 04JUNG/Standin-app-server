@@ -26,6 +26,7 @@ import {
   resolveBody,
   snapshot,
   upgradedRememberedBase,
+  currentPresetAssets,
   type BodyCard,
   type BodyCatalog,
   type BodyIntent,
@@ -89,9 +90,9 @@ function shapeError(e: unknown): never {
  * Characters the settings page may edit, with what it needs to show them outside a job:
  * the name, the neutral preview and the live-preview runtime (same metadata as body-options).
  */
-export function presentShapeEditable(catalog: BodyCatalog) {
+export function presentShapeEditable(catalog: BodyCatalog, keep: Iterable<string> = []) {
   const byId = new Map(catalog.assets.map((a) => [a.characterId, a]));
-  return shapeEditable(catalog).map((entry) => {
+  return shapeEditable({ ...catalog, assets: currentPresetAssets(catalog, keep) }).map((entry) => {
     const a = byId.get(entry.characterId)!;
     return {
       ...entry,
@@ -129,7 +130,13 @@ export function presentPreferences(
   const normalized = effectivePreferences(normalizePreferences(value));
   return {
     ...normalized,
-    pickerVisibility: normalized.pickerVisibility ?? defaultPickerVisibility(),
+    pickerVisibility: (() => {
+      const visible = normalized.pickerVisibility ?? defaultPickerVisibility();
+      return { ...visible, hiddenPresetIds: [...new Set(visible.hiddenPresetIds.map(id => {
+        const asset = catalog.assets.find(a => a.characterId === id);
+        return (asset && upgradedRememberedBase(asset, catalog)?.characterId) || id;
+      }))] };
+    })(),
     cards: cardsOf(value),
     lastUsed: (() => {
       const last = value.lastUsed;
@@ -138,7 +145,10 @@ export function presentPreferences(
       const replacement = asset && upgradedRememberedBase(asset, catalog);
       return replacement ? { ...last, characterId: replacement.characterId } : last;
     })(),
-    shapeEditable: presentShapeEditable(catalog),
+    shapeEditable: presentShapeEditable(catalog, [
+      ...cardsOf(value).map(c => c.characterId),
+      ...(value.lastUsed?.controls ? [value.lastUsed.characterId] : []),
+    ]),
   };
 }
 /**
@@ -723,8 +733,16 @@ export async function bodyOptions(
   );
   const catalog = deps.catalog(),
     { poses, previewOnly } = personBodyContext(person, semantic);
+  const preferences = await readPreferences(db, owner);
+  const keep = cardsOf(preferences).map(c => c.characterId);
+  const { rows: selected } = await db.query<{ value: BodySelection }>(
+    "SELECT value FROM body_selections WHERE job_id=$1 AND person_index=$2", [jobId, index],
+  );
+  const current = selected[0]?.value;
+  if (current?.resolvedBody && (current.intent === "manual" || current.shape))
+    keep.push(current.resolvedBody.characterId);
   const characters = await Promise.all(
-    catalog.assets.map(async (a) => {
+    currentPresetAssets(catalog, keep).map(async (a) => {
       const reasons = !poses.length
         ? ["BODY_NOT_APPLICABLE"]
         : !bodyEligible(a, catalog, poses, previewOnly)

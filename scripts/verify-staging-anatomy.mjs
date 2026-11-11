@@ -1,21 +1,25 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { release, initializer } from './prepare-staging-anatomy.mjs';
 
 export function verifyStagingAnatomy(task, mainName = 'bff') {
   if (!task.family?.startsWith('StandinStagingApp')) throw Error('Anatomy guard requires a staging task');
   const main = task.containerDefinitions?.find(c => c.name === mainName);
   const init = task.containerDefinitions?.find(c => c.name === 'body-assets-init');
   const env = c => Object.fromEntries((c?.environment ?? []).map(e => [e.name, e.value]));
+  const assets = mainName === 'analysis-worker' ? release.worker : release;
   const expected = {
     BODY_ASSETS_ROLE: 'bff',
     BODY_ASSETS_ROOT: '/app/body-staging',
-    BODY_ASSETS_MANIFEST_KEY: 'body-models/releases/anatomy-20261111-5ab242a0112a-bff/manifest.json',
-    BODY_ASSETS_MANIFEST_SHA256: '5ab242a0112a1914bddf5a68f821ec4180db90605e7a5aeeeb69a0dcd680e898',
+    BODY_ASSETS_MANIFEST_KEY: assets.prefix + '/manifest.json',
+    BODY_ASSETS_MANIFEST_SHA256: assets.manifestSha256,
   };
   for (const [key, value] of Object.entries(expected)) {
     if (env(init)[key] !== value) throw Error(`Staging anatomy release changed: ${key}`);
   }
+  if (JSON.stringify(init.command) !== JSON.stringify(['node', '--input-type=module', '-e', initializer]))
+    throw Error('Staging body initializer changed');
   if (env(main).CONVERTER_CHARACTER_ID !== 'male-base-v0-8-0' ||
       env(main).BODY_CATALOG_PATH !== '/app/body-staging/body-models.json' ||
       !main?.dependsOn?.some(d => d.containerName === init?.name && d.condition === 'SUCCESS')) {
