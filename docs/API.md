@@ -1936,3 +1936,27 @@ and the same owned review receipt checks. Its internal read-only
 a client trigger or safety authority. No BFF API/UI change is needed for watching
 model changes. Future rollout must mount/configure the catalog, active library
 and private cache; this PR update does not deploy them.
+
+## RC4 staging refinement
+
+Staging-only `REFINE_RELEASE_ENABLED=1` accepts `releaseVersion: "RC4"` on the
+existing candidate refine POST. Ownership and exposed-candidate eligibility are
+checked first. One stored original PNG is sent to the internal RC4 endpoint;
+no client coordinates or manual conditions are accepted. Current RC4 supports
+one depicted target and registered original assets only.
+
+Accepted responses include `release` (version, FBX SHA, display GLB SHA,
+`previewUrl`, camera). `exportUrl` points to the authenticated job-scoped
+`/refine/release/fbx` route. The BFF verifies and persists both binary files before
+claiming success. Downloads verify their stored SHA again and never redirect to
+a worker handle. Off / older clients retain the existing BVH path.
+
+The preview is baked from the verified final FBX, with camera applied separately.
+The original RC4 mesh is used; body/hand/crop modifications must not be silently
+applied afterward. A withheld RC4 response supplies no RC4 artifact. The existing
+original candidate route remains available. An unavailable worker is an explicit
+503; clients must not describe it as a successful RC4 correction.
+
+Release objects use the existing installation/job S3 retention prefix. Production
+activation is outside this PR. Staging live-call and download evidence remains a
+separate release check, not implied by TypeScript or mock tests.
