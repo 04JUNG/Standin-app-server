@@ -1,3 +1,4 @@
+import { releaseEnabled } from "../refine/release.js";
 import { interactiveEnabled } from "../interactive-state/runtime.js";
 import { staticAssets } from "../interactive-state/static.js";
 import { historyFrames } from "../interactive-state/history.js";
@@ -441,6 +442,7 @@ jobsRoutes.get("/:id/result", async (c) => {
       ...(result.source === "semantic"
         ? semanticCapabilities(await currentCapabilities())
         : await currentCapabilities()),
+      refineRelease: result.source !== "semantic" && result.candidatesByPerson.length === 1 && releaseEnabled(),
       ...(result.candidatesByPerson.some(
         (p) =>
           p.candidates.length > 0 &&
