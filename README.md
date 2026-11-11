@@ -83,7 +83,7 @@ docker compose down            # 종료 (DB는 pg-data 볼륨에 유지)
 | `QUOTA_GLOBAL_DAILY` | 0 | 서비스 전체 일일 분석 상한(비용 산정 전이라 기본 off) |
 | `QUOTA_INSTALLATION_CONCURRENT` | 1 | 설치별 동시 분석 개수 |
 | `ANALYSIS_STALE_AFTER_SECONDS` | 300 | 유실 Job 판정 시간 |
-| `ANALYSIS_TIMEOUT_MS` | 120000 | 추론 `/analyze` 상한 |
+| `ANALYSIS_TIMEOUT_MS` | 180000 | 추론 `/analyze` 상한 |
 | `JOB_EXECUTION_MODE` | `inline` | `inline` 또는 `sqs` 단계적 전환 스위치 |
 | `ANALYSIS_QUEUE_URL` | — | `sqs` 모드에서 사용할 SQS URL |
 | `WORKER_VISIBILITY_SECONDS` | 180 | SQS 메시지 visibility와 heartbeat 기준 |
