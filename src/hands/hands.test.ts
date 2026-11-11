@@ -35,7 +35,7 @@ const rawCatalog = {
   ],
 };
 const catalog = parseCatalog(rawCatalog);
-function fixture() {
+function fixture(legacy?: Pick<HandSelection, "left" | "right" | "recommended" | "revision">) {
   let encoded = JSON.stringify({
     candidatesByPerson: [0, 1].map((personIndex) => ({
       personIndex,
@@ -56,6 +56,18 @@ function fixture() {
       }),
     })),
   });
+  if (legacy) {
+    const result = JSON.parse(encoded);
+    result.candidatesByPerson[0].handSelection = {
+      ...legacy,
+      personIndex: 0,
+      observation: result.candidatesByPerson[0].hands,
+      library_version: catalog.library_version,
+      library_sha256: catalog.library_sha256,
+      changed: ["right"],
+    };
+    encoded = JSON.stringify(result);
+  }
   let gate = Promise.resolve();
   const tx: typeof transaction = async (fn) => {
     const previous = gate;
@@ -119,25 +131,38 @@ test("catalog rewrites image paths, rejects duplicate IDs and requires a valid d
     }),
   );
 });
-test("hidden hand preset, not first candidate, initializes a persistent per-person selection", async () => {
+test("rough search keeps both original hands until a side is explicitly changed", async () => {
   const f = fixture();
   const first = await f.store.selection("owner", "job", 0);
-  assert.equal(first.left, "relaxed");
+  assert.equal(first.left, "source_pose");
+  assert.equal(first.right, "source_pose");
   assert.equal(first.observation.left.candidates[0], "fist");
   const saved = await f.store.selection("owner", "job", 0, {
     left: "fist",
     library_sha256: catalog.library_sha256,
     expectedRevision: 0,
   });
-  assert.equal(saved.right, "open");
-  assert.equal(saved.recommended.left, "relaxed");
+  assert.equal(saved.right, "source_pose");
+  assert.equal(saved.recommended.left, "source_pose");
   assert.deepEqual(saved.changed, ["left"]);
   assert.equal(
     (await createHandStore(f.deps).selection("owner", "job", 0)).left,
     "fist",
   );
-  assert.equal((await f.store.selection("owner", "job", 1)).left, "relaxed");
+  assert.equal((await f.store.selection("owner", "job", 1)).left, "source_pose");
   assert.equal(f.json().candidatesByPerson[0]!.handSelection!.revision, 1);
+});
+test("saved rough results migrate the automatic sides and keep explicit overrides", async () => {
+  const f = fixture({
+    left: "relaxed", right: "fist",
+    recommended: { left: "relaxed", right: "open" }, revision: 3,
+  });
+  const state = await f.store.selection("owner", "job", 0);
+  assert.equal(state.left, "source_pose");
+  assert.equal(state.right, "fist");
+  assert.deepEqual(state.changed, ["right"]);
+  assert.equal(state.revision, 4);
+  assert.equal((await f.store.selection("owner", "job", 0)).revision, 4);
 });
 test("ownership, invalid presets, stale library and concurrent stale writes are rejected", async () => {
   const f = fixture();
@@ -196,8 +221,8 @@ test("catalog migration reconciles removed presets and increments the persisted 
   };
   const store = createHandStore({ ...f.deps, catalog: async () => newer });
   const migrated = await store.selection("owner", "job", 0);
-  assert.equal(migrated.left, "relaxed");
-  assert.equal(migrated.right, "open");
+  assert.equal(migrated.left, "source_pose");
+  assert.equal(migrated.right, "source_pose");
   assert.equal(migrated.revision, 2);
 });
 test("PUT accepts only partial side values, hash and revision, and GET restores them", async () => {
