@@ -6,7 +6,7 @@ import type { AppEnv } from "../env.js";
 import type { AnalysisResult } from "../types.js";
 import type { Job } from "../jobs/store.js";
 import type { RefineContext } from "../mapping.js";
-import { parseCatalog } from "../hands/model.js";
+import { parseCatalog, SOURCE_POSE, type HandSelection } from "../hands/model.js";
 import { createHandStore } from "../hands/store.js";
 import { createHandSelectionRoutes } from "../hands/routes.js";
 import { createSemanticRoutes } from "./routes.js";
@@ -183,7 +183,11 @@ test("direct text -> owned BVH preview -> hands persist, without refine or any r
     404,
   );
   const handUrl = `/jobs/${id}/people/0/hands`;
-  assert.equal((await app.request(handUrl)).status, 200);
+  const initialHands = await app.request(handUrl);
+  assert.equal(initialHands.status, 200);
+  const selection = await initialHands.json() as HandSelection;
+  assert.equal(selection.left, SOURCE_POSE);
+  assert.equal(selection.right, SOURCE_POSE);
   assert.equal(
     (await app.request(handUrl, { headers: { "X-Test-Owner": "other" } }))
       .status,
@@ -250,6 +254,26 @@ test("direct text -> owned BVH preview -> hands persist, without refine or any r
     409,
   );
   assert.equal(forbiddenCalls, 0);
+  const legacy = load();
+  const legacyHands = legacy.candidatesByPerson[0]!.handSelection!;
+  legacyHands.right = "relaxed";
+  legacyHands.recommended = { left: "relaxed", right: "relaxed" };
+  encoded = JSON.stringify(legacy);
+  const migrated = await (await app.request(handUrl)).json() as HandSelection;
+  assert.equal(migrated.left, "fist");
+  assert.equal(migrated.right, SOURCE_POSE);
+  assert.equal(migrated.revision, 2);
+  const explicit = await app.request(handUrl, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      right: "relaxed",
+      library_sha256: catalog.library_sha256,
+      expectedRevision: migrated.revision,
+    }),
+  });
+  assert.equal(explicit.status, 200);
+  assert.equal((await explicit.json() as HandSelection).right, "relaxed");
   changed = true;
   assert.equal((await app.request(previewUrl)).status, 409);
 });
