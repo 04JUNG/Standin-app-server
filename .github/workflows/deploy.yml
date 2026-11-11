@@ -52,7 +52,7 @@ jobs:
       - name: Test and build
         run: |
           npm ci
-          node --test scripts/configure-staging-scene-export.test.mjs
+          node --test scripts/configure-staging-scene-export.test.mjs scripts/configure-staging-refine.test.mjs
           npm run typecheck
           npm run build
 
@@ -103,6 +103,13 @@ jobs:
           aws ecs describe-task-definition \
             --task-definition "$TASK_DEFINITION" \
             --query taskDefinition > taskdef.json
+
+      - name: Pin staging bff legacy refine policy
+        if: github.ref == 'refs/heads/develop'
+        env:
+          STAGING_REFINE_RELEASE_ENABLED: ${{ vars.REFINE_RELEASE_ENABLED || '0' }}
+          STAGING_REFINE_FEATURE_ENABLED: ${{ vars.REFINE_FEATURE_ENABLED || 'true' }}
+        run: node scripts/configure-staging-refine.mjs taskdef.json bff
 
       # Staging only. Individual FBX export remains enabled when scenes are off.
       - name: Configure integrated FBX export in staging
@@ -169,6 +176,13 @@ jobs:
           aws ecs describe-task-definition \
             --task-definition "$WORKER_TASK_DEFINITION" \
             --query taskDefinition > worker-taskdef.json
+
+      - name: Pin staging analysis-worker legacy refine policy
+        if: env.ECS_WORKER_SERVICE != '' && github.ref == 'refs/heads/develop'
+        env:
+          STAGING_REFINE_RELEASE_ENABLED: ${{ vars.REFINE_RELEASE_ENABLED || '0' }}
+          STAGING_REFINE_FEATURE_ENABLED: ${{ vars.REFINE_FEATURE_ENABLED || 'true' }}
+        run: node scripts/configure-staging-refine.mjs worker-taskdef.json analysis-worker
 
       - name: Refresh worker body initializer runtime
         if: env.ECS_WORKER_SERVICE != ''

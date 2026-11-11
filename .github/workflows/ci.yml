@@ -42,7 +42,7 @@ jobs:
         run: npm test
 
       - name: Verify staging scene export toggle
-        run: node --test scripts/configure-staging-scene-export.test.mjs
+        run: node --test scripts/configure-staging-scene-export.test.mjs scripts/configure-staging-refine.test.mjs
 
       - name: Verify code-only develop merges
         run: node --test scripts/code-only-develop.test.mjs
