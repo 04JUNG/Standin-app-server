@@ -1,7 +1,5 @@
 # API 계약 — BFF가 클라(Tauri)에 노출하는 `/v1`
 
-웹 방문·앱 이용 경로의 새 선택 동의 계약(2026-11-09)은 [JOURNEY_ANALYTICS.md](JOURNEY_ANALYTICS.md)를 참조합니다. 운영 대시보드 `/v1/admin/marketing`의 `journeys` 필드는 미동의 설치를 개별 마케팅 경로로 반환하지 않습니다.
-
 ## Top5 수평 8방향 미리보기 2026-10-21
 
 기존 일반 후보와 동적 `pose-previews`의 `/poster` URL에 `variant=rough-yaw8-v1`을 추가하면, BFF가 저장된 후보별 `render_camera`에서 가장 가까운 45도 방향을 고릅니다. 중간값은 증가 방향으로 선택하며 원본 검색·내보내기 카메라는 보존합니다. 임의 query `view`는 저장된 선택과 불일치하면 409입니다. legacy 카메라는 검증된 변환이 없으면 정면 참고로 둡니다.
@@ -47,39 +45,48 @@ tools/basic-closeup-fixture.mjs`로 loopback fixture를 실행한다. 서버의 
 main 기반 로컬 재검증: 타입 검사 통과, 전체 테스트 701개 통과/2개 기존 skip/실패 0.
 기본 계획의 과거 결과 조회 보완·범위 변경 시 무효화·권한 유지 테스트를 포함한다.
 
-## v4 장면 보정과 최종 장면 확인 (scene-save-v1)
+## native 파츠 v4 장면 보정과 최종 확인 (2026-10-30)
 
-기본 꺼짐입니다. 기존 `{persons}` 요청은 v4 flag가 켜져도 항상 기본 통합
-`rough-layout-v1` FBX를 저장합니다. 자동 보정은 `contractVersion: "scene-save-v1"`와
-`saveMode: "auto-correct-v4"`를 모두 명시한 요청에만 적용됩니다. 새 클라이언트의
-기본 저장 값은 `saveMode: "original-selection"`입니다. 보정 실패 시 자동 모드 전환은 없습니다.
+`POST /v1/analysis/jobs/:jobId/scene`의 `auto-correct-v4`는 서버 #153의
+`refine-v4-parts-http-v1` / `refine-v4-parts.1`에 연결합니다. 기존 `/scene/plan`·`build`의
+장면 계약 문자열은 native 실행 증거로 사용하지 않습니다. 기존 `{persons}` 및
+`original-selection`은 원선택 저장이며 자동 보정 실패 후 모드를 자동 전환하지 않습니다.
+현재 통합 FBX 저장 중지·기본 flags·기존 인물별 저장 정책은 유지합니다.
 
-Job 결과의 `capabilities.sceneSaveContract`는 지원 버전·가용 모드·확인 버전·900초 TTL·취소
-범위를 제공합니다. 기존 `sceneExport`, `sceneRefinement`도 유지합니다. 보정 capability는
-flag/URL/토큰/보관 원본 등의 자격 조건이며 worker live readiness를 보장하지 않습니다.
+Job capability의 `autoCorrectV4.readiness=configuration_only`, `configured`는 설정 상태입니다.
+`available=false`, `parts_discovery_required`/`explicit_intent_required`로 실행 가능 상태와
+구분합니다. 새 인증 endpoint **`GET /v1/analysis/jobs/:jobId/scene/parts`**는 소유 completed job에서
+실제 private `GET /parts/capabilities`를 확인하고, 지원 동작·카탈로그·정확한 설명과
+명시적 검수 요구를 반환합니다. worker 미배포/구버전/disabled는 실패하며 준비 완료로 만들지 않습니다.
 
-prepare에는 명시 계약·보정 모드와 `prepare:true`, 기존 reviewed `persons`를 보냅니다.
-응답은 `reviewVersion:"scene-review-v1"`, `expiresAt`, `reviewKey`, `artifactSha256`,
-인물별 before/after summary, `personCount`, `fileCount:1`을 포함합니다.
-기존 paired PNG 및 `artifactOnly:true`의 `verified-scene-fbx-v1` 경로를 모두 지원합니다.
-확인·미리보기에는 동일한 `persons`, 계약·모드, `reviewVersion`, `reviewKey`, `artifactSha256`가
-필요합니다. 사용자 확인 후에도 소유권·후보 확정·체형/손 revision·원본 SHA를 다시 검사하고
-준비한 동일 바이트만 반환하며 새로 보정하지 않습니다. 실제 다운로드 SHA도 확인해야 합니다.
+클라이언트 변경이 필요합니다. prepare/preview/confirm에 동일한 `parts`(계약/엔진 버전,
+카탈로그 SHA, 인물별 명시적으로 확인한 intent와 operation)를 전달합니다. 수정할 인물의 현재
+검수한 **full FBX**를 원본 그대로 `POST /parts/refine`에 보내며, 서버가 반환한 자산만
+장면 조립에 사용합니다. 반신 등 잘린 자산은 미지원이며 원본 BVH로 재생성하지 않습니다.
+기존 `refineAllowed=false`, 피부·저장 정책은 바꾸지 않고, 기존 보호된 자산 소유권/후보/
+체형/손/범위/검수 검증과 서버의 버전 있는 명시적 파츠 계약을 함께 통과해야 합니다.
 
-scene 영수증은 기존 인물별 shared receipt와 별도의 owner/job `scene-receipts/` S3 객체로
-공유합니다. 저장 성공 전 키를 반환하지 않으며 다른 BFF 인스턴스도 같은 파일을 읽습니다.
-개발 환경에서 공유 버킷이 없으면 인스턴스별 메모리만 사용하며 다른 인스턴스·재시작은
-`SCENE_REVIEW_REQUIRED` 재준비로 복구합니다. production에서 버킷이 없으면 준비를 실패시킵니다.
+원래 저장된 VLM 상세 설명과 검색 문장은 소유권·현재 선택 동의 범위에서 원문 그대로 전달하며,
+후속 사용자 지시와 구분합니다. 미보관 원문은 null, 표현 한도 초과는 명시적 실패입니다.
+원래 분석 저장 한도 이전의 전체 raw VLM 텍스트 복원은 보장하지 않습니다. BFF의 자연어 좌우
+추정·IK·관계값 생성은 없습니다. 서버 계약은 자동 이미지 기반 파츠 선택을 제공하지 않습니다.
 
-만료 `SCENE_REVIEW_EXPIRED`, 원본 변경 `SCENE_SOURCE_CHANGED`, 지원 불가 체형
-`SCENE_UNSUPPORTED_BODY`, 사용 불가 `SCENE_UNAVAILABLE`, busy `SCENE_BUSY`,
-제한 시간 `SCENE_TIMEOUT`, 무결성 `SCENE_INTEGRITY`를 구분합니다. 오류별
-`details.recovery`/`allowedActions`를 사용하고 임의 원인·진행률을 생성하지 않습니다.
-HTTP 요청 취소는 대기 중단이며 worker 연산 중단 보장이 없습니다. 서버 취소 API는 없습니다.
+준비 응답 `parts`와 manifest의 `artifact.parts`는 실제 버전/실행 여부/요청 ID·SHA/context SHA/
+현재·native 결과 SHA/적용 부위·저장 검증을 제공합니다. `applied`와 `retained`를 구분하며
+`retained`는 입력 현재 FBX와 바이트가 같아야 합니다. 점수 상승은 반환하지 않습니다.
+최종 조립 SHA에 `reviewKey`/`scene-review-v1`/15분 만료/카메라를 결합하고, 별도 PNG는 저장된
+최종 FBX를 렌더합니다. 새 preview/save 요청도 동일한 persons/parts/검수 SHA가 필요합니다.
+다운로드는 동일 바이트만 반환하며 엔진/BVH를 다시 실행하지 않습니다.
 
-정확한 JSON·오류/복구·summary·취소·앱/바 상태 계약과 worker 미해결 범위는
-[장면 저장 계약](scene-save-contract.md), 내부 경계는 [v4 장면 저장](scene-refinement-v4.md)을 참고하세요.
-실제 최신 Staging 설치 앱의 3컷 검증은 worker 준비 후 별도로 필요합니다.
+입력·설명·지시·체형·손·범위·선택·카탈로그·버전 변경 시 검수/캐시를 무효화합니다.
+서버 typed 오류와 HTTP 상태를 allowlist하고, `details.stage`, `jobId`, `retryable`,
+복구 행동·연산 지속 가능 여부를 제공합니다. HTTP 취소 `SCENE_CANCELLED`와 제한 시간
+`SCENE_TIMEOUT`을 구분하며 worker 중지나 자동 재시도를 보장하지 않습니다.
+
+정확한 [요청/응답·상태·클라이언트 UI 계약](scene-save-contract.md)과
+[서버 의존성·원문 보존 한계·검증 경계](scene-refinement-v4.md)를 참고하세요.
+서버 #153은 확인 시 미병합·미배포였으며 실제 staging 앱의 팔/다리 적용·다운로드·FBX 재열기와
+새 점수는 미검증입니다. 이 변경은 운영 변경·배포·병합을 수행하지 않습니다.
 
 ## 선택 품질 검토 동의 (2026-10-19)
 
@@ -1331,7 +1338,7 @@ BVH downloads and final FBX/refined/cropped export contracts are unchanged.
 
 `BODY_SELECTION_ENABLED=true`인 새 작업에서 선택적 body 추천·선택 저장 계약을 제공한다. 기본은 off다.
 
-- GET/PUT `/v1/installations/current/body-preferences`: 설치별 last_used/auto 모드와 체형 카드. PUT 본문은 `{ mode, expectedRevision, mutationId }`만 받는다. 과거 사용자 기본값 필드/모드의 새 쓰기는 `400 INVALID_INPUT`이다.
+- GET/PUT `/v1/installations/current/body-preferences`: 설치별 last_used/auto 모드와 체형 카드. PUT 본문은 `{ mode?, pickerVisibility?, expectedRevision, mutationId }`를 받으며 mode 또는 pickerVisibility 중 하나 이상이 필요하다. 과거 사용자 기본값 필드/모드의 새 쓰기는 `400 INVALID_INPUT`이다.
 - GET/PUT `/v1/analysis/jobs/{jobId}/people/{personIndex}/body-selection`: inherit/manual/auto 선택 저장·조회.
 - GET 같은 인물 경로의 `/body-options`: 적용 가능한 승인 체형 목록.
 - GET result에 person별 bodyRecommendation/bodySelection 추가. 기존 포즈 후보는 유지한다.
@@ -1439,7 +1446,7 @@ PNG/304 응답의 `X-Standin-Hand-Library-SHA256`으로 카탈로그 일치를 �
 미준비는 404 `HAND_THUMBNAIL_UNAVAILABLE`, 라이브러리 변경은 409 `HAND_LIBRARY_CHANGED`다.
 ## 직접 자연어 포즈 검색
 
-`GET /v1/semantic-search/capabilities`, `POST /v1/semantic-search`는 설치 인증을 사용한다. `query`와 `topK`(양의 안전 정수 또는 명시적인 `null`, 생략 시 5)로 검색하고 정식 또는 근접 후보가 있으면 `jobId`를 반환한다. 자동 refine·release는 금지하며 원본 해시에 바인딩된 후보의 수동 저장은 위 계약을 따른다. 이미지 없는 `source=semantic` 결과의 `image`는 null이다. 자연어 작업은 이미지 기반 refine/search-fit camera를 허용하지 않으며 정면 참고 카메라의 체형 검수는 지원한다. `topK:null`은 검색 기준을 통과한 전체 결과를 전달하며 BFF에서 5/20개로 자르지 않는다. capabilities의 `supportsAllResults:true`로 이를 알리고, 기존 앱용 `maxTopK:20` 힌트는 유지한다. 서버 페이지네이션은 없으며 UI에서 저장 썸네일을 지연 로딩하고 그룹별 20개씩 추가 표시한다. 입력 제한, 별도 검색 rate limit, 오류, 기록·해시 계약은 [SEMANTIC_SEARCH_INTEGRATION.md](SEMANTIC_SEARCH_INTEGRATION.md)를 따른다.
+`GET /v1/semantic-search/capabilities`, `POST /v1/semantic-search`는 설치 인증을 사용한다. `query`와 `topK`(양의 안전 정수 또는 명시적인 `null`, 생략 시 5)로 검색하고 정식 또는 근접 후보가 있으면 `jobId`를 반환한다. 자동 refine·release는 금지하며 원본 해시에 바인딩된 후보의 수동 저장은 위 계약을 따른다. 이미지 없는 `source=semantic` 결과의 `image`는 null이다. 자연어 작업은 이미지 기반 refine/search-fit camera를 허용하지 않으며 정면 참고 카메라의 체형 검수는 지원한다. `topK:null`은 검색 기준을 통과한 전체 결과를 전달하며 BFF에서 5/20개로 자르지 않는다. capabilities의 `supportsAllResults:true`로 이를 알리고, 기존 앱용 `maxTopK:20` 힌트는 유지한다. `supportsProgressiveResults:true`인 BFF에 `progressive:true`를 추가하면 전체 검색 순위의 스냅샷을 저장하고 첫 20개만 준비한다. `GET /v1/semantic-search/:jobId/pages?cursor=…`로 다음 20개를 읽는다. 자세한 커서·소유권·재시도·배포 계약은 [SEMANTIC_PROGRESSIVE_LOADING.md](SEMANTIC_PROGRESSIVE_LOADING.md)를 따른다. 기존 요청은 전체 결과 반환을 유지한다. 입력 제한, 별도 검색 rate limit, 오류, 기록·해시 계약은 [SEMANTIC_SEARCH_INTEGRATION.md](SEMANTIC_SEARCH_INTEGRATION.md)를 따른다.
 
 두 기능의 공통 흐름·통합 검증·PR 제출 범위는 [HANDS_SEMANTIC_INTEGRATION.md](HANDS_SEMANTIC_INTEGRATION.md)를 따른다. 자연어 결과도 준비된 handSelection capability를 유지해 수동 손 선택을 사용할 수 있다.
 
@@ -1595,68 +1602,361 @@ Converter 코드·모델·라이브러리 자산 변경은 필요 없다.
 
 이 썸네일은 정면의 기본 인체 참고이며 선택 체형/손 또는 검색 시점을 표현하지 않는다. 대시보드 Job 상세의 후보는 러프에서 인식한 인물별 `outputScope.detected`에 맞춰 자동 표시한다. `half`와 `bust`는 기존 자동 출력 정책과 같이 팔을 포함하는 상반신(`half`), `shoulder_head`와 `head`는 해당 범위를 사용한다. 전신으로 인식했거나 감지 범위가 없으면 전신이다. 사용자가 고른 `selection`·`resolved`는 이 검토용 표시 범위를 바꾸지 않으며 수동 전환 버튼은 없다. 부분 범위 자산이 없으면 안내를 표시하고 전신으로 자동 대체하지 않는다. 갤러리 목록/확대는 전신 참고를 유지한다. 종전 시점별 `/thumbnail?view=...` API는 호환성을 위해 유지한다.
 
-## 선택적 광고 설치 연결
+## 사용자 흐름 관측 (클라이언트 계측 v2, 운영 배포 전)
 
-신규 설치의 광고 연결·철회와 관리자 집계 계약은 [AD_ACQUISITION.md](AD_ACQUISITION.md)를 따른다. 기존 품질 검토 동의와 별개이며 Google/Meta로 앱 이용 기록을 보내지 않는다.
+### 호환성 확인 및 전송
+
+- 설치 인증으로 `GET /v1/events/capabilities` → `{ "journeyVersion": 2 }`.
+- 현재 분석 응답의 `capabilities.analyticsJourney: true`도 같은 지원을 표시한다.
+- 클라이언트는 capabilities가 확인된 서버에만 새 이벤트를 보낸다. 기존 서버는 모르는 이벤트 이름이 포함된 배치를 거절하므로, 실제 배포 시 **BFF를 먼저**, 호환성 확인 후 클라이언트를 배포한다. 이 변경 자체로 운영 배포를 실행하지 않는다.
+- 전송은 기존 `POST /v1/events/batch`를 재사용한다. 기존 동의·소유권 검사, `eventId` 중복 방지, 철회 처리를 그대로 적용한다. 동의하지 않은 사용자에게 새 추적을 강제하지 않는다.
+- 공통 허용 속성: `telemetryVersion: 2`, `sessionId`, 실행 중인 `appVersion`, `surface: app|bar`, 선택적 `attemptId`. 식별자는 최대 128자의 영숫자·하이픈·밑줄만 허용한다. 원본 이미지, 검색 문장, 로컬 경로, 자유 형식 오류 메시지를 전송하지 않는다.
+- 기존 `results_viewed`, `candidate_selected`, `selection_confirmed`, `export_completed`, `export_failed`를 재사용한다.
+- 추가 이벤트: `input_started`, `input_cancelled`, `input_failed`, `review_viewed`, `preparation_started`, `preparation_ready`, `preparation_failed`, `export_requested`, `export_cancelled`, `thumbnail_failed`.
+- `export_completed.nativeDiskWrite: true`는 실제 네이티브 디스크 쓰기가 끝난 경우에만 설정한다. 서버 FBX 생성, 브라우저 모의 저장, 저장 창 열기는 해당하지 않는다.
+- 파일 준비와 저장 시도는 각각 고유 `attemptId`를 쓴다. 같은 시도의 시작·종료는 동일 작업·세션·시도 식별자를 유지한다. `elapsedMs`는 0~86,400,000의 유한 숫자, 오류 `code`·`phase`는 코드형 문자열만 허용한다.
+- `input_confirmed.inputAttemptId/inputId`, `results_viewed.inputId/source/entryPoint`는 입력 연결용이다. 현재 입력 집계는 연결 전환율이 아닌 이벤트 건수이며, 작업 코호트 분모와 섞지 않는다.
+
+### 관리자 집계
+
+`GET /v1/admin/journey?days=7&audience=all&idleMinutes=30`
+
+기존 관리자 인증·접근 감사 및 `Cache-Control: private, no-store`를 따른다.
+
+- `days`: 기존 제품 지표와 동일한 1~90일 정수.
+- `audience`: `all|internal|unclassified`. 내부 표시가 없다는 이유만으로 외부 사용자로 분류하지 않는다. 개발자로 표시한 설치는 관리자 뷰가 늘 빼므로 이 API에서도 보이지 않는다.
+- `idleMinutes`: 5~1440분 정수, 기본 30분. 이 값은 후속 기록 관찰 대기 시간이며 실제 이탈을 판정하는 값이 아니다.
+- 기준 코호트: 응답 `window.from`~`window.to` 사이에 분석 요청이 생성된 작업. 이후 행동도 동일 종료 시점까지만 관측한다. 설치 수는 사람 수가 아니다.
+- 반환: `window`, `totals`, `stages`, `transitions`, `outcomes`, `coverage`, `durations`, `audiences`, `inputs`, `segments`, `diagnostics`, `notes`.
+- `stages`: 분석 요청·완료 → 결과 표시 → 후보 선택 → 사용 확정 → 저장 전 화면 → 파일 준비 완료 → 저장 요청 → 실제 파일 저장의 **독립 관측 건수**와 설치 수. 누락 단계가 있어도 뒤 단계 관측을 지우거나 앞 단계가 있었다고 추정하지 않는다.
+- `transitions`: `reached`를 `advanced|waiting|noNextEvent|unobservable|failed|cancelled`로 분리한다. 병렬 준비 등으로 순서가 역전되거나 중간 계측이 누락된 경우 `unobservable`이다. `noNextEvent`는 관찰 시간이 지났지만 후속 기록이 없다는 의미이며 원인을 단정하지 않는다.
+- `outcomes.saved`는 해당 작업에서 실제 저장에 한 번 이상 도달했음을 뜻한다. 이후 재저장 실패가 첫 성공을 취소하지 않는다. 그 외 작업은 마지막 관련 준비·저장 행동을 기준으로 실패·취소·대기·무후속 기록·관측 불가로 구분한다.
+- `coverage`: 새 계측 버전 작업, 구형 이벤트만 있는 작업, 클라이언트 기록 없는 작업을 구분한다. 과거 기록을 소급 채우지 않으며 동의·전송 누락·구형 버전은 실제 이탈과 같지 않다.
+- `durations`: 분석 시간과 첫 실제 저장까지의 시간, 동일 작업·세션·시도를 연결한 준비 및 저장 시간의 표본 수·중앙값·p90(ms). 대응 시작 이벤트가 없으면 시도 시간 표본에서 제외한다.
+- `inputs`: 기간 내 입력 시작·취소·실패 이벤트 수와 설치 수. **이벤트 시각 기준 별도 분모**이며 작업 생성 코호트와 전환율로 비교하지 않는다.
+- `segments`: 실제 이벤트의 앱 버전·전체 화면/플로팅 바별 작업·설치·저장 도달 작업 수. 여러 화면·버전에서 같은 작업을 열면 중복 포함될 수 있다.
+- `diagnostics`: 썸네일·분석·준비·저장 실패 및 저장 취소 관측 작업 수와 이벤트 수.
+- SQL은 기존 품질 열람 뷰를 사용하여 철회·삭제·관리자 범위 규칙을 유지한다. 원본이나 개별 설치/작업/세션 식별자는 집계 응답에 포함하지 않는다.
+- 코호트가 10,000개 작업을 넘으면 조용히 일부만 집계하지 않고 400과 조회 기간 축소 안내를 반환한다.
+
+검증: `src/admin/journey.test.ts`(관측 누락·상태 분리·분모·중앙값), `src/admin/journeyStore.test.ts`(PostgreSQL SQL·동일 시도 시간·내부 구분·실제 저장), `src/analytics/store.test.ts`(이벤트 허용 목록), 기존 `src/installations/qualityConsent.test.ts`(동의·철회·내부 제외 회귀), `src/ops/journeyDashboard.test.ts`(표시·요청·오류 처리).
+
+### 기능 사용·구간 시간·재사용 확장 (`featureUsageVersion: 1`)
+
+`GET /v1/events/capabilities`는 `{ journeyVersion: 2, featureUsageVersion: 1 }`를 반환한다. `feature_action`, `journey_exit`, `selection_failed`는 **featureUsageVersion 지원을 확인한 경우에만** 전송한다. 구형 journeyVersion 2 서버도 이 이름을 모를 수 있으므로 journeyVersion만으로 활성화하면 안 된다. 지원 확인이 네트워크 오류로 실패하면 미지원으로 단정하지 않는다.
+
+허용 계약:
+
+- `feature`: `hand_library|semantic_search|body_selection|body_custom|history|capture|file_input|clipboard|analysis|pose_selection|export`.
+- `feature_action.action`: `exposure|open|search_started|search_completed|search_failed|cancelled|selected|applied|adjusted|reset|creation_started|saved|reused|failed|upload_started|upload_completed|upload_failed|preview_started|preview_completed|preview_failed`.
+- 노출은 실제 표시된 사용 가능한 진입점에 기록한다. 선택·적용은 명시적 사용자 행동에만 기록한다. 자동 손 기본값이나 화면 재렌더를 수동 사용으로 세지 않는다. 조절 이벤트는 커밋된 조작 단위로 제한한다.
+- `journey_exit.reason`: `back|home|close|cancel`. 실제 연결된 UI 동작만 기록하며 프로세스 종료·강제 종료를 추정하지 않는다. 명시적 뒤로가기 뒤 저장에 성공할 수 있으므로 이동 이벤트를 최종 이탈로 부르지 않는다.
+- 공통 `errorCategory`: `server|network|permission|validation|client|unknown`, `httpStatus`: 정수 400~599, `osName`: `macos|windows|linux|unknown`, `source`: `capture|file|semantic|clipboard|history|unknown`. 취소는 실패 원인과 분리한다. 기존 서버 작업 source가 있으면 클라이언트의 unknown 값보다 우선한다.
+- `searchOrdinal`: 1~100,000 정수. 재검색 여부는 `search_started.searchOrdinal > 1`로 관측한다. `search_completed.resultCount=0`은 성공 응답에 후보가 없는 경우이며 요청 실패와 다르다.
+- 내보내기에 `usedHandLibrary|usedBodySelection|usedBodyCustom|fromHistory|fromSemanticSearch` 불리언을 허용한다. 실제 해당 작업의 기능 적용·재사용 이력이 있을 때만 true로 보고한다. 원본·검색어·사용자 체형 이름·수치·파일 경로·이미지 URL은 허용하지 않는다.
+- 준비/저장/검색/업로드/미리보기의 시작·종료는 동일 `attemptId`와 `sessionId`를 유지한다. 업로드 및 문장 검색은 시작 시 jobId가 없어도 종료 때 서버 jobId가 생길 수 있으므로 이 두 종류의 시간 연결은 작업 ID 대신 설치·세션·시도를 사용한다.
+- `preview_*`는 실제 이미지/모델 주소가 준비되어 로드를 시작한 시점부터 표시까지다. 파일 생성 전체 시간이 아니다. `phase=candidate_image|review_image|review_model`을 구분한다.
+
+`/v1/admin/journey`의 기존 필드를 유지하고 `advanced`를 추가한다.
+
+| 필드 | 집계 기준 |
+|---|---|
+| `featureUsage` | 기능·행동별 이벤트 수, 중복 제거 설치·작업 수 |
+| `featureSummary` | 기능별 노출 설치, 사용 설치, 노출∩사용 설치, 적용 설치, 같은 작업에서 적용 후 저장한 설치, 화면별 관측. 전체 설치 수는 app/bar 합계가 아니라 다시 중복 제거한다 |
+| `featureSummary.savedWithFeatureInstallations/Jobs` | 실제 네이티브 저장 보고의 기능 사용 플래그가 true인 설치·작업 수. 시간 연결 기반 `savedAfterApplyInstallations`와 구분한다 |
+| `featureSegments` | 기능·행동·화면·OS·입력 방식·실행 버전별 비교. 동일 설치가 여러 행에 포함될 수 있다 |
+| `failures` | 카테고리·코드·HTTP 상태·기능·단계·화면·OS·입력·버전. `origin=client_report`는 이벤트 시각, `origin=server_job`은 작업 코호트. 서버 ABANDONED는 사용자 이탈로 해석하지 않는다. 두 출처를 합하면 같은 오류를 중복 셀 수 있다 |
+| `recovery` | 동일 시도 실패→성공, 시도 식별자가 없어 연결 불가인 실패, 실패 작업 수, 새 시도를 관측한 작업 수, 실패 이후 같은 작업에서 성공한 작업 수를 분리. 마지막 값은 같은 설정 복구의 증거가 아니다 |
+| `stageOutcomes` | 작업의 가장 뒤 관측 단계와 저장 도달/실패/취소/대기/무후속/관측 불가를 화면·기능 맥락별로 집계. 맥락이 확인되지 않으면 unknown |
+| `durationSegments` | 단계 또는 동일 시도 처리의 화면별 표본 수·누락 표본·중앙값·p90(ms). 분모 없는 화면은 0ms 대신 null |
+| `activation` | 조회 기간의 새 설치 중 현재 동의가 유효하고 v2 활동이 관측된 설치 → 첫 관측 실제 저장 → 이후 다른 작업 시작/다른 작업 저장/같은 작업 재저장 구분 |
+| `retention` | 같은 신규 관측 코호트의 최초 v2 활동일(KST) 기준 D1·D7. 해당 날짜가 완전히 지난 설치만 eligible. 앱 이벤트 재방문·분석 요청·실제 저장을 별도 집계 |
+| `searchOutcomes` | 문장 검색 시도의 시작·완료·결과 0건·실패·취소·재검색. 동일 설치·세션·시도 중복 제거, 결과 수 누락 별도 표시 |
+| `results` | 작업 코호트의 결과 표시 작업, 후보 0건이 관측된 작업, 후보 수 누락 작업, 썸네일 실패 작업, 후보 변경 행동 수 |
+| `exits` | 실제 뒤로가기·홈·닫기·취소 행동. 최종 이탈이나 원인 확정이 아닌 이벤트 건수 |
+
+시간 배열 `durations`에는 분석 및 첫 저장까지의 기존 시간, 모든 인접 단계 시간, 동일 시도 업로드·문장 검색·파일 준비·저장·미리보기 시간이 중복 없이 포함된다. `scope=job_cohort|consented_job_cohort|consented_event_time`을 함께 반환한다. 인접 단계는 실제 관측된 순서를 연결하며 재방문·설정 변경 시간이 포함될 수 있다. 서버 처리 구간의 화면 구분은 해당 작업의 `input_confirmed` 또는 실제 작업 접수를 기록한 `upload_completed`가 있는 경우에만 붙인다. 병렬 준비가 먼저 끝나거나 중간 이벤트가 없으면 누락 표본으로 남긴다.
+
+`advanced`의 클라이언트·기능·재방문 집계는 기존 관리자 광역 열람 설정과 무관하게 **현재 유효한 동의의 이벤트·작업만** 대상으로 한다. 설치·이벤트·작업의 consent ID를 일치시키므로 철회 전 기록이 새 동의 코호트에 들어가지 않는다. 과거 미수집 기간을 채우지 않으며 첫 관측 저장을 생애 첫 저장으로 단정하지 않는다. 서버 기본 단계 표와 표본 수가 다를 수 있다.
+
+이벤트 시각 기능 집계와 작업 생성 시각 코호트, 신규 설치 코호트는 서로 다른 분모이다. 자동으로 전체 사용자 사용률로 합치지 않는다. 현재 새 설치 관측 코호트의 전체 수집 가능 이력은 선택 기간 안에 있으므로 그 기간을 조회한다. 50,000개 이벤트 또는 이력 작업 한도를 넘으면 명시적으로 오류를 반환하고 기간을 줄이도록 안내한다. 일부 행만 반환하여 백분율을 왜곡하지 않는다.
+
+추가 검증: `journeyAdvanced.test.ts`는 표면 중복 제거·노출 교집합·서버/클라 오류 분리·시도 및 재시도·새 설치 활성화·KST 완전 날짜·구간 누락·검색 0건을 검증한다. `journeyAdvancedStore.test.ts`는 실제 PostgreSQL SQL에서 동의 ID 교차·미동의·내부 범위·속성 최소 투영·조회 상한의 명시적 실패를 검증한다.
 
 
-## 관리자 마케팅 자동 집계 (2026-10-29)
+추가 의미 규칙:
 
-소재별 건수 API와 `campaignCounts` 응답은 [CAMPAIGN_COUNTS.md](CAMPAIGN_COUNTS.md)를 따른다. 한국시간 2026-11-05 수신분부터 0을 포함한 건수를 반환한다. 이전 기간과 겹치면 이전 건수는 기존 5건 기준을 적용한 `previousPeriod`로 분리한다. 기존 설치별 연결은 계속 선택 동의를 요구한다.
+- `results`는 작업별 가장 최근에 관측한 결과 화면을 사용한다. `partialZeroCandidateJobs`는 인물 중 일부만 후보가 0개인 작업, `zeroCandidateJobs`는 전체 후보 수가 0인 작업이다. 인물별 수가 없는 구형 이벤트는 `personCandidateCountMissingJobs`로 분리한다. `zeroCandidatePeople/observedPeople`는 이 인물별 수가 확인된 작업만의 합계다.
+- `recovery.feature/surface`는 실패가 관측된 맥락이다. 이후 다른 화면에서 같은 작업을 성공해도 원래 실패 화면 기준에 표시한다. 분석 실패의 작업·시도 식별자가 없으면 연결 불가로 표시하며 다른 작업의 재분석을 복구라고 추정하지 않는다.
+- `export_completed.writingElapsedMs`는 이미 다운로드·검증한 데이터를 base64로 직렬화하고 IPC를 거쳐 로컬 파일을 저장하는 클라이언트 처리 시간이다. 순수 디스크 I/O 시간이라고 부르지 않는다. 동일 설치·작업·세션·시도 중복 보고는 표본 한 개이며 시도 식별자가 없는 보고는 누락 표본으로 분리한다.
 
-`GET /v1/admin/marketing?days=7` (1–90, 기본 7), 기존 X-Beta-Admin-Token 인증 및 private/no-store 적용.
-응답은 `windowDays`, `queriedAt`, `since`, `acquisition`(기존 광고 연결 설치 코호트), `usage`(전체 운영 합계), `usageDetails`(일별·반복 이용), `meta`를 포함한다.
-앱은 조회 시점 이전 N×24시간 내 등록한 설치 기준이며 철회·삭제 요청 설치를 제외한다. 개발자 제외 설정은 `acquisition`과 `usage` 모두에 적용한다.
-설치는 첫 실행 서버 등록 식별자이며 설치 프로그램 완료/고유 사람 수가 아니다. 소재별 이용은 연결 동의 이후만 집계한다.
-Meta는 KRW/Asia/Seoul 광고계정의 오늘 포함 N개 달력 날짜, 지정된 포스터 A·영상 A 광고 4개와 서포터즈 모집 광고 1개 ID로 조회한다. 계정 전체 실적을 뜻하지 않는다.
-`meta.status`: ready / unconfigured / unavailable / stale. `snapshot`은 없으면 null, 있으면
-since/until/fetchedAt/rows(creative, adId, phase: landing|download|supporters, spend, impressions, clicks, landingViews, downloadClicks, reach, frequency, saves, shares, videoViews)를 제공한다.
-기존 LPV 광고 2개와 다운로드 전환 광고 2개를 별도 행으로 제공한다. `downloadClicks`는 맞춤 전환 `offsite_conversion.custom.1680558963511586`만 읽으며 다른 맞춤 이벤트 합계는 사용하지 않는다. 2026-10-31 생성 전 전환은 소급 집계하지 않고, 설치·파일 다운로드 완료로 해석하지 않는다. 미게재 초안의 행도 0일 수 있다. 앱 귀속 키는 동일 소재의 광고 단계를 구분하지 않으므로 단계별 설치 전환율을 계산하지 않는다.
 
-2026-11-05 확장:
-- 서포터즈 행: `creative=supporters-poster`, `phase=supporters`, ad `52573071176169`. 서포터즈 방문은 Google Forms 방문이며 지원서 제출이 아니다. 베타 다운로드와 합쳐 지원 전환으로 표시하지 않는다.
-- `reach`/`frequency`는 Meta 추정치, 필드 미제공 시 null. 고유 도달을 소재별/일별로 합산하지 않는다. `saves`는 `onsite_conversion.post_save`, `shares`는 `post`, `videoViews`는 3초 재생 `video_view` 액션. 영상 외 소재는 UI에서 재생을 해당 없음으로 표시한다.
-- `meta.daily`: 독립 `status` + `snapshot`(since/until/fetchedAt/rows). 행은 기존 광고 지표에 `day`를 추가한다. `time_increment=1`의 한국 날짜, 오늘 포함. 동일 소재의 다른 날은 별개이며 동일 광고·날짜 중복 또는 범위 밖 날짜는 실패 처리한다. 응답이 정상이고 기록이 없는 날짜만 UI에서 0으로 채운다.
-- `meta.supporters`: 독립 `status` + `snapshot`(fetchedAt, adsetId, effectiveStatus, start, end, lifetimeBudget, remainingBudget, lifetime, since, until). 광고세트 `52573071175969`를 읽고 account_id를 검증한다. 예산은 원화 원 단위이며 `/100` 환산하지 않는다. `lifetime`은 `insights.date_preset(maximum)`으로 받은 **광고세트 전체 기간** 지표이며 선택한 `days`의 지출과 구분한다. `remainingBudget`은 Meta 광고세트 잔여 예산이지 계정 현금 잔액이 아니다. 누적 조회 기간은 since/until이며 실적 없음은 null이다.
-- 일별/서포터즈 API만 실패하면 합계는 유지하고 해당 보고서만 unavailable/stale로 표시한다. 기존 같은 기간 캐시가 있으면 조회 시각과 함께 stale로 남기며 0으로 대체하지 않는다. 기간 변경 시 다른 기간의 합계/일별 캐시를 재사용하지 않는다.
-- 요약 CTR=링크 클릭/노출, CPM=광고비×1,000/노출, 링크 CPC=광고비/링크 클릭, 방문당/다운로드 클릭당 비용=광고비/각 액션. 분모 0이면 `—`. A/B 문구는 같은 목표 내 관측 비용 비교이며 통계 검정·승자 판정이 아니다.
-- Google Analytics 4 상세 보고서와 Google Forms 실제 제출 수는 서버 API 자동 연결 전이다. 현재 대시보드는 상태 및 해당 원본 보고서 링크를 제공한다. 임의 값이나 과거 수동 확인값을 실시간 제출 수로 표시하지 않으며 지원당 비용/ROAS를 추정하지 않는다.
-Meta가 명시적으로 API 접근 차단을 반환하면 `meta.reason: access_blocked`를 추가한다. 원시 오류나 자격증명은 반환하지 않는다.
-오류는 0으로 바꾸지 않는다. stale은 동일 기간의 마지막 성공값이며 기간 변경 시 다른 기간 캐시는 사용하지 않는다.
-관리자 대시보드 마케팅 탭은 보이는 동안 30초마다 조회하며 Meta 호출은 프로세스별 60초 캐시와 중복 요청 병합을 적용한다.
-Meta 보고 지연과 설치 코호트 시간축 차이 때문에 두 표를 합쳐 전체 광고 전환율이나 통계적 A/B 승자를 산출하지 않는다.
+## 관리자 저장 커스텀 체형 조회
 
-`usage`는 기존 `ops_count_installations`/`ops_count_jobs` 집계 전용 뷰만 읽는다. 광고·품질 선택 동의 유무와 관계없이 이미 서비스 제공 과정에서 저장된 등록·분석 처리 기록의 합계이며, 신규 데이터 수집·개별 설치 응답·광고 출처 연결·Google/Meta 전송은 없다.
-- `newInstallations`: 기간 내 최초 서버 등록 설치. 다운로드/설치 프로그램 완료/고유 사람 수와 다르다.
-- `newStarted`, `newCompleted`: 신규 등록 설치 중 등록 이후 분석을 시작/성공한 설치 수. 반복 작업은 설치별 한 번만 센다.
-- `activeInstallations`: 기존·신규 설치를 포함해 기간 내 최근 인증 요청이 있는 설치 수.
-- `startedInstallations`, `completedInstallations`, `jobsStarted`, `jobsCompleted`: 기간 내 시작된 작업 기준 설치 수/작업 수. 성공은 조회 시점의 completed 상태이며 완료 시각 코호트가 아니다.
-- `hideInternal`: 적용한 개발자 제외 설정.
-광고 연결 미동의 설치의 이용은 이 전체 운영 합계에만 포함하며 `acquisition`의 출처 미확인 이용 수는 표시하지 않는다. 서버 등록/통신이 없는 다운로드, 오프라인 실행, 로컬 저장 완료를 전체 이용으로 추정하지 않는다. 서버 요청 실패도 성과 0으로 처리하지 않는다.
+대시보드의 **커스텀 체형** 탭에서 현재 저장된 카드 목록과 조절값, 정면·측면·후면 미리보기를 조회한다. 읽기 전용이며 카드 수정·다운로드 작업 생성·Converter 호출을 하지 않는다.
 
-`usageDetails`도 같은 집계 전용 뷰와 개발자/철회/삭제 필터만 사용한다. 새 이벤트, 원본 콘텐츠, OS/개별 설치 이력/광고 출처 조인은 추가하지 않는다. 확장 조회가 실패하면 `null`로 반환하고 기존 usage는 유지한다.
-- `since`/`until`: 기존 usage와 같은 최근 N×24시간. 한국 날짜로 나눈 `trend`는 N+1 날짜를 포함할 수 있으며 첫날/마지막 날은 부분 날짜다.
-- `trend`: day, newInstallations, jobsStarted, jobsCompleted, jobsFailed. 날짜는 서버 등록/작업 시작 기준이며 완료/실패는 조회 시점 상태다. 정상 조회 시 기록이 없는 날짜는 0.
-- `repeatAnalyzers`: 기간 내 서로 다른 한국 날짜 2일 이상에 분석을 시작한 설치 수. 동일 날짜 반복 요청은 한 날짜로만 세며 고유 사람 수/D1·D7 리텐션과 다르다.
-- `jobsFailed`/`jobsPending`: 기간에 시작한 작업 중 현재 failed / queued 또는 running인 건수.
+| GET 경로 | 동작 |
+|---|---|
+| `/v1/admin/review/custom-bodies` | 설치별 저장 카드. `installationId`, `cursor`, `limit`(기본 20, 최대 50개 설치) 지원 |
+| `/v1/admin/review/custom-bodies/:installationId/:cardId` | 현재 카드의 저장 수치·기본 모델·생성/수정 시각·미리보기 가능 여부 |
+| `/v1/admin/review/custom-bodies/:installationId/:cardId/preview?revision=…&view=front` | 상세 응답의 revision에 대한 SVG. view는 front/side/back |
 
-화면의 전체/베타/다운로드/랜딩/서포터즈 필터는 Meta 표와 추이에 적용한다. 소재별 앱 건수는 광고 단계 구분을 할 수 없어 베타 관련 화면에서 동일한 범위를 유지하며 별도 날짜를 표시한다. 서포터즈 전용 보기에서는 베타 앱 표를 숨긴다.
+기존 관리자 헤더 인증과 품질 검토 활성화 가드·감사 기록을 사용한다. 현재 품질 검토 동의가 유효한 설치만 조회하며, 내부 설치 제외 설정과 철회·삭제 요청을 반영한다. 기간 필터 대신 **현재 저장 상태**를 조회한다. 관리자 광역 열람 설정으로도 이 동의 조건을 우회하지 않는다. 설치 ID는 사용자 실명이나 사람 수를 뜻하지 않는다.
 
-서버만 META_MARKETING_TOKEN(ads_read), META_MARKETING_VERSION, META_MARKETING_ACCOUNT_ID를 읽는다.
-토큰은 ECS Secrets로 주입하며 브라우저·소스·로그에 기록하지 않는다. API 버전은 앱에서 확인한 지원 버전을 명시한다.
-미설정이어도 앱 집계는 작동한다. 토큰 만료/조회 실패는 관리자 화면에 표시된다.
+미리보기는 현재 승인된 카탈로그의 기본 메시와 카드의 저장 수치를 사용한다. 과거 메시 자산의 스냅샷이나 사용자의 최종 포즈 FBX가 아니다. 현재 모델이 없거나 수치 범위·계산 버전이 호환되지 않으면 저장값과 불가 사유를 보여주며 기본 체형으로 대체하지 않는다. 저장된 원본 이미지나 별도 업로드 FBX를 수집하지 않는다.
 
-배포 환경 변수: META_MARKETING_SECRET_ARN(Secrets Manager JSON token 키), META_MARKETING_VERSION(v26.0 검증), META_MARKETING_ACCOUNT_ID. BFF 실행 역할에 해당 시크릿 GetSecretValue만 허용한다. worker에는 주입하지 않는다. 토큰 갱신 후 새 ECS 배포가 필요하다. CDK로 태스크를 재생성하는 경우에도 동일 secret 연결을 보존하거나 이 배포 워크플로를 재실행한다.
+앱의 수치 계산기를 `src/admin/bodyRuntime`에 고정된 소스와 함께 재사용한다. SOURCE.json에 클라이언트 커밋과 원본 체크섬을 기록하며 Blender 기준 소형 픽스처로 계산 일치를 검증한다. 파서의 record 스키마는 보안 수정된 Zod 4 API에 맞춰 문자열 키를 명시한다. 수치 계산은 변경하지 않는다. 자산 크기·SHA256·형식·원본 해시·규칙·프리셋을 확인한 뒤 메시를 계산한다. 모델 데이터 자체는 코드에 포함하지 않으며 BFF의 기존 카탈로그와 로컬 런타임 자산이 필요하다.
 
-### 블로그 유입·읽기 집계 (2026-11-09)
+카드/자산 바인딩의 revision이 바뀌면 이전 미리보기를 거부한다. 생성 후에도 소유 카드와 동의 상태를 다시 확인한다. 응답은 private/no-store이고 토큰은 URL에 넣지 않는다. 브라우저는 인증 fetch 이후 Blob URL을 사용하고 닫을 때 해제한다. 서버 캐시는 메모리에만 최대 4개·120초, SVG당 8MiB이며 동시에 최대 2개를 계산한다. 새 DB 마이그레이션·S3 쓰기·운영 배포는 필요하지 않다.
 
-관리자 인증이 필요한 `GET /v1/admin/marketing?days=1..90`에 `blog` 객체를 추가한다. 별도 인증 없는 공개 집계 API는 없다. 조회 실패 시 `null`이며 수집 0건과 구분한다.
+### Refine v3 private shadow (default off)
 
-- `totals`: 글 조회, 중복 제거한 방문 브라우저, 활성 체류 합계(ms), 관련 글 영역 도달 조회, 다운로드 안내 클릭 조회.
-- `posts`: 경로별 조회·방문 브라우저·활성 체류·75% 스크롤 도달·관련 글 영역 도달·다운로드 안내 클릭·모바일 조회.
-- `sources`: 글별 고정 유입 출처 분류와 조회·방문 브라우저. UTM source 우선, 없으면 직전 참조 도메인 분류. 원문 URL·검색어는 저장하지 않는다. internal은 사이트 내부 이동이며 최초 외부 유입이 아니다.
-- `sections`: 글·구간별 노출 조회, 방문 브라우저, 활성 5초 이상 조회, 활성 체류 합계. 노출·스크롤은 읽기 완료가 아니다.
-- `daily`: KST 날짜별 조회·방문 브라우저. 기록이 있는 날짜만 반환한다.
-- `catalog`: 공개 글 제목·경로·구간 이름. 원고나 사용자 입력은 포함하지 않는다.
+`REFINE_V3_SHADOW=false` gates a server-only, bounded `refine-shadow-v1` envelope relay from inference analysis through private stored refine context back to inference `/refine`. It adds no public client request fields or refine permission. See [REFINE_V3_SHADOW.md](REFINE_V3_SHADOW.md) for limits and unsupported product integration.
 
-집계 대상은 기간 내 page_view가 있는 글 조회이며 목록 페이지는 제외한다. 동의 철회·만료 기록은 제외하고 재전송은 이벤트/문서 순번으로 중복 제거한다. 방문자 수는 사람 수가 아니다. 사이트 하단 활성 시간은 글 평균에서 제외한다. 다운로드 안내 클릭은 글에서 홈 #beta로 이동한 조회이며 실제 다운로드·설치 완료가 아니다. 기존 보관기간 90일과 삭제 절차를 그대로 사용한다. 새 BFF 허용 경로·구간 배포 이후 랜딩을 배포해야 한다.
+## 최소 데스크톱 버전 (2026-10-27)
+
+Standin **0.2.0 정식 이상**만 지원한다. `0.2.0-beta.*`는 미지원이다.
+클라이언트는 매 요청에 실행 중인 빌드의 `X-App-Version`을 보낸다(CORS 허용).
+설치 인증 후 분석·조회·refine·저장·모델·이벤트·체형 설정을 처리하기 전에 검사한다.
+헤더가 없는 기존 앱은 설치 등록의 `app_version`으로 판정한다. 헤더가 있으면 저장된
+버전보다 우선하므로 업데이트 후 재등록할 필요가 없다. 누락·잘못된 버전은 차단한다.
+신규 `POST /v1/installations`도 본문의 `appVersion`과 제공된 헤더를 검사한다.
+
+미지원 응답: HTTP **426**, `Cache-Control: no-store`.
+```json
+{"error":{"code":"UPDATE_REQUIRED","message":"Standin 0.2.0 이상으로 업데이트해야 사용할 수 있습니다.","details":{"minimumVersion":"0.2.0"},"requestId":"req_..."}}
+```
+`GET /v1/client-policy`는 설치 인증 없이 헤더 버전을 검사하고 지원되면
+`{"minimumVersion":"0.2.0"}`을 반환한다. 기존 앱도 서버에서 차단되지만 이미 배포된
+앱의 화면은 소급 변경되지 않는다. 신규 앱은 426을 받으면 업데이트 화면만 표시한다.
+헬스·관리자·인증/OAuth 및 `DELETE /v1/installations/current/data`는 버전 차단 대상이 아니다.
+업데이트 피드와 0.2.0 이상 설치 파일을 먼저 게시한 뒤 BFF를 배포한다.
+
+## Session replay v1 (development/staging)
+
+Replay-only flags default ON and `REPLAY_CONSENT_MODE=assumed` per the 2026-10-28 implementation
+instruction. This does not change quality-consent evidence or historical analytics.
+Production assumed collection/reads fail closed. Installation authentication, admin review
+authentication and explicit withdrawal/deletion remain required. New recordings have a
+30-day maximum retention; earlier source expiry, withdrawal and deletion take precedence.
+Existing recordings keep their stored `expiresAt`.
+
+- `POST /v1/replays`: versioned/idempotent session creation.
+- `PUT /v1/replays/:id/streams/:window/chunks/:sequence`: SHA-256 validated JSON or bounded gzip/base64 events.
+- `PUT /v1/replays/:id/assets/:hash`: private immutable image/font bytes with append-only snapshot/job bindings.
+- `POST /v1/replays/:id/finish`: declare final sequences; complete vs incomplete manifest.
+- `DELETE /v1/replays/:id`: remove own recording. `DELETE /v1/replays`: withdraw and purge own replay data.
+- `GET /v1/admin/replays`: authorized filtered list; `nextBefore` is an opaque cursor.
+- `GET /v1/admin/replays/facets`: authorized filter choices and counts for version, OS,
+  surface, error, save state, recording state and installation audience. Each facet omits
+  its own selected value while keeping the other filters. At most 100 choices per facet;
+  `truncated` names any facet with additional choices.
+- `GET /v1/admin/replays/:id/manifest`: stream descriptors, immutable assets, gaps and existing timeline.
+- `GET /v1/admin/replays/:id/streams/:window/chunks/:sequence`: authenticated decoded events.
+- `GET /v1/admin/replays/:id/assets/:hash`: authenticated binary, private/no-store, no presigned URL.
+- Existing `/v1/admin/ops/dashboard`: actual bundled rrweb player, capture reconstruction, image comparison.
+
+Exact requests/responses/errors/limits: [replay-contract.v1.json](replay-contract.v1.json).
+Configuration, deletion scope, local real-BFF runner and playback boundaries:
+[SESSION_REPLAY.md](SESSION_REPLAY.md). Infrastructure proposal: [REPLAY_INFRASTRUCTURE.md](REPLAY_INFRASTRUCTURE.md).
+
+### Dedicated replay browser (2026-11-06)
+
+The existing dashboard now exposes **리플레이** next to **운영**, with a recent-first
+scrollable/draggable list, incremental loading and authenticated lazy image previews.
+One `q` field searches replay, installation, app-session and linked job IDs by substring
+(1–128 ASCII identifier characters). Version/OS/surface/status choices are separate tags.
+The list and facets share the dashboard period and global developer-installation exclusion.
+Default range is the last seven days; explicit `from`/`to` ranges are limited to 90 days.
+List `limit` defaults to 50, is capped at 100, and the dashboard requests 18 at a time.
+Keep `from`/`to` unchanged while following `nextBefore` to preserve pagination scope.
+List items additionally include linked job IDs/count, surfaces, duration, error/save state
+and an optional authenticated preview asset descriptor. Existing authorization, consent,
+expiry, deletion and private/no-store asset guards still apply to both endpoints.
+`#replay` opens the tab directly, and existing job/metric replay links use this tab.
+Playback has a shared timeline, speed control and optional automatic window switching;
+3D is still recorded image frames, not a reconstruction of unrecorded interaction.
+
+## CSP 장면 metadata·부분 저장·입력 identity (2026-10-28)
+
+기존 FBX binary와 scene-save-v1/v4 검수 계약을 유지하면서 `csp-scene-manifest-v1` prepare/metadata/release를 추가했습니다. 기본 통합도 v4와 독립적으로 prepare할 수 있습니다. 미선택 generation 후보는 job 전체를 차단하지 않으며 선택된 generation은 계속 차단합니다. 부분 저장은 누락 사유와 snapshot 확인 없이 release하지 않습니다.
+
+result에 `sourceImage`(job에 묶인 원본명/SHA/크기)와 `capabilities.sceneAvailability`(기본/v4/metadata 가용 이유 및 후보별 사전 조건)를 추가합니다. polling/history의 `failure`는 같은 분석 phase/code/recovery를 전달하며 scene 오류 details.phase는 scene_prepare입니다. 기존 error/errorCode 필드는 보존합니다.
+
+상세 wire 계약·호환성·새 CORS 헤더·카메라 unavailable 상태는 [CSP metadata 계약](csp-scene-manifest-v1.md), 읽기 전용 로그 점검과 설정 보존 제안은 [런타임 점검](csp-runtime-readiness-2026-10-28.md)을 따릅니다. 전체 scene-camera-v1 레시피 전달은 Converter의 artifact-bound metadata 계약을 기다리며 CSP 자동 적용/실제 가져오기는 미검증입니다.
+
+## Scene camera metadata extension
+
+Scene manifest requests may negotiate `cameraContractVersion=scene-camera-artifact-v1`. The artifact-bound available-camera shape and backwards compatibility are described in [scene-camera-transport-v1.md](scene-camera-transport-v1.md). One shared scene deadline covers prepare stages; this does not change `/analyze` deadlines.
+
+### Replay deployment classification and review fixes (2026-10-31)
+
+Missing `REPLAY_ENVIRONMENT` and `NODE_ENV` now classify as `unclassified`, so assumed
+collection/read is denied. Set development explicitly for local use; the isolated launcher
+already does so. Docker staging still requires `REPLAY_ENVIRONMENT=staging`.
+The dashboard recognizes both body-shape `canvas_frame` and review-model `final` assets as
+recorded 3D frames; this does not prove a saved FBX or a successful CSP import.
+
+## Interactive pose operation v1 (opt-in real-model integration)
+
+The installation-authenticated polling/cancel/model/export/file and auxiliary canvas-frame
+routes are specified in [INTERACTIVE_STATE_V1.md](./INTERACTIVE_STATE_V1.md) and
+[bff-http-contract-v1.json](./contracts/bff-http-contract-v1.json). The private Converter
+HTTP transport, exact camera/frame bridge and verified recent hand-variant endpoint are
+implemented. Static Top5 capability requires complete prebuilt candidate coverage; card
+requests never run Blender. `INTERACTIVE_STATE_ENABLED` remains false by default and a
+private service token is required. Refined interactive states require actual persisted
+inference version/config/base hashes. Legacy verified FBX, static history/semantic lists
+and scene contracts retain their established safety/release rules.
+
+### 기본형 역할 메타데이터 (2026-11-04, 활성화 없음)
+
+승인 체형 카탈로그는 자산별 `gender: male|female|child`, `role: default|previous_default|preset`, `order: nonnegative integer`를 선택적으로 선언할 수 있다. `body-options`와 `body-preferences.shapeEditable`에 그대로 전달하며, `/models`는 표시 이름·성별·role·order를 제공하고 실제 availability는 Converter 목록으로 결정한다. `/models.isDefault/defaultCharacterId`는 구 export용 `CONVERTER_CHARACTER_ID` 의미를 유지한다.
+
+role이 있는 카탈로그의 공통 남성 폴백은 `defaultCharacterId`로 명시한 유일한 `gender=male,role=default` 자산이다. 기존 `male-base-*`는 `previous_default` 카드로 남고 새 ID/자산을 가리키도록 덮어쓰지 않는다. role 없는 카탈로그의 기존 남성 기본형 탐색 및 last_used/auto 정책은 유지한다. 작업 시작에 BodyRef를 고정하고, 과거 폴백 선택에 캡처 필드가 없더라도 저장된 BodyRef가 있으면 그 ID/해시/revision을 보존한다. 신규 자산 누락은 다른 BASE로 대체하지 않고 unavailable로 닫는다.
+
+새 비율·실제 hash·기존형 보존·캐시/포스터·병행 PR 경계는 [통합 계약](BODY_DEFAULT_ROLLOUT_20261104.md)을 따른다. 이 코드 변경은 자산 승인이나 배포/활성화를 뜻하지 않는다.
+
+### Final FBX appearance boundary (2026-11-06, scoped native v2 support)
+
+The strict optional `appearance:{version:"fbx-outline-v1",width:0..2}` on interactive prepare, owned capability/head recovery, exact target-width support, separate base/outline proofs and final byte binding are documented in [OUTLINE_EXPORT_APPEARANCE.md](./OUTLINE_EXPORT_APPEARANCE.md). Current approved male/female defaults support full continuous0<width<=2 and cropped width2 under the live posed-FBX-import contract. BFF independently pins those targets; an upstream boolean alone cannot enable them. Omission/zero preserves legacy identity and bytes. Old opaque v1 remains rejected. `.clip`/CSP-internal posing are outside present scope; default flags remain off and this is not deployment.
+
+### Final FBX skin extension (2026-11-06, default off)
+
+Interactive prepare/head accept separate strict `skin:{version:"fbx-skin-v1",id:"default"|"gray-guide"|"flesh"|"flesh-guide"|"muscle"}`. Existing strict `fbx-outline-v1` is unchanged. Default/omission preserves legacy identity; nondefault skin binds approved asset identity and the complete current selection. The owned head adds `skinExport:{version,available,supportedIds}`; unsupported assets never silently fall back. Base→skin→outline receipts and download SHA remain separate, and stale/cancelled results are fenced. See [SKIN_EXPORT.md](./SKIN_EXPORT.md) for exact scope and validation status. Approved current male/female full individual files support skin-only or exact outline2 combinations under pinned manifest1fb0fa38 and actual CSP import evidence. Owned operation skinPreview assets use exact compressed-UV and prebuilt2048 PNG hashes; final FBX retains the approved4096 image. Runtime flags remain default off; this does not deploy or enable skin globally.
+
+
+### 체형 더보기 표시 설정 (2026-11-07)
+
+GET `/v1/installations/current/body-preferences`는 `pickerVisibility: { hiddenPresetIds: string[], hiddenCardIds: string[] }`를 추가로 반환한다. 과거 설치의 기본값은 두 빈 배열(모두 표시)이다. PUT은 mode 변경 없이 pickerVisibility만 갱신할 수 있고, 기존 mode-only 클라이언트와 idempotency payload는 유지된다.
+
+- 표시 설정은 설치별 기존 preferences JSON에 저장한다. 새 테이블이나 데이터 마이그레이션은 없다.
+- preset ID 최대 256개, card ID 최대 48개. 중복·빈 ID·알 수 없는 키·잘못된 타입은 400이다.
+- 동일 preferences revision·mutationId 규칙을 사용한다. 충돌은 409, 재전송은 기존 응답을 반환한다.
+- 숨김은 카드 삭제·자동 추천·last_used·진행 중 인물 선택·FBX 허용 범위를 바꾸지 않는다. 실제 카드 삭제 시 그 카드의 숨김 ID만 정리한다.
+- BFF를 먼저 배포한 뒤 해당 필드를 읽는 클라이언트를 배포한다. 구 BFF에는 새 클라이언트가 표시 체크를 노출하지 않는다.
+- 클라의 CSP 실험용 중복 20종 제거는 제품 목록 정책이다. 계산 자산/카탈로그 ID를 폐기하지 않아 기존 카드와 작업의 원본 연결을 유지한다.
+
+## Closed supporter access
+
+When `ACCESS_GATE_ENABLED=true`, every installation-protected product request
+requires an explicitly allowed operator installation or a redeemed, unrevoked
+supporter code. Existing beta installations receive HTTP 403 with
+`ACCESS_CODE_REQUIRED`. Quota exemptions and the dashboard's internal roster
+do not grant access. Operators are explicitly configured through
+`ACCESS_OPERATOR_INSTALLATIONS`.
+
+Authenticated installation management remains available for access checks,
+code redemption, optional-consent management and withdrawal/deletion.
+Installation registration remains available so new supporters can redeem a code.
+
+- `GET /v1/installations/current/access` returns
+  `{required:boolean,allowed:boolean,role:"operator"|"supporter"|null,codeRegistered:boolean,showBetaEndedNotice:boolean}`.
+- `POST /v1/installations/current/access/redeem` accepts `{code:string}`.
+  Codes are atomically bound to one installation. Retrying on the same
+  installation is idempotent. A used, revoked or invalid code returns
+  `ACCESS_CODE_INVALID` (400), and 10 attempts per 10 minutes returns
+  `ACCESS_CODE_RATE_LIMITED` (429).
+- `SUPPORTER_ACCESS_ENABLED=false` denies supporter requests and redemption
+  while retaining the explicitly configured operator installations.
+- Status responses have `Cache-Control: private, no-store`.
+  Every protected request rechecks the server's current state.
+
+Codes have no automatic expiration in this release. Operators can revoke one
+with `node scripts/access-codes.mjs revoke <code-id>` after a build. Issue
+single-device codes with
+`node scripts/access-codes.mjs issue <count> <private-output.json> [label]`.
+Plaintext codes are written only to a new mode-0600 output file. The database
+stores only SHA-256 digests. The role grants application use, independently
+of dashboard administrator credentials.
+
+Deploy the BFF and code-entry client, configure the explicit operator IDs,
+then enable the gate in the deployment environment. The BFF and worker
+workflow both preserve these environment settings on subsequent deployment.
+
+
+The open-beta thank-you and code entry are separate client screens. Only
+unredeemed installations whose server `created_at` is at or before the fixed
+`OPEN_BETA_ENDED_AT` (ISO-8601 with timezone) see the thank-you, then continue
+to code entry. New installations go directly to code entry. Missing/invalid
+cutoffs never classify new installations as beta users. Freeze this value at
+closure; do not move it forward with each deployment. A download that never
+registered, or an installation whose local identity was reset, cannot be
+identified as an old download from existing records.
+
+Operators and active redeemed installations bypass both screens. Redeemed but
+revoked/disabled installations receive an access-ended screen without code
+reentry. Registration is checked on the server on launch and subsequent
+requests; no local allow flag grants access. Old clients are denied by the same
+server middleware without an update, but need the new client to display the
+two-step UI and redeem codes. Unsupported old clients may receive the existing
+update-required response first. Preview mode and public app updates remain
+separate from installation-protected product APIs.
+
+### Registered final FBX reuse diagnostics
+
+`format=ready` continues preparing a job-owned `verified-fbx-v1` receipt. The
+Converter may now resolve the exact final bytes from a private persistent cache
+of server-registered library BVHs and catalog models. The BFF still validates
+source/model/preview/shape/hand lineage and FBX hashes; source availability,
+ownership, selected body/hand revisions and late-response fences run on every
+request. No client cache path, cache key or safety assertion is accepted.
+
+The optional `X-Standin-Final-Artifact-Origin: hit|miss` header describes the
+Converter origin of the immutable bytes, retained with this job's review pair.
+It is diagnostic, not a receipt or a statement about the current BFF memory hit.
+A new job always gets a distinct review key even when its FBX bytes match. Ready
+and download do not request an image; preview still renders those exact bytes
+through `/render-final-preview`. Camera, output scope, mirror, numeric shape,
+hand edits and server policy versions remain part of the Converter binding.
+Refined/private BVHs outside its pinned library registry retain the normal
+calculation and job-scoped artifact path. No client selection UI change is needed.
+
+No deployment or shared S3 publication is part of this change. Cache population,
+persistent-volume installation, input-registry pinning and complete library
+coverage are separate operator work. The Converter preserves its existing
+validation gates; a structural FBX receipt is not a complete body-collision
+certificate.
+
+Local reproduction (after building this checkout): start the server repository's
+`scripts/serve_final_fbx_reuse_probe.py --forbid-conversion` with the populated
+cache, matching environment and pinned library manifest, then run
+`node scripts/verify-final-fbx-reuse.mjs <server-pilot-directory> [converter-url]`.
+The job/owner store and confirmations are fixtures; the semantic presentation,
+default body selection, routes, Converter HTTP, final FBX, PNG and hash/receipt
+checks are real. Never deploy either probe. The matching server pilot report
+records the measured sample and explicit ungenerated library coverage.
+
+The matching Converter PR also starts automatic preparation on service startup
+and when its server-owned default-model catalog changes. It warms both the exact
+semantic front-reference camera and unbaked full-body form using original hands.
+Until exact validation/registration completes, this BFF keeps the normal fallback
+and the same owned review receipt checks. Its internal read-only
+`/final-cache/prewarm-status` is operational diagnostics and is not forwarded as
+a client trigger or safety authority. No BFF API/UI change is needed for watching
+model changes. Future rollout must mount/configure the catalog, active library
+and private cache; this PR update does not deploy them.
+
+## RC4 staging refinement
+
+Staging-only `REFINE_RELEASE_ENABLED=1` accepts `releaseVersion: "RC4"` on the
+existing candidate refine POST. Ownership and exposed-candidate eligibility are
+checked first. One stored original PNG is sent to the internal RC4 endpoint;
+no client coordinates or manual conditions are accepted. Current RC4 supports
+one depicted target and registered original assets only.
+
+Accepted responses include `release` (version, FBX SHA, display GLB SHA,
+`previewUrl`, camera). `exportUrl` points to the authenticated job-scoped
+`/refine/release/fbx` route. The BFF verifies and persists both binary files before
+claiming success. Downloads verify their stored SHA again and never redirect to
+a worker handle. Off / older clients retain the existing BVH path.
+
+The preview is baked from the verified final FBX, with camera applied separately.
+The original RC4 mesh is used; body/hand/crop modifications must not be silently
+applied afterward. A withheld RC4 response supplies no RC4 artifact. The existing
+original candidate route remains available. An unavailable worker is an explicit
+503; clients must not describe it as a successful RC4 correction.
+
+Release objects use the existing installation/job S3 retention prefix. Production
+activation is outside this PR. Staging live-call and download evidence remains a
+separate release check, not implied by TypeScript or mock tests.

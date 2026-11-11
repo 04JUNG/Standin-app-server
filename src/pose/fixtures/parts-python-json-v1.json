@@ -1,0 +1,110 @@
+{
+  "source": "Python json.dumps(sort_keys=True, allow_nan=False), server #153 e12ab015",
+  "vectors": [
+    {
+      "value": {
+        "context": {
+          "vlm_description": "상세 좌우 불명확 😀",
+          "person_index": 0
+        },
+        "operation": {
+          "type": "advance_foot",
+          "side": "left",
+          "distance_m": 0.05
+        }
+      },
+      "canonical": "{\"context\": {\"person_index\": 0, \"vlm_description\": \"\\uc0c1\\uc138 \\uc88c\\uc6b0 \\ubd88\\uba85\\ud655 \\ud83d\\ude00\\u007f\"}, \"operation\": {\"distance_m\": 0.05, \"side\": \"left\", \"type\": \"advance_foot\"}}",
+      "sha256": "9dea105e466b747aedffa4000c5f68d45c2ac45e2e3fe0b89c18e378c538e26e"
+    },
+    {
+      "value": {
+        "context": {
+          "vlm_description": "상세 좌우 불명확 😀",
+          "person_index": 0
+        },
+        "operation": {
+          "type": "advance_foot",
+          "side": "left",
+          "distance_m": 1e-06
+        }
+      },
+      "canonical": "{\"context\": {\"person_index\": 0, \"vlm_description\": \"\\uc0c1\\uc138 \\uc88c\\uc6b0 \\ubd88\\uba85\\ud655 \\ud83d\\ude00\\u007f\"}, \"operation\": {\"distance_m\": 1e-06, \"side\": \"left\", \"type\": \"advance_foot\"}}",
+      "sha256": "33dafe0566288ef29f767640a145f8335a6e43a5d31d39098570a71f255de29c"
+    },
+    {
+      "value": {
+        "context": {
+          "vlm_description": "상세 좌우 불명확 😀",
+          "person_index": 0
+        },
+        "operation": {
+          "type": "advance_foot",
+          "side": "left",
+          "distance_m": 1e-05
+        }
+      },
+      "canonical": "{\"context\": {\"person_index\": 0, \"vlm_description\": \"\\uc0c1\\uc138 \\uc88c\\uc6b0 \\ubd88\\uba85\\ud655 \\ud83d\\ude00\\u007f\"}, \"operation\": {\"distance_m\": 1e-05, \"side\": \"left\", \"type\": \"advance_foot\"}}",
+      "sha256": "4f3ac3d7784874be5533ac8dc91ad2a4c2fb2be36fd43c18895b27eeb2407631"
+    },
+    {
+      "value": {
+        "context": {
+          "vlm_description": "상세 좌우 불명확 😀",
+          "person_index": 0
+        },
+        "operation": {
+          "type": "advance_foot",
+          "side": "left",
+          "distance_m": 0.0001
+        }
+      },
+      "canonical": "{\"context\": {\"person_index\": 0, \"vlm_description\": \"\\uc0c1\\uc138 \\uc88c\\uc6b0 \\ubd88\\uba85\\ud655 \\ud83d\\ude00\\u007f\"}, \"operation\": {\"distance_m\": 0.0001, \"side\": \"left\", \"type\": \"advance_foot\"}}",
+      "sha256": "ec7b95bebabc24f54964b640f4314fb0a7c5136a23703b3f0f46ae54a09336a9"
+    },
+    {
+      "value": {
+        "context": {
+          "vlm_description": "상세 좌우 불명확 😀",
+          "person_index": 0
+        },
+        "operation": {
+          "type": "advance_foot",
+          "side": "left",
+          "distance_m": 1e-07
+        }
+      },
+      "canonical": "{\"context\": {\"person_index\": 0, \"vlm_description\": \"\\uc0c1\\uc138 \\uc88c\\uc6b0 \\ubd88\\uba85\\ud655 \\ud83d\\ude00\\u007f\"}, \"operation\": {\"distance_m\": 1e-07, \"side\": \"left\", \"type\": \"advance_foot\"}}",
+      "sha256": "31a143b66d225b1da97598fcf9019133a61a37f16beb9e66587e8b397aa60911"
+    },
+    {
+      "value": {
+        "context": {
+          "vlm_description": "상세 좌우 불명확 😀",
+          "person_index": 0
+        },
+        "operation": {
+          "type": "advance_foot",
+          "side": "left",
+          "distance_m": 5e-324
+        }
+      },
+      "canonical": "{\"context\": {\"person_index\": 0, \"vlm_description\": \"\\uc0c1\\uc138 \\uc88c\\uc6b0 \\ubd88\\uba85\\ud655 \\ud83d\\ude00\\u007f\"}, \"operation\": {\"distance_m\": 5e-324, \"side\": \"left\", \"type\": \"advance_foot\"}}",
+      "sha256": "ac054351f12af735c183e0ee5a834b63740d09d2b1a4c0232a8a695707c01a57"
+    },
+    {
+      "value": {
+        "context": {
+          "vlm_description": "상세 좌우 불명확 😀",
+          "person_index": 0
+        },
+        "operation": {
+          "type": "advance_foot",
+          "side": "left",
+          "distance_m": 0.1
+        }
+      },
+      "canonical": "{\"context\": {\"person_index\": 0, \"vlm_description\": \"\\uc0c1\\uc138 \\uc88c\\uc6b0 \\ubd88\\uba85\\ud655 \\ud83d\\ude00\\u007f\"}, \"operation\": {\"distance_m\": 0.1, \"side\": \"left\", \"type\": \"advance_foot\"}}",
+      "sha256": "ab964c9ee8077da75902cf612fff402ca6b2a7a3c318219753c28098cdbf50a5"
+    }
+  ]
+}

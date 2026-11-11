@@ -106,10 +106,11 @@ export interface PoseCandidate {
 }
 
 export interface AnalysisResult {
+  sourceImage?: ReturnType<typeof import("./pose/sceneManifest.js").sourceImageIdentity>;
   manualExportVersion?: 1 | 2;
   jobId: string;
   source?: "image" | "semantic";
-  semantic?: { query: string; index: Record<string, string> };
+  semantic?: { query: string; index: Record<string, string>; paging?: import("./semantic/pages.js").SemanticPaging };
   image: { width: number; height: number } | null;
   inferenceMetadata: {
     deploymentVersion: string;
@@ -132,6 +133,9 @@ export interface AnalysisResult {
    * 추론 endpoint가 살아 있어도 BFF flag가 꺼져 있으면 여기서 false가 나간다.
    */
   capabilities: {
+    refineRelease?: boolean;
+    selectionPreview?: boolean;
+    analyticsJourney?: boolean;
     handSelection?: boolean;
     bodySelection?: boolean;
     semanticBodySelection?: boolean;
@@ -147,6 +151,7 @@ export interface AnalysisResult {
      * 배포에서 전건 실패한다 — 그래서 서버가 알려 준다.
      */
     fbxExport: boolean;
+    sceneAvailability?: ReturnType<typeof import("./pose/sceneAvailability.js").sceneAvailability>;
     sceneExport?: boolean;
     sceneRefinement?: boolean;
     sceneSaveContract?: ReturnType<typeof import("./pose/sceneContract.js").sceneSaveContract>;

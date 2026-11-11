@@ -4,6 +4,11 @@ on:
   push:
     branches: [main, develop]
   workflow_dispatch:
+    inputs:
+      scene_export_enabled:
+        description: "Enable integrated FBX export for this staging deployment"
+        type: boolean
+        default: false
 
 permissions:
   id-token: write
@@ -20,7 +25,10 @@ env:
 jobs:
   deploy:
     name: Deploy
-    if: vars.AUTO_DEPLOY_ENABLED == 'true'
+    # A code-only merge can suppress deployment without suppressing CI.
+    if: >-
+      vars.AUTO_DEPLOY_ENABLED == 'true' &&
+      (github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip deploy]'))
     runs-on: ubuntu-latest
     # main만 프로덕션이다. 그 외 브랜치는 전부 staging으로 간다.
     environment: ${{ github.ref == 'refs/heads/main' && 'beta' || 'staging' }}
@@ -31,6 +39,8 @@ jobs:
       ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
       ECS_SERVICE: ${{ vars.ECS_SERVICE }}
       ECS_WORKER_SERVICE: ${{ vars.ECS_WORKER_SERVICE }}
+      # Staging defaults off, including automatic deploys. Re-enable explicitly for a manual run.
+      STAGING_SCENE_EXPORT_ENABLED: ${{ github.event_name == 'workflow_dispatch' && inputs.scene_export_enabled && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -42,6 +52,7 @@ jobs:
       - name: Test and build
         run: |
           npm ci
+          node --test scripts/configure-staging-scene-export.test.mjs scripts/configure-production-refine.test.mjs
           npm run typecheck
           npm run build
 
@@ -93,10 +104,31 @@ jobs:
             --task-definition "$TASK_DEFINITION" \
             --query taskDefinition > taskdef.json
 
+      # Staging only. Individual FBX export remains enabled when scenes are off.
+      - name: Configure integrated FBX export in staging
+        if: github.ref != 'refs/heads/main'
+        run: node scripts/configure-staging-scene-export.mjs taskdef.json
+
+      - name: Configure staging private interactive transport
+        if: github.ref != 'refs/heads/main'
+        env:
+          STAGING_INTERACTIVE_STATE_ENABLED: ${{ vars.INTERACTIVE_STATE_ENABLED }}
+        run: node scripts/configure-staging-interactive.mjs taskdef.json
+
       - name: Refresh BFF body initializer runtime
         env:
           DEPLOY_IMAGE: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.image.outputs.digest }}
         run: node scripts/refresh-body-init-image.mjs taskdef.json "$DEPLOY_IMAGE" bff
+
+      - name: Prevent staging anatomy release regression
+        if: github.ref == 'refs/heads/develop'
+        run: |
+          node scripts/prepare-staging-anatomy.mjs taskdef.json
+          node scripts/verify-staging-anatomy.mjs taskdef.json
+
+      - name: Pin production legacy refine
+        if: github.ref == 'refs/heads/main'
+        run: node scripts/configure-production-refine.mjs taskdef.json bff
 
       # REVIEW_WITHOUT_QUALITY_CONSENT: 관리자 열람을 품질 동의와 분리하는 스위치. 환경(staging·beta)의
       #   변수가 'true'일 때만 켜지고, 없거나 다른 값이면 false다. 뷰는 시작할 때마다 다시 만들어지므로
@@ -115,6 +147,10 @@ jobs:
             CAMPAIGN_COUNTS_ENABLED=${{ vars.CAMPAIGN_COUNTS_ENABLED || 'false' }}
             META_MARKETING_VERSION=${{ vars.META_MARKETING_VERSION }}
             META_MARKETING_ACCOUNT_ID=${{ vars.META_MARKETING_ACCOUNT_ID || '1090943087171654' }}
+            ACCESS_GATE_ENABLED=${{ vars.ACCESS_GATE_ENABLED || 'false' }}
+            OPEN_BETA_ENDED_AT=${{ vars.OPEN_BETA_ENDED_AT || '' }}
+            ACCESS_OPERATOR_INSTALLATIONS=${{ vars.ACCESS_OPERATOR_INSTALLATIONS || '' }}
+            SUPPORTER_ACCESS_ENABLED=${{ vars.SUPPORTER_ACCESS_ENABLED || 'true' }}
             HAND_SELECTION_ENABLED=${{ vars.HAND_SELECTION_ENABLED || 'false' }}
             SEMANTIC_SEARCH_ENABLED=${{ vars.SEMANTIC_SEARCH_ENABLED || 'false' }}
             SEMANTIC_SEARCH_PER_MINUTE=${{ vars.SEMANTIC_SEARCH_PER_MINUTE || '10' }}
@@ -148,6 +184,16 @@ jobs:
           DEPLOY_IMAGE: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.image.outputs.digest }}
         run: node scripts/refresh-body-init-image.mjs worker-taskdef.json "$DEPLOY_IMAGE" analysis-worker
 
+      - name: Pin worker to the same staging body presets
+        if: env.ECS_WORKER_SERVICE != '' && github.ref == 'refs/heads/develop'
+        run: |
+          node scripts/prepare-staging-anatomy.mjs worker-taskdef.json analysis-worker
+          node scripts/verify-staging-anatomy.mjs worker-taskdef.json analysis-worker
+
+      - name: Pin production worker legacy refine
+        if: env.ECS_WORKER_SERVICE != '' && github.ref == 'refs/heads/main'
+        run: node scripts/configure-production-refine.mjs worker-taskdef.json analysis-worker
+
       - uses: aws-actions/amazon-ecs-render-task-definition@v1
         if: env.ECS_WORKER_SERVICE != ''
         id: render_worker
@@ -156,6 +202,13 @@ jobs:
           container-name: analysis-worker
           image: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.image.outputs.digest }}
           environment-variables: |
+            CAMPAIGN_COUNTS_ENABLED=${{ vars.CAMPAIGN_COUNTS_ENABLED || 'false' }}
+            META_MARKETING_VERSION=${{ vars.META_MARKETING_VERSION }}
+            META_MARKETING_ACCOUNT_ID=${{ vars.META_MARKETING_ACCOUNT_ID || '1090943087171654' }}
+            ACCESS_GATE_ENABLED=${{ vars.ACCESS_GATE_ENABLED || 'false' }}
+            OPEN_BETA_ENDED_AT=${{ vars.OPEN_BETA_ENDED_AT || '' }}
+            ACCESS_OPERATOR_INSTALLATIONS=${{ vars.ACCESS_OPERATOR_INSTALLATIONS || '' }}
+            SUPPORTER_ACCESS_ENABLED=${{ vars.SUPPORTER_ACCESS_ENABLED || 'true' }}
             HAND_SELECTION_ENABLED=${{ vars.HAND_SELECTION_ENABLED || 'false' }}
             SEMANTIC_SEARCH_ENABLED=${{ vars.SEMANTIC_SEARCH_ENABLED || 'false' }}
             SEMANTIC_SEARCH_PER_MINUTE=${{ vars.SEMANTIC_SEARCH_PER_MINUTE || '10' }}

@@ -1,6 +1,7 @@
+import { releaseEnabled, runRelease, downloadRelease, downloadReleasePreview } from "./release.js";
 // POST /v1/analysis/jobs/:jobId/people/:personIndex/refine — 선택 후보 refine 프록시.
 // jobsRoutes 아래에 마운트된다(경로 prefix는 /v1/analysis/jobs).
-import { candidateRefineAllowed } from "./eligibility.js";
+import { candidateRefineAllowed, releaseCandidateAllowed } from "./eligibility.js";
 import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
 import { errorEnvelope } from "../mapping.js";
@@ -42,6 +43,7 @@ export function createRefineRoutes(overrides: Partial<typeof defaults> = {}) {
     const body = (await c.req.json().catch(() => null)) as {
       candidateId?: unknown;
       deferPreview?: unknown;
+      releaseVersion?: unknown;
     } | null;
     if (
       body?.deferPreview !== undefined &&
@@ -93,7 +95,8 @@ export function createRefineRoutes(overrides: Partial<typeof defaults> = {}) {
     const selected = owned.result?.candidatesByPerson
       .find((p) => p.personIndex === personIndex)
       ?.candidates.find((p) => p.id === candidateId);
-    if (owned.result?.source === "semantic" || !candidateRefineAllowed(selected))
+    const useRelease = releaseEnabled() && body?.releaseVersion === "RC4";
+    if (owned.result?.source === "semantic" || !(useRelease ? owned.result?.candidatesByPerson.length === 1 && releaseCandidateAllowed(selected) : candidateRefineAllowed(selected)))
       return c.json(
         errorEnvelope(
           "CANDIDATE_REFINE_FORBIDDEN",
@@ -102,6 +105,22 @@ export function createRefineRoutes(overrides: Partial<typeof defaults> = {}) {
         ),
         409,
       );
+    if (useRelease) {
+      if (!selected?.poseId) return c.json(errorEnvelope("INVALID_SELECTION","원본 포즈를 확인하지 못했습니다.",requestId),409);
+      try {
+        const release = await runRelease({installationId,jobId,personIndex,candidateId});
+        const record = release as {status:string; camera?:unknown; artifact_sha256?:string; version:string; selected?:string};
+        if (record.status === "accepted") return c.json({jobId, personIndex, candidateId,
+          refined:true, reasonCode:"rc4_accepted", adjustedLimbs:[], thumbnailUrl:null,
+          exportUrl:`/v1/analysis/jobs/${encodeURIComponent(jobId)}/people/${personIndex}/refine/release/fbx?${new URLSearchParams({candidateId})}`,
+          release:{...record,previewUrl:`/v1/analysis/jobs/${encodeURIComponent(jobId)}/people/${personIndex}/refine/release/preview?${new URLSearchParams({candidateId})}`},
+        });
+        return c.json({jobId,personIndex,candidateId,refined:false,reasonCode:"rc4_withheld",adjustedLimbs:[],thumbnailUrl:null,
+          exportUrl:`/v1/pose-candidates/${encodeURIComponent(selected.poseId)}/export?${new URLSearchParams({jobId,personIndex:String(personIndex),candidateId})}`});
+      } catch {
+        return c.json(errorEnvelope("REFINE_RELEASE_UNAVAILABLE", "최종 보정 파일을 준비하지 못했습니다.",requestId),503);
+      }
+    }
     const outcome = await deps.runRefine({
       installationId,
       jobId,
@@ -231,6 +250,15 @@ export function createRefineRoutes(overrides: Partial<typeof defaults> = {}) {
     },
   );
 
+  refineRoutes.get("/:jobId/people/:personIndex/refine/release/:artifact", async c=>{
+    const jobId=c.req.param("jobId"),personIndex=Number(c.req.param("personIndex")),candidateId=c.req.query("candidateId")??"",installationId=c.get("installationId")!;
+    if(!releaseEnabled() || !Number.isInteger(personIndex) || personIndex<0 || !candidateId ||
+      !(await deps.getOwnedJob(jobId,installationId)) || !(await deps.validateExportCandidate(installationId,jobId,personIndex,candidateId)))return c.json({error:"NOT_FOUND"},404);
+    const kind=c.req.param("artifact");if(kind!=="fbx" && kind!=="preview")return c.json({error:"NOT_FOUND"},404);
+    const result=await (kind==="fbx"?downloadRelease:downloadReleasePreview)({installationId,jobId,personIndex,candidateId});
+    if(!result)return c.json({error:"NOT_FOUND"},404);
+    return new Response(result.bytes,{headers:{"Content-Type":kind==="fbx"?"application/octet-stream":"model/gltf-binary","Content-Disposition":kind==="fbx"?"attachment; filename=refined.fbx":"inline","Cache-Control":"private, no-store","X-Artifact-Sha256":kind==="fbx"?result.record.artifact_sha256:result.record.preview_sha256}});
+  });
   return refineRoutes;
 }
 export const refineRoutes = createRefineRoutes();

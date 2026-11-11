@@ -1,3 +1,5 @@
+import { createInteractiveRoutes } from "./interactive-state/routes.js";
+import { interactiveService, interactiveEnabled, selectionPreviewService } from "./interactive-state/runtime.js";
 import { createSemanticRoutes } from "./semantic/routes.js";
 // Standin BFF (앱 서버) 엔트리포인트.
 // 경계: [Tauri] ──/v1──> [BFF: 이 서버] ──HTTP──> [도원 추론 서버]
@@ -30,11 +32,15 @@ import { analyticsRoutes } from "./analytics/routes.js";
 import { installationRoutes } from "./installations/routes.js";
 import { requireInstallation } from "./installations/middleware.js";
 import { rateLimitByIp } from "./limits/middleware.js";
+import { clientPolicyRoutes } from "./client-version/routes.js";
 import { adminRoutes } from "./admin/routes.js";
 import { CAMPAIGN_COUNT_PATH, createCampaignCountRoutes } from "./marketingCounts.js";
 import { createWebJourneyRoutes } from "./journey/routes.js";
 
-const app = new Hono<AppEnv>();
+import { createReplayRoutes } from "./replay/routes.js";
+import { replayArtifactWitness } from "./replay/witness.js";
+import { replayService } from "./replay/runtime.js";
+export const app = new Hono<AppEnv>();
 
 // Terminate shared-label counts before request IDs, identity-aware logging,
 // authentication and IP-based limits. This route cannot access service records.
@@ -140,6 +146,9 @@ app.get("/healthz", async (c) => {
   return c.json({ ok: true, inference: await health() });
 });
 
+// Startup compatibility check does not require an installation.
+app.route("/v1/client-policy", clientPolicyRoutes);
+
 // /v1 계약 (클라 endpoints.ts와 맞물림)
 // 공개: /v1/auth/*  |  보호(requireAuth): users·analysis·pose-candidates
 app.route("/v1/auth", authRoutes);
@@ -191,7 +200,11 @@ app.use("/v1/pose-candidates/*", requireInstallation);
 app.use("/v1/hands/*", requireInstallation);
 app.use("/v1/events/*", requireInstallation);
 
+const artifactWitness=replayArtifactWitness(replayService,()=>log.warn({type:"replay_artifact_witness",errorCode:"REPLAY_WITNESS_FAILED"}));
+app.use("/v1/pose-candidates/*",artifactWitness);
+app.use("/v1/analysis/jobs/:jobId/scene",artifactWitness);
 app.route("/v1/users", usersRoutes);
+app.route("/v1/analysis/jobs", createInteractiveRoutes(interactiveService, interactiveEnabled, selectionPreviewService));
 app.route("/v1/analysis/jobs", jobsRoutes);
 app.use("/v1/analysis/jobs/:jobId/scene", bodyLimit({ maxSize: 32768 }));
 app.route("/v1/analysis/jobs", createSceneRoutes((request) => app.fetch(request)));
@@ -199,6 +212,9 @@ app.route("/v1/models", characterRoutes);
 app.route("/v1/pose-candidates", poseRoutes);
 app.route("/v1/events", analyticsRoutes);
 app.route("/v1/hands", createHandRoutes());
+app.use("/v1/replays", requireInstallation);
+app.use("/v1/replays/*", requireInstallation);
+app.route("/v1/replays", createReplayRoutes(replayService));
 app.route("/v1/admin", adminRoutes);
 
 // DB가 준비된 뒤에 요청을 받는다. 실패하면 기동하지 않는다 —
@@ -245,9 +261,13 @@ notify({
 
 // 추론 서버는 ALB에 붙어 있지 않아 밖에서 아무도 보지 않는다. BFF가 대신 지켜본다.
 const stopInferenceWatch = startInferenceWatch();
+const stopInteractive = interactiveEnabled() ? interactiveService.start() : () => {};
 // 요청 지표를 1분 롤업으로 저장하고 추론 서버 지표도 함께 긁어 온다(계획 3단계).
 const stopOpsFlush = startOpsFlush();
 
+// Replay objects have a shorter retention and a durable deletion queue.
+const replayMaintenance = setInterval(() => { void replayService.sweep().catch(() => log.warn({type:"replay_maintenance",errorCode:"REPLAY_DELETE_RETRY"})); }, 60_000);
+replayMaintenance.unref();
 const maintenanceTimer = setInterval(
   () => {
     void runDataMaintenance().catch((error) =>
@@ -311,6 +331,7 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, () => {
     log.info({ type: "shutdown", msg: `${signal} 수신 — 종료합니다.`, signal });
     stopInferenceWatch();
+    stopInteractive();
     stopOpsFlush();
     server.close(() => {
       // 버퍼에 남은 알림과 지표를 먼저 밀어낸다. 종료 신호 뒤에는 주기를 기다릴 수 없다.

@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { PGlite } from "@electric-sql/pglite";
+import { COHORT_SQL } from "./productStore.js";
+import { DAILY_AGGREGATES_SQL } from "./qualityStore.js";
+import { toAccuracy } from "./quality.js";
 import {
   WINDOW_DAYS_DEFAULT,
   WINDOW_DAYS_MAX,
@@ -74,11 +78,72 @@ test("코호트는 비중을 내고 문제 그룹을 표시한다", () => {
     installed_only: 10, failed_only: 5, completed_no_selection: 25,
     selected_no_export: 10, exported: 50, total: 100,
   });
-  assert.equal(items.length, 5);
+  assert.equal(items.length, 6);
   const problem = items.find((i) => i.key === "completedNoSelection");
   assert.equal(problem?.share, 25);
   assert.equal(problem?.highlight, true);
   assert.equal(items.find((i) => i.key === "exported")?.share, 50);
+});
+
+test("작업 전환율과 설치 전환율을 서로 다른 분모로 제공한다", () => {
+  const stages = toFunnel(funnelRow({jobs_started: 15, jobs_completed: 15, jobs_selected: 5,
+    installations_started: 5, installations_completed: 5, installations_selected: 2}));
+  assert.equal(stages[3].rateBasis, "installations");
+  assert.equal(stages[3].fromPrevious, 40);
+  assert.equal(stages[3].jobFromPrevious, 33.3);
+  assert.equal(stages[3].jobFromStarted, 33.3);
+  assert.equal(stages[1].jobFromPrevious, null);
+  assert.equal(stages[4].label, "서버 내보내기 기록");
+});
+
+test("거리 평균에는 유효 작업 표본과 기록 비율을 함께 제공한다", () => {
+  const result = toDropoff([{selected:false, jobs:10, zero_people_jobs:0, shortfall_jobs:0,
+    avg_best_distance:0.2,avg_people:1,distance_samples:2}],[],[],0);
+  assert.equal(result.notSelected.distanceSamples, 2);
+  assert.equal(result.notSelected.distanceCoverageRate, 20);
+  assert.equal(result.selected.distanceCoverageRate, null);
+});
+
+test("실제 SQL은 진행 중 작업을 실패로 세지 않고 선택 작업과 인물 순위 표본을 분리한다", async () => {
+  const db = new PGlite();
+  try {
+    const {rows:[{today}]} = await db.query<{today:string}>("SELECT current_date::text AS today");
+    const at = new Date(Date.parse(`${today}T00:00:00Z`) - 86400000).toISOString();
+    const from = new Date(Date.parse(at) - 86400000).toISOString();
+    await db.exec(`CREATE TABLE quality_review_installations(id text,last_seen_at text);
+      CREATE TABLE quality_review_jobs(id text,installation_id text,created_at text,status text);
+      CREATE TABLE quality_review_confirmed_selections(job_id text,rank int);
+      CREATE TABLE quality_review_export_events(job_id text,status text);
+      CREATE TABLE quality_review_job_feedback(job_id text,reason text);`);
+    for (const id of ["only","failed","pending","complete","selected","exported"])
+      await db.query("INSERT INTO quality_review_installations VALUES ($1,$2)",[id,at]);
+    for (const [id,inst,status] of [["f","failed","failed"],["p","pending","queued"],["p2","pending","failed"],
+      ["c","complete","completed"],["s","selected","completed"],["e","exported","completed"]])
+      await db.query("INSERT INTO quality_review_jobs VALUES ($1,$2,$3,$4)",[id,inst,at,status]);
+    await db.exec(`INSERT INTO quality_review_confirmed_selections VALUES ('s',1),('e',1);
+      INSERT INTO quality_review_export_events VALUES ('e','completed'),('e','completed');`);
+    const cohort = (await db.query<Record<string,number>>(COHORT_SQL,[from])).rows[0];
+    assert.deepEqual(cohort,{installed_only:1,failed_only:1,pending:1,completed_no_selection:1,
+      selected_no_export:1,exported:1,total:6});
+    // Isolated three-job cohort: one job has three selected people, two valid ranks,
+    // two export attempts. An unselected job's export must not inflate the conversion.
+    await db.exec(`DELETE FROM quality_review_jobs; DELETE FROM quality_review_confirmed_selections;
+      DELETE FROM quality_review_export_events;`);
+    for (const [id,status] of [["selectedjob","completed"],["emptyjob","completed"],["failedjob","failed"]])
+      await db.query("INSERT INTO quality_review_jobs VALUES ($1,'inst',$2,$3)",[id,at,status]);
+    await db.exec(`INSERT INTO quality_review_confirmed_selections VALUES ('selectedjob',1),('selectedjob',3),('selectedjob',null);
+      INSERT INTO quality_review_export_events VALUES ('selectedjob','completed'),('selectedjob','completed'),('emptyjob','completed');`);
+    const daily = (await db.query(DAILY_AGGREGATES_SQL,[7])).rows as unknown as Parameters<typeof toAccuracy>[0];
+    const accuracy = toAccuracy(daily);
+    assert.equal(accuracy.selections,1);
+    assert.equal(accuracy.selectionRate,50);
+    assert.equal(accuracy.rankSamples,2);
+    assert.equal(accuracy.rankSelectionSamples,3);
+    assert.equal(accuracy.rankCoverageRate,66.7);
+    assert.equal(accuracy.top1Rate,50);
+    assert.equal(accuracy.meanReciprocalRank,0.667);
+    assert.equal(accuracy.exportRate,100);
+  } finally { await db.close(); }
 });
 
 test("이탈 신호는 선택 여부로 갈라 비교한다", () => {

@@ -1,5 +1,6 @@
 import { progressWriter } from "./progressStream.js";
 import { beginProgress, writeProgress, type ProgressFence } from "./progressStore.js";
+import { analysisFailureDetails } from "./failure.js";
 // BFF의 핵심 역할: 동기 추론(/analyze)을 백그라운드로 호출해 Job으로 감싼다.
 // ⚠ Phase 0: 프로세스 내 비동기 실행(await 하지 않고 fire-and-forget).
 //    Phase 3: 큐(BullMQ/Redis 등)로 교체 — 이 함수 시그니처는 유지.
@@ -123,6 +124,7 @@ export async function runAnalysisJob(
       jobStatus: "failed",
       durationMs: Date.now() - startedAt,
       errorCode,
+      ...analysisFailureDetails(errorCode),
       quotaRefunded: refundQuota,
       ...errorFields(error),
     });

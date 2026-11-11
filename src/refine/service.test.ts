@@ -578,3 +578,38 @@ test("stored v2 camera is forwarded intact to refine, including its search proje
   await runRefine(INPUT, context.base);
   assert.deepEqual(request?.camera, camera);
 });
+
+test("v3 shadow relays only stored envelope when enabled and never changes policy", async () => {
+  const { config } = await import("../config.js");
+  const prior = config.refineV3Shadow;
+  const envelope = { payload: { version: "refine-shadow-v1", person_id: "person-0" }, signature: "a".repeat(64) };
+  try {
+    for (const enabled of [false, true]) {
+      Object.assign(config, { refineV3Shadow: enabled });
+      const context = deps({ loadRefineContext: async () => ({ ...CONTEXT, refineV3: envelope }) });
+      const upstream = context.base.refineUpstream;
+      let request: RefineUpstreamRequest | undefined;
+      context.base.refineUpstream = async (input) => { request = input; return upstream(input); };
+      await runRefine(INPUT, context.base);
+      assert.deepEqual(request?.refine_v3, enabled ? envelope : undefined);
+      assert.equal(request?.refine_allowed, true);
+      assert.deepEqual(request?.refinable_limbs, CONTEXT.refinableLimbs);
+    }
+    const blocked = deps({ loadRefineContext: async () => ({ ...CONTEXT, refineAllowed: false, refineV3: envelope }),
+      refineUpstream: async () => { throw new Error("must not bypass global gate"); } });
+    const result = await runRefine(INPUT, blocked.base);
+    assert.equal(isRefineFailure(result), false);
+    if (!isRefineFailure(result)) assert.equal(result.reasonCode, "skeleton_policy");
+  } finally { Object.assign(config, { refineV3Shadow: prior }); }
+});
+
+test("malformed, oversized and client asserted shadow authority are discarded", async () => {
+  const { readRefineShadow } = await import("./shadow.js");
+  const valid = { payload: { version: "refine-shadow-v1", visibility: ["model_inferred"] }, signature: "a".repeat(64) };
+  const detached = readRefineShadow(valid);
+  valid.payload.visibility[0] = "direct_observed";
+  assert.deepEqual(detached?.payload.visibility, ["model_inferred"]);
+  assert.equal(readRefineShadow({ ...valid, verified: true }), undefined);
+  assert.equal(readRefineShadow({ ...valid, signature: "fake" }), undefined);
+  assert.equal(readRefineShadow({ ...valid, payload: { version: "refine-shadow-v1", text: "x".repeat(65536) } }), undefined);
+});

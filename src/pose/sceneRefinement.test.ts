@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Job } from "../jobs/store.js";
-import { prepareRefinedScene } from "./sceneRefinement.js";
+import { prepareLegacyRefinedScene as prepareRefinedScene } from "./sceneLegacyRefinement.fixture.js";
 import { ConverterError, sha256Hex } from "../converter/client.js";
 import type { FramedInput } from "../converter/framing.js";
 const fbx = Buffer.from("Kaydara FBX Binary  \0\x1a\0full"),
@@ -10,7 +10,7 @@ const character = "a".repeat(64),
   bvh = Buffer.from("registered-bvh"),
   image = Buffer.from("image"),
   refined = Buffer.from("refined-bvh");
-function fixture(replace = false) {
+function fixture(replace = false, replacementId = "new_pose") {
   const job = {
     id: "j",
     inputS3Key: "owned",
@@ -91,7 +91,7 @@ function fixture(replace = false) {
           plan_id: "private",
           character_sha256: character,
           people: [
-            { person_index: 4, pose_id: replace ? "new_pose" : "original" },
+            { person_index: 4, pose_id: replace ? replacementId : "original" },
           ],
         };
       }
@@ -110,7 +110,7 @@ function fixture(replace = false) {
         people: [
           {
             person_index: 4,
-            pose_id: replace ? "new_pose" : "original",
+            pose_id: replace ? replacementId : "original",
             output_scope: "full",
             arm_goals: [],
           },
@@ -230,3 +230,31 @@ test("explicit converter calibration mismatch is unsupported body; other 409 err
   f.deps.convertFramed = async () => { throw new ConverterError("CONVERTER_REJECTED", "private", null, 409, "SOURCE_BVH_SHA256_MISMATCH"); };
   await assert.rejects(prepareRefinedScene("owner", f.job, f.refs, f.sources, f.deps, true), { code: "CONVERTER_REJECTED" });
 });
+
+
+test("stored input SHA binds the actual v4 original bytes before any worker request", async () => {
+  const f = fixture();
+  f.job.inputSha256 = sha256Hex(image);
+  await prepareRefinedScene("owner", f.job, f.refs, f.sources, f.deps, true);
+  f.job.inputSha256 = "b".repeat(64);
+  let called = false;
+  f.deps.request = async () => { called = true; throw new Error("must not dispatch"); };
+  await assert.rejects(prepareRefinedScene("owner", f.job, f.refs, f.sources, f.deps, true), { code: "SCENE_SOURCE_CHANGED" });
+  assert.equal(called, false);
+});
+
+// Registered library names contain spaces; identity still must be a leaf name.
+test("registered replacement names containing spaces reach the library unchanged", async () => {
+  const f = fixture(true, "Arm Stretching_00054");
+  await prepareRefinedScene("owner", f.job, f.refs, f.sources, f.deps, true);
+  assert.deepEqual(f.ids, ["Arm Stretching_00054"]);
+  assert.equal(f.calls.length, 1);
+});
+for (const id of ["", ".", "..", "../pose", "folder/pose", "folder\\pose", "pose\u0000", "pose\n"])
+  test(`unsafe planned pose identity ${JSON.stringify(id)} is rejected before fetching`, async () => {
+    const f = fixture(true, id);
+    await assert.rejects(prepareRefinedScene("owner", f.job, f.refs, f.sources, f.deps, true),
+      { code: "SCENE_INTEGRITY" });
+    assert.deepEqual(f.ids, []);
+    assert.equal(f.calls.length, 0);
+  });

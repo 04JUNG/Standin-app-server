@@ -1,5 +1,6 @@
 // 환경설정 단일 소스. dev는 셸 env 또는 `tsx --env-file=.env`로 주입.
 import { parseExemptList } from "./limits/policy.js";
+import { resolveReplayEnvironment } from "./replay/environment.js";
 
 function env(key: string, def = ""): string {
   return process.env[key] ?? def;
@@ -11,6 +12,26 @@ export const config = {
   metaMarketingToken: env("META_MARKETING_TOKEN"),
   metaMarketingVersion: env("META_MARKETING_VERSION"),
   metaMarketingAccountId: env("META_MARKETING_ACCOUNT_ID", "1090943087171654"),
+
+  accessGateEnabled: env("ACCESS_GATE_ENABLED", "false") === "true",
+  openBetaEndedAt: env("OPEN_BETA_ENDED_AT"),
+  accessOperatorInstallations: parseExemptList(env("ACCESS_OPERATOR_INSTALLATIONS")),
+  supporterAccessEnabled: env("SUPPORTER_ACCESS_ENABLED", "true") === "true",
+  /** Additive operation API; also requires a frozen implemented Converter transport. */
+  interactiveConverterToken: env("CONVERTER_INTERACTIVE_TOKEN"),
+  /** Requires separately CSP-certified Converter capability; never enabled by this flag alone. */
+  skinExportEnabled: env("SKIN_EXPORT_ENABLED", "false") === "true",
+  outlineExportEnabled: env("OUTLINE_EXPORT_ENABLED", "false") === "true",
+  interactiveStateEnabled: env("INTERACTIVE_STATE_ENABLED", "false") === "true",
+  replayEnabled: env("REPLAY_ENABLED", "true") === "true",
+  captureReplayEnabled: env("CAPTURE_REPLAY_ENABLED", "true") === "true",
+  cspResultCaptureEnabled: env("CSP_RESULT_CAPTURE_ENABLED", "true") === "true",
+  replayConsentMode: env("REPLAY_CONSENT_MODE", "assumed"),
+  // Docker uses NODE_ENV=production for staging too. Classification must be explicit there.
+  replayEnvironment: resolveReplayEnvironment(process.env),
+  replayBucket: env("REPLAY_BUCKET"),
+  replayLocalDir: env("REPLAY_LOCAL_DIR", "work/replay-objects"),
+  refineV3Shadow: env("REFINE_V3_SHADOW", "false") === "true",
   poseThumbnailRevision: env(
     "POSE_THUMBNAIL_REVISION",
     env("DEPLOYMENT_VERSION"),
@@ -27,6 +48,7 @@ export const config = {
   ),
   bodyUxEnabled: env("BODY_UX_ENABLED", "false") === "true",
   bodySelectionEnabled: env("BODY_SELECTION_ENABLED", "false") === "true",
+  bodyRecommendationEnabled: env("BODY_RECOMMENDATION_ENABLED", "false") === "true",
   bodyCatalogPath: env("BODY_CATALOG_PATH", "config/body-models.json"),
   /**
    * Numeric body controls (`body-shape.v1`). Even when on, only assets whose catalog

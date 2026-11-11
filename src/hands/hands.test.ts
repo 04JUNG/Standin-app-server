@@ -359,6 +359,23 @@ test("thumbnail requests pin the catalog library and return the PNG with its ide
   );
   assert.equal(calls, 1);
 });
+test("mesh-only revisions change validators and retain released client URL compatibility", async () => {
+  const oldCatalog = parseCatalog({ ...rawCatalog, thumbnail_revision: "a".repeat(64) });
+  const newCatalog = parseCatalog({ ...rawCatalog, thumbnail_revision: "b".repeat(64) });
+  assert.equal(oldCatalog.library_sha256, newCatalog.library_sha256);
+  assert.deepEqual(oldCatalog.categories, newCatalog.categories);
+  assert.notEqual(oldCatalog.thumbnail_revision, newCatalog.thumbnail_revision);
+  const route = (value: typeof catalog) => createHandRoutes({
+    catalog: async () => value,
+    thumbnail: async () => { throw new Error("stale revision must not reach upstream"); },
+  });
+  assert.notEqual((await route(oldCatalog).request("/catalog")).headers.get("ETag"),
+    (await route(newCatalog).request("/catalog")).headers.get("ETag"));
+  assert.equal((await route(newCatalog).request(`/fist/thumbnail?side=left&revision=${oldCatalog.thumbnail_revision}`)).status, 409);
+  assert.equal((await route(newCatalog).request("/fist/thumbnail?side=left&revision=bad")).status, 400);
+  assert.throws(() => parseCatalog({ ...rawCatalog, thumbnail_revision: "invalid" }));
+});
+
 test("unavailable or invalid thumbnail is explicit and never a successful icon response", async () => {
   const unavailable = createHandRoutes({
     catalog: async () => ({ ...catalog, thumbnails_available: false }),

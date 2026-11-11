@@ -23,7 +23,7 @@ export function createHandRoutes(
     };
     return c.json({ ...catalog, categories: [...catalog.categories, sourceCategory] }, 200, {
       "Cache-Control": "private, max-age=3600",
-      ETag: `"${catalog.library_sha256.slice(0, 32)}-source-pose"`,
+      ETag: `"${catalog.library_sha256.slice(0, 32)}-${catalog.thumbnail_revision?.slice(0, 32) ?? "legacy"}-source-pose"`,
     });
   });
   app.get("/:preset/thumbnail", async (c) => {
@@ -37,6 +37,11 @@ export function createHandRoutes(
       );
     const catalog = await deps.catalog();
     const library = c.req.query("library");
+    const revision = c.req.query("revision");
+    if (revision !== undefined && !SHA.test(revision))
+      throw new HandError("INVALID_INPUT", 400, "손 이미지 요청을 확인해 주세요.");
+    if (revision !== undefined && revision !== catalog.thumbnail_revision)
+      throw new HandError("HAND_LIBRARY_CHANGED", 409, "손 이미지가 변경되었습니다. 다시 불러와 주세요.");
     if (library !== undefined && !SHA.test(library))
       throw new HandError(
         "INVALID_INPUT",
@@ -77,6 +82,8 @@ export function createHandRoutes(
       "Cache-Control": "private, max-age=86400",
       "X-Standin-Hand-Library-SHA256": catalog.library_sha256,
     });
+    if (catalog.thumbnail_revision)
+      headers.set("X-Standin-Hand-Thumbnail-Revision", catalog.thumbnail_revision);
     if (response.headers.get("ETag"))
       headers.set("ETag", response.headers.get("ETag")!);
     if (response.status === 304)

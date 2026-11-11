@@ -55,6 +55,9 @@ export async function transaction<T>(fn: (client: PoolClient) => Promise<T>): Pr
   }
 }
 
+import { ACCESS_SCHEMA } from "./access/schema.js";
+import { INTERACTIVE_SCHEMA } from "./interactive-state/schema.js";
+import { REPLAY_SCHEMA } from "./replay/schema.js";
 import { QUALITY_CONSENT_SCHEMA } from "./installations/qualityConsent.js";
 import { JOURNEY_SCHEMA } from "./journey/schema.js";
 
@@ -85,6 +88,8 @@ export const SCHEMA = `
   ALTER TABLE installations ADD COLUMN IF NOT EXISTS acquisition_creative TEXT;
   ALTER TABLE installations ADD COLUMN IF NOT EXISTS acquisition_consented_at TIMESTAMPTZ;
   ALTER TABLE installations ADD COLUMN IF NOT EXISTS acquisition_version TEXT;
+
+  ${ACCESS_SCHEMA}
 
   CREATE TABLE IF NOT EXISTS users (
     id             TEXT PRIMARY KEY,
@@ -146,6 +151,7 @@ export const SCHEMA = `
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS source TEXT;
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS input_s3_key TEXT;
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS input_sha256 TEXT;
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS input_original_name TEXT;
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS input_mime TEXT;
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS input_size BIGINT;
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS input_width INTEGER;
@@ -161,6 +167,12 @@ export const SCHEMA = `
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress_sequence BIGINT NOT NULL DEFAULT 0;
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress_source_sequence BIGINT NOT NULL DEFAULT 0;
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress_json JSONB;
+
+  CREATE TABLE IF NOT EXISTS semantic_snapshots (
+    job_id TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+    snapshot_id TEXT NOT NULL,
+    groups_json TEXT NOT NULL
+  );
 
   -- DB commit과 SQS 전송 사이의 유실을 막는 transactional outbox.
   CREATE TABLE IF NOT EXISTS job_outbox (
@@ -301,6 +313,7 @@ export const SCHEMA = `
   /* 확인 화면 미리보기 PNG의 S3 key. object_key와 마찬가지로 NULL이면 "없다"이지
      오류가 아니다 — 그림이 없으면 화면이 후보 썸네일로 폴백한다. */
   ALTER TABLE refined_artifacts ADD COLUMN IF NOT EXISTS thumbnail_key TEXT;
+  ALTER TABLE refined_artifacts ADD COLUMN IF NOT EXISTS interactive_lineage JSONB;
 
   CREATE TABLE IF NOT EXISTS daily_analytics_aggregates (
     day                   TEXT PRIMARY KEY,
@@ -416,6 +429,8 @@ export const SCHEMA = `
 
   ${QUALITY_CONSENT_SCHEMA}
   ${JOURNEY_SCHEMA}
+  ${REPLAY_SCHEMA}
+  ${INTERACTIVE_SCHEMA}
 
   CREATE OR REPLACE VIEW analytics_job_funnel AS
   SELECT

@@ -1,0 +1,12 @@
+import { readFileSync, writeFileSync } from "node:fs";
+const [path, name] = process.argv.slice(2);
+const task = JSON.parse(readFileSync(path, "utf8"));
+const matches = task.containerDefinitions.filter(c => c.name === name);
+if (matches.length !== 1) throw new Error("exactly one serving container required");
+const container = matches[0];
+const env = Object.fromEntries((container.environment ?? []).map(v => [v.name, v.value]));
+env.REFINE_RELEASE_ENABLED = "0";
+env.REFINE_V3_SHADOW = "false";
+delete env.REFINE_RELEASE_WORKER_URL;
+container.environment = Object.entries(env).map(([name, value]) => ({name, value}));
+writeFileSync(path, JSON.stringify(task, null, 2) + "\n");

@@ -8,7 +8,7 @@ import * as store from './store.js';
 import { JOURNEY_VERSION, parseWebEvent, type WebEvent } from './contract.js';
 import { createWebJourneyRoutes, createAppJourneyRoutes } from './routes.js';
 import { journeySummary } from '../admin/journeys.js';
-import { JOURNEY_DASHBOARD_SCRIPT } from '../ops/journeyDashboard.js';
+import { JOURNEY_DASHBOARD_SCRIPT } from '../ops/marketingJourneyDashboard.js';
 import vm from 'node:vm';
 import type { AppEnv } from '../env.js';
 

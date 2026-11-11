@@ -1,31 +1,123 @@
-/** Embedded in the authenticated ops dashboard; every server value is escaped. */
-export const JOURNEY_DASHBOARD_SCRIPT = String.raw`
-function journeyBlock(j) {
-  if (!j || j.status !== 'ready') return '<h3>방문·앱 이용 경로</h3><p class="sub">조회하지 못했습니다. 0건이 아닙니다. 다음 새로고침에서 재시도합니다.</p>';
-  const sectionNames={page:'페이지',hero:'첫 화면',input:'입력 소개',process:'분석 과정',result:'결과 소개',features:'기능',guides:'사용 가이드',beta:'다운로드',faq:'자주 묻는 질문',footer:'하단'};
-  const eventNames={page_view:'페이지 열기',section_view:'구간 진입',cta_click:'버튼 클릭',download_click:'다운로드 클릭',pc_link_copy:'PC 링크 복사',app_open_click:'앱 열기 클릭',page_hidden:'탭 숨김',page_exit:'페이지 떠남',app_started:'앱 시작',input_confirmed:'입력 확정',results_viewed:'결과 확인',candidate_selected:'후보 선택',selection_confirmed:'선택 확정',analysis_started:'분석 요청',analysis_success:'분석 성공',analysis_failed:'분석 실패',export_completed:'저장 완료',export_failed:'저장 실패',capture_failed:'캡처 실패'};
-  const creatives={'meta-poster-a':'포스터 A','meta-hook-a':'영상 A',other:'기타'};
-  const num=v=>Number(v||0).toLocaleString('ko-KR');
-  const seconds=v=>(Number(v||0)/1000).toFixed(1)+'초';
-  const name=v=>sectionNames[v]||v;
-  const table=(heads,rows)=>'<div class="scroll"><table><thead><tr>'+heads.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+rows.join('')+'</tbody></table></div>';
-  const timeline=events=>!events?.length?'<span class="sub">선택 동의한 단계 이벤트 없음</span>':'<details><summary>최근 '+esc(events.length)+'개 단계</summary><ol>'+events.map(e=>'<li>'+esc(when(e.at))+' · '+esc(eventNames[e.name]||e.name)+(e.section?' · '+esc(name(e.section)):'')+(e.target&&e.target!=='none'?' · '+esc(e.target):'')+'</li>').join('')+'</ol></details>';
-  const t=j.totals||{};
-  let html='<section class="marketing-section"><h3>방문·다운로드·앱 연결</h3><p class="sub">쿠키 허용 후 수집한 브라우저 기준입니다. 사람 수가 아니며 다른 브라우저·기기는 별도 방문자로 집계합니다. 최근 '+esc(j.rowLimit)+'개 경로를 표시합니다.</p><div class="kpis">';
-  for(const [label,value] of [['동의한 방문자',t.visitors],['다운로드 클릭 방문자',t.downloadVisitors],['다운로드 클릭 건수',t.downloadClicks],['앱을 연결한 방문자',t.linkedVisitors],['연결 후 분석 성공',t.analyzedVisitors],['연결 후 저장 완료',t.exportedVisitors]])html+='<div class="kpi"><div class="label">'+label+'</div><div class="value">'+num(value)+'</div></div>';
-  html+='</div><p class="sub">다운로드 완료·설치 완료는 브라우저에서 확인할 수 없습니다. 앱 연결은 설치 후 앱 열기 링크와 앱의 선택 동의가 모두 필요합니다. 기존 설치도 연결할 수 있어 위 숫자는 순차 전환 퍼널이 아닙니다. 연결 전 사용은 소급 연결하지 않습니다.</p><h3>어느 구간을 보고 떠났나요?</h3>';
-  html+=table(['구간','방문자','활성 체류 / 페이지 평균','마지막 관측 구간'],j.sections.map(s=>'<tr><td>'+esc(name(s.section))+'</td><td>'+num(s.visitors)+'</td><td>'+seconds(Number(s.engagedMs)/Math.max(1,s.pages))+'</td><td>'+num(s.lastObserved)+'</td></tr>'));
-  if(!j.sections.length)html+='<p class="sub">수집된 구간 이벤트가 없습니다. 동의 전 방문은 포함하지 않습니다.</p>';
-  html+='<p class="sub">활성 체류: 탭이 보이고 초점이 있으며 최근 60초 내 활동한 시간. 가장 많이 보이는 구간 하나만 계산합니다. 마지막 관측: 30분 이상 새 이벤트가 없는 방문자의 마지막 구간이며, 실제 종료 위치·이탈 이유를 확정하지 않습니다. 기기 종료·통신 실패로 마지막 이벤트가 빠질 수 있습니다.</p><h3>방문자별 경로</h3>';
-  html+=table(['방문자 / 마지막 관측','유입 / 기기','마지막 구간 / 활성 체류','다운로드 / 앱 진행','경로'],j.visitors.map(v=>{
-    const stage=!v.linkedApps?'앱 미연결 · 사용 여부 확인 불가':v.exported?'저장 완료':v.analyzed?'분석 성공 · 이후 저장 미관측':'앱 연결 · 이후 분석 성공 미관측';
-    return '<tr><td>'+esc(v.id)+'<br>'+esc(when(v.lastAt))+'</td><td>'+esc(creatives[v.creative]||v.creative)+'<br>'+esc(v.source)+' / '+esc(v.device)+'</td><td>'+esc(name(v.section))+'<br>'+seconds(v.engagedMs)+' · 스크롤 '+num(v.depth)+'%</td><td>클릭 '+num(v.downloads)+'건<br>'+stage+'</td><td>'+timeline(v.timeline)+'</td></tr>';
-  }));
-  html+='<h3>연결에 동의한 새 설치별 이용 단계</h3><p class="sub">조회 기간에 처음 등록하고 웹 연결에 동의한 설치의 동의 이후 기록입니다. 서버 분석 요청·성공·실패와 앱의 세부 단계·저장 이벤트를 구분합니다. 미동의 설치의 개별 경로는 표시하지 않으며 전체 사용량은 위 운영 합계에서 확인합니다. 원본 파일·이메일·입력 문장·작업 식별자는 표시하지 않습니다. 재설치하면 별도 설치일 수 있습니다.</p>';
-  html+=table(['설치 / 버전','첫 등록 / 최근 접속','분석 요청 · 성공 · 실패','마지막 관측 / 웹 연결','세부 단계'],j.installations.map(i=>{
-    const last=i.timeline?.[i.timeline.length-1];
-    return '<tr><td>'+esc(i.id)+'<br>'+esc(i.os)+' '+esc(i.version)+'</td><td>'+esc(when(i.firstAt))+'<br>'+esc(when(i.lastAt))+'</td><td>'+num(i.started)+' · '+num(i.completed)+' · '+num(i.failed)+'</td><td>'+(last?esc(eventNames[last.name]||last.name):i.completed?'분석 성공':i.started?'분석 요청':'서버 등록')+'<br>'+(i.visitorId?'방문자 '+esc(i.visitorId):'웹 방문 미연결')+'</td><td>'+timeline(i.timeline)+'</td></tr>';
-  }));
-  return html+'<p class="sub">새 웹·앱 연결 기록은 최대 90일 보관하며 철회·삭제·만료 기록은 제외합니다. v0.2.9 이상 앱과 새 웹 동의 이후부터 수집됩니다. 이전 기간·미동의·차단·네트워크 실패를 사용 0건으로 해석하지 마세요.</p></section>';
+import { JOURNEY_ADVANCED_HTML, JOURNEY_ADVANCED_SCRIPT } from "./journeyAdvancedDashboard.js";
+/** Read-only product journey panel. Uses the dashboard's esc/ms/when/token helpers. */
+export const JOURNEY_PANEL_HTML = String.raw`
+    <div class="card" id="journeyPanel">
+      <h2>사용 흐름 — 결과 확인부터 실제 파일 저장까지</h2>
+      <div class="controls">
+        <label class="sub">설치 구분
+          <select id="journeyAudience">
+            <option value="all">전체 열람 범위</option>
+            <option value="unclassified">미분류 설치</option>
+          </select>
+        </label>
+        <label class="sub">후속 행동 관찰 시간
+          <select id="journeyIdle">
+            <option value="30" selected>30분</option>
+            <option value="60">1시간</option>
+            <option value="1440">24시간</option>
+          </select>
+        </label>
+        <button class="ghost" id="journeyGo">불러오기</button>
+        <span id="journeyMsg" class="sub" role="status" aria-live="polite"></span>
+      </div>
+      <p class="sub">상단 기간이 적용되고, 개발자로 표시한 설치는 항상 빠집니다. 미분류 설치에는 내부 테스트가 섞일 수 있으며, 설치 수는 사람 수와 다릅니다.</p>
+      ${JOURNEY_ADVANCED_HTML}
+      <div id="journeyOut" aria-busy="false"></div>
+    </div>`;
+
+export const JOURNEY_PANEL_SCRIPT = String.raw`
+function journeyNum(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value.toLocaleString("ko-KR") : "—";
+}
+function journeyTable(headers, rows) {
+  if (!rows.length) return '<p class="empty">해당 조건의 기록이 없습니다.</p>';
+  return '<div class="scroll"><table><thead><tr>' + headers.map((h) => '<th scope="col">' + esc(h) + '</th>').join('') +
+    '</tr></thead><tbody>' + rows.map((cells) => '<tr>' + cells.map((c, i) => '<td' + (i ? ' class="num"' : '') + '>' + esc(c) + '</td>').join('') + '</tr>').join('') +
+    '</tbody></table></div>';
+}
+${JOURNEY_ADVANCED_SCRIPT}
+let journeyLatestData;
+function journeyRender(data) {
+  journeyLatestData = data;
+  const t = data.totals, c = data.coverage;
+  const names = Object.fromEntries(data.stages.map((s) => [s.key, s.label]));
+  const cards = [
+    ['분석 요청 작업', t.jobs, t.installations + '개 설치 · 선택 기간에 시작한 작업'],
+    ['세부 기록이 있는 작업', t.observableJobs, '단계마다 기록 누락 여부를 따로 확인'],
+    ['관찰할 수 없는 작업', t.unobservableJobs, '이탈로 계산하지 않음'],
+    ['실제 저장 성공 기록', data.outcomes.saved, '앱이 디스크 쓰기 성공을 확인한 작업'],
+  ];
+  const outcomes = [
+    ['실제 저장 성공', data.outcomes.saved], ['오류 기록', data.outcomes.failed],
+    ['취소 기록', data.outcomes.cancelled], ['진행 중·관찰 시간 미경과', data.outcomes.waiting],
+    ['후속 행동 미관측', data.outcomes.noNextEvent], ['관찰 불가', data.outcomes.unobservable],
+  ];
+  const transitions = data.transitions.map((s) => [
+    (names[s.from] || s.from) + ' → ' + (names[s.to] || s.to),
+    journeyNum(s.reached), journeyNum(s.advanced), journeyNum(s.waiting),
+    journeyNum(s.noNextEvent), journeyNum(s.failed), journeyNum(s.cancelled), journeyNum(s.unobservable),
+  ]);
+  return '<div class="kpis">' + cards.map(([label, value, hint]) =>
+    '<div class="kpi"><div class="label">' + esc(label) + '</div><div class="value">' + journeyNum(value) +
+    '</div><div class="hint">' + esc(hint) + '</div></div>').join('') + '</div>' +
+    '<p class="sub">후속 행동 미관측은 ' + esc(data.window.idleMinutes) + '분 동안 이어지는 기록이 없다는 뜻입니다. 이탈 확정이나 원인 판정이 아니며, 나중에 돌아오면 집계가 달라집니다.</p>' +
+    '<h3>분석 요청 전 입력 행동</h3>' +
+    '<p class="sub">선택 기간에 발생한 입력 이벤트입니다. 아직 작업이 만들어지기 전의 기록이므로 아래 작업 수와 직접 나누지 않습니다. 캡처·파일 입력의 취소와 실패를 함께 확인하세요.</p>' +
+    journeyTable(['입력 행동', '이벤트', '설치'], (data.inputs || []).map((i) => [i.label, journeyNum(i.events), journeyNum(i.installations)])) +
+    '<h3>단계별 도달 기록</h3>' +
+    '<p class="sub">각 단계에서 확인한 작업을 독립적으로 셉니다. 작업 기록에서 다시 열거나 중간 기록이 빠지면 뒤 단계가 더 많을 수 있으므로 단순히 빼서 이탈률을 계산하지 않습니다.</p>' +
+    journeyTable(['단계', '작업', '설치'], data.stages.map((s) => [s.label, journeyNum(s.jobs), journeyNum(s.installations)])) +
+    '<h3>어느 구간에서 후속 행동이 없었나</h3>' +
+    '<p class="sub">같은 작업의 시간 순서로 연결합니다. 체형·손 변경은 선택 사항이며 필수 단계에 넣지 않습니다. 준비 완료와 저장 전 화면의 순서는 작업마다 달라질 수 있습니다.</p>' +
+    journeyTable(['구간', '시작 단계 도달', '다음 단계 도달', '관찰 중', '후속 미관측', '오류', '취소', '관찰 불가'], transitions) +
+    '<h3>작업별 저장 도달·미진행 상태</h3>' +
+    '<p class="sub">한 번이라도 실제 저장에 성공한 작업은 성공으로 유지합니다. 이후 재저장 오류는 아래 오류 기록에 따로 표시됩니다.</p>' +
+    journeyTable(['상태', '작업'], outcomes.map(([label, n]) => [label, journeyNum(n)])) +
+    '<h3>구간별 소요 시간</h3>' +
+    '<p class="sub">시작과 끝이 연결된 기록만 포함합니다. 표본 수를 함께 보고, 준비·저장 재시도는 같은 시도끼리 비교합니다. 초 단위 경과 시간이며 대기·화면을 떠나 있던 시간이 포함될 수 있습니다. 시작·끝 누락이나 시간 순서 역전은 0초로 채우지 않습니다.</p>' +
+    journeyTable(['구간', '측정 범위', '유효 표본', '미측정', '중앙값', '상위 90% 지점'], data.durations.map((d) => [d.label, ({job_cohort:'작업 코호트',consented_job_cohort:'현재 동의·작업 코호트',consented_event_time:'현재 동의·이벤트 시각'})[d.scope]||d.scope||'범위 미확인', journeyNum(d.samples), journeyNum(d.missingSamples), journeySeconds(d.medianMs), journeySeconds(d.p90Ms)])) +
+    journeyAdvancedRender(data) +
+    '<h3>발생한 오류·취소</h3>' +
+    '<p class="sub">재시도 후 성공한 작업도 포함하는 발생 기록입니다. 위의 작업 상태와 합산하지 않습니다.</p>' +
+    journeyTable(['종류', '작업', '이벤트'], (data.diagnostics || []).map((d) => [d.label, journeyNum(d.jobs), journeyNum(d.events)])) +
+    '<h3>앱 버전·화면별 기록</h3>' +
+    '<p class="sub">설치 등록 당시 버전이 아닌 이벤트가 발생한 앱 버전입니다. 같은 작업을 여러 화면에서 열면 중복 포함되므로 행끼리 합산하지 않습니다.</p>' +
+    journeyTable(['앱 버전 · 화면', '작업', '설치', '실제 저장 작업'], (data.segments || []).map((s) => [s.appVersion + ' · ' + (s.surface === 'bar' ? '플로팅 바' : s.surface === 'app' ? '전체 화면' : '미확인'), journeyNum(s.jobs), journeyNum(s.installations), journeyNum(s.savedJobs)])) +
+    '<details style="margin-top:16px"><summary>기록 범위와 해석</summary>' +
+    journeyTable(['기록 상태', '작업'], [
+      ['새 계측 기록 있음', journeyNum(c.version2Jobs)], ['기존 계측만 있음', journeyNum(c.legacyEventJobs)],
+      ['클라이언트 기록 없음', journeyNum(c.noClientEventJobs)],
+    ]) + journeyTable(['설치 구분', '작업', '설치'], data.audiences.filter((a) => a.key !== 'internal').map((a) => [a.key === 'internal' ? '내부 테스트' : a.key === 'unclassified' ? '미분류' : a.key, journeyNum(a.jobs), journeyNum(a.installations)])) +
+    '<ul class="sub">' + data.notes.map((note) => '<li>' + esc(note) + '</li>').join('') + '</ul></details>';
+}
+let journeyRequestNumber = 0;
+async function journeyGo() {
+  const requestNumber = ++journeyRequestNumber;
+  $('journeyMsg').textContent = '불러오는 중…';
+  $('journeyOut').innerHTML = '';
+  $('journeyOut').setAttribute('aria-busy', 'true');
+  const params = new URLSearchParams({ days: $('period').value, audience: $('journeyAudience').value, idleMinutes: $('journeyIdle').value });
+  try {
+    const res = await fetch('/v1/admin/journey?' + params, { headers: { 'X-Beta-Admin-Token': token }, cache: 'no-store' });
+    if (!res.ok) throw new Error(res.status === 404 ? '세부 흐름을 조회할 수 없습니다. 서버 지원 여부와 관리자 권한을 확인해 주세요.' : '조회 실패 (' + res.status + ')');
+    const data = await res.json();
+    if (requestNumber !== journeyRequestNumber) return;
+    $('journeyOut').innerHTML = journeyRender(data);
+    $('journeyMsg').textContent = when(data.window.from) + ' ~ ' + when(data.window.to) + ' · 조회 시점 기준';
+  } catch (error) {
+    if (requestNumber !== journeyRequestNumber) return;
+    $('journeyOut').innerHTML = '';
+    $('journeyMsg').textContent = error instanceof Error ? error.message : '조회하지 못했습니다.';
+  } finally {
+    if (requestNumber === journeyRequestNumber) $('journeyOut').setAttribute('aria-busy', 'false');
+  }
+}
+$('journeyGo').addEventListener('click', journeyGo);
+$('journeyAudience').addEventListener('change', journeyGo);
+$('journeyIdle').addEventListener('change', journeyGo);
+for (const id of ['journeyDetailSurface','journeyDetailFeature','journeyDetailCategory']) {
+  $(id).addEventListener('change', () => {
+    if (journeyLatestData) $('journeyOut').innerHTML = journeyRender(journeyLatestData);
+  });
 }
 `;

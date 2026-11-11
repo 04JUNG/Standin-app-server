@@ -1,9 +1,12 @@
 // refine 관련 저장소 접근. 공개 AnalysisResult와 내부 refine context를 분리해 둔다(BFF-04).
+import type { RefineLineage } from "./lineage.js";
+import { readRefineShadow, type RefineShadowEnvelope } from "./shadow.js";
 import type { AnalysisResult, CandidateCamera } from "../types.js";
 import { queryOne, transaction } from "../db.js";
 
 /** `/analyze` 때 서버측에 보관해 둔 refine 입력과 안전정책. */
 export interface StoredRefineContext {
+  refineV3?: RefineShadowEnvelope;
   keypoints: number[][];
   scores: number[] | null;
   refineAllowed: boolean;
@@ -46,14 +49,17 @@ export async function loadRefineContext(
   );
   if (!row) return null;
 
+  let refineV3: RefineShadowEnvelope | undefined;
   let keypoints: number[][] | null = null;
   let scores: number[] | null = null;
   if (row.refine_context_json) {
     try {
       const parsed = JSON.parse(row.refine_context_json) as {
+        refineV3?: unknown;
         keypoints?: number[][] | null;
         scores?: number[] | null;
       };
+      refineV3 = readRefineShadow(parsed.refineV3);
       keypoints = parsed.keypoints ?? null;
       scores = parsed.scores ?? null;
     } catch {
@@ -68,13 +74,15 @@ export async function loadRefineContext(
   if (row.refinable_limbs_json) {
     try {
       const parsed: unknown = JSON.parse(row.refinable_limbs_json);
-      if (Array.isArray(parsed)) refinableLimbs = parsed.filter((v) => typeof v === "string");
+      if (Array.isArray(parsed))
+        refinableLimbs = parsed.filter((v) => typeof v === "string");
     } catch {
       refinableLimbs = [];
     }
   }
 
   return {
+    ...(refineV3 ? { refineV3 } : {}),
     keypoints,
     scores: scores && scores.length === 17 ? scores : null,
     refineAllowed: row.refine_allowed === true,
@@ -94,20 +102,42 @@ export async function loadCandidate(
   jobId: string,
   personIndex: number,
   candidateId: string,
-): Promise<{ poseId: string; view: string; distance: number | null; camera?: CandidateCamera } | null> {
-  const row = await queryOne<{ pose_id: string; view: string; distance: number | null }>(
+): Promise<{
+  poseId: string;
+  view: string;
+  distance: number | null;
+  camera?: CandidateCamera;
+} | null> {
+  const row = await queryOne<{
+    pose_id: string;
+    view: string;
+    distance: number | null;
+  }>(
     `SELECT pose_id, view, distance FROM analysis_candidates
      WHERE job_id = $1 AND person_index = $2 AND candidate_id = $3`,
     [jobId, personIndex, candidateId],
   );
   if (!row) return null;
-  const job = await queryOne<{ result_json: string | null }>("SELECT result_json FROM jobs WHERE id = $1", [jobId]);
-  const result = job?.result_json ? JSON.parse(job.result_json) as AnalysisResult : null;
-  const camera = result?.candidatesByPerson.find(p => p.personIndex === personIndex)?.candidates.find(c => c.id === candidateId)?.camera;
-  return { poseId: row.pose_id, view: row.view, distance: row.distance, ...(camera ? { camera } : {}) };
+  const job = await queryOne<{ result_json: string | null }>(
+    "SELECT result_json FROM jobs WHERE id = $1",
+    [jobId],
+  );
+  const result = job?.result_json
+    ? (JSON.parse(job.result_json) as AnalysisResult)
+    : null;
+  const camera = result?.candidatesByPerson
+    .find((p) => p.personIndex === personIndex)
+    ?.candidates.find((c) => c.id === candidateId)?.camera;
+  return {
+    poseId: row.pose_id,
+    view: row.view,
+    distance: row.distance,
+    ...(camera ? { camera } : {}),
+  };
 }
 
 export interface RefinedArtifact {
+  lineage?: RefineLineage | null;
   jobId: string;
   personIndex: number;
   candidateId: string;
@@ -121,6 +151,7 @@ export interface RefinedArtifact {
 }
 
 interface ArtifactRow {
+  interactive_lineage?: RefineLineage | null;
   job_id: string;
   person_index: number;
   candidate_id: string;
@@ -136,11 +167,13 @@ function toArtifact(row: ArtifactRow): RefinedArtifact {
   let limbs: string[] = [];
   try {
     const parsed: unknown = JSON.parse(row.limbs_json);
-    if (Array.isArray(parsed)) limbs = parsed.filter((v) => typeof v === "string");
+    if (Array.isArray(parsed))
+      limbs = parsed.filter((v) => typeof v === "string");
   } catch {
     limbs = [];
   }
   return {
+    ...(row.interactive_lineage ? { lineage: row.interactive_lineage } : {}),
     jobId: row.job_id,
     personIndex: row.person_index,
     candidateId: row.candidate_id,
@@ -173,22 +206,27 @@ export async function findRefinedArtifact(
  * ⚠ `refined=true`는 **object_key까지 실제로 저장한 뒤에만** 넘어와야 한다. 거짓 성공을
  *   남기면 export가 조정본을 찾다가 매번 베이스로 떨어지면서 지표만 틀어진다(BFF-06).
  */
-export async function saveRefinedArtifact(artifact: RefinedArtifact): Promise<void> {
+export async function saveRefinedArtifact(
+  artifact: RefinedArtifact,
+): Promise<void> {
   await transaction(async (client) => {
     // 조정하는 동안 작업 삭제나 동의 철회로 작업이 지워졌으면 대장을 남기지 않는다. 남기면 설치·작업
     // ID가 든 object_key가 어떤 삭제 경로에도 걸리지 않는다. 이미 올린 S3 객체는 버킷 lifecycle(90일)이
     // 지운다. 삭제 쪽(retention.ts::deleteJobs)이 같은 행을 FOR UPDATE로 먼저 잠근다.
-    const job = await client.query("SELECT 1 FROM jobs WHERE id = $1 FOR SHARE", [artifact.jobId]);
+    const job = await client.query(
+      "SELECT 1 FROM jobs WHERE id = $1 FOR SHARE",
+      [artifact.jobId],
+    );
     if (job.rowCount === 0) return;
     await client.query(
       `INSERT INTO refined_artifacts
         (job_id, person_index, candidate_id, pose_id, refined, reason, object_key,
-         thumbnail_key, limbs_json, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+         thumbnail_key, limbs_json, created_at, interactive_lineage)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
        ON CONFLICT (job_id, person_index, candidate_id) DO UPDATE SET
          pose_id = EXCLUDED.pose_id, refined = EXCLUDED.refined, reason = EXCLUDED.reason,
          object_key = EXCLUDED.object_key, thumbnail_key = EXCLUDED.thumbnail_key,
-         limbs_json = EXCLUDED.limbs_json`,
+         limbs_json = EXCLUDED.limbs_json, interactive_lineage = EXCLUDED.interactive_lineage`,
       [
         artifact.jobId,
         artifact.personIndex,
@@ -200,6 +238,7 @@ export async function saveRefinedArtifact(artifact: RefinedArtifact): Promise<vo
         artifact.thumbnailKey,
         JSON.stringify(artifact.limbs),
         new Date().toISOString(),
+        artifact.lineage ? JSON.stringify(artifact.lineage) : null,
       ],
     );
   });

@@ -42,3 +42,10 @@ export function dynamicRefineBinding(person: UpstreamPerson, row: PreviewCandida
         r.some((v, j) => !Number.isFinite(v) || Math.abs(v - row.render_camera.rotation[i]![j]!) > 1e-6))) return null;
   return binding;
 }
+
+/** RC4 re-extracts its own skeleton and camera from the owned original image. */
+export function releaseCandidateAllowed(c: PoseCandidate | undefined): boolean {
+  return !!c && c.source === "library" && !!c.poseId &&
+    c.lookupAllowed === true && c.manualExportAllowed === true &&
+    c.bvhAvailable === true && hash(c.sourceBvhSha256);
+}

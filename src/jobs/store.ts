@@ -43,6 +43,10 @@ export interface Job {
   inputMime: string | null;
   progress?: unknown;
   attemptCount?: number;
+  inputOriginalName?: string | null;
+  inputSha256?: string | null;
+  inputWidth?: number | null;
+  inputHeight?: number | null;
 }
 
 interface JobRow {
@@ -59,6 +63,10 @@ interface JobRow {
   input_mime: string | null;
   progress_json?: unknown;
   attempt_count?: number;
+  input_original_name?: string | null;
+  input_sha256?: string | null;
+  input_width?: number | null;
+  input_height?: number | null;
 }
 
 function toJob(r: JobRow): Job {
@@ -78,6 +86,10 @@ function toJob(r: JobRow): Job {
     inputMime: r.input_mime,
     progress: r.progress_json,
     attemptCount: r.attempt_count,
+    inputOriginalName: r.input_original_name ?? null,
+    inputSha256: r.input_sha256 ?? null,
+    inputWidth: r.input_width ?? null,
+    inputHeight: r.input_height ?? null,
   };
 }
 
@@ -417,6 +429,8 @@ export async function deleteOwnedJob(
   installationId: string,
 ): Promise<DeleteJobOutcome> {
   return transaction(async (client) => {
+    // Replay writes and quality withdrawal lock installation before session/job rows.
+    await client.query("SELECT id FROM installations WHERE id=$1 FOR UPDATE", [installationId]);
     // 소유·상태 판정과 삭제 사이에 워커가 상태를 바꾸지 못하게 잠근다.
     const owned = await client.query<{
       status: JobStatus;
@@ -465,15 +479,15 @@ export async function listConfirmedSelections(jobId: string): Promise<
 
 export async function setJobInput(
   id: string,
-  input: { s3Key: string | null; sha256: string },
+  input: { s3Key: string | null; sha256: string; originalName?: string | null },
   enqueue = false,
 ): Promise<void> {
   await transaction(async (client) => {
     const now = new Date().toISOString();
     await client.query(
       `UPDATE jobs SET input_s3_key = $2, input_sha256 = $3,
-         input_stored_at = $4, updated_at = $4 WHERE id = $1`,
-      [id, input.s3Key, input.sha256, now],
+         input_stored_at = $4, updated_at = $4, input_original_name = $5 WHERE id = $1`,
+      [id, input.s3Key, input.sha256, now, input.originalName ?? null],
     );
     if (enqueue) {
       await client.query(
@@ -694,6 +708,7 @@ export async function persistAnalysisRecords(
           // refine 입력은 서버측에만 둔다(BFF-04). 클라가 되돌려 보낸 값은 신뢰하지 않는다.
           ctx
             ? JSON.stringify({
+                ...(ctx.refineV3 ? { refineV3: ctx.refineV3 } : {}),
                 keypoints: ctx.keypoints,
                 scores: ctx.scores,
                 qualityReasons: ctx.qualityReasons,
