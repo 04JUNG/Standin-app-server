@@ -1,0 +1,286 @@
+{
+  "fixtureOnly": true,
+  "description": "SYNTHETIC contract/parser cases only. Current analyze producer skips refinement and never emits these outcomes.",
+  "cases": [
+    {
+      "name": "synthetic-refine-running",
+      "snapshots": [
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 1,
+          "updatedAt": "2026-11-05T17:00:00.000Z",
+          "stage": "refining",
+          "completedStages": [
+            "analyzing",
+            "extracting",
+            "understanding",
+            "searching"
+          ],
+          "skippedStages": [],
+          "people": [
+            {
+              "personIndex": 0,
+              "refinement": {
+                "candidateId": "fixture_pose::front",
+                "status": "running",
+                "before": {
+                  "format": "coco17",
+                  "coordinateSpace": "image-normalized",
+                  "points": [
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    [
+                      0.3,
+                      0.2
+                    ],
+                    [
+                      0.6,
+                      0.2
+                    ],
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "synthetic-refine-improved",
+      "snapshots": [
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 2,
+          "updatedAt": "2026-11-05T17:00:00.000Z",
+          "stage": "refining",
+          "completedStages": [
+            "analyzing",
+            "extracting",
+            "understanding",
+            "searching"
+          ],
+          "skippedStages": [],
+          "people": [
+            {
+              "personIndex": 0,
+              "refinement": {
+                "candidateId": "fixture_pose::front",
+                "status": "improved",
+                "before": {
+                  "format": "coco17",
+                  "coordinateSpace": "image-normalized",
+                  "points": [
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    [
+                      0.3,
+                      0.2
+                    ],
+                    [
+                      0.6,
+                      0.2
+                    ],
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null
+                  ]
+                },
+                "after": {
+                  "format": "coco17",
+                  "coordinateSpace": "image-normalized",
+                  "points": [
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    [
+                      0.35,
+                      0.2
+                    ],
+                    [
+                      0.6,
+                      0.2
+                    ],
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "synthetic-refine-unchanged",
+      "snapshots": [
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 3,
+          "updatedAt": "2026-11-05T17:00:00.000Z",
+          "stage": "refining",
+          "completedStages": [
+            "analyzing",
+            "extracting",
+            "understanding",
+            "searching"
+          ],
+          "skippedStages": [],
+          "people": [
+            {
+              "personIndex": 0,
+              "refinement": {
+                "candidateId": "fixture_pose::front",
+                "status": "unchanged",
+                "before": {
+                  "format": "coco17",
+                  "coordinateSpace": "image-normalized",
+                  "points": [
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    [
+                      0.3,
+                      0.2
+                    ],
+                    [
+                      0.6,
+                      0.2
+                    ],
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "synthetic-refine-reverted",
+      "snapshots": [
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 4,
+          "updatedAt": "2026-11-05T17:00:00.000Z",
+          "stage": "refining",
+          "completedStages": [
+            "analyzing",
+            "extracting",
+            "understanding",
+            "searching"
+          ],
+          "skippedStages": [],
+          "people": [
+            {
+              "personIndex": 0,
+              "refinement": {
+                "candidateId": "fixture_pose::front",
+                "status": "reverted",
+                "before": {
+                  "format": "coco17",
+                  "coordinateSpace": "image-normalized",
+                  "points": [
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    [
+                      0.3,
+                      0.2
+                    ],
+                    [
+                      0.6,
+                      0.2
+                    ],
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "synthetic-refine-skipped",
+      "snapshots": [
+        {
+          "version": "pose-analysis-progress.v1",
+          "sequence": 5,
+          "updatedAt": "2026-11-05T17:00:00.000Z",
+          "stage": "refining",
+          "completedStages": [
+            "analyzing",
+            "extracting",
+            "understanding",
+            "searching"
+          ],
+          "skippedStages": [],
+          "people": [
+            {
+              "personIndex": 0,
+              "refinement": {
+                "candidateId": "fixture_pose::front",
+                "status": "skipped"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

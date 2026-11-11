@@ -77,10 +77,12 @@ while (!stopping) {
         heartbeat.unref();
         try {
           if (!job.inputS3Key) throw new Error("queued job has no input key");
-          await runAnalysisJob(job.id, await loadInput(job.inputS3Key), "", true);
+          await runAnalysisJob(job.id, await loadInput(job.inputS3Key), "", true,
+            { workerId, attempt: job.attemptCount! });
           await deleteJobMessage(message.ReceiptHandle!);
         } catch (error) {
-          await updateJob(job.id, { status: "failed", errorCode: "INPUT_STORAGE_FAILED" }).catch(
+          await updateJob(job.id, { status: "failed", errorCode: "INPUT_STORAGE_FAILED" },
+            { workerId, attempt: job.attemptCount! }).catch(
             (persistError) =>
               log.error({
                 type: "queue_job",

@@ -157,6 +157,10 @@ export const SCHEMA = `
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS lease_owner TEXT;
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS lease_expires_at TEXT;
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress_run_id TEXT;
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress_sequence BIGINT NOT NULL DEFAULT 0;
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress_source_sequence BIGINT NOT NULL DEFAULT 0;
+  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress_json JSONB;
 
   -- DB commit과 SQS 전송 사이의 유실을 막는 transactional outbox.
   CREATE TABLE IF NOT EXISTS job_outbox (

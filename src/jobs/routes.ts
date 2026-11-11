@@ -1,4 +1,5 @@
 import { sceneReceiptStorageAvailable } from "../pose/sceneStorage.js";
+import { publicProgress } from "./progressStore.js";
 import { sceneSaveContract } from "../pose/sceneContract.js";
 import { createSemanticModelRoutes } from "../semantic/model-preview.js";
 import { createHandPreviewRoutes } from "../hands/preview.js";
@@ -258,6 +259,7 @@ jobsRoutes.get("/:id", async (c) => {
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
     error: job.errorCode,
+    ...(publicProgress(job.status, job.progress) ? { progress: publicProgress(job.status, job.progress) } : {}),
   });
 });
 
