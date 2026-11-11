@@ -279,6 +279,23 @@ test("requested hands are transmitted and mismatched bake receipts cannot be exp
     await assert.rejects(convertFramed({ ...input, hands }, deps({ ...payload(), hands: bad })), { code: "CONVERTER_INTEGRITY" });
 });
 
+test("source pose hands are omitted from the converter request independently", async () => {
+  const binding = { library_version: "hand-library-v1", library_sha256: "a".repeat(64), revision: 1 };
+  for (const left of [null, "relaxed"]) {
+    const hands = { ...binding, left, right: null };
+    const receipt = left && { ...hands, version: "hand-bake-v1" };
+    const overrides = deps({ ...payload(), hands: receipt });
+    const fetcher = overrides.fetch;
+    overrides.fetch = (async (url, init) => {
+      const body = init!.body as FormData;
+      assert.equal(body.get("hand_left"), left);
+      assert.equal(body.has("hand_right"), false);
+      return fetcher(url, init);
+    }) as typeof fetch;
+    await convertFramed({ ...input, hands }, overrides);
+  }
+});
+
 test("protected export purpose selects the normal converter endpoint; missing support never falls back", async () => {
   const paths: string[] = [];
   const fetcher = (async (url: string | URL | Request) => {

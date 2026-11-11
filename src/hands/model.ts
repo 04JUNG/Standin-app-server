@@ -1,5 +1,6 @@
 /** Character-relative hands. Never infer selection from candidates[0]. */
 export const SIDES = ["left", "right"] as const;
+export const SOURCE_POSE = "source_pose";
 export const PRESET = /^[a-z][a-z0-9_]{0,63}$/;
 export const SHA = /^[a-f0-9]{64}$/;
 export type Side = (typeof SIDES)[number];
@@ -46,8 +47,8 @@ export interface HandSelection {
   changed: Side[];
 }
 export interface HandBake {
-  left: string;
-  right: string;
+  left: string | null;
+  right: string | null;
   library_version: string;
   library_sha256: string;
   revision: number;

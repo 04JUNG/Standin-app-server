@@ -7,8 +7,10 @@ import {
   readHands,
   record,
   SIDES,
+  SOURCE_POSE,
   type HandCatalog,
   type HandSelection,
+  type Side,
 } from "./model.js";
 
 export interface HandChange {
@@ -60,6 +62,7 @@ export function createHandStore(deps = defaults) {
       const ids = new Set(
         catalog.categories.flatMap((c) => c.presets.map((p) => p.id)),
       );
+      ids.add(SOURCE_POSE);
       if (change && change.library_sha256 !== catalog.library_sha256)
         throw new HandError(
           "HAND_LIBRARY_CHANGED",
@@ -77,21 +80,31 @@ export function createHandStore(deps = defaults) {
         );
       const observation = readHands(person.hands);
       const valid = (id: string) => (ids.has(id) ? id : catalog.default_preset);
+      const recommendedPreset = (side: Side) =>
+        result.source !== "semantic" || observation[side].source === "default"
+          ? SOURCE_POSE
+          : valid(observation[side].preset);
+      const recommended = {
+        left: recommendedPreset("left"),
+        right: recommendedPreset("right"),
+      };
       let current: HandSelection = person.handSelection ?? {
         personIndex,
-        left: valid(observation.left.preset),
-        right: valid(observation.right.preset),
-        recommended: {
-          left: valid(observation.left.preset),
-          right: valid(observation.right.preset),
-        },
+        ...recommended,
+        recommended,
         observation,
         library_version: catalog.library_version,
         library_sha256: catalog.library_sha256,
         revision: 0,
         changed: [],
       };
-      if (current.library_sha256 !== catalog.library_sha256) {
+      // Older jobs stored automatic presets as the selection. Keep only a
+      // preset that differs from the old recommendation when switching defaults.
+      const migrate = SIDES.filter(
+        (side) => recommended[side] === SOURCE_POSE && current.recommended[side] !== SOURCE_POSE,
+      );
+      const libraryChanged = current.library_sha256 !== catalog.library_sha256;
+      if (libraryChanged) {
         if (change)
           throw new HandError(
             "HAND_LIBRARY_CHANGED",
@@ -100,8 +113,8 @@ export function createHandStore(deps = defaults) {
           );
         current = {
           ...current,
-          left: valid(current.left),
-          right: valid(current.right),
+          left: ids.has(current.left) ? current.left : recommended.left,
+          right: ids.has(current.right) ? current.right : recommended.right,
           recommended: {
             left: valid(current.recommended.left),
             right: valid(current.recommended.right),
@@ -110,6 +123,17 @@ export function createHandStore(deps = defaults) {
           library_sha256: catalog.library_sha256,
           revision: current.revision + 1,
         };
+      }
+      if (migrate.length) {
+        current = {
+          ...current,
+          recommended: { ...current.recommended },
+          revision: current.revision + (libraryChanged ? 0 : 1),
+        };
+        for (const side of migrate) {
+          if (current[side] === current.recommended[side]) current[side] = SOURCE_POSE;
+          current.recommended[side] = SOURCE_POSE;
+        }
       }
       if (change) {
         if (change.expectedRevision !== current.revision)
