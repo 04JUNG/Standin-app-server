@@ -13,7 +13,8 @@ export const releaseCamera = z.object({
   pixel_scale:z.number().finite().positive(), offset:z.tuple([z.number().finite(),z.number().finite()]),
   image_size:z.tuple([z.number().positive().int(),z.number().positive().int()]), embedded_in_fbx:z.literal(false),
 });
-const accepted = z.object({version:z.literal("New Refine Release RC4"),status:z.literal("accepted"),handle:z.string().regex(/^[a-f0-9]{32}$/),preview_sha256:z.string().regex(/^[a-f0-9]{64}$/),artifact_sha256:z.string().regex(/^[a-f0-9]{64}$/),camera:releaseCamera,selected:z.string()});
+const sourceReceipt = z.object({identity:z.object({version:z.literal("original-bvh-assets-v1"),bvh_sha256:z.string().regex(/^[a-f0-9]{64}$/),body_sha256:z.string().regex(/^[a-f0-9]{64}$/),builder_sha256:z.string().regex(/^[a-f0-9]{64}$/),blender_version:z.string()}),cache_key:z.string().regex(/^[a-f0-9]{64}$/),cache_hit:z.boolean(),pose_id:z.string(),zero_manual_edits:z.literal(true)});
+const accepted = z.object({source:sourceReceipt.optional(),version:z.literal("New Refine Release RC4"),status:z.literal("accepted"),handle:z.string().regex(/^[a-f0-9]{32}$/),preview_sha256:z.string().regex(/^[a-f0-9]{64}$/),artifact_sha256:z.string().regex(/^[a-f0-9]{64}$/),camera:releaseCamera,selected:z.string()});
 const held = z.object({version:z.literal("New Refine Release RC4"),status:z.literal("withheld"),download_url:z.null(),reason_codes:z.array(z.string())});
 type Location = {installationId:string;jobId:string;personIndex:number;candidateId:string};
 function key(p:Location) {
@@ -55,6 +56,8 @@ export async function runRelease(p:Location) {
     const raw=await releaseRefine(image,candidate.poseId);
     const withheld=held.safeParse(raw);if(withheld.success)return withheld.data;
     const record=accepted.parse(raw);
+    const exposed=job.result?.candidatesByPerson.find(v=>v.personIndex===p.personIndex)?.candidates.find(v=>v.id===p.candidateId);
+    if(!record.source || record.source.pose_id!==candidate.poseId || record.source.identity.bvh_sha256!==exposed?.sourceBvhSha256)throw new Error("original source receipt mismatch");
     const bytes=await releaseFbx(record.handle);
     if(digest(bytes)!==record.artifact_sha256 || Buffer.from(bytes.subarray(0,18)).toString()!=="Kaydara FBX Binary")throw new Error("artifact integrity failed");
     if(!(await getOwnedJob(p.jobId,p.installationId)))throw new Error("job deleted");
