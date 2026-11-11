@@ -38,9 +38,12 @@ export function decodeFramedPair(key: string, body: Uint8Array): FramedArtifact 
         [value.characterSha256, value.previewRevision].some(v => v !== undefined && !/^[a-f0-9]{64}$/.test(v)))
       throw new Error("identity");
     const fbx = Buffer.from(value.fbx, "base64"), preview = Buffer.from(value.preview, "base64");
+    const origin = value.finalCache;
+    if (origin !== undefined && (!origin || !["hit", "miss"].includes(origin.status) ||
+        origin.blenderRuns !== (origin.status === "hit" ? 0 : 1))) throw new Error("origin");
     if (!fbx.length || (value.artifactContract === "verified-fbx-v1" ? preview.length !== 0 : !preview.length) || sha256Hex(fbx) !== value.artifactSha256 ||
         sha256Hex(preview) !== value.previewSha256) throw new Error("digest");
-    return { ...(value.artifactContract === "verified-fbx-v1" ? { artifactContract: "verified-fbx-v1" as const } : {}), fbx, preview, conversionId: value.conversionId, artifactSha256: value.artifactSha256,
+    return { ...(origin ? { finalCache: origin } : {}), ...(value.artifactContract === "verified-fbx-v1" ? { artifactContract: "verified-fbx-v1" as const } : {}), fbx, preview, conversionId: value.conversionId, artifactSha256: value.artifactSha256,
       sourceBvhSha256: value.sourceBvhSha256,
       ...(value.characterSha256 ? { characterSha256: value.characterSha256 } : {}),
       ...(value.previewRevision ? { previewRevision: value.previewRevision } : {}) };

@@ -1893,6 +1893,50 @@ two-step UI and redeem codes. Unsupported old clients may receive the existing
 update-required response first. Preview mode and public app updates remain
 separate from installation-protected product APIs.
 
+### Registered final FBX reuse diagnostics
+
+`format=ready` continues preparing a job-owned `verified-fbx-v1` receipt. The
+Converter may now resolve the exact final bytes from a private persistent cache
+of server-registered library BVHs and catalog models. The BFF still validates
+source/model/preview/shape/hand lineage and FBX hashes; source availability,
+ownership, selected body/hand revisions and late-response fences run on every
+request. No client cache path, cache key or safety assertion is accepted.
+
+The optional `X-Standin-Final-Artifact-Origin: hit|miss` header describes the
+Converter origin of the immutable bytes, retained with this job's review pair.
+It is diagnostic, not a receipt or a statement about the current BFF memory hit.
+A new job always gets a distinct review key even when its FBX bytes match. Ready
+and download do not request an image; preview still renders those exact bytes
+through `/render-final-preview`. Camera, output scope, mirror, numeric shape,
+hand edits and server policy versions remain part of the Converter binding.
+Refined/private BVHs outside its pinned library registry retain the normal
+calculation and job-scoped artifact path. No client selection UI change is needed.
+
+No deployment or shared S3 publication is part of this change. Cache population,
+persistent-volume installation, input-registry pinning and complete library
+coverage are separate operator work. The Converter preserves its existing
+validation gates; a structural FBX receipt is not a complete body-collision
+certificate.
+
+Local reproduction (after building this checkout): start the server repository's
+`scripts/serve_final_fbx_reuse_probe.py --forbid-conversion` with the populated
+cache, matching environment and pinned library manifest, then run
+`node scripts/verify-final-fbx-reuse.mjs <server-pilot-directory> [converter-url]`.
+The job/owner store and confirmations are fixtures; the semantic presentation,
+default body selection, routes, Converter HTTP, final FBX, PNG and hash/receipt
+checks are real. Never deploy either probe. The matching server pilot report
+records the measured sample and explicit ungenerated library coverage.
+
+The matching Converter PR also starts automatic preparation on service startup
+and when its server-owned default-model catalog changes. It warms both the exact
+semantic front-reference camera and unbaked full-body form using original hands.
+Until exact validation/registration completes, this BFF keeps the normal fallback
+and the same owned review receipt checks. Its internal read-only
+`/final-cache/prewarm-status` is operational diagnostics and is not forwarded as
+a client trigger or safety authority. No BFF API/UI change is needed for watching
+model changes. Future rollout must mount/configure the catalog, active library
+and private cache; this PR update does not deploy them.
+
 ## RC4 staging refinement
 
 Staging-only `REFINE_RELEASE_ENABLED=1` accepts `releaseVersion: "RC4"` on the
