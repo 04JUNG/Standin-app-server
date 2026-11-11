@@ -8,6 +8,7 @@ import {
 import { FRAMING_VERSION } from "../converter/framing.js";
 import {
   HandError,
+  SOURCE_POSE,
   parseCatalog,
   record,
   type HandCatalog,
@@ -129,8 +130,8 @@ export async function handBakeFor(
       "손 목록이 변경되었습니다. 다시 선택해 주세요.",
     );
   return {
-    left: selection.left,
-    right: selection.right,
+    left: selection.left === SOURCE_POSE ? null : selection.left,
+    right: selection.right === SOURCE_POSE ? null : selection.right,
     library_version: selection.library_version,
     library_sha256: selection.library_sha256,
     revision: selection.revision,

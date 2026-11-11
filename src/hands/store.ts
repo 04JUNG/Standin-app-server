@@ -7,8 +7,10 @@ import {
   readHands,
   record,
   SIDES,
+  SOURCE_POSE,
   type HandCatalog,
   type HandSelection,
+  type Side,
 } from "./model.js";
 
 export interface HandChange {
@@ -60,6 +62,7 @@ export function createHandStore(deps = defaults) {
       const ids = new Set(
         catalog.categories.flatMap((c) => c.presets.map((p) => p.id)),
       );
+      ids.add(SOURCE_POSE);
       if (change && change.library_sha256 !== catalog.library_sha256)
         throw new HandError(
           "HAND_LIBRARY_CHANGED",
@@ -77,14 +80,18 @@ export function createHandStore(deps = defaults) {
         );
       const observation = readHands(person.hands);
       const valid = (id: string) => (ids.has(id) ? id : catalog.default_preset);
+      const recommendedPreset = (side: Side) =>
+        result.source === "semantic" && observation[side].source === "default"
+          ? SOURCE_POSE
+          : valid(observation[side].preset);
+      const recommended = {
+        left: recommendedPreset("left"),
+        right: recommendedPreset("right"),
+      };
       let current: HandSelection = person.handSelection ?? {
         personIndex,
-        left: valid(observation.left.preset),
-        right: valid(observation.right.preset),
-        recommended: {
-          left: valid(observation.left.preset),
-          right: valid(observation.right.preset),
-        },
+        ...recommended,
+        recommended,
         observation,
         library_version: catalog.library_version,
         library_sha256: catalog.library_sha256,
@@ -110,6 +117,21 @@ export function createHandStore(deps = defaults) {
           library_sha256: catalog.library_sha256,
           revision: current.revision + 1,
         };
+      }
+      // Saved semantic jobs used the catalog fallback for unobserved hands.
+      const migrate = SIDES.filter(
+        (side) => recommended[side] === SOURCE_POSE && current.recommended[side] !== SOURCE_POSE,
+      );
+      if (migrate.length) {
+        current = {
+          ...current,
+          recommended: { ...current.recommended },
+          revision: current.revision + 1,
+        };
+        for (const side of migrate) {
+          if (current[side] === current.recommended[side]) current[side] = SOURCE_POSE;
+          current.recommended[side] = SOURCE_POSE;
+        }
       }
       if (change) {
         if (change.expectedRevision !== current.revision)

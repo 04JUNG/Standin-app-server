@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
 import { errorEnvelope } from "../mapping.js";
-import { HandError, PRESET, SHA } from "./model.js";
+import { HandError, PRESET, SHA, SOURCE_POSE } from "./model.js";
 import { readyHandCatalog, getHandThumbnail } from "./service.js";
 import { handStore, parseHandChange } from "./store.js";
 export function createHandRoutes(
@@ -11,9 +11,19 @@ export function createHandRoutes(
   app.onError(handRouteError);
   app.get("/catalog", async (c) => {
     const catalog = await deps.catalog();
-    return c.json(catalog, 200, {
+    const sourceCategory = {
+      id: SOURCE_POSE,
+      label: "포즈 원본",
+      presets: [{
+        id: SOURCE_POSE,
+        label: "원본 포즈의 손",
+        description: "선택한 포즈의 손 모양을 유지합니다.",
+        thumbnails: null,
+      }],
+    };
+    return c.json({ ...catalog, categories: [...catalog.categories, sourceCategory] }, 200, {
       "Cache-Control": "private, max-age=3600",
-      ETag: `"${catalog.library_sha256.slice(0, 32)}"`,
+      ETag: `"${catalog.library_sha256.slice(0, 32)}-source-pose"`,
     });
   });
   app.get("/:preset/thumbnail", async (c) => {
