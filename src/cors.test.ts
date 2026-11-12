@@ -65,10 +65,11 @@ for (const origin of ["tauri://localhost", "http://tauri.localhost", "http://loc
     const app = new Hono().use("*", appCors([origin]));
     const response = await app.request("/v1/models", { method: "OPTIONS", headers: {
       Origin: origin, "Access-Control-Request-Method": "GET",
-      "Access-Control-Request-Headers": "x-app-version,x-installation-id,x-device-token",
+      "Access-Control-Request-Headers": "x-app-version,x-installation-id,x-device-token,x-standin-interactive-protocol",
     } });
     assert.equal(response.status, 204);
     assert.ok(response.headers.get("Access-Control-Allow-Headers")?.toLowerCase().includes("x-app-version"));
+    assert.ok(response.headers.get("Access-Control-Allow-Headers")?.toLowerCase().includes("x-standin-interactive-protocol"));
   });
 }
 

@@ -23,7 +23,7 @@ function setup() {
     store: new Proxy({}, { get: forbidden }), posters: {}, renderPoster: forbidden, metric: () => {},
   } as unknown as InteractiveDeps);
   const app = new Hono<AppEnv>();
-  app.use("*", async (c,next) => { if (c.req.header("X-Owner")) c.set("installationId",c.req.header("X-Owner")!); await next(); });
+  app.use("*", async (c,next) => { c.req.raw.headers.set("X-Standin-Interactive-Protocol", "pose-body-only-v1"); if (c.req.header("X-Owner")) c.set("installationId",c.req.header("X-Owner")!); await next(); });
   app.route("/v1/analysis/jobs",createInteractiveRoutes(service,()=>true));
   const path = "/v1/analysis/jobs/job_test/people/0/selection-skin-preview?"+new URLSearchParams({candidateId:"candidate",skin:JSON.stringify(skin)});
   const request = (url: string, owner="owner") => app.request(url,{headers:{"X-Owner":owner}});

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { INTERACTIVE_PROTOCOL_HEADER, supportsPoseBodyProtocol } from "./protocol.js";
 import { skinSchema, skinMessage } from "../appearance/skin.js";
 import type { SelectionPreviewService } from "./selectionPreview.js";
 import { appearanceSchema, outlineMessage } from "../appearance/model.js";
@@ -32,7 +33,7 @@ export function createInteractiveRoutes(
     return c.json(
       errorEnvelope(
         code,
-        code.startsWith("SKIN_") ? skinMessage(code) : code.startsWith("OUTLINE_") ? outlineMessage(code) : "선택한 결과를 다시 확인해 주세요.",
+        code === "INTERACTIVE_PROTOCOL_REQUIRED" ? "앱을 최신 버전으로 업데이트해 주세요." : code.startsWith("SKIN_") ? skinMessage(code) : code.startsWith("OUTLINE_") ? outlineMessage(code) : "선택한 결과를 다시 확인해 주세요.",
         c.get("requestId"),
       ),
       status,
@@ -70,12 +71,14 @@ export function createInteractiveRoutes(
     }),
   );
   const l = (c: {
-    req: { param(name: string): string; query(): Record<string, string> };
+    req: { param(name: string): string; query(): Record<string, string>; header(name: string): string | undefined };
     get(name: "installationId"): string | undefined;
   }) => {
     if (!enabled()) throw new InteractiveError("INTERACTIVE_DISABLED", 503);
     const installationId = c.get("installationId");
     if (!installationId) throw new InteractiveError("NOT_FOUND", 404);
+    if (!supportsPoseBodyProtocol(c.req.header(INTERACTIVE_PROTOCOL_HEADER)))
+      throw new InteractiveError("INTERACTIVE_PROTOCOL_REQUIRED", 426);
     const raw = c.req.param("personIndex"),
       personIndex = Number(raw),
       jobId = c.req.param("jobId");

@@ -9,6 +9,7 @@ export function appCors(origins: string[]) {
     allowHeaders: [
       "Content-Type",
       CLIENT_VERSION_HEADER,
+      "X-Standin-Interactive-Protocol",
       "If-None-Match",
       "Authorization",
       "X-Installation-Id",
