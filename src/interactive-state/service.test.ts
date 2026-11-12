@@ -59,6 +59,8 @@ async function setup() {
     outlineHold: undefined as Promise<void> | undefined,
     valid: true,
     resolveUnavailable: false,
+    afterWorkValidationFailures: 0,
+    runtimeFailures: 0,
     solveCalls: 0,
     exportCalls: 0,
     cancelCalls: 0,
@@ -72,6 +74,7 @@ async function setup() {
     sent: [] as number[],
   };
   const resolver = async () => {
+    if (state.runtimeFailures > 0) { state.runtimeFailures--; throw new InteractiveError("BODY_PREVIEW_UNAVAILABLE", 503); }
     if (state.resolveUnavailable) throw new Error("temporary upstream failure");
     if (!state.valid) throw new InteractiveError("NOT_FOUND", 404);
     return fixtureSelection(hash(state.selection));
@@ -116,6 +119,7 @@ async function setup() {
         state.sent.push(op.revision);
         await state.hold;
         if (signal.aborted) throw new Error("aborted");
+        state.runtimeFailures = state.afterWorkValidationFailures;
         return { snapshotId: "snapshot", packet: fixturePacket(op) };
       },
       model: async (op) => Buffer.from(JSON.stringify(fixturePacket(op))),
@@ -123,6 +127,7 @@ async function setup() {
         state.exportCalls++;
         await state.hold;
         const receipt = fixtureReceipt(op);
+        state.runtimeFailures = state.afterWorkValidationFailures;
         return state.invalidReceipt ? { ...receipt, verified: false } : receipt;
       },
       file: async () => {
@@ -198,6 +203,24 @@ async function setup() {
     tick: (s: Stage) => service.tick(s),
   };
 }
+
+test("post-solve and post-export runtime outages keep one operation and never repeat Converter work", async () => {
+  const s = await setup();
+  try {
+    const op = await (await s.prepare()).json() as ReturnType<typeof publicOperation>;
+    s.state.afterWorkValidationFailures = 1;
+    await s.tick("preview");
+    assert.equal((await s.read(op.operationId)).previewState, "authoritative");
+    assert.equal((await s.request(`/${op.operationId}/model`)).status, 200);
+    await s.request(`/${op.operationId}/export`, "POST");
+    await s.tick("export");
+    assert.equal((await s.read(op.operationId)).exportState, "ready");
+    assert.equal(s.state.solveCalls, 1);
+    assert.equal(s.state.exportCalls, 1);
+    assert.equal(s.state.events.filter(e => e === "artifact_revalidation_retry").length, 2);
+    assert.ok(!s.state.events.includes("artifact_prepare_failed"));
+  } finally { await s.pg.close(); }
+});
 test("prepare is immediate; repeated mutation is idempotent; request does not accept client matrices", async () => {
   const s = await setup();
   try {

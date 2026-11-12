@@ -1,7 +1,8 @@
 import { checkSkinPreviewModel, type SkinPreview } from "../appearance/skin-preview.js";
 import { nondefaultSkin, type Skin } from "../appearance/skin.js";
 import { nonzeroAppearance, type Appearance } from "../appearance/model.js";
-import { parsePacket, parseReceipt } from "./packet.js";
+import { parsePacket, parsePublishedPacket, parseReceipt } from "./packet.js";
+import { recoverValidation } from "./revalidation.js";
 import { sha256Hex } from "../converter/client.js";
 import { decodeFrame, type ClientFrame } from "./clientFrame.js";
 import {
@@ -204,7 +205,7 @@ export class InteractiveService {
   async model(op: Operation, signal?: AbortSignal) {
     if (!active(op) || !op.stateHash)
       throw new InteractiveError("INTERACTIVE_NOT_READY");
-    const selection = await this.revalidate(op);
+    await this.revalidate(op);
     const bytes = await this.consume(op, () =>
       this.deps.worker.model(op, signal),
     );
@@ -216,8 +217,8 @@ export class InteractiveService {
     } catch {
       throw new InteractiveError("CONVERTER_INTEGRITY");
     }
-    const parsed = parsePacket(packet, op, selection);
-    checkSkinPreviewModel(op.skinPreview, parsed.payload.model);
+    await this.timed(op, "artifact_model_delivery_validation", "validation",
+      () => parsePublishedPacket(packet, op));
     await this.assertDeliverable(op);
     return bytes;
   }
@@ -435,8 +436,11 @@ export class InteractiveService {
         });
     }, 1000);
     guard.unref();
+    const revalidate = () => recoverValidation(() => this.revalidate(op), controller.signal, op.expiresAt,
+      code => this.deps.metric("artifact_revalidation_retry", stage, Date.now() - started, code,
+        { operationId: op.operationId, revision: op.revision }));
     try {
-      const selection = await this.revalidate(op);
+      const selection = await revalidate();
       this.deps.metric(
         "artifact_prepare_started",
         stage,
@@ -455,7 +459,7 @@ export class InteractiveService {
           () => parsePacket(solved.packet, op, selection));
         checkSkinPreviewModel(op.skinPreview, validated.payload.model);
         if (controller.signal.aborted) return;
-        await this.revalidate(op);
+        await revalidate();
         const published = await this.deps.store.update(
           op,
           {
@@ -483,14 +487,14 @@ export class InteractiveService {
           selection,
         );
         if (controller.signal.aborted) return;
-        await this.revalidate(op);
+        await revalidate();
         let processed = { ...op, receipt }, source: Uint8Array | undefined;
         if (op.skin || op.appearance) source = await this.verifiedFile(processed, controller.signal);
         const skinReceipt = op.skin
           ? await this.skin().prepare(processed, selection, source!, controller.signal)
           : undefined;
         if (controller.signal.aborted) return;
-        await this.revalidate(op);
+        await revalidate();
         if (skinReceipt) {
           processed = { ...processed, skinReceipt };
           source = await this.skin().file(processed, selection, controller.signal);
@@ -498,14 +502,14 @@ export class InteractiveService {
           outlineSourceOperation(processed);
         }
         if (controller.signal.aborted) return;
-        await this.revalidate(op);
+        await revalidate();
         const outlineReceipt = op.appearance
           ? await this.outline().prepare(outlineSourceOperation(processed), selection, source!, controller.signal)
           : undefined;
         if (op.skin && outlineReceipt && outlineReceipt.sourceArtifactSha256 !== skinReceipt?.artifactSha256)
           throw new InteractiveError("SKIN_BINDING_MISMATCH");
         if (controller.signal.aborted) return;
-        await this.revalidate(op);
+        await revalidate();
         const published = await this.deps.store.update(
           op,
           { exportState: "ready", receipt, ...(outlineReceipt ? { outlineReceipt } : {}), ...(skinReceipt ? { skinReceipt } : {}) },
@@ -518,9 +522,9 @@ export class InteractiveService {
           : await this.verifiedFile(op, controller.signal);
         const png = await this.deps.renderPoster(op, bytes, controller.signal);
         if (controller.signal.aborted) return;
-        await this.revalidate(op);
+        await revalidate();
         const poster = await this.deps.posters.publish(op, png);
-        await this.revalidate(op);
+        await revalidate();
         const published = await this.deps.store.update(
           op,
           { poster },
