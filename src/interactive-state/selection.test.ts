@@ -12,6 +12,7 @@ function setup(purpose: "export" | "preview" = "export") {
     owner: true,
     confirmed: true,
     previewOnly: false,
+    manual: false,
     member: true,
     quarantine: false,
     refined: false,
@@ -38,6 +39,7 @@ function setup(purpose: "export" | "preview" = "export") {
     }) as BodySelection;
   const resolver = createSelectionResolver(
     {
+      manualPresentationCamera: (_person, candidate) => s.manual ? { camera: candidate?.camera } as never : null,
       loadBodyCatalog: () => ({ version: "test", defaultCharacterId: null, assets: [{ characterId: "registered", assetSha256: s.catalogSha, shapeRuntime: { rules: "standin-body-0.7.2" } }] }) as never,
       getOwnedJob: async () =>
         s.owner
@@ -54,7 +56,12 @@ function setup(purpose: "export" | "preview" = "export") {
                         id: "candidate",
                         poseId: "pose",
                         sourceBvhSha256: sha,
-                        releaseAllowed: true,
+                        releaseAllowed: !s.manual,
+                        source: s.manual ? "library" : undefined,
+                        manualExportAllowed: s.manual,
+                        lookupAllowed: s.manual,
+                        reviewRequired: s.manual,
+                        refineAllowed: false,
                         bvhAvailable: true,
                         camera: {
                           version: "candidate-camera-v2",
@@ -189,4 +196,21 @@ test("default shape rules are bound only from an exact trusted catalog body", as
  const changed=await resolve();
  assert.equal(changed.defaultShapeRules,null);
  assert.notEqual(first.selectionHash,changed.selectionHash);
+});
+
+test("confirmed hash-bound manual review exports a presentation body without upgrading preview authority", async () => {
+  const { s, resolve } = setup("export");
+  s.previewOnly = true;
+  s.manual = true;
+  await resolve();
+  s.confirmed = false;
+  await assert.rejects(resolve, /SELECTION_REQUIRED/);
+  s.confirmed = true;
+  s.quarantine = true;
+  await assert.rejects(resolve);
+  s.quarantine = false;
+  s.catalogSha = "d".repeat(64);
+  // The selected body must still resolve to the actual registered model identity.
+  s.character = "unavailable";
+  await assert.rejects(resolve, /CHARACTER_UNAVAILABLE/);
 });
