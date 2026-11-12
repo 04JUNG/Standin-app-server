@@ -21,6 +21,8 @@ function setup(purpose: "export" | "preview" = "export") {
     scope: "full",
     character: "ok",
     runtime: "a".repeat(64),
+    modelAvailable: true,
+    modelSha: "c".repeat(64),
     catalogSha: "c".repeat(64),
     source: source,
   };
@@ -101,10 +103,10 @@ function setup(purpose: "export" | "preview" = "export") {
         solverVersion: "chain-transport-v3.2.5",
         framingVersion: "skin-regions-v2-shoulder-head",
       }),
-      modelPreviewIdentity: async () => ({
-        characterSha256: "c".repeat(64),
+      modelPreviewIdentity: async () => s.modelAvailable ? ({
+        characterSha256: s.modelSha,
         modelRevision: s.runtime,
-      }),
+      }) : null,
     },
     purpose,
   );
@@ -213,4 +215,15 @@ test("confirmed hash-bound manual review exports a presentation body without upg
   // The selected body must still resolve to the actual registered model identity.
   s.character = "unavailable";
   await assert.rejects(resolve, /CHARACTER_UNAVAILABLE/);
+});
+
+
+test("temporary identity probe failure stays closed without falsely invalidating review", async () => {
+  const { s, resolve } = setup();
+  s.modelAvailable = false;
+  await assert.rejects(resolve(), { code: "BODY_PREVIEW_UNAVAILABLE", status: 503 });
+  s.modelAvailable = true;
+  await resolve();
+  s.modelSha = "d".repeat(64);
+  await assert.rejects(resolve(), { code: "PREVIEW_CHANGED" });
 });

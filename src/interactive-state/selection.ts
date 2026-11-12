@@ -135,7 +135,10 @@ export function createSelectionResolver(
       throw new InteractiveError("INTERACTIVE_REFINE_LINEAGE_UNAVAILABLE");
     const runtime = await deps.runtime(),
       model = await deps.modelPreviewIdentity(characterId);
-    if (!model || model.characterSha256 !== body.resolvedBody.assetSha256)
+    // Missing live identity is a temporary readiness failure, not proof of a changed model.
+    // Keep export closed; only an actual hash mismatch invalidates the review.
+    if (!model) throw new InteractiveError("BODY_PREVIEW_UNAVAILABLE", 503);
+    if (model.characterSha256 !== body.resolvedBody.assetSha256)
       throw new InteractiveError("PREVIEW_CHANGED");
     const camera = manual?.camera ?? candidate.camera;
     // Camera mapping belongs to Converter. Legacy yaw-only cameras lack projection; refuse capability.
