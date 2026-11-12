@@ -1,7 +1,8 @@
-import { checkSkinPreviewModel, type SkinPreview } from "../appearance/skin-preview.js";
+import { type SkinPreview } from "../appearance/skin-preview.js";
 import { nondefaultSkin, type Skin } from "../appearance/skin.js";
 import { nonzeroAppearance, type Appearance } from "../appearance/model.js";
-import { parsePacket, parsePublishedPacket, parseReceipt } from "./packet.js";
+import { parsePublishedPacket, parseReceipt } from "./packet.js";
+import { validatePacketAsync } from "./packet-validation.js";
 import { recoverValidation } from "./revalidation.js";
 import { ConverterError, sha256Hex } from "../converter/client.js";
 import { decodeFrame, type ClientFrame } from "./clientFrame.js";
@@ -460,14 +461,13 @@ export class InteractiveService {
         if (!/^[A-Za-z0-9_-]{1,128}$/.test(solved.snapshotId))
           throw new InteractiveError("CONVERTER_INTEGRITY");
         const validated = await this.timed(op, "artifact_packet_validation", stage,
-          () => parsePacket(solved.packet, op, selection));
-        checkSkinPreviewModel(op.skinPreview, validated.payload.model);
+          () => validatePacketAsync(solved.packet, op, selection, controller.signal));
         if (controller.signal.aborted) return;
         await revalidate();
         const published = await this.deps.store.update(
           op,
           {
-            stateHash: validated.packet.stateHash,
+            stateHash: validated.stateHash,
             snapshotId: solved.snapshotId,
             snapshotProof: validated.snapshotProof,
             previewState: "authoritative",
