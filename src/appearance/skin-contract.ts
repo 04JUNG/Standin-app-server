@@ -1,7 +1,7 @@
 /** Exact live contract intersected with independent immutable asset/CSP pins. */
 import { z } from "zod";
 import type { Appearance } from "./model.js";
-import { skinSchema, type Skin } from "./skin.js";
+import { skinSchema, skinSupportsScope, type Skin } from "./skin.js";
 import { SKIN_EXPRESSION, type SkinAssetPin, type SkinContext } from "./skin-proof.js";
 import { skinPreview } from "./skin-preview.js";
 import { approvedSkins } from "./skin-pins.js";
@@ -37,7 +37,7 @@ export function checkSkinContract(raw: unknown, selection: ResolvedSelection, sk
   if (!c.assets_available) throw new InteractiveError("SKIN_ASSETS_UNAVAILABLE", 503);
   if (!c.csp_certified) throw new InteractiveError("SKIN_NOT_CSP_CERTIFIED", 503);
   const pin = policy.models[selection.characterId], m = c.candidate_models[selection.characterId];
-  if (!pin || !m || selection.scope !== "full" || pin.characterSha256 !== selection.body.resolvedBody?.assetSha256 ||
+  if (!pin || !m || !skinSupportsScope(selection.scope) || pin.characterSha256 !== selection.body.resolvedBody?.assetSha256 ||
     c.asset_manifest_sha256 !== policy.assetManifestSha256 || c.asset_version !== policy.assetVersion ||
     m.character_sha256 !== pin.characterSha256 || m.vertices !== pin.vertices || m.bones !== pin.bones ||
     m.polygon_indices_sha256 !== pin.polygonIndicesSha256 || m.weights_sha256 !== pin.weightsSha256 ||

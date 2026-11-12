@@ -52,6 +52,9 @@ async function setup() {
   const state = {
     selection: "first",
     skinAvailable: false,
+    skinChecks: 0,
+    skinCheckError: undefined as unknown,
+    scope: "full" as ResolvedSelection["scope"],
     skinAsset: "fixture asset manifest version 1",
     skinCalls: 0,
     skinAssetReads: 0,
@@ -93,14 +96,15 @@ async function setup() {
     if (state.runtimeFailures > 0) { state.runtimeFailures--; throw state.runtimeError; }
     if (state.resolveUnavailable) throw new Error("temporary upstream failure");
     if (!state.valid) throw new InteractiveError("NOT_FOUND", 404);
-    return fixtureSelection(hash(state.selection));
+    return { ...fixtureSelection(hash(state.selection)), scope: state.scope };
   };
   const skinBytes = (op: Operation) => Buffer.concat([syntheticFbx, Buffer.from(`|skin:${op.skin?.id}`)]);
   const service = new InteractiveService({
     store,
     resolve: resolver,
     skin: {
-      check: async () => { if (!state.skinAvailable) throw new InteractiveError("SKIN_NOT_CSP_CERTIFIED", 503);
+      check: async () => { state.skinChecks++; if (state.skinCheckError) throw state.skinCheckError;
+        if (!state.skinAvailable) throw new InteractiveError("SKIN_NOT_CSP_CERTIFIED", 503);
         return { identity: hash(state.skinAsset), supportedIds: ["default", "gray-guide", "flesh", "flesh-guide", "muscle"], preview: state.skinPreview }; },
       asset: async () => {
         state.skinAssetReads++;
@@ -333,10 +337,11 @@ test("full polling/model/export/file path separates preparation, PNG and native 
   }
 });
 
-test("a transient poll 503 preserves the accepted work and exposes latency diagnostics", async () => {
+for (const binary of [false, true]) test(`a transient poll 503 preserves the accepted work and exposes latency diagnostics (${binary ? "v2" : "v1"})`, async () => {
   const s = await setup();
+  const headers = binary ? BINARY_CLIENT : {};
   try {
-    const accepted = await s.prepare();
+    const accepted = await s.prepare(1, 0, "mutation-1", {}, headers);
     assert.equal(accepted.status, 202);
     const op = await accepted.json() as ReturnType<typeof publicOperation>;
     s.state.resolveUnavailable = true;
@@ -358,16 +363,17 @@ test("a transient poll 503 preserves the accepted work and exposes latency diagn
       assert(s.state.events.includes(event));
   } finally { await s.pg.close(); }
 });
-test("latest wins: queued older revision never runs; late running response cannot publish", async () => {
+for (const binary of [false, true]) test(`latest wins: queued older revision never runs; late running response cannot publish (${binary ? "v2" : "v1"})`, async () => {
   const s = await setup();
+  const headers = binary ? BINARY_CLIENT : {};
   try {
     const a = await (
-      await s.prepare()
+      await s.prepare(1, 0, "mutation-1", {}, headers)
     )
       .json()
       .then((v) => v as ReturnType<typeof publicOperation>);
     const b = await (
-      await s.prepare(2, 1)
+      await s.prepare(2, 1, "mutation-2", {}, headers)
     )
       .json()
       .then((v) => v as ReturnType<typeof publicOperation>);
@@ -378,14 +384,14 @@ test("latest wins: queued older revision never runs; late running response canno
     let release!: () => void;
     s.state.hold = new Promise<void>((r) => (release = r));
     const c = await (
-      await s.prepare(3, 2)
+      await s.prepare(3, 2, "mutation-3", {}, headers)
     )
       .json()
       .then((v) => v as ReturnType<typeof publicOperation>);
     const pending = s.tick("preview");
     while (s.state.solveCalls < 2) await new Promise((r) => setTimeout(r, 1));
     const d = await (
-      await s.prepare(4, 3)
+      await s.prepare(4, 3, "mutation-4", {}, headers)
     )
       .json()
       .then((v) => v as ReturnType<typeof publicOperation>);
@@ -395,7 +401,7 @@ test("latest wins: queued older revision never runs; late running response canno
     assert.equal((await s.read(d.operationId)).previewState, "solving");
     await s.tick("preview");
     assert.equal((await s.read(d.operationId)).previewState, "authoritative");
-    assert.equal((await s.prepare(5, 2)).status, 409);
+    assert.equal((await s.prepare(5, 2, "mutation-5", {}, headers)).status, 409);
   } finally {
     await s.pg.close();
   }
@@ -603,10 +609,11 @@ test("simultaneous prepare compare-and-swap has one winner and distinct people k
   }
 });
 
-test("running cancellation aborts and fences late response; byte corruption never delivers", async () => {
+for (const binary of [false, true]) test(`running cancellation aborts and fences late response; byte corruption never delivers (${binary ? "v2" : "v1"})`, async () => {
   const s = await setup();
+  const headers = binary ? BINARY_CLIENT : {};
   try {
-    const op = (await (await s.prepare()).json()) as ReturnType<
+    const op = (await (await s.prepare(1, 0, "mutation-1", {}, headers)).json()) as ReturnType<
       typeof publicOperation
     >;
     let release!: () => void;
@@ -619,7 +626,7 @@ test("running cancellation aborts and fences late response; byte corruption neve
     assert.equal((await s.read(op.operationId)).previewState, "cancelled");
     assert.ok(!s.state.events.includes("artifact_prepare_ready"));
     s.state.hold = undefined;
-    const next = (await (await s.prepare(2, 1)).json()) as ReturnType<
+    const next = (await (await s.prepare(2, 1, "mutation-2", {}, headers)).json()) as ReturnType<
       typeof publicOperation
     >;
     await s.tick("preview");
@@ -629,7 +636,7 @@ test("running cancellation aborts and fences late response; byte corruption neve
     const failed = await s.read(next.operationId);
     assert.equal(failed.previewState, "authoritative");
     assert.equal(failed.exportState, "failed");
-    assert.equal((await s.request(`/${next.operationId}/model`)).status, 200);
+    assert.equal((await s.request(`/${next.operationId}/model`, "GET", undefined, owner, headers)).status, 200);
     s.state.invalidReceipt = false;
     await s.request(`/${next.operationId}/export`, "POST");
     await s.tick("export");
@@ -1001,6 +1008,42 @@ test("approved asset replacement invalidates ready skin bytes and changes the ne
     s.state.skinAvailable = false;
     const head = await (await s.request("?" + new URLSearchParams({ candidateId: "candidate", skin: JSON.stringify(flesh) }))).json() as { operation: unknown; skinExport: { available: boolean; supportedIds: string[] } };
     assert.equal(head.operation, null); assert.equal(head.skinExport.available, false); assert.deepEqual(head.skinExport.supportedIds, ["default"]);
+  } finally { await s.pg.close(); }
+});
+
+test("head says why skins are unavailable: cropped scope without a Converter call, otherwise the skin code", async () => {
+  const s = await setup();
+  type Head = { operation: unknown; skinExport: { available: boolean; supportedIds: string[] }; skinUnavailable?: unknown };
+  const head = async (skin?: unknown) => await (await s.request("?" + new URLSearchParams({ candidateId: "candidate",
+    ...(skin ? { skin: JSON.stringify(skin) } : {}) }))).json() as Head;
+  try {
+    let body = await head(flesh);
+    assert.deepEqual(body.skinExport, { version: "fbx-skin-v1", available: false, supportedIds: ["default"] });
+    assert.deepEqual(body.skinUnavailable, { code: "SKIN_NOT_CSP_CERTIFIED" });
+    s.state.skinCheckError = new Error("socket reset");
+    assert.deepEqual((await head(flesh)).skinUnavailable, { code: "SKIN_UNAVAILABLE" });
+    s.state.skinCheckError = new InteractiveError("INTERACTIVE_SUPERSEDED", 409);
+    assert.deepEqual((await head(flesh)).skinUnavailable, { code: "SKIN_UNAVAILABLE" });
+    s.state.skinCheckError = new InteractiveError("SKIN_UV_INCOMPATIBLE");
+    assert.deepEqual((await head(flesh)).skinUnavailable, { code: "SKIN_UV_INCOMPATIBLE" });
+    s.state.skinCheckError = undefined; s.state.skinAvailable = true;
+    body = await head(flesh);
+    // Clients up to 2.10.4 parse skinExport strictly: an available capability gains no keys.
+    assert.deepEqual(Object.keys(body.skinExport).sort(), ["available", "supportedIds", "version"]);
+    assert.equal(body.skinExport.available, true); assert.ok(!("skinUnavailable" in body));
+    for (const scope of ["half", "bust", "shoulder_head", "head"] as const) {
+      s.state.scope = scope; s.state.skinChecks = 0;
+      for (const skin of [flesh, undefined]) {
+        body = await head(skin);
+        assert.deepEqual(body.skinExport, { version: "fbx-skin-v1", available: false, supportedIds: ["default"] });
+        assert.deepEqual(body.skinUnavailable, { code: "SKIN_UNSUPPORTED", outputScope: scope });
+      }
+      assert.equal(s.state.skinChecks, 0);
+    }
+    // The cropped default-skin pose still prepares; only nondefault skins are refused.
+    assert.equal((await s.prepare(1, 0, "cropped-default")).status, 202);
+    assert.equal((await head()).operation === null, false);
+    assert.equal((await head(flesh)).operation, null);
   } finally { await s.pg.close(); }
 });
 
