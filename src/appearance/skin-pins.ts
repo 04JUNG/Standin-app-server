@@ -1,8 +1,8 @@
 /** Generated from Converter skin_assets.v1.json; exact model/UV/material pins. */
 import type { SkinPolicy } from "./skin-contract.js";
 export const approvedSkins: SkinPolicy = {
-  "assetVersion": "staging-anatomy-skins-20261112-v2",
-  "assetManifestSha256": "936e9fe9c2b7258d599b383b3001ce3f308b3a429c254177895f65cba66da6e7",
+  "assetVersion": "staging-composed-skins-20261112-v3",
+  "assetManifestSha256": "f4d37bf100dcdec1de5c115d06fa68b30d3213d864d95e540c2d6bbc3676d265",
   "models": {
     "female-base-v0-4-0": {
       "characterSha256": "ffd7b57d6ebba06299be252976b511afe5684a237e6f7d440bb90b2ba20f0c33",
@@ -24,6 +24,10 @@ export const approvedSkins: SkinPolicy = {
           "sha256": "e34f0a717589134d7722dd46528ca753984b003a8b10e5ad685bd1acaa8d0820",
           "bytes": 429265
         },
+        "flesh-muscle": {
+          "sha256": "d5c1578f3a7d6c9021253e92d62afaf0294e56ac1f1eeb2fd314492691a24567",
+          "bytes": 292773
+        },
         "gray-guide": {
           "sha256": "74b2d2fd23c595f17e5fec762554cb87798eb08697cad244565f4b5443843d2c",
           "bytes": 421155
@@ -41,6 +45,10 @@ export const approvedSkins: SkinPolicy = {
         "flesh-guide": {
           "sha256": "7f49c637bffd3e40acc792c5259d5503a1db39ddfedfdca25e7a25ea369b0ae9",
           "bytes": 285631
+        },
+        "flesh-muscle": {
+          "sha256": "e3577c4e566c31c525fe2cef54b7485e2265afc53a02605c0c3ac7dfe8c55e29",
+          "bytes": 189298
         },
         "gray-guide": {
           "sha256": "ab7e062652c230ac20017e4d1af0c69857b6ca0d3725a543e86a15c11f028b83",
@@ -120,6 +128,10 @@ export const approvedSkins: SkinPolicy = {
           "sha256": "e34f0a717589134d7722dd46528ca753984b003a8b10e5ad685bd1acaa8d0820",
           "bytes": 429265
         },
+        "flesh-muscle": {
+          "sha256": "d5c1578f3a7d6c9021253e92d62afaf0294e56ac1f1eeb2fd314492691a24567",
+          "bytes": 292773
+        },
         "gray-guide": {
           "sha256": "74b2d2fd23c595f17e5fec762554cb87798eb08697cad244565f4b5443843d2c",
           "bytes": 421155
@@ -137,6 +149,10 @@ export const approvedSkins: SkinPolicy = {
         "flesh-guide": {
           "sha256": "7f49c637bffd3e40acc792c5259d5503a1db39ddfedfdca25e7a25ea369b0ae9",
           "bytes": 285631
+        },
+        "flesh-muscle": {
+          "sha256": "e3577c4e566c31c525fe2cef54b7485e2265afc53a02605c0c3ac7dfe8c55e29",
+          "bytes": 189298
         },
         "gray-guide": {
           "sha256": "ab7e062652c230ac20017e4d1af0c69857b6ca0d3725a543e86a15c11f028b83",
@@ -168,6 +184,10 @@ export const approvedSkins: SkinPolicy = {
           "sha256": "e34f0a717589134d7722dd46528ca753984b003a8b10e5ad685bd1acaa8d0820",
           "bytes": 429265
         },
+        "flesh-muscle": {
+          "sha256": "d5c1578f3a7d6c9021253e92d62afaf0294e56ac1f1eeb2fd314492691a24567",
+          "bytes": 292773
+        },
         "gray-guide": {
           "sha256": "74b2d2fd23c595f17e5fec762554cb87798eb08697cad244565f4b5443843d2c",
           "bytes": 421155
@@ -185,6 +205,10 @@ export const approvedSkins: SkinPolicy = {
         "flesh-guide": {
           "sha256": "7f49c637bffd3e40acc792c5259d5503a1db39ddfedfdca25e7a25ea369b0ae9",
           "bytes": 285631
+        },
+        "flesh-muscle": {
+          "sha256": "e3577c4e566c31c525fe2cef54b7485e2265afc53a02605c0c3ac7dfe8c55e29",
+          "bytes": 189298
         },
         "gray-guide": {
           "sha256": "ab7e062652c230ac20017e4d1af0c69857b6ca0d3725a543e86a15c11f028b83",
@@ -216,6 +240,10 @@ export const approvedSkins: SkinPolicy = {
           "sha256": "e34f0a717589134d7722dd46528ca753984b003a8b10e5ad685bd1acaa8d0820",
           "bytes": 429265
         },
+        "flesh-muscle": {
+          "sha256": "d5c1578f3a7d6c9021253e92d62afaf0294e56ac1f1eeb2fd314492691a24567",
+          "bytes": 292773
+        },
         "gray-guide": {
           "sha256": "74b2d2fd23c595f17e5fec762554cb87798eb08697cad244565f4b5443843d2c",
           "bytes": 421155
@@ -233,6 +261,10 @@ export const approvedSkins: SkinPolicy = {
         "flesh-guide": {
           "sha256": "7f49c637bffd3e40acc792c5259d5503a1db39ddfedfdca25e7a25ea369b0ae9",
           "bytes": 285631
+        },
+        "flesh-muscle": {
+          "sha256": "e3577c4e566c31c525fe2cef54b7485e2265afc53a02605c0c3ac7dfe8c55e29",
+          "bytes": 189298
         },
         "gray-guide": {
           "sha256": "ab7e062652c230ac20017e4d1af0c69857b6ca0d3725a543e86a15c11f028b83",
@@ -264,6 +296,10 @@ export const approvedSkins: SkinPolicy = {
           "sha256": "e34f0a717589134d7722dd46528ca753984b003a8b10e5ad685bd1acaa8d0820",
           "bytes": 429265
         },
+        "flesh-muscle": {
+          "sha256": "d5c1578f3a7d6c9021253e92d62afaf0294e56ac1f1eeb2fd314492691a24567",
+          "bytes": 292773
+        },
         "gray-guide": {
           "sha256": "74b2d2fd23c595f17e5fec762554cb87798eb08697cad244565f4b5443843d2c",
           "bytes": 421155
@@ -281,6 +317,10 @@ export const approvedSkins: SkinPolicy = {
         "flesh-guide": {
           "sha256": "7f49c637bffd3e40acc792c5259d5503a1db39ddfedfdca25e7a25ea369b0ae9",
           "bytes": 285631
+        },
+        "flesh-muscle": {
+          "sha256": "e3577c4e566c31c525fe2cef54b7485e2265afc53a02605c0c3ac7dfe8c55e29",
+          "bytes": 189298
         },
         "gray-guide": {
           "sha256": "ab7e062652c230ac20017e4d1af0c69857b6ca0d3725a543e86a15c11f028b83",
@@ -312,6 +352,10 @@ export const approvedSkins: SkinPolicy = {
           "sha256": "e34f0a717589134d7722dd46528ca753984b003a8b10e5ad685bd1acaa8d0820",
           "bytes": 429265
         },
+        "flesh-muscle": {
+          "sha256": "d5c1578f3a7d6c9021253e92d62afaf0294e56ac1f1eeb2fd314492691a24567",
+          "bytes": 292773
+        },
         "gray-guide": {
           "sha256": "74b2d2fd23c595f17e5fec762554cb87798eb08697cad244565f4b5443843d2c",
           "bytes": 421155
@@ -329,6 +373,10 @@ export const approvedSkins: SkinPolicy = {
         "flesh-guide": {
           "sha256": "7f49c637bffd3e40acc792c5259d5503a1db39ddfedfdca25e7a25ea369b0ae9",
           "bytes": 285631
+        },
+        "flesh-muscle": {
+          "sha256": "e3577c4e566c31c525fe2cef54b7485e2265afc53a02605c0c3ac7dfe8c55e29",
+          "bytes": 189298
         },
         "gray-guide": {
           "sha256": "ab7e062652c230ac20017e4d1af0c69857b6ca0d3725a543e86a15c11f028b83",
@@ -360,6 +408,10 @@ export const approvedSkins: SkinPolicy = {
           "sha256": "e34f0a717589134d7722dd46528ca753984b003a8b10e5ad685bd1acaa8d0820",
           "bytes": 429265
         },
+        "flesh-muscle": {
+          "sha256": "d5c1578f3a7d6c9021253e92d62afaf0294e56ac1f1eeb2fd314492691a24567",
+          "bytes": 292773
+        },
         "gray-guide": {
           "sha256": "74b2d2fd23c595f17e5fec762554cb87798eb08697cad244565f4b5443843d2c",
           "bytes": 421155
@@ -377,6 +429,10 @@ export const approvedSkins: SkinPolicy = {
         "flesh-guide": {
           "sha256": "7f49c637bffd3e40acc792c5259d5503a1db39ddfedfdca25e7a25ea369b0ae9",
           "bytes": 285631
+        },
+        "flesh-muscle": {
+          "sha256": "e3577c4e566c31c525fe2cef54b7485e2265afc53a02605c0c3ac7dfe8c55e29",
+          "bytes": 189298
         },
         "gray-guide": {
           "sha256": "ab7e062652c230ac20017e4d1af0c69857b6ca0d3725a543e86a15c11f028b83",
@@ -408,6 +464,10 @@ export const approvedSkins: SkinPolicy = {
           "sha256": "e34f0a717589134d7722dd46528ca753984b003a8b10e5ad685bd1acaa8d0820",
           "bytes": 429265
         },
+        "flesh-muscle": {
+          "sha256": "d5c1578f3a7d6c9021253e92d62afaf0294e56ac1f1eeb2fd314492691a24567",
+          "bytes": 292773
+        },
         "gray-guide": {
           "sha256": "74b2d2fd23c595f17e5fec762554cb87798eb08697cad244565f4b5443843d2c",
           "bytes": 421155
@@ -425,6 +485,10 @@ export const approvedSkins: SkinPolicy = {
         "flesh-guide": {
           "sha256": "7f49c637bffd3e40acc792c5259d5503a1db39ddfedfdca25e7a25ea369b0ae9",
           "bytes": 285631
+        },
+        "flesh-muscle": {
+          "sha256": "e3577c4e566c31c525fe2cef54b7485e2265afc53a02605c0c3ac7dfe8c55e29",
+          "bytes": 189298
         },
         "gray-guide": {
           "sha256": "ab7e062652c230ac20017e4d1af0c69857b6ca0d3725a543e86a15c11f028b83",
@@ -456,6 +520,10 @@ export const approvedSkins: SkinPolicy = {
           "sha256": "e34f0a717589134d7722dd46528ca753984b003a8b10e5ad685bd1acaa8d0820",
           "bytes": 429265
         },
+        "flesh-muscle": {
+          "sha256": "d5c1578f3a7d6c9021253e92d62afaf0294e56ac1f1eeb2fd314492691a24567",
+          "bytes": 292773
+        },
         "gray-guide": {
           "sha256": "74b2d2fd23c595f17e5fec762554cb87798eb08697cad244565f4b5443843d2c",
           "bytes": 421155
@@ -473,6 +541,10 @@ export const approvedSkins: SkinPolicy = {
         "flesh-guide": {
           "sha256": "7f49c637bffd3e40acc792c5259d5503a1db39ddfedfdca25e7a25ea369b0ae9",
           "bytes": 285631
+        },
+        "flesh-muscle": {
+          "sha256": "e3577c4e566c31c525fe2cef54b7485e2265afc53a02605c0c3ac7dfe8c55e29",
+          "bytes": 189298
         },
         "gray-guide": {
           "sha256": "ab7e062652c230ac20017e4d1af0c69857b6ca0d3725a543e86a15c11f028b83",
@@ -504,6 +576,10 @@ export const approvedSkins: SkinPolicy = {
           "sha256": "e34f0a717589134d7722dd46528ca753984b003a8b10e5ad685bd1acaa8d0820",
           "bytes": 429265
         },
+        "flesh-muscle": {
+          "sha256": "d5c1578f3a7d6c9021253e92d62afaf0294e56ac1f1eeb2fd314492691a24567",
+          "bytes": 292773
+        },
         "gray-guide": {
           "sha256": "74b2d2fd23c595f17e5fec762554cb87798eb08697cad244565f4b5443843d2c",
           "bytes": 421155
@@ -521,6 +597,10 @@ export const approvedSkins: SkinPolicy = {
         "flesh-guide": {
           "sha256": "7f49c637bffd3e40acc792c5259d5503a1db39ddfedfdca25e7a25ea369b0ae9",
           "bytes": 285631
+        },
+        "flesh-muscle": {
+          "sha256": "e3577c4e566c31c525fe2cef54b7485e2265afc53a02605c0c3ac7dfe8c55e29",
+          "bytes": 189298
         },
         "gray-guide": {
           "sha256": "ab7e062652c230ac20017e4d1af0c69857b6ca0d3725a543e86a15c11f028b83",
@@ -552,6 +632,10 @@ export const approvedSkins: SkinPolicy = {
           "sha256": "e34f0a717589134d7722dd46528ca753984b003a8b10e5ad685bd1acaa8d0820",
           "bytes": 429265
         },
+        "flesh-muscle": {
+          "sha256": "d5c1578f3a7d6c9021253e92d62afaf0294e56ac1f1eeb2fd314492691a24567",
+          "bytes": 292773
+        },
         "gray-guide": {
           "sha256": "74b2d2fd23c595f17e5fec762554cb87798eb08697cad244565f4b5443843d2c",
           "bytes": 421155
@@ -569,6 +653,10 @@ export const approvedSkins: SkinPolicy = {
         "flesh-guide": {
           "sha256": "7f49c637bffd3e40acc792c5259d5503a1db39ddfedfdca25e7a25ea369b0ae9",
           "bytes": 285631
+        },
+        "flesh-muscle": {
+          "sha256": "e3577c4e566c31c525fe2cef54b7485e2265afc53a02605c0c3ac7dfe8c55e29",
+          "bytes": 189298
         },
         "gray-guide": {
           "sha256": "ab7e062652c230ac20017e4d1af0c69857b6ca0d3725a543e86a15c11f028b83",
@@ -600,6 +688,10 @@ export const approvedSkins: SkinPolicy = {
           "sha256": "b7c5924cdc47745c14efdbce4efd23db4d74403687eea85221aa1f8268125921",
           "bytes": 436664
         },
+        "flesh-muscle": {
+          "sha256": "2c9ac2d72809db3d43bd05045c8af18fe04a2bd9e4448e583a0acf90f17762b9",
+          "bytes": 284908
+        },
         "gray-guide": {
           "sha256": "224ad8c751c43fe9b9c687cbe20acbb08cac762673180946805c7835180eb068",
           "bytes": 430521
@@ -617,6 +709,10 @@ export const approvedSkins: SkinPolicy = {
         "flesh-guide": {
           "sha256": "d188b7d20345850bbc7dcf352a2cd67b570d337b1d553f9cec844e30496c574b",
           "bytes": 291711
+        },
+        "flesh-muscle": {
+          "sha256": "0e17f10d6a814c12fd572031820f04dafa380ad66abfd6b3c0a2d474f29303b5",
+          "bytes": 180433
         },
         "gray-guide": {
           "sha256": "7250869f5badb5f838951f375a94cf157d7a1efc55514bdbc9ba0ac76be80eff",
@@ -648,6 +744,10 @@ export const approvedSkins: SkinPolicy = {
           "sha256": "b7c5924cdc47745c14efdbce4efd23db4d74403687eea85221aa1f8268125921",
           "bytes": 436664
         },
+        "flesh-muscle": {
+          "sha256": "2c9ac2d72809db3d43bd05045c8af18fe04a2bd9e4448e583a0acf90f17762b9",
+          "bytes": 284908
+        },
         "gray-guide": {
           "sha256": "224ad8c751c43fe9b9c687cbe20acbb08cac762673180946805c7835180eb068",
           "bytes": 430521
@@ -665,6 +765,10 @@ export const approvedSkins: SkinPolicy = {
         "flesh-guide": {
           "sha256": "d188b7d20345850bbc7dcf352a2cd67b570d337b1d553f9cec844e30496c574b",
           "bytes": 291711
+        },
+        "flesh-muscle": {
+          "sha256": "0e17f10d6a814c12fd572031820f04dafa380ad66abfd6b3c0a2d474f29303b5",
+          "bytes": 180433
         },
         "gray-guide": {
           "sha256": "7250869f5badb5f838951f375a94cf157d7a1efc55514bdbc9ba0ac76be80eff",
@@ -744,6 +848,10 @@ export const approvedSkins: SkinPolicy = {
           "sha256": "b7c5924cdc47745c14efdbce4efd23db4d74403687eea85221aa1f8268125921",
           "bytes": 436664
         },
+        "flesh-muscle": {
+          "sha256": "2c9ac2d72809db3d43bd05045c8af18fe04a2bd9e4448e583a0acf90f17762b9",
+          "bytes": 284908
+        },
         "gray-guide": {
           "sha256": "224ad8c751c43fe9b9c687cbe20acbb08cac762673180946805c7835180eb068",
           "bytes": 430521
@@ -761,6 +869,10 @@ export const approvedSkins: SkinPolicy = {
         "flesh-guide": {
           "sha256": "d188b7d20345850bbc7dcf352a2cd67b570d337b1d553f9cec844e30496c574b",
           "bytes": 291711
+        },
+        "flesh-muscle": {
+          "sha256": "0e17f10d6a814c12fd572031820f04dafa380ad66abfd6b3c0a2d474f29303b5",
+          "bytes": 180433
         },
         "gray-guide": {
           "sha256": "7250869f5badb5f838951f375a94cf157d7a1efc55514bdbc9ba0ac76be80eff",
@@ -792,6 +904,10 @@ export const approvedSkins: SkinPolicy = {
           "sha256": "b7c5924cdc47745c14efdbce4efd23db4d74403687eea85221aa1f8268125921",
           "bytes": 436664
         },
+        "flesh-muscle": {
+          "sha256": "2c9ac2d72809db3d43bd05045c8af18fe04a2bd9e4448e583a0acf90f17762b9",
+          "bytes": 284908
+        },
         "gray-guide": {
           "sha256": "224ad8c751c43fe9b9c687cbe20acbb08cac762673180946805c7835180eb068",
           "bytes": 430521
@@ -809,6 +925,10 @@ export const approvedSkins: SkinPolicy = {
         "flesh-guide": {
           "sha256": "d188b7d20345850bbc7dcf352a2cd67b570d337b1d553f9cec844e30496c574b",
           "bytes": 291711
+        },
+        "flesh-muscle": {
+          "sha256": "0e17f10d6a814c12fd572031820f04dafa380ad66abfd6b3c0a2d474f29303b5",
+          "bytes": 180433
         },
         "gray-guide": {
           "sha256": "7250869f5badb5f838951f375a94cf157d7a1efc55514bdbc9ba0ac76be80eff",
@@ -840,6 +960,10 @@ export const approvedSkins: SkinPolicy = {
           "sha256": "b7c5924cdc47745c14efdbce4efd23db4d74403687eea85221aa1f8268125921",
           "bytes": 436664
         },
+        "flesh-muscle": {
+          "sha256": "2c9ac2d72809db3d43bd05045c8af18fe04a2bd9e4448e583a0acf90f17762b9",
+          "bytes": 284908
+        },
         "gray-guide": {
           "sha256": "224ad8c751c43fe9b9c687cbe20acbb08cac762673180946805c7835180eb068",
           "bytes": 430521
@@ -857,6 +981,10 @@ export const approvedSkins: SkinPolicy = {
         "flesh-guide": {
           "sha256": "d188b7d20345850bbc7dcf352a2cd67b570d337b1d553f9cec844e30496c574b",
           "bytes": 291711
+        },
+        "flesh-muscle": {
+          "sha256": "0e17f10d6a814c12fd572031820f04dafa380ad66abfd6b3c0a2d474f29303b5",
+          "bytes": 180433
         },
         "gray-guide": {
           "sha256": "7250869f5badb5f838951f375a94cf157d7a1efc55514bdbc9ba0ac76be80eff",
@@ -888,6 +1016,10 @@ export const approvedSkins: SkinPolicy = {
           "sha256": "b7c5924cdc47745c14efdbce4efd23db4d74403687eea85221aa1f8268125921",
           "bytes": 436664
         },
+        "flesh-muscle": {
+          "sha256": "2c9ac2d72809db3d43bd05045c8af18fe04a2bd9e4448e583a0acf90f17762b9",
+          "bytes": 284908
+        },
         "gray-guide": {
           "sha256": "224ad8c751c43fe9b9c687cbe20acbb08cac762673180946805c7835180eb068",
           "bytes": 430521
@@ -905,6 +1037,10 @@ export const approvedSkins: SkinPolicy = {
         "flesh-guide": {
           "sha256": "d188b7d20345850bbc7dcf352a2cd67b570d337b1d553f9cec844e30496c574b",
           "bytes": 291711
+        },
+        "flesh-muscle": {
+          "sha256": "0e17f10d6a814c12fd572031820f04dafa380ad66abfd6b3c0a2d474f29303b5",
+          "bytes": 180433
         },
         "gray-guide": {
           "sha256": "7250869f5badb5f838951f375a94cf157d7a1efc55514bdbc9ba0ac76be80eff",
@@ -936,6 +1072,10 @@ export const approvedSkins: SkinPolicy = {
           "sha256": "b7c5924cdc47745c14efdbce4efd23db4d74403687eea85221aa1f8268125921",
           "bytes": 436664
         },
+        "flesh-muscle": {
+          "sha256": "2c9ac2d72809db3d43bd05045c8af18fe04a2bd9e4448e583a0acf90f17762b9",
+          "bytes": 284908
+        },
         "gray-guide": {
           "sha256": "224ad8c751c43fe9b9c687cbe20acbb08cac762673180946805c7835180eb068",
           "bytes": 430521
@@ -953,6 +1093,10 @@ export const approvedSkins: SkinPolicy = {
         "flesh-guide": {
           "sha256": "d188b7d20345850bbc7dcf352a2cd67b570d337b1d553f9cec844e30496c574b",
           "bytes": 291711
+        },
+        "flesh-muscle": {
+          "sha256": "0e17f10d6a814c12fd572031820f04dafa380ad66abfd6b3c0a2d474f29303b5",
+          "bytes": 180433
         },
         "gray-guide": {
           "sha256": "7250869f5badb5f838951f375a94cf157d7a1efc55514bdbc9ba0ac76be80eff",
@@ -984,6 +1128,10 @@ export const approvedSkins: SkinPolicy = {
           "sha256": "b7c5924cdc47745c14efdbce4efd23db4d74403687eea85221aa1f8268125921",
           "bytes": 436664
         },
+        "flesh-muscle": {
+          "sha256": "2c9ac2d72809db3d43bd05045c8af18fe04a2bd9e4448e583a0acf90f17762b9",
+          "bytes": 284908
+        },
         "gray-guide": {
           "sha256": "224ad8c751c43fe9b9c687cbe20acbb08cac762673180946805c7835180eb068",
           "bytes": 430521
@@ -1001,6 +1149,10 @@ export const approvedSkins: SkinPolicy = {
         "flesh-guide": {
           "sha256": "d188b7d20345850bbc7dcf352a2cd67b570d337b1d553f9cec844e30496c574b",
           "bytes": 291711
+        },
+        "flesh-muscle": {
+          "sha256": "0e17f10d6a814c12fd572031820f04dafa380ad66abfd6b3c0a2d474f29303b5",
+          "bytes": 180433
         },
         "gray-guide": {
           "sha256": "7250869f5badb5f838951f375a94cf157d7a1efc55514bdbc9ba0ac76be80eff",
@@ -1032,6 +1184,10 @@ export const approvedSkins: SkinPolicy = {
           "sha256": "b7c5924cdc47745c14efdbce4efd23db4d74403687eea85221aa1f8268125921",
           "bytes": 436664
         },
+        "flesh-muscle": {
+          "sha256": "2c9ac2d72809db3d43bd05045c8af18fe04a2bd9e4448e583a0acf90f17762b9",
+          "bytes": 284908
+        },
         "gray-guide": {
           "sha256": "224ad8c751c43fe9b9c687cbe20acbb08cac762673180946805c7835180eb068",
           "bytes": 430521
@@ -1049,6 +1205,10 @@ export const approvedSkins: SkinPolicy = {
         "flesh-guide": {
           "sha256": "d188b7d20345850bbc7dcf352a2cd67b570d337b1d553f9cec844e30496c574b",
           "bytes": 291711
+        },
+        "flesh-muscle": {
+          "sha256": "0e17f10d6a814c12fd572031820f04dafa380ad66abfd6b3c0a2d474f29303b5",
+          "bytes": 180433
         },
         "gray-guide": {
           "sha256": "7250869f5badb5f838951f375a94cf157d7a1efc55514bdbc9ba0ac76be80eff",
@@ -1090,6 +1250,22 @@ export const approvedSkins: SkinPolicy = {
       "characterId": "female-base-v0-4-0",
       "characterSha256": "ffd7b57d6ebba06299be252976b511afe5684a237e6f7d440bb90b2ba20f0c33",
       "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 0,
+      "maxOutlineWidth": 0
+    },
+    {
+      "characterId": "female-base-v0-4-0",
+      "characterSha256": "ffd7b57d6ebba06299be252976b511afe5684a237e6f7d440bb90b2ba20f0c33",
+      "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 2,
+      "maxOutlineWidth": 2
+    },
+    {
+      "characterId": "female-base-v0-4-0",
+      "characterSha256": "ffd7b57d6ebba06299be252976b511afe5684a237e6f7d440bb90b2ba20f0c33",
+      "scope": "full",
       "skinId": "gray-guide",
       "minOutlineWidth": 0,
       "maxOutlineWidth": 0
@@ -1210,6 +1386,22 @@ export const approvedSkins: SkinPolicy = {
       "characterId": "female-fat-max-v0-4-0",
       "characterSha256": "87563be9bbb84e8d3c2f22b542a27a5c9d49bd939156338b45c40e323fb82cb9",
       "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 0,
+      "maxOutlineWidth": 0
+    },
+    {
+      "characterId": "female-fat-max-v0-4-0",
+      "characterSha256": "87563be9bbb84e8d3c2f22b542a27a5c9d49bd939156338b45c40e323fb82cb9",
+      "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 2,
+      "maxOutlineWidth": 2
+    },
+    {
+      "characterId": "female-fat-max-v0-4-0",
+      "characterSha256": "87563be9bbb84e8d3c2f22b542a27a5c9d49bd939156338b45c40e323fb82cb9",
+      "scope": "full",
       "skinId": "gray-guide",
       "minOutlineWidth": 0,
       "maxOutlineWidth": 0
@@ -1266,6 +1458,22 @@ export const approvedSkins: SkinPolicy = {
       "characterId": "female-ideal70-v0-4-0",
       "characterSha256": "669d62723f743163fce7cb1351004f7300cb6d5903761b8e8d2add38b754a6ba",
       "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 0,
+      "maxOutlineWidth": 0
+    },
+    {
+      "characterId": "female-ideal70-v0-4-0",
+      "characterSha256": "669d62723f743163fce7cb1351004f7300cb6d5903761b8e8d2add38b754a6ba",
+      "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 2,
+      "maxOutlineWidth": 2
+    },
+    {
+      "characterId": "female-ideal70-v0-4-0",
+      "characterSha256": "669d62723f743163fce7cb1351004f7300cb6d5903761b8e8d2add38b754a6ba",
+      "scope": "full",
       "skinId": "gray-guide",
       "minOutlineWidth": 0,
       "maxOutlineWidth": 0
@@ -1322,6 +1530,22 @@ export const approvedSkins: SkinPolicy = {
       "characterId": "female-ideal83-v0-4-0",
       "characterSha256": "4cbc58767c54c0ccc1dfd46a7d086a3503af3fc7e1dfa69a21c02eedd1a2234d",
       "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 0,
+      "maxOutlineWidth": 0
+    },
+    {
+      "characterId": "female-ideal83-v0-4-0",
+      "characterSha256": "4cbc58767c54c0ccc1dfd46a7d086a3503af3fc7e1dfa69a21c02eedd1a2234d",
+      "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 2,
+      "maxOutlineWidth": 2
+    },
+    {
+      "characterId": "female-ideal83-v0-4-0",
+      "characterSha256": "4cbc58767c54c0ccc1dfd46a7d086a3503af3fc7e1dfa69a21c02eedd1a2234d",
+      "scope": "full",
       "skinId": "gray-guide",
       "minOutlineWidth": 0,
       "maxOutlineWidth": 0
@@ -1378,6 +1602,22 @@ export const approvedSkins: SkinPolicy = {
       "characterId": "female-muscle-max-v0-4-0",
       "characterSha256": "8e2407d0118a7d38b4d2553d260778683c5ef8ef3819e6dba18bf43650c7585f",
       "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 0,
+      "maxOutlineWidth": 0
+    },
+    {
+      "characterId": "female-muscle-max-v0-4-0",
+      "characterSha256": "8e2407d0118a7d38b4d2553d260778683c5ef8ef3819e6dba18bf43650c7585f",
+      "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 2,
+      "maxOutlineWidth": 2
+    },
+    {
+      "characterId": "female-muscle-max-v0-4-0",
+      "characterSha256": "8e2407d0118a7d38b4d2553d260778683c5ef8ef3819e6dba18bf43650c7585f",
+      "scope": "full",
       "skinId": "gray-guide",
       "minOutlineWidth": 0,
       "maxOutlineWidth": 0
@@ -1434,6 +1674,22 @@ export const approvedSkins: SkinPolicy = {
       "characterId": "female-muscular-v0-4-0",
       "characterSha256": "76558d763ba524101fd9c3b50458641423869a2602d9198d05d41cc46efcd522",
       "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 0,
+      "maxOutlineWidth": 0
+    },
+    {
+      "characterId": "female-muscular-v0-4-0",
+      "characterSha256": "76558d763ba524101fd9c3b50458641423869a2602d9198d05d41cc46efcd522",
+      "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 2,
+      "maxOutlineWidth": 2
+    },
+    {
+      "characterId": "female-muscular-v0-4-0",
+      "characterSha256": "76558d763ba524101fd9c3b50458641423869a2602d9198d05d41cc46efcd522",
+      "scope": "full",
       "skinId": "gray-guide",
       "minOutlineWidth": 0,
       "maxOutlineWidth": 0
@@ -1490,6 +1746,22 @@ export const approvedSkins: SkinPolicy = {
       "characterId": "female-new-fat-v0-4-0",
       "characterSha256": "43e0cff054daed6a7d76b5e338c6a0bb941760cecff417c7ca9f4ae3f5bf0f3f",
       "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 0,
+      "maxOutlineWidth": 0
+    },
+    {
+      "characterId": "female-new-fat-v0-4-0",
+      "characterSha256": "43e0cff054daed6a7d76b5e338c6a0bb941760cecff417c7ca9f4ae3f5bf0f3f",
+      "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 2,
+      "maxOutlineWidth": 2
+    },
+    {
+      "characterId": "female-new-fat-v0-4-0",
+      "characterSha256": "43e0cff054daed6a7d76b5e338c6a0bb941760cecff417c7ca9f4ae3f5bf0f3f",
+      "scope": "full",
       "skinId": "gray-guide",
       "minOutlineWidth": 0,
       "maxOutlineWidth": 0
@@ -1546,6 +1818,22 @@ export const approvedSkins: SkinPolicy = {
       "characterId": "female-new-muscular-v0-4-0",
       "characterSha256": "b22bf84b91a7af1dbb4328aaafa99fbe5d89c30b29dd2c8987b65fd0fb223a96",
       "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 0,
+      "maxOutlineWidth": 0
+    },
+    {
+      "characterId": "female-new-muscular-v0-4-0",
+      "characterSha256": "b22bf84b91a7af1dbb4328aaafa99fbe5d89c30b29dd2c8987b65fd0fb223a96",
+      "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 2,
+      "maxOutlineWidth": 2
+    },
+    {
+      "characterId": "female-new-muscular-v0-4-0",
+      "characterSha256": "b22bf84b91a7af1dbb4328aaafa99fbe5d89c30b29dd2c8987b65fd0fb223a96",
+      "scope": "full",
       "skinId": "gray-guide",
       "minOutlineWidth": 0,
       "maxOutlineWidth": 0
@@ -1602,6 +1890,22 @@ export const approvedSkins: SkinPolicy = {
       "characterId": "female-slim-v0-4-0",
       "characterSha256": "33e5041fdfc61ef26553a12d52464a1050cfa8a7a04d98668aeb250f9fb33c38",
       "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 0,
+      "maxOutlineWidth": 0
+    },
+    {
+      "characterId": "female-slim-v0-4-0",
+      "characterSha256": "33e5041fdfc61ef26553a12d52464a1050cfa8a7a04d98668aeb250f9fb33c38",
+      "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 2,
+      "maxOutlineWidth": 2
+    },
+    {
+      "characterId": "female-slim-v0-4-0",
+      "characterSha256": "33e5041fdfc61ef26553a12d52464a1050cfa8a7a04d98668aeb250f9fb33c38",
+      "scope": "full",
       "skinId": "gray-guide",
       "minOutlineWidth": 0,
       "maxOutlineWidth": 0
@@ -1658,6 +1962,22 @@ export const approvedSkins: SkinPolicy = {
       "characterId": "female-soft-v0-4-0",
       "characterSha256": "5d0345f98d881ce46777fdf91129d02a54ff20619ee63e5af9c47738ec4057b2",
       "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 0,
+      "maxOutlineWidth": 0
+    },
+    {
+      "characterId": "female-soft-v0-4-0",
+      "characterSha256": "5d0345f98d881ce46777fdf91129d02a54ff20619ee63e5af9c47738ec4057b2",
+      "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 2,
+      "maxOutlineWidth": 2
+    },
+    {
+      "characterId": "female-soft-v0-4-0",
+      "characterSha256": "5d0345f98d881ce46777fdf91129d02a54ff20619ee63e5af9c47738ec4057b2",
+      "scope": "full",
       "skinId": "gray-guide",
       "minOutlineWidth": 0,
       "maxOutlineWidth": 0
@@ -1714,6 +2034,22 @@ export const approvedSkins: SkinPolicy = {
       "characterId": "female-toon64-v0-4-0",
       "characterSha256": "dc12c453dbc46f175351d72a73fc8b0f8bc3f8ec15316fb72d2a1082b66a4a68",
       "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 0,
+      "maxOutlineWidth": 0
+    },
+    {
+      "characterId": "female-toon64-v0-4-0",
+      "characterSha256": "dc12c453dbc46f175351d72a73fc8b0f8bc3f8ec15316fb72d2a1082b66a4a68",
+      "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 2,
+      "maxOutlineWidth": 2
+    },
+    {
+      "characterId": "female-toon64-v0-4-0",
+      "characterSha256": "dc12c453dbc46f175351d72a73fc8b0f8bc3f8ec15316fb72d2a1082b66a4a68",
+      "scope": "full",
       "skinId": "gray-guide",
       "minOutlineWidth": 0,
       "maxOutlineWidth": 0
@@ -1770,6 +2106,22 @@ export const approvedSkins: SkinPolicy = {
       "characterId": "male-base-v0-8-0",
       "characterSha256": "705035f1bd247b3bf63a6d293065a5a39390b2d228df559474f9dc6682bf8c43",
       "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 0,
+      "maxOutlineWidth": 0
+    },
+    {
+      "characterId": "male-base-v0-8-0",
+      "characterSha256": "705035f1bd247b3bf63a6d293065a5a39390b2d228df559474f9dc6682bf8c43",
+      "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 2,
+      "maxOutlineWidth": 2
+    },
+    {
+      "characterId": "male-base-v0-8-0",
+      "characterSha256": "705035f1bd247b3bf63a6d293065a5a39390b2d228df559474f9dc6682bf8c43",
+      "scope": "full",
       "skinId": "gray-guide",
       "minOutlineWidth": 0,
       "maxOutlineWidth": 0
@@ -1826,6 +2178,22 @@ export const approvedSkins: SkinPolicy = {
       "characterId": "male-bulk-v0-8-0",
       "characterSha256": "9bbd89667c4d38a80b6600f318b84550021d389a0a92c3713b9bb8fb22be2901",
       "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 0,
+      "maxOutlineWidth": 0
+    },
+    {
+      "characterId": "male-bulk-v0-8-0",
+      "characterSha256": "9bbd89667c4d38a80b6600f318b84550021d389a0a92c3713b9bb8fb22be2901",
+      "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 2,
+      "maxOutlineWidth": 2
+    },
+    {
+      "characterId": "male-bulk-v0-8-0",
+      "characterSha256": "9bbd89667c4d38a80b6600f318b84550021d389a0a92c3713b9bb8fb22be2901",
+      "scope": "full",
       "skinId": "gray-guide",
       "minOutlineWidth": 0,
       "maxOutlineWidth": 0
@@ -1946,6 +2314,22 @@ export const approvedSkins: SkinPolicy = {
       "characterId": "male-fat-max-v0-8-0",
       "characterSha256": "61d0ededbc9e7d71c01b44196e93aa1278ff49fe603bfca28cca2cbd2eac4234",
       "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 0,
+      "maxOutlineWidth": 0
+    },
+    {
+      "characterId": "male-fat-max-v0-8-0",
+      "characterSha256": "61d0ededbc9e7d71c01b44196e93aa1278ff49fe603bfca28cca2cbd2eac4234",
+      "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 2,
+      "maxOutlineWidth": 2
+    },
+    {
+      "characterId": "male-fat-max-v0-8-0",
+      "characterSha256": "61d0ededbc9e7d71c01b44196e93aa1278ff49fe603bfca28cca2cbd2eac4234",
+      "scope": "full",
       "skinId": "gray-guide",
       "minOutlineWidth": 0,
       "maxOutlineWidth": 0
@@ -2002,6 +2386,22 @@ export const approvedSkins: SkinPolicy = {
       "characterId": "male-ideal70-v0-8-0",
       "characterSha256": "5c29616fd615db67070f4ab26bb3c46158f43801805cdf53dacc10819ec969cb",
       "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 0,
+      "maxOutlineWidth": 0
+    },
+    {
+      "characterId": "male-ideal70-v0-8-0",
+      "characterSha256": "5c29616fd615db67070f4ab26bb3c46158f43801805cdf53dacc10819ec969cb",
+      "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 2,
+      "maxOutlineWidth": 2
+    },
+    {
+      "characterId": "male-ideal70-v0-8-0",
+      "characterSha256": "5c29616fd615db67070f4ab26bb3c46158f43801805cdf53dacc10819ec969cb",
+      "scope": "full",
       "skinId": "gray-guide",
       "minOutlineWidth": 0,
       "maxOutlineWidth": 0
@@ -2058,6 +2458,22 @@ export const approvedSkins: SkinPolicy = {
       "characterId": "male-ideal83-v0-8-0",
       "characterSha256": "56248a449cbe312b87687c7e6ffcb35149ed62ee02f1dc8700052025a7dc786f",
       "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 0,
+      "maxOutlineWidth": 0
+    },
+    {
+      "characterId": "male-ideal83-v0-8-0",
+      "characterSha256": "56248a449cbe312b87687c7e6ffcb35149ed62ee02f1dc8700052025a7dc786f",
+      "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 2,
+      "maxOutlineWidth": 2
+    },
+    {
+      "characterId": "male-ideal83-v0-8-0",
+      "characterSha256": "56248a449cbe312b87687c7e6ffcb35149ed62ee02f1dc8700052025a7dc786f",
+      "scope": "full",
       "skinId": "gray-guide",
       "minOutlineWidth": 0,
       "maxOutlineWidth": 0
@@ -2114,6 +2530,22 @@ export const approvedSkins: SkinPolicy = {
       "characterId": "male-muscle-max-v0-8-0",
       "characterSha256": "11e88a4df956e9bd2c25f058265eb7530257f196ae54f1ad5f01099f090f38b4",
       "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 0,
+      "maxOutlineWidth": 0
+    },
+    {
+      "characterId": "male-muscle-max-v0-8-0",
+      "characterSha256": "11e88a4df956e9bd2c25f058265eb7530257f196ae54f1ad5f01099f090f38b4",
+      "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 2,
+      "maxOutlineWidth": 2
+    },
+    {
+      "characterId": "male-muscle-max-v0-8-0",
+      "characterSha256": "11e88a4df956e9bd2c25f058265eb7530257f196ae54f1ad5f01099f090f38b4",
+      "scope": "full",
       "skinId": "gray-guide",
       "minOutlineWidth": 0,
       "maxOutlineWidth": 0
@@ -2170,6 +2602,22 @@ export const approvedSkins: SkinPolicy = {
       "characterId": "male-muscular-v0-8-0",
       "characterSha256": "37c6ad6e8f61354dc51f99594efecdc8b4c48d03b7e611a4e648fc0e64925e2a",
       "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 0,
+      "maxOutlineWidth": 0
+    },
+    {
+      "characterId": "male-muscular-v0-8-0",
+      "characterSha256": "37c6ad6e8f61354dc51f99594efecdc8b4c48d03b7e611a4e648fc0e64925e2a",
+      "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 2,
+      "maxOutlineWidth": 2
+    },
+    {
+      "characterId": "male-muscular-v0-8-0",
+      "characterSha256": "37c6ad6e8f61354dc51f99594efecdc8b4c48d03b7e611a4e648fc0e64925e2a",
+      "scope": "full",
       "skinId": "gray-guide",
       "minOutlineWidth": 0,
       "maxOutlineWidth": 0
@@ -2226,6 +2674,22 @@ export const approvedSkins: SkinPolicy = {
       "characterId": "male-soft-v0-8-0",
       "characterSha256": "a9dcd65e68d03e62d89ff3cffd27c330361595d9407d02ba16b2720086582f2e",
       "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 0,
+      "maxOutlineWidth": 0
+    },
+    {
+      "characterId": "male-soft-v0-8-0",
+      "characterSha256": "a9dcd65e68d03e62d89ff3cffd27c330361595d9407d02ba16b2720086582f2e",
+      "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 2,
+      "maxOutlineWidth": 2
+    },
+    {
+      "characterId": "male-soft-v0-8-0",
+      "characterSha256": "a9dcd65e68d03e62d89ff3cffd27c330361595d9407d02ba16b2720086582f2e",
+      "scope": "full",
       "skinId": "gray-guide",
       "minOutlineWidth": 0,
       "maxOutlineWidth": 0
@@ -2275,6 +2739,22 @@ export const approvedSkins: SkinPolicy = {
       "characterSha256": "29aacebd756619bf62dd6f760a9966797e42dcd485dfcff82f0f878adabc595a",
       "scope": "full",
       "skinId": "flesh-guide",
+      "minOutlineWidth": 2,
+      "maxOutlineWidth": 2
+    },
+    {
+      "characterId": "male-toon64-v0-8-0",
+      "characterSha256": "29aacebd756619bf62dd6f760a9966797e42dcd485dfcff82f0f878adabc595a",
+      "scope": "full",
+      "skinId": "flesh-muscle",
+      "minOutlineWidth": 0,
+      "maxOutlineWidth": 0
+    },
+    {
+      "characterId": "male-toon64-v0-8-0",
+      "characterSha256": "29aacebd756619bf62dd6f760a9966797e42dcd485dfcff82f0f878adabc595a",
+      "scope": "full",
+      "skinId": "flesh-muscle",
       "minOutlineWidth": 2,
       "maxOutlineWidth": 2
     },

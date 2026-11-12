@@ -2,7 +2,7 @@
 import { z } from "zod";
 export const skinSchema = z.object({
   version: z.literal("fbx-skin-v1"),
-  id: z.enum(["default", "gray-guide", "flesh", "flesh-guide", "muscle"]),
+  id: z.enum(["default", "gray-guide", "flesh", "flesh-guide", "muscle", "flesh-muscle"]),
 }).strict();
 export type Skin = z.infer<typeof skinSchema>;
 export function nondefaultSkin(value?: Skin): Skin | undefined {
