@@ -1,9 +1,10 @@
 /** Approved neutral UV/texture overlay metadata; canonical model bytes stay unchanged. */
-import { gunzipSync } from "node:zlib";
-import { z } from "zod";
+import { Worker } from "node:worker_threads";
 import { hash, InteractiveError } from "../interactive-state/model.js";
 import { sha256Hex } from "../converter/client.js";
+import { log } from "../log.js";
 import type { SkinContext } from "./skin-proof.js";
+import type { SkinUvPin } from "./skin-uv.js";
 import { triangleIndexJson, type SolvedModelV2 } from "../interactive-state/shared/interactive_pose_v2.mjs";
 export interface SkinPreview {
   schema: "skin-preview-v1";
@@ -40,24 +41,71 @@ export function checkSkinPreviewBinaryModel(preview: SkinPreview | undefined, mo
     sha256Hex(Buffer.from(triangleIndexJson(mesh.triangles), "ascii")) !== pin.trianglesSha256)
     throw new InteractiveError("SKIN_UV_INCOMPATIBLE");
 }
-export function verifySkinPreviewAsset(preview: SkinPreview, digest: string, bytes: Uint8Array) {
+type UvVerdict = "ok" | "invalid" | "unavailable";
+/** Structure verdicts for exact pinned bytes. Sound because every call re-checks length and SHA-256
+ * against the pin before consulting it; transient worker failures are never remembered. */
+const uvVerdicts = new Map<string, "ok" | "invalid">();
+const uvPending = new Map<string, Promise<UvVerdict>>();
+let uvQueue: Promise<unknown> = Promise.resolve(), uvRuns = 0;
+/** Off-thread UV structure checks this process has started (observability and tests). */
+export const skinUvVerificationRuns = () => uvRuns;
+function checkUvOffThread(bytes: Uint8Array, pin: SkinUvPin): Promise<UvVerdict> {
+  uvRuns++;
+  const started = performance.now();
+  return new Promise<UvVerdict>(resolve => {
+    let worker: Worker | undefined, settled = false;
+    const done = (verdict: UvVerdict) => {
+      if (settled) return;
+      settled = true; clearTimeout(timer);
+      void worker?.terminate().catch(() => {});
+      log.info({ type: "skin_uv_verification", durationMs: performance.now() - started, verdict, payloadBytes: bytes.length });
+      resolve(verdict);
+    };
+    const timer = setTimeout(() => done("unavailable"), 120_000);
+    try {
+      // Private copy: never detach the caller's (or the asset cache's) buffer.
+      const copy = Uint8Array.from(bytes);
+      worker = new Worker(new URL("./skin-uv-worker.js", import.meta.url), { workerData: { bytes: copy, pin },
+        // The 139k-vertex male UV passes within 128 MB; 2x headroom keeps the 1 GB task safe.
+        transferList: [copy.buffer], resourceLimits: { maxOldGenerationSizeMb: 256 } });
+      worker.once("message", (m: { ok?: unknown }) => done(m?.ok === true ? "ok" : "invalid"));
+      worker.once("error", () => done("unavailable"));
+      worker.once("exit", () => done("unavailable"));
+    } catch { done("unavailable"); }
+  });
+}
+function verifyUv(digest: string, bytes: Uint8Array, pin: SkinUvPin): Promise<UvVerdict> {
+  const key = [digest, pin.characterSha256, pin.vertices, pin.trianglesSha256].join(":");
+  const known = uvVerdicts.get(key);
+  if (known) return Promise.resolve(known);
+  let pending = uvPending.get(key);
+  if (!pending) {
+    // One check at a time: each decodes ~40 MB of JSON and the BFF task has 1 GB in total.
+    const run = uvQueue.then(() => checkUvOffThread(bytes, pin));
+    uvQueue = run;
+    pending = run.then(verdict => {
+      if (verdict !== "unavailable") { if (uvVerdicts.size >= 64) uvVerdicts.clear(); uvVerdicts.set(key, verdict); }
+      return verdict;
+    }).finally(() => uvPending.delete(key));
+    uvPending.set(key, pending);
+  }
+  return pending;
+}
+/** Exact pinned bytes. The UV structure check (all former schema rules, `skin-uv.ts`) runs in a
+ * worker once per pinned digest, so a 9 MB UV never holds the HTTP event loop. */
+export async function verifySkinPreviewAsset(preview: SkinPreview, digest: string, bytes: Uint8Array) {
   const pin = digest === preview.uv.sha256 ? preview.uv : digest === preview.texture.sha256 ? preview.texture : undefined;
   if (!pin || bytes.length !== pin.bytes || sha256Hex(bytes) !== digest) throw new InteractiveError("SKIN_INTEGRITY_ERROR");
-  try {
-    if (digest === preview.texture.sha256) {
-      const png = Buffer.from(bytes);
-      if (png.length < 33 || !png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ||
-        png.subarray(12, 16).toString("ascii") !== "IHDR" || png.readUInt32BE(16) < 1 || png.readUInt32BE(20) < 1 ||
-        png.readUInt32BE(16) > 2048 || png.readUInt32BE(20) > 2048) throw new Error("PNG bounds");
-      return "image/png";
-    }
-    const raw: unknown = JSON.parse(gunzipSync(bytes, { maxOutputLength: 64 * 1024 * 1024 }).toString("utf8"));
-    const value = z.object({ source_sha256: z.literal(preview.compatibility.characterSha256),
-      uv: z.array(z.tuple([z.number().finite().min(0).max(1), z.number().finite().min(0).max(1)])).min(3).max(1000000),
-      triangles: z.array(z.tuple([z.number().int().nonnegative(), z.number().int().nonnegative(), z.number().int().nonnegative()])).min(1).max(333333),
-    }).strict().parse(raw);
-    if (value.uv.length !== value.triangles.length * 3 || hash(value.triangles) !== preview.compatibility.trianglesSha256 ||
-      value.triangles.some(t => t.some(i => i >= preview.compatibility.vertices))) throw new Error("UV topology");
-    return "application/gzip";
-  } catch { throw new InteractiveError("SKIN_INTEGRITY_ERROR"); }
+  if (digest === preview.texture.sha256) {
+    const png = Buffer.from(bytes);
+    if (png.length < 33 || !png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ||
+      png.subarray(12, 16).toString("ascii") !== "IHDR" || png.readUInt32BE(16) < 1 || png.readUInt32BE(20) < 1 ||
+      png.readUInt32BE(16) > 2048 || png.readUInt32BE(20) > 2048) throw new InteractiveError("SKIN_INTEGRITY_ERROR");
+    return "image/png";
+  }
+  const c = preview.compatibility;
+  const verdict = await verifyUv(digest, bytes, { characterSha256: c.characterSha256, vertices: c.vertices, trianglesSha256: c.trianglesSha256 });
+  if (verdict === "unavailable") throw new InteractiveError("SKIN_UNAVAILABLE", 503);
+  if (verdict !== "ok") throw new InteractiveError("SKIN_INTEGRITY_ERROR");
+  return "application/gzip";
 }
