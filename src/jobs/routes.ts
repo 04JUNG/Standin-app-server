@@ -1,4 +1,5 @@
 import { releaseEnabled } from "../refine/release.js";
+import { INTERACTIVE_PROTOCOL_HEADER, supportsPoseBodyProtocol } from "../interactive-state/protocol.js";
 import { interactiveEnabled } from "../interactive-state/runtime.js";
 import { staticAssets } from "../interactive-state/static.js";
 import { historyFrames } from "../interactive-state/history.js";
@@ -324,6 +325,7 @@ jobsRoutes.get("/:id/result", async (c) => {
     c.get("installationId")!,
     job.result,
   );
+  const appearanceProtocol = supportsPoseBodyProtocol(c.req.header(INTERACTIVE_PROTOCOL_HEADER));
   const availability = sceneAvailability(job);
   const interactiveAssets = new Map<string, Map<string, unknown>>();
   if (interactiveEnabled() && result.source !== "semantic") {
@@ -410,19 +412,19 @@ jobsRoutes.get("/:id/result", async (c) => {
       })),
     })),
     capabilities: {
-      selectionPreview: interactiveEnabled(),
+      selectionPreview: interactiveEnabled() && appearanceProtocol,
       ...(top5Ready
         ? {
             interactivePreview: {
               schemaVersion: "interactive-preview-capability-v1",
               top5: true,
-              operations: interactiveEnabled(),
+              operations: interactiveEnabled() && appearanceProtocol,
             },
           }
         : {}),
       interactiveState: {
         schemaVersion: "standin.interactive-http.v1",
-        available: interactiveEnabled(),
+        available: interactiveEnabled() && appearanceProtocol,
         transport: "polling",
         localHands: false,
         initialFbxRequired: true,

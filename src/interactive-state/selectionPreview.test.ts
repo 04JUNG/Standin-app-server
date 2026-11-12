@@ -130,6 +130,7 @@ test("HTTP endpoint is gated, bounds payloads, and creates no exportable stored 
   const t = setup();
   const app = new Hono<import("../env.js").AppEnv>();
   app.use("*", async (c, next) => {
+    c.req.raw.headers.set("X-Standin-Interactive-Protocol", "pose-body-only-v1");
     c.set("installationId", "owner");
     c.set("requestId", "preview-test");
     await next();
