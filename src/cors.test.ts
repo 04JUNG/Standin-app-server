@@ -32,6 +32,7 @@ for (const origin of ["tauri://localhost", "http://tauri.localhost", "http://loc
       "X-Standin-Scene-Manifest-Version": "csp-scene-manifest-v1",
       "X-Standin-Scene-Snapshot-SHA256": "a".repeat(64),
       "X-Standin-File-Count": "1",
+      "X-Standin-Base-Selection-Hash": "a".repeat(64),
       "X-Standin-Output-Scope": "half",
       "X-Standin-Preview-Projection": "orthographic",
       "X-Standin-Preview-Only": "true",

@@ -88,6 +88,29 @@ export function createInteractiveRoutes(
       throw new InteractiveError("INVALID_INPUT", 400);
     return { installationId, jobId, personIndex };
   };
+  const skinRequest = (c: { req: { query(name: string): string | undefined } }) => {
+    const candidateId = c.req.query("candidateId"), raw = c.req.query("skin");
+    if (!candidateId || candidateId.length > 200 || !raw || raw.length > 200)
+      throw new InteractiveError("INVALID_INPUT", 400);
+    let value: unknown;
+    try { value = JSON.parse(raw); } catch { throw new InteractiveError("INVALID_INPUT", 400); }
+    const skin = skinSchema.safeParse(value);
+    if (!skin.success || skin.data.id === "default") throw new InteractiveError("INVALID_INPUT", 400);
+    return { candidateId, skin: skin.data };
+  };
+  r.get("/:jobId/people/:personIndex/selection-skin-preview", async c => {
+    const location = l(c), { candidateId, skin } = skinRequest(c);
+    return c.json(await service.selectionSkinPreview(location, candidateId, skin), 200, { "Cache-Control": "private, no-store" });
+  });
+  r.get("/:jobId/people/:personIndex/selection-skin-assets/:digest", async c => {
+    const location = l(c), { candidateId, skin } = skinRequest(c), digest = c.req.param("digest");
+    if (!/^[a-f0-9]{64}$/.test(digest)) throw new InteractiveError("NOT_FOUND", 404);
+    const baseSelectionHash = c.req.query("baseSelectionHash");
+    if (!baseSelectionHash || !/^[a-f0-9]{64}$/.test(baseSelectionHash)) throw new InteractiveError("INVALID_INPUT", 400);
+    const asset = await service.selectionSkinAsset(location, candidateId, skin, digest, baseSelectionHash, c.req.raw.signal);
+    return new Response(asset.bytes, { headers: { "Content-Type": asset.contentType, "Content-Length": String(asset.bytes.length),
+      "Cache-Control": "private, no-store", "X-Skin-Asset-SHA256": digest, "X-Standin-Base-Selection-Hash": asset.baseSelectionHash } });
+  });
   const previewPath = "/:jobId/people/:personIndex/selection-preview";
   r.use(
     previewPath,

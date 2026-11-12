@@ -18,6 +18,7 @@ export function appCors(origins: string[]) {
     // 429 응답의 Retry-After를 웹뷰가 읽으려면 노출 목록에 있어야 한다(사용량 제한 안내).
     exposeHeaders: [
       "X-Standin-State-Hash",
+      "X-Standin-Base-Selection-Hash",
       "X-Standin-Revision",
       "X-Standin-Poster-Variant",
       "X-Standin-Poster-Yaw",
