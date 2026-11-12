@@ -6,6 +6,14 @@ import type { SkinPreview } from "../appearance/skin-preview.js";
 import { skinSchema, nondefaultSkin, type Skin } from "../appearance/skin.js";
 export const HTTP_SCHEMA = "standin.interactive-http.v1";
 export const SHA = /^[a-f0-9]{64}$/;
+/** Typed-JSON canonical state (`/model` = application/vnd.standin.solved-pose-state-v1+json). */
+export const STATE_ENCODING_V1 = "typed-f64be-json-v1";
+/** Binary canonical state (`/model` = application/vnd.standin.solved-pose-state-v2). */
+export const STATE_ENCODING_V2 = "standin-binary-f64le-v2";
+export type StateEncoding = typeof STATE_ENCODING_V1 | typeof STATE_ENCODING_V2;
+/** Encoding of a published state. A missing field is v1 (see Operation.stateEncoding). */
+export const stateEncodingOf = (op: Pick<Operation, "stateEncoding">): StateEncoding =>
+  op.stateEncoding === STATE_ENCODING_V2 ? STATE_ENCODING_V2 : STATE_ENCODING_V1;
 export class InteractiveError extends Error {
   constructor(
     readonly code: string,
@@ -70,6 +78,14 @@ export interface Operation extends Location {
   selectionHash: string;
   /** Converter canonical snapshot digest. Null until solve; never replaced once assigned. */
   stateHash: string | null;
+  /** Encoding asked of the Converter, decided at prepare (client capability + operator switch). */
+  requestedStateEncoding?: StateEncoding;
+  /**
+   * Encoding of the bytes stateHash names. Written in the same update as stateHash and never
+   * changed. Absent = v1: operations from before this field, or published by an older BFF
+   * replica (rolling deploy/rollback) that only knew v1.
+   */
+  stateEncoding?: StateEncoding;
   previewState: PreviewState;
   exportState: ExportState;
   eventSequence: number;

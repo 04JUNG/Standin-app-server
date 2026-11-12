@@ -23,6 +23,7 @@ export const interactiveService = new InteractiveService({
   resolve: createSelectionResolver(),
   worker,
   posters: new PrivatePosters(),
+  binaryState: () => config.interactiveBinaryState,
   renderPoster: (op, fbx, signal) =>
     renderFinalPreview(
       { fbx, artifactSha256: String(finalReceipt(op)!.artifactSha256) },

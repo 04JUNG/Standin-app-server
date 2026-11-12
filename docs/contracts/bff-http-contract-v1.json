@@ -1,7 +1,7 @@
 {
   "schemaVersion": "standin.interactive-http.v1",
   "status": "implemented-opt-in-local-real-verified",
-  "updatedAt": "2026-11-06",
+  "updatedAt": "2026-11-12",
   "source": {
     "repository": "04JUNG/Standin-app-server",
     "baseCommit": "37adaa616b21ac49933974f73b56fbc5c575b0c2",
@@ -22,11 +22,24 @@
     "httpTransport": "private authenticated /interactive/v1; default disabled",
     "runtimeSha256": "d35d8c8c2d7888c437e53791c8dd5ba58c8bd65a597c016eb26e6236c3369eff",
     "adapterVersion": "post-frozen-file-canonical-snapshot-v2",
-    "deadline": "Immutable BFF operation expiry; maximum one hour, missing/expired handle revokes ready"
+    "deadline": "Immutable BFF operation expiry; maximum one hour, missing/expired handle revokes ready",
+    "canonicalEncodings": [
+      "typed-f64be-json-v1",
+      "standin-binary-f64le-v2"
+    ]
   },
   "basePath": "/v1/analysis/jobs/{jobId}/people/{personIndex}/interactive-state",
   "authentication": "existing installation headers on every request; private no-store",
   "transport": "polling (1000ms suggested); no SSE in v1",
+  "protocol": {
+    "header": "X-Standin-Interactive-Protocol",
+    "syntax": "comma-separated token list; exact case-sensitive tokens; surrounding whitespace and empty items ignored; unknown tokens ignored",
+    "required": "pose-body-only-v1 (missing: 426 INTERACTIVE_PROTOCOL_REQUIRED on every interactive route)",
+    "optional": {
+      "solved-state-binary-v2": "client reads binary /model bytes (standin-binary-f64le-v2)"
+    },
+    "example": "pose-body-only-v1, solved-state-binary-v2"
+  },
   "routes": {
     "POST /": {
       "request": {
@@ -41,7 +54,7 @@
     },
     "GET /{operationId}": "200 Operation after full current-state revalidation",
     "DELETE /{operationId}": "200 cancelled (idempotent); abort queued and active worker",
-    "GET /{operationId}/model": "200 server packet; never client matrices",
+    "GET /{operationId}/model": "200 server state; Content-Type selects the decoder: application/vnd.standin.solved-pose-state-v1+json (typed-JSON packet, modelResponse) or application/vnd.standin.solved-pose-state-v2 (binary bytes, modelResponseBinary; only for requests advertising solved-state-binary-v2, otherwise 426 INTERACTIVE_PROTOCOL_REQUIRED); never client matrices",
     "POST /{operationId}/export": "202 same-state idempotent export preparation",
     "GET /{operationId}/file": "200 verified FBX only; latest revision + full release/current-state recheck",
     "GET /{operationId}/poster": "200 server-authoritative static PNG or 404; never blocks list/export",
@@ -51,7 +64,7 @@
       "response": "201 auxiliary UI-only acknowledgement; same-hash retry idempotent; never accuracy/file safety evidence; never authoritative history poster"
     },
     "GET /v1/analysis/jobs/{jobId}/people/{personIndex}/interactive-frame": "200 archived current-selection server PNG; separate from operation/file expiry, same owned-job retention/source checks",
-    "GET /{operationId}/variants": "200 bounded exact previously verified owner-bound hand variants; current ready operation required",
+    "GET /{operationId}/variants": "200 bounded exact previously verified owner-bound hand variants; current ready operation required; binary-state operations always 409 CONVERTER_INTEGRITY (no v1 hand atlas), without a Converter call",
     "GET /{operationId}/skin-assets/{sha256}": "200 bounded approved application/gzip UV or image/png preview after installation/current operation/selection/asset revalidation; private/no-store, exact SHA/bytes; no arbitrary hashes/URLs"
   },
   "Operation": {
@@ -81,7 +94,8 @@
     "Legacy framed ready/preview, semantic static lists, scene and explicit download contracts retained; rollout disabled by default",
     "selectionHash is the stable pre-solve request fingerprint; stateHash is the Converter full canonical snapshot hash. Revision fences even pre-solve replies. expectedStateHash nullable, compared when non-null.",
     "Archived static representative frames are separate from expiring export authority; every image delivery still verifies current ownership/selection/source. Existing thumbnailUrl is retained.",
-    "Client frame cameraHash is a claimed auxiliary metadata value, never trusted camera/projection evidence. One auxiliary image per operation; cannot populate authoritative history."
+    "Client frame cameraHash is a claimed auxiliary metadata value, never trusted camera/projection evidence. One auxiliary image per operation; cannot populate authoritative history.",
+    "Clients must branch on the /model Content-Type, not on what they advertised: an operation negotiated as binary can still be served as v1 when the Converter answers v1 or the operator switch is off. X-Standin-State-Hash always equals SHA256 of the delivered binary bytes (v2) or the packet stateHash (v1)."
   ],
   "changes": [
     "Initial BFF polling draft; converter packet schema pending",
@@ -90,7 +104,8 @@
     "Pinned BFF implementation 7dcfcfd and Converter draft implementation 3fa41e71; confirmed no HTTP transport and no frozen/activated integration.",
     "Real-model v2 integration: authenticated internal HTTP, normalized search projection, strict file-canonical display/export correspondence, prebuilt 5/5 local Top5 and bounded verified hand tables. Default flags remain off.",
     "Strict appearance-bound final export boundary; rejected CSP hull remains unavailable, zero legacy unchanged.",
-    "Align native-v2/culling/surface/continuous full-width/width2 cropped target proof with current posed-FBX scope; preserve v1 rejection and zero path."
+    "Align native-v2/culling/surface/continuous full-width/width2 cropped target proof with current posed-FBX scope; preserve v1 rejection and zero path.",
+    "2026-11-12 binary solved state: optional X-Standin-Interactive-Protocol token solved-state-binary-v2, per-operation requestedStateEncoding/stateEncoding, application/vnd.standin.solved-pose-state-v2 /model bytes validated with the vendored Converter reader, INTERACTIVE_BINARY_STATE operator switch; v1 behaviour unchanged."
   ],
   "implementationStatus": "implemented private Converter HTTP/camera/static/verified-hand transport; local real-asset and full-wire tests pass; disabled by default",
   "schemas": {
@@ -247,6 +262,30 @@
     "canonicalEncoding": "typed-f64be-json-v1",
     "canonicalState": "Converter canonical JSON payload: schema, identity, bounded model (bones+skin+mesh+split normals), safety, dependencies; float values encoded {$f64: 16 hex chars}. See Converter contract; no external assets or client matrices."
   },
+  "modelResponseBinary": {
+    "mediaType": "application/vnd.standin.solved-pose-state-v2",
+    "encoding": "standin-binary-f64le-v2",
+    "body": "Converter binary state bytes, delivered unchanged (layout: Standin-server docs/INTERACTIVE_STATE_BINARY_V2.md; reader: Standin-server converter/shared/interactive_pose_v2.mjs readSolvedStateV2)",
+    "stateHash": "SHA256 of all body bytes (= X-Standin-State-Hash = operation stateHash)",
+    "modelSha256": "SHA256 of the bytes from the STNDMDL2 magic to the end (= export receipt packetModelSha256)",
+    "headers": [
+      "Content-Type",
+      "Content-Length",
+      "Cache-Control: private, no-store",
+      "X-Standin-State-Hash",
+      "X-Standin-Revision"
+    ],
+    "logicalContent": "lossless re-encoding of the v1 canonicalState payload (schema, identity, model, safety, dependencies)"
+  },
+  "stateEncodingNegotiation": {
+    "decidedAt": "prepare (POST /); stored per operation as requestedStateEncoding (absent = v1)",
+    "binaryWhen": "request advertises solved-state-binary-v2 AND INTERACTIVE_BINARY_STATE is on (default); the switch is re-checked when the preview is solved",
+    "converterRequest": "POST /interactive/v1/solve with X-Standin-State-Encoding: standin-binary-f64le-v2 (header omitted for v1, request otherwise unchanged)",
+    "fallback": "Converter v1 answer (older Converter or CONVERTER_INTERACTIVE_BINARY_STATE=0) is validated by the unchanged v1 path and the operation is recorded as v1",
+    "fixedWith": "published encoding stored as stateEncoding in the same update as stateHash and never changed; absent = typed-f64be-json-v1 (older rows or a state published by an older BFF replica)",
+    "selectionPreview": "always v1",
+    "capability": "analysis job result capabilities.solvedStateBinary = {protocolToken: \"solved-state-binary-v2\", mediaType, available: operator switch}, present only when interactiveState.available; a separate key because clients parse interactiveState strictly. Clients may add the token only after seeing it, which keeps a BFF rollback from turning the token list into 426 responses."
+  },
   "limits": {
     "operationTtlSeconds": 3600,
     "queuedPerInstallation": 20,
@@ -261,7 +300,8 @@
     "sse": false,
     "realWorkerValidated": false,
     "nativeSaveValidated": false,
-    "top5MatrixCoverageValidated": false
+    "top5MatrixCoverageValidated": false,
+    "binaryStateSwitch": "INTERACTIVE_BINARY_STATE=1 default; 0 = v1 for new and still-solving operations; any value other than 0/1/true/false fails startup"
   },
   "staticAssets": {
     "resolve": "batched offline Converter manifest; never Blender per card",
