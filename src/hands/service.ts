@@ -122,6 +122,9 @@ export async function handBakeFor(
   if (!scopeIncludesHands(resolvePersonOutputScope(person).resolved)) return null;
   const selection = person?.handSelection;
   if (!selection) return null;
+  // Keeping both source hands needs no preset assets or Converter library agreement.
+  // Any selected preset still requires the fresh agreement below.
+  if (selection.left === SOURCE_POSE && selection.right === SOURCE_POSE) return null;
   const catalog = await readyHandCatalog(true);
   if (selection.library_sha256 !== catalog.library_sha256)
     throw new HandError(
