@@ -102,14 +102,15 @@ export function createSkinArtifacts(overrides: Partial<SkinDeps> = {}): SkinArti
       if (!assets.has(digest)) { if (assets.size >= 8) assets.delete(assets.keys().next().value!); assets.set(digest, bytes); }
       return { bytes, contentType };
     },
-    async asset(op, selection, digest, signal) {
-      const current = await context(selection, op.skin, op.appearance, signal), preview = skinPreview(current.context, selection.characterId);
-      if (!op.skinPreview || hash(op.skinPreview) !== hash(preview)) throw new InteractiveError("SKIN_BINDING_MISMATCH");
+    async asset(op, digest, signal) {
+      // The operation service revalidates the exact live approval before and
+      // after this read. The stored descriptor still pins the approved bytes.
+      const preview = op.skinPreview;
+      if (!preview) throw new InteractiveError("SKIN_BINDING_MISMATCH");
       const pin = digest === preview.uv.sha256 ? preview.uv : digest === preview.texture.sha256 ? preview.texture : undefined;
       if (!pin) throw new InteractiveError("NOT_FOUND", 404);
-      const bytes = await readAsset(digest, pin.bytes, signal), contentType = verifySkinPreviewAsset(preview, digest, bytes);
-      const fresh = await context(selection, op.skin, op.appearance, signal);
-      if (fresh.approval.identity !== current.approval.identity) throw new InteractiveError("SKIN_BINDING_MISMATCH");
+      const bytes = await readAsset(digest, pin.bytes, signal);
+      const contentType = verifySkinPreviewAsset(preview, digest, bytes);
       if (!assets.has(digest)) { if (assets.size >= 8) assets.delete(assets.keys().next().value!); assets.set(digest, bytes); }
       return { bytes, contentType };
     },
