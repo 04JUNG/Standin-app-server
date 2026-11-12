@@ -3,6 +3,7 @@ import { nondefaultSkin, type Skin } from "../appearance/skin.js";
 import { nonzeroAppearance, type Appearance } from "../appearance/model.js";
 import { parsePacket, parseReceipt } from "./packet.js";
 import { sha256Hex } from "../converter/client.js";
+import { log } from "../log.js";
 import { decodeFrame, type ClientFrame } from "./clientFrame.js";
 import {
   InteractiveError,
@@ -141,10 +142,29 @@ export class InteractiveService {
     };
   }
   async current(l: Location, id: string) {
-    const op = await this.deps.store.get(l, id);
-    // Cancelled states are visible after ownership/current selection validation.
-    await this.revalidate(op);
-    return op;
+    const startedAt = performance.now();
+    let lookupMs: number | undefined;
+    let failed = false;
+    let errorCode: string | undefined;
+    try {
+      const op = await this.deps.store.get(l, id);
+      lookupMs = performance.now() - startedAt;
+      // Cancelled states are visible after ownership/current selection validation.
+      await this.revalidate(op);
+      return op;
+    } catch (error) {
+      failed = true;
+      if (error && typeof error === "object" && "code" in error &&
+          typeof error.code === "string" && /^[A-Z0-9_]{1,64}$/.test(error.code))
+        errorCode = error.code;
+      throw error;
+    } finally {
+      const durationMs = performance.now() - startedAt;
+      if (failed || durationMs >= 500)
+        log.info({ type: "interactive_state_read", jobId: l.jobId, operationId: id,
+          durationMs, lookupMs, revalidateMs: lookupMs === undefined ? undefined : durationMs - lookupMs,
+          failed, errorCode });
+    }
   }
   async revalidate(op: Operation) {
     const selection = await this.resolve(op, op.candidateId, op.appearance, op.skin);
@@ -434,8 +454,11 @@ export class InteractiveService {
         );
         if (!/^[A-Za-z0-9_-]{1,128}$/.test(solved.snapshotId))
           throw new InteractiveError("CONVERTER_INTEGRITY");
+        const packetStarted = performance.now();
         const validated = parsePacket(solved.packet, op, selection);
         checkSkinPreviewModel(op.skinPreview, validated.payload.model);
+        log.info({ type: "interactive_packet_validation", jobId: op.jobId, operationId: op.operationId,
+          revision: op.revision, durationMs: performance.now() - packetStarted });
         if (controller.signal.aborted) return;
         await this.revalidate(op);
         const published = await this.deps.store.update(
