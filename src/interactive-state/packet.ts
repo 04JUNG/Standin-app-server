@@ -240,22 +240,36 @@ export function checkIdentity(
   )
     throw new InteractiveError("CONVERTER_INTEGRITY");
 }
+function boundPacket(raw: unknown, op: Operation) {
+  const packet = packetSchema.parse(raw);
+  if (
+    packet.operation !== op.operationId ||
+    packet.revision !== op.revision ||
+    (op.stateHash && packet.stateHash !== op.stateHash) ||
+    !/^[\x00-\x7f]+$/.test(packet.canonicalState) ||
+    sha256Hex(Buffer.from(packet.canonicalState, "ascii")) !==
+      packet.stateHash
+  )
+    throw new Error("packet binding");
+  return packet;
+}
+
+/** The persisted hash pins all bytes of the surface that passed full validation. */
+export function checkPublishedPacket(raw: unknown, op: Operation) {
+  try {
+    if (!op.stateHash || !op.snapshotProof) throw new Error("snapshot not published");
+    boundPacket(raw, op);
+  } catch {
+    throw new InteractiveError("CONVERTER_INTEGRITY");
+  }
+}
 export function parsePacket(
   raw: unknown,
   op: Operation,
   selection: ResolvedSelection,
 ) {
   try {
-    const packet = packetSchema.parse(raw);
-    if (
-      packet.operation !== op.operationId ||
-      packet.revision !== op.revision ||
-      (op.stateHash && packet.stateHash !== op.stateHash) ||
-      !/^[\x00-\x7f]+$/.test(packet.canonicalState) ||
-      sha256Hex(Buffer.from(packet.canonicalState, "ascii")) !==
-        packet.stateHash
-    )
-      throw new Error("packet binding");
+    const packet = boundPacket(raw, op);
     const typed: unknown = JSON.parse(packet.canonicalState);
     if (canonicalTyped(typed) !== packet.canonicalState)
       throw new Error("noncanonical state");

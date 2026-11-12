@@ -1,7 +1,7 @@
 import { checkSkinPreviewModel, type SkinPreview } from "../appearance/skin-preview.js";
 import { nondefaultSkin, type Skin } from "../appearance/skin.js";
 import { nonzeroAppearance, type Appearance } from "../appearance/model.js";
-import { parsePacket, parseReceipt } from "./packet.js";
+import { checkPublishedPacket, parsePacket, parseReceipt } from "./packet.js";
 import { sha256Hex } from "../converter/client.js";
 import { log } from "../log.js";
 import { decodeFrame, type ClientFrame } from "./clientFrame.js";
@@ -141,13 +141,17 @@ export class InteractiveService {
           : null,
     };
   }
+  // Byte and mutation handlers perform their own fresh selection checks.
+  lookup(l: Location, id: string) {
+    return this.deps.store.get(l, id);
+  }
   async current(l: Location, id: string) {
     const startedAt = performance.now();
     let lookupMs: number | undefined;
     let failed = false;
     let errorCode: string | undefined;
     try {
-      const op = await this.deps.store.get(l, id);
+      const op = await this.lookup(l, id);
       lookupMs = performance.now() - startedAt;
       // Cancelled states are visible after ownership/current selection validation.
       await this.revalidate(op);
@@ -220,8 +224,12 @@ export class InteractiveService {
     } catch {
       throw new InteractiveError("CONVERTER_INTEGRITY");
     }
-    const parsed = parsePacket(packet, op, selection);
-    checkSkinPreviewModel(op.skinPreview, parsed.payload.model);
+    if (op.snapshotProof) {
+      checkPublishedPacket(packet, op);
+    } else {
+      const parsed = parsePacket(packet, op, selection);
+      checkSkinPreviewModel(op.skinPreview, parsed.payload.model);
+    }
     await this.assertDeliverable(op);
     return bytes;
   }
@@ -488,22 +496,24 @@ export class InteractiveService {
           selection,
         );
         if (controller.signal.aborted) return;
-        await this.revalidate(op);
         let processed = { ...op, receipt }, source: Uint8Array | undefined;
-        if (op.skin || op.appearance) source = await this.verifiedFile(processed, controller.signal);
+        if (op.skin || op.appearance) {
+          await this.revalidate(op);
+          source = await this.verifiedFile(processed, controller.signal);
+        }
         const skinReceipt = op.skin
           ? await this.skin().prepare(processed, selection, source!, controller.signal)
           : undefined;
         if (controller.signal.aborted) return;
-        await this.revalidate(op);
         if (skinReceipt) {
+          await this.revalidate(op);
           processed = { ...processed, skinReceipt };
           source = await this.skin().file(processed, selection, controller.signal);
           this.verifyAppearanceBytes(source, skinReceipt, "SKIN_INTEGRITY_ERROR");
           outlineSourceOperation(processed);
         }
         if (controller.signal.aborted) return;
-        await this.revalidate(op);
+        if (op.appearance) await this.revalidate(op);
         const outlineReceipt = op.appearance
           ? await this.outline().prepare(outlineSourceOperation(processed), selection, source!, controller.signal)
           : undefined;

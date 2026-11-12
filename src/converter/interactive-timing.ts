@@ -1,7 +1,7 @@
 import { log } from "../log.js";
 import type { Operation } from "../interactive-state/model.js";
 
-export type ConverterTrace = { op: Operation; phase: "solve" | "export" | "model" | "variants" | "file" | "skin" };
+export type ConverterTrace = { op: Operation; phase: "solve" | "export" | "model" | "variants" | "file" | "skin" | "outline" };
 function timingHeader(response: Response, name: string) {
   const value = response.headers.get(name);
   if (value === null || !/^\d+(\.\d+)?$/.test(value)) return undefined;
