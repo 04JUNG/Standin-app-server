@@ -3,6 +3,7 @@ import { config } from "../config.js";
 import { log } from "../log.js";
 import { ConverterError, EXPECTED_SOLVER_VERSION } from "./client.js";
 import { FRAMING_VERSION } from "./framing.js";
+import { probeDeadline, probeOnce } from "./probeDeadline.js";
 export interface PreviewRuntime {
   schemaVersion: "body-preview-runtime.v1";
   previewRevision: string;
@@ -11,18 +12,27 @@ export interface PreviewRuntime {
   solverVersion: string;
   framingVersion: string;
 }
-export async function getPreviewRuntime(
-  fetcher = fetch,
-): Promise<PreviewRuntime> {
+let pending: Promise<PreviewRuntime> | undefined;
+/** Concurrent polls share one in-flight read; every new poll still reads the contract. */
+export function getPreviewRuntime(fetcher = fetch): Promise<PreviewRuntime> {
+  if (fetcher !== fetch) return readPreviewRuntime(fetcher);
+  pending ??= readPreviewRuntime(fetcher).finally(() => {
+    pending = undefined;
+  });
+  return pending;
+}
+async function readPreviewRuntime(fetcher: typeof fetch): Promise<PreviewRuntime> {
   const started = performance.now();
   let status: number | undefined;
+  // A BFF event-loop stall must not abort a contract response that already arrived.
+  const deadline = probeDeadline(5000);
   try {
-    const response = await fetcher(
+    const response = await probeOnce(() => fetcher(
       `${config.converterBaseUrl.replace(/\/+$/, "")}/preview-contract`,
       {
-        signal: AbortSignal.timeout(5000),
+        signal: deadline.signal,
       },
-    );
+    ), deadline.signal);
     status = response.status;
     if (!response.ok) {
       await response.body?.cancel();
@@ -66,7 +76,7 @@ export async function getPreviewRuntime(
     };
   } catch (error) {
     log.warn({ type: "interactive_runtime_probe_failed", status,
-      durationMs: performance.now() - started,
+      durationMs: performance.now() - started, stalledMs: Math.round(deadline.stalledMs()),
       errorCode: error instanceof Error && ["TimeoutError", "AbortError"].includes(error.name)
         ? error.name : "BODY_PREVIEW_UNAVAILABLE" });
     throw new ConverterError(
@@ -74,6 +84,7 @@ export async function getPreviewRuntime(
       "preview runtime contract unavailable",
     );
   } finally {
+    deadline.clear();
     log.info({ type: "interactive_runtime_probe", status, durationMs: performance.now() - started });
   }
 }
