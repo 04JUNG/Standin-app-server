@@ -19,14 +19,14 @@ const model = z.object({ character_sha256: sha, vertices: z.number().int().posit
   bones: z.number().int().positive().max(256), preview_resolution: z.literal(2048),
   preview_mesh: z.string().min(1).max(100), triangles_sha256: sha, polygon_indices_sha256: sha, weights_sha256: sha }).strict();
 const asset = z.object({ character_id: z.string().min(1).max(200), kind: z.enum(["uv", "texture", "preview-texture"]),
-  skin_id: skinId.nullable(), sha256: sha, bytes: z.number().int().positive().max(4 * 1024 * 1024),
+  skin_id: skinId.nullable(), sha256: sha, bytes: z.number().int().positive().max(16 * 1024 * 1024),
   url: z.string().max(100) }).strict();
 export const skinContractSchema = z.object({ version: z.literal("fbx-skin-v1"), expression: z.literal(SKIN_EXPRESSION),
   enabled: z.boolean(), assets_available: z.boolean(), csp_certified: z.boolean(), acceptance_scope: z.literal("posed-fbx-import"),
   runtime_revision: sha, asset_manifest_sha256: sha, asset_version: z.string().min(1).max(100),
   skins: z.array(skinId).max(5), supported_targets: z.array(z.object({ character_id: z.string().min(1).max(200),
     character_sha256: sha, output_scope: z.literal("full"), skin_ids: z.array(skinId).min(1).max(4) }).strict()).max(100),
-  candidate_models: z.record(z.string().max(200), model), assets: z.array(asset).max(100),
+  candidate_models: z.record(z.string().max(200), model), assets: z.array(asset).max(256),
   zero: z.literal("default-legacy-byte-preserving"), order: z.tuple([z.literal("skin"), z.literal("outline")]),
 }).strict();
 export function checkSkinContract(raw: unknown, selection: ResolvedSelection, skin?: Skin, appearance?: Appearance, policy: SkinPolicy = approvedSkins) {
