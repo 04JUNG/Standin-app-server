@@ -41,7 +41,7 @@ export function verifySkinPreviewAsset(preview: SkinPreview, digest: string, byt
         png.readUInt32BE(16) > 2048 || png.readUInt32BE(20) > 2048) throw new Error("PNG bounds");
       return "image/png";
     }
-    const raw: unknown = JSON.parse(gunzipSync(bytes, { maxOutputLength: 16 * 1024 * 1024 }).toString("utf8"));
+    const raw: unknown = JSON.parse(gunzipSync(bytes, { maxOutputLength: 64 * 1024 * 1024 }).toString("utf8"));
     const value = z.object({ source_sha256: z.literal(preview.compatibility.characterSha256),
       uv: z.array(z.tuple([z.number().finite().min(0).max(1), z.number().finite().min(0).max(1)])).min(3).max(1000000),
       triangles: z.array(z.tuple([z.number().int().nonnegative(), z.number().int().nonnegative(), z.number().int().nonnegative()])).min(1).max(333333),

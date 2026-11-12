@@ -81,5 +81,5 @@ test("skin HTTP stream/body bounds and disabled transport fail before file prepa
   let pulls = 0;
   await assert.rejects(createSkinArtifacts({ ...deps, enabled: () => true,
     fetch: (async () => new Response(new ReadableStream({ pull(c) { pulls++; c.enqueue(new Uint8Array(16384)); } }))) as typeof fetch }).check(selection, seed.skin), /SKIN_INTEGRITY_ERROR/);
-  assert.ok(pulls < 8);
+  assert.ok(pulls <= 10);
 });

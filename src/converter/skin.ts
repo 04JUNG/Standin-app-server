@@ -33,7 +33,7 @@ export function createSkinArtifacts(overrides: Partial<SkinDeps> = {}): SkinArti
     catch { throw new InteractiveError(signal?.aborted ? "INTERACTIVE_SUPERSEDED" : "SKIN_UNAVAILABLE", signal?.aborted ? 409 : 503); }
     const reader = response.body?.getReader();
     if (!reader) throw new InteractiveError("SKIN_UNAVAILABLE", 503);
-    const cap = path === "/skin-contract" ? 65536 : response.ok ? 42 * 1024 * 1024 : 16384;
+    const cap = path === "/skin-contract" ? 128 * 1024 : response.ok ? 42 * 1024 * 1024 : 16384;
     let size = 0; const chunks: Uint8Array[] = [];
     try {
       for (;;) { const { done, value } = await reader.read(); if (done) break;
@@ -69,7 +69,7 @@ export function createSkinArtifacts(overrides: Partial<SkinDeps> = {}): SkinArti
     try {
       if (!response.ok || response.headers.get("X-Skin-Asset-SHA256") !== digest) throw new InteractiveError("SKIN_ASSETS_UNAVAILABLE", 503);
       for (;;) { const { done, value } = await reader.read(); if (done) break;
-        size += value.length; if (size > expectedBytes || size > 4 * 1024 * 1024) throw new InteractiveError("SKIN_INTEGRITY_ERROR"); chunks.push(value); }
+        size += value.length; if (size > expectedBytes || size > 16 * 1024 * 1024) throw new InteractiveError("SKIN_INTEGRITY_ERROR"); chunks.push(value); }
       const advertised = response.headers.get("content-length");
       if (size !== expectedBytes || (advertised !== null && (!/^\d+$/.test(advertised) || Number(advertised) !== size)))
         throw new InteractiveError("SKIN_INTEGRITY_ERROR");
