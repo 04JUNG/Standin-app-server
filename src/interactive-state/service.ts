@@ -3,7 +3,7 @@ import { nondefaultSkin, type Skin } from "../appearance/skin.js";
 import { nonzeroAppearance, type Appearance } from "../appearance/model.js";
 import { parsePacket, parsePublishedPacket, parseReceipt } from "./packet.js";
 import { recoverValidation } from "./revalidation.js";
-import { sha256Hex } from "../converter/client.js";
+import { ConverterError, sha256Hex } from "../converter/client.js";
 import { decodeFrame, type ClientFrame } from "./clientFrame.js";
 import {
   InteractiveError,
@@ -78,7 +78,7 @@ export class InteractiveService {
     let code: string | undefined;
     try { return await action(); }
     catch (error) {
-      code = error instanceof InteractiveError ? error.code : "INTERACTIVE_UNAVAILABLE";
+      code = error instanceof InteractiveError || error instanceof ConverterError ? error.code : "INTERACTIVE_UNAVAILABLE";
       throw error;
     } finally {
       this.deps.metric(event, stage, performance.now() - started, code,
@@ -542,7 +542,7 @@ export class InteractiveService {
         undefined, { operationId: op.operationId, revision: op.revision });
     } catch (error) {
       const code =
-        error instanceof InteractiveError
+        error instanceof InteractiveError || error instanceof ConverterError
           ? error.code
           : "INTERACTIVE_WORKER_FAILED";
       if (!controller.signal.aborted) {
