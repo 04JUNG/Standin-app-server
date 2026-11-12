@@ -3,7 +3,7 @@ import { config } from "../config.js";
 import { log } from "../log.js";
 import { ConverterError, EXPECTED_SOLVER_VERSION } from "./client.js";
 import { FRAMING_VERSION } from "./framing.js";
-import { probeDeadline } from "./probeDeadline.js";
+import { probeDeadline, probeOnce } from "./probeDeadline.js";
 export interface PreviewRuntime {
   schemaVersion: "body-preview-runtime.v1";
   previewRevision: string;
@@ -27,12 +27,12 @@ async function readPreviewRuntime(fetcher: typeof fetch): Promise<PreviewRuntime
   // A BFF event-loop stall must not abort a contract response that already arrived.
   const deadline = probeDeadline(5000);
   try {
-    const response = await fetcher(
+    const response = await probeOnce(() => fetcher(
       `${config.converterBaseUrl.replace(/\/+$/, "")}/preview-contract`,
       {
         signal: deadline.signal,
       },
-    );
+    ), deadline.signal);
     status = response.status;
     if (!response.ok) {
       await response.body?.cancel();

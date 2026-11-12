@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { sameShapeSource, type BodyShape, type ShapeSource } from "../body-selection/shape.js";
 import { config } from "../config.js";
 import { log } from "../log.js";
-import { probeDeadline } from "./probeDeadline.js";
+import { probeDeadline, probeOnce } from "./probeDeadline.js";
 import { framedPairStore, type FramedLocation, type FramedPairStore } from "./framedStorage.js";
 import {
   ConverterError,
@@ -319,10 +319,10 @@ export class FramingHealthProbe {
     const deadline = probeDeadline(5000);
     try {
       const deps = this.deps();
-      const res = await deps.fetch(`${deps.baseUrl}/healthz`, {
+      const res = await probeOnce(() => deps.fetch(`${deps.baseUrl}/healthz`, {
         headers: { "X-Request-Id": probeRequestId },
         signal: deadline.signal,
-      });
+      }), deadline.signal);
       const v = await boundedJson(res);
       if (res.ok) {
         const scopes = v.output_scopes;

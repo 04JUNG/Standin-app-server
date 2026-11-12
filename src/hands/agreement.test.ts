@@ -5,7 +5,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { Worker } from "node:worker_threads";
 import { EXPECTED_SOLVER_VERSION } from "../converter/client.js";
 import { FRAMING_VERSION } from "../converter/framing.js";
-import { probeDeadline, type ProbeDeadline } from "../converter/probeDeadline.js";
+import { probeDeadline, probeOnce, type ProbeDeadline } from "../converter/probeDeadline.js";
 import { HandAgreement, type HandAgreementDeps } from "./agreement.js";
 import { parseCatalog, type HandCatalog } from "./model.js";
 
@@ -254,4 +254,92 @@ test("the feature switch closes readiness even with a fresh agreement", async ()
   await agreement.read(true);
   enabled = false;
   await assert.rejects(agreement.read(true), { code: "HAND_SELECTION_DISABLED" });
+});
+
+/**
+ * Fake Converter that, like uvicorn, sends no Keep-Alive hint and closes an idle socket
+ * on its own after `idleCloseMs` (uvicorn: 5 s). undici then keeps the socket pooled for
+ * its default 4 s and cannot learn of the close while this thread is stalled.
+ */
+async function keepAliveConverter(idleCloseMs: number) {
+  const worker = new Worker(
+    `
+    const { parentPort, workerData } = require("node:worker_threads");
+    const net = require("node:net");
+    const body = JSON.stringify(workerData.health);
+    const CRLF = String.fromCharCode(13, 10);
+    const server = net.createServer((socket) => {
+      let idle;
+      socket.on("data", () => {
+        clearTimeout(idle);
+        socket.write(["HTTP/1.1 200 OK", "Content-Type: application/json",
+          "Content-Length: " + Buffer.byteLength(body), "", body].join(CRLF));
+        idle = setTimeout(() => socket.destroy(), workerData.idleCloseMs);
+      });
+      socket.on("error", () => {});
+    });
+    server.listen(0, "127.0.0.1", () => parentPort.postMessage(server.address().port));
+    parentPort.on("message", (m) => { if (m === "close") server.close(() => process.exit(0)); });
+    `,
+    { eval: true, workerData: { health, idleCloseMs } },
+  );
+  const [port] = (await once(worker, "message")) as [number];
+  return {
+    url: `http://127.0.0.1:${port}/healthz`,
+    close: async () => {
+      worker.postMessage("close");
+      await once(worker, "exit");
+    },
+  };
+}
+
+test("a probe right after a stall longer than the Converter's idle close still succeeds", async () => {
+  // Production uvicorn closes idle keep-alive sockets after 5 s. Another session reproduced
+  // UND_ERR_SOCKET for the first request after a 6-10 s BFF stall in node:20-slim. This host
+  // does not always hit the stale socket, so the retry decision itself is tested with fakes below.
+  const converter = await keepAliveConverter(300);
+  try {
+    await (await fetch(converter.url)).json();
+    stall(800);
+    const deadline = probeDeadline(2000);
+    try {
+      const response = await probeOnce(() => fetch(converter.url, { signal: deadline.signal }), deadline.signal);
+      assert.equal(((await response.json()) as typeof health).ok, true);
+    } finally {
+      deadline.clear();
+    }
+  } finally {
+    await converter.close();
+  }
+});
+
+test("only a stale connection is retried, once, inside the same deadline", async () => {
+  const socketError = (code: string) => Object.assign(new TypeError("fetch failed"), { cause: { code } });
+  const h = harness();
+  let calls = 0;
+  h.health(async () => {
+    calls++;
+    if (calls === 1) throw socketError("UND_ERR_SOCKET");
+    return Response.json(health);
+  });
+  assert.equal((await h.agreement.read(true)).library_sha256, catalog.library_sha256);
+  assert.equal(calls, 2);
+  for (const code of ["ECONNREFUSED", "ENOTFOUND"]) {
+    const other = harness();
+    let attempts = 0;
+    other.health(async () => {
+      attempts++;
+      throw socketError(code);
+    });
+    await assert.rejects(other.agreement.read(true), { code: "HANDS_UNAVAILABLE" });
+    assert.equal(attempts, 1, code);
+  }
+  const twice = harness();
+  let attempts = 0;
+  twice.health(async () => {
+    attempts++;
+    throw socketError("UND_ERR_SOCKET");
+  });
+  await assert.rejects(twice.agreement.read(true), { code: "HANDS_UNAVAILABLE" });
+  assert.equal(attempts, 2);
 });

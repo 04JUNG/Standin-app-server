@@ -58,3 +58,23 @@ export function probeDeadline(
     },
   };
 }
+
+const STALE_SOCKET = new Set(["UND_ERR_SOCKET", "UND_ERR_CLOSED", "ECONNRESET", "EPIPE"]);
+/**
+ * The Converter (uvicorn keep-alive 5 s) closes idle sockets while this process is stalled.
+ * The first probe after the stall can reuse one and fail before any response arrives.
+ * A refused connection or DNS failure is not this case and is not retried.
+ */
+export function staleConnection(error: unknown): boolean {
+  const cause = error instanceof TypeError ? (error as { cause?: unknown }).cause : undefined;
+  return !!cause && typeof cause === "object" && "code" in cause && STALE_SOCKET.has(String(cause.code));
+}
+/** Read-only probes only: one retry on a fresh connection, inside the same deadline. */
+export async function probeOnce<T>(send: () => Promise<T>, signal: AbortSignal): Promise<T> {
+  try {
+    return await send();
+  } catch (error) {
+    if (signal.aborted || !staleConnection(error)) throw error;
+    return send();
+  }
+}

@@ -10,7 +10,7 @@
 import { randomUUID } from "node:crypto";
 import { EXPECTED_SOLVER_VERSION } from "../converter/client.js";
 import { FRAMING_VERSION } from "../converter/framing.js";
-import { probeDeadline, type ProbeDeadline } from "../converter/probeDeadline.js";
+import { probeDeadline, probeOnce, type ProbeDeadline } from "../converter/probeDeadline.js";
 import { log } from "../log.js";
 import { HandError, record, type HandCatalog } from "./model.js";
 
@@ -76,10 +76,10 @@ export class HandAgreement {
     const deadline = this.deadline(this.probeTimeoutMs);
     try {
       const catalog = await this.deps.catalog();
-      const response = await this.deps.health({
-        signal: deadline.signal,
-        headers: { "X-Request-Id": probeRequestId },
-      });
+      const response = await probeOnce(
+        () => this.deps.health({ signal: deadline.signal, headers: { "X-Request-Id": probeRequestId } }),
+        deadline.signal,
+      );
       // 429/5xx is the Converter saying "not now", not a different library.
       if (!response.ok) {
         await response.body?.cancel().catch(() => {});
