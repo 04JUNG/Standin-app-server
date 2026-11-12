@@ -1,2 +1,4 @@
 # 저장소 내부는 LF로 정규화(운영체제 혼용 시 CRLF 잡음 방지)
 * text=auto eol=lf
+# 공유 리더는 PROVENANCE.txt의 SHA256으로 고정된다. 줄바꿈을 변환하지 않는다.
+src/interactive-state/shared/*.mjs -text

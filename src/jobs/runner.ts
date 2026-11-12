@@ -69,20 +69,20 @@ export async function runAnalysisJob(
     const writer = run ? progressWriter(p => writeProgress(run, p)) : undefined;
     let fallback: CutResult | undefined;
     let cut: CutResult;
-    let rankingTimeout: InferenceTimeoutError | undefined;
+    let rankingFailure: { error: unknown } | undefined;
     try {
       cut = await analyze(file, hint, writer?.push, value => { fallback = value; });
     } catch (error) {
-      if (!(error instanceof InferenceTimeoutError) || !fallback) throw error;
+      if (!fallback) throw error;
       cut = fallback;
-      rankingTimeout = error;
+      rankingFailure = { error };
     } finally {
       writer?.close();
     }
     const result = mapCutResult(jobId, cut);
-    if (rankingTimeout && !result.candidatesByPerson.some(person =>
+    if (rankingFailure && !result.candidatesByPerson.some(person =>
       person.candidates.some(candidate => candidate.bvhAvailable && candidate.manualExportAllowed !== false))) {
-      throw rankingTimeout;
+      throw rankingFailure.error;
     }
     const persisted = await persistAnalysisRecords(
       jobId,
@@ -100,7 +100,9 @@ export async function runAnalysisJob(
     }
     logQualityMetrics(jobId, result);
     log.info({ type: "analysis_job", jobId, phase: "analysis", jobStatus: "completed",
-      durationMs: Date.now() - startedAt, ...(rankingTimeout ? { rankingTimedOut: true } : {}) });
+      durationMs: Date.now() - startedAt,
+      ...(rankingFailure ? { rankingFallbackReason: analysisFailureCode(rankingFailure.error) } : {}),
+      ...(rankingFailure?.error instanceof InferenceTimeoutError ? { rankingTimedOut: true } : {}) });
   } catch (error) {
     // timeout·상류 혼잡·그 외를 구분한다 — "추론이 응답하지 않는다", "상류가 붐빈다",
     // "추론이 거절했다"는 운영 대응이 다르고, 사용자에게 줄 안내도 다르다.

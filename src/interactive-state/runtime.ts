@@ -23,6 +23,7 @@ export const interactiveService = new InteractiveService({
   resolve: createSelectionResolver(),
   worker,
   posters: new PrivatePosters(),
+  binaryState: () => config.interactiveBinaryState,
   renderPoster: (op, fbx, signal) =>
     renderFinalPreview(
       { fbx, artifactSha256: String(finalReceipt(op)!.artifactSha256) },
@@ -31,12 +32,13 @@ export const interactiveService = new InteractiveService({
       false,
       signal,
     ),
-  metric: (event, stage, elapsedMs, code) =>
+  metric: (event, stage, elapsedMs, code, context) =>
     log.info({
       type: "interactive_artifact",
       event,
       stage,
       durationMs: elapsedMs,
+      ...context,
       ...(code ? { errorCode: code } : {}),
     }),
 });
