@@ -75,7 +75,7 @@ test("an obsolete worker cannot publish a result or log completed after its leas
   assert.ok(messages.some(m=>m.jobStatus==="ignored"&&m.errorCode==="JOB_NOT_CURRENT"));
 });
 
-for (const mode of ["fallback", "empty", "final"] as const) {
+for (const mode of ["timeout", "empty", "error", "disconnect", "no-fallback", "final"] as const) {
   test(`analysis stream completes correctly with ${mode}`, async t => {
     const db = new PGlite();
     t.after(() => db.close());
@@ -102,11 +102,18 @@ for (const mode of ["fallback", "empty", "final"] as const) {
       const encoder = new TextEncoder();
       const stream = new ReadableStream<Uint8Array>({
         start(controller) {
-          const send = (type: string, result: CutResult) =>
-            controller.enqueue(encoder.encode(`${JSON.stringify({ type, result })}\n`));
-          send("fallback", mode === "empty" ? cut : withPose("base_pose"));
+          const send = (event: object) =>
+            controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+          if (mode !== "no-fallback") {
+            send({ type: "fallback", result: mode === "empty" ? cut : withPose("base_pose") });
+          }
           if (mode === "final") {
-            send("result", withPose("reranked_pose"));
+            send({ type: "result", result: withPose("reranked_pose") });
+            controller.close();
+          } else if (mode === "error") {
+            send({ type: "error", status: 500, detail: "ranking failed" });
+            controller.close();
+          } else if (mode === "disconnect" || mode === "no-fallback") {
             controller.close();
           } else {
             timeout.signal.addEventListener("abort", () => controller.error(timeout.signal.reason), { once: true });
@@ -119,9 +126,9 @@ for (const mode of ["fallback", "empty", "final"] as const) {
 
     await runAnalysisJob("job_timeout", new Blob(["offline image"]));
     const job = await getOwnedJob("job_timeout", "owner");
-    if (mode === "empty") {
+    if (mode === "empty" || mode === "no-fallback") {
       assert.equal(job?.status, "failed");
-      assert.equal(job?.errorCode, "ANALYSIS_TIMEOUT");
+      assert.equal(job?.errorCode, mode === "empty" ? "ANALYSIS_TIMEOUT" : "INFERENCE_FAILED");
     } else {
       const expected = mode === "final" ? "reranked_pose" : "base_pose";
       assert.equal(job?.status, "completed");
