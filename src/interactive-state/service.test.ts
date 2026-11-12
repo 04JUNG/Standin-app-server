@@ -7,7 +7,7 @@ import {
 } from "./fixture.js";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { sha256Hex } from "../converter/client.js";
+import { ConverterError, sha256Hex } from "../converter/client.js";
 import { PGlite } from "@electric-sql/pglite";
 import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
@@ -61,6 +61,7 @@ async function setup() {
     resolveUnavailable: false,
     afterWorkValidationFailures: 0,
     runtimeFailures: 0,
+    runtimeError: new InteractiveError("BODY_PREVIEW_UNAVAILABLE", 503) as Error,
     solveCalls: 0,
     exportCalls: 0,
     cancelCalls: 0,
@@ -74,7 +75,7 @@ async function setup() {
     sent: [] as number[],
   };
   const resolver = async () => {
-    if (state.runtimeFailures > 0) { state.runtimeFailures--; throw new InteractiveError("BODY_PREVIEW_UNAVAILABLE", 503); }
+    if (state.runtimeFailures > 0) { state.runtimeFailures--; throw state.runtimeError; }
     if (state.resolveUnavailable) throw new Error("temporary upstream failure");
     if (!state.valid) throw new InteractiveError("NOT_FOUND", 404);
     return fixtureSelection(hash(state.selection));
@@ -204,9 +205,10 @@ async function setup() {
   };
 }
 
-test("post-solve and post-export runtime outages keep one operation and never repeat Converter work", async () => {
+for (const probe of ["runtime", "catalog"] as const) test(`post-solve and post-export ${probe} outages keep one operation and never repeat Converter work`, async () => {
   const s = await setup();
   try {
+    if (probe === "catalog") s.state.runtimeError = new ConverterError("CONVERTER_UNAVAILABLE", "catalog temporarily unavailable");
     const op = await (await s.prepare()).json() as ReturnType<typeof publicOperation>;
     s.state.afterWorkValidationFailures = 1;
     await s.tick("preview");

@@ -19,8 +19,14 @@ export async function recoverValidation<T>(
       return result;
     } catch (error) {
       signal.throwIfAborted();
-      if (!(error instanceof InteractiveError || error instanceof ConverterError) ||
-          error.code !== "BODY_PREVIEW_UNAVAILABLE") throw error;
+      const runtimeUnavailable = (error instanceof InteractiveError || error instanceof ConverterError) &&
+        error.code === "BODY_PREVIEW_UNAVAILABLE";
+      // Character catalog refresh is also a read-only Converter probe. Its
+      // transport errors differ from /healthz and /preview-contract failures.
+      const transportUnavailable = error instanceof ConverterError &&
+        ["CONVERTER_UNAVAILABLE", "CONVERTER_TIMEOUT", "CONVERTER_FAILED"].includes(error.code) &&
+        [0, 429, 502, 503, 504].includes(error.upstreamStatus);
+      if (!runtimeUnavailable && !transportUnavailable) throw error;
       const remaining = deadline - timing.now();
       if (remaining <= 0) throw error;
       retried(error.code);
