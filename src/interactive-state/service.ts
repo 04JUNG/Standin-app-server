@@ -1,14 +1,14 @@
-import { checkSkinPreviewBinaryModel, checkSkinPreviewModel, type SkinPreview } from "../appearance/skin-preview.js";
+import { type SkinPreview } from "../appearance/skin-preview.js";
 import { nondefaultSkin, type Skin } from "../appearance/skin.js";
 import { nonzeroAppearance, type Appearance } from "../appearance/model.js";
-import { parsePacket, parsePublishedPacket, parseReceipt } from "./packet.js";
+import { parsePublishedPacket, parseReceipt } from "./packet.js";
 import {
   STATE_MEDIA_TYPE_V2,
   isBinaryPacket,
   parseBinaryPacketMeta,
-  parseBinaryState,
   verifyPublishedBinaryState,
 } from "./packetV2.js";
+import { validatePacketAsync, validateBinaryPacketAsync } from "./packet-validation.js";
 import { recoverValidation } from "./revalidation.js";
 import { ConverterError, sha256Hex } from "../converter/client.js";
 import { decodeFrame, type ClientFrame } from "./clientFrame.js";
@@ -508,8 +508,7 @@ export class InteractiveService {
           const bytes = await this.timed(op, "artifact_converter_model", stage, () =>
             this.deps.worker.model({ ...op, snapshotId: solved.snapshotId }, controller.signal, STATE_MEDIA_TYPE_V2));
           const validated = await this.timed(op, "artifact_packet_validation", stage,
-            () => parseBinaryState(meta, bytes, op, selection));
-          checkSkinPreviewBinaryModel(op.skinPreview, validated.state.model);
+            () => validateBinaryPacketAsync(meta, bytes, op, selection, controller.signal));
           publication = { stateHash: meta.stateHash, snapshotProof: validated.snapshotProof, stateEncoding: STATE_ENCODING_V2 };
         } else {
           // Typed-JSON v1, unchanged. Also the fallback when an older Converter or its kill
@@ -517,9 +516,8 @@ export class InteractiveService {
           if (binary && solved.stateEncoding !== undefined && solved.stateEncoding !== STATE_ENCODING_V1)
             throw new InteractiveError("CONVERTER_INTEGRITY");
           const validated = await this.timed(op, "artifact_packet_validation", stage,
-            () => parsePacket(solved.packet, op, selection));
-          checkSkinPreviewModel(op.skinPreview, validated.payload.model);
-          publication = { stateHash: validated.packet.stateHash, snapshotProof: validated.snapshotProof, stateEncoding: STATE_ENCODING_V1 };
+            () => validatePacketAsync(solved.packet, op, selection, controller.signal));
+          publication = { stateHash: validated.stateHash, snapshotProof: validated.snapshotProof, stateEncoding: STATE_ENCODING_V1 };
           if (requested)
             this.deps.metric("artifact_state_encoding_fallback", stage, 0, binary ? "CONVERTER_ANSWERED_V1" : "BINARY_STATE_DISABLED",
               { operationId: op.operationId, revision: op.revision });

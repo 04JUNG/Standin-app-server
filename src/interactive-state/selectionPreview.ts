@@ -6,7 +6,8 @@ import {
   type Location,
   type Operation,
 } from "./model.js";
-import { parsePacket } from "./packet.js";
+import type { parsePacket } from "./packet.js";
+import { validatePacketAsync } from "./packet-validation.js";
 import type { ResolvedSelection } from "./selection.js";
 import type { InteractiveWorker } from "./worker.js";
 
@@ -96,7 +97,7 @@ export class SelectionPreviewService {
       const solved = await this.worker.solve(previewSelection, op, signal);
       op.snapshotId = solved.snapshotId;
       signal.throwIfAborted();
-      const validated = parsePacket(solved.packet, op, previewSelection);
+      await validatePacketAsync(solved.packet, op, previewSelection, signal);
       const current = await this.resolve(location, candidateId);
       if (current.selectionHash !== selection.selectionHash)
         throw new InteractiveError("PREVIEW_CHANGED");
@@ -105,7 +106,7 @@ export class SelectionPreviewService {
         schemaVersion: "standin.selection-preview.v1" as const,
         previewOnly: true as const,
         bodyRevision,
-        packet: validated.packet,
+        packet: solved.packet as ReturnType<typeof parsePacket>["packet"],
       };
     } finally {
       if (op) await this.worker.cancel(op).catch(() => undefined);

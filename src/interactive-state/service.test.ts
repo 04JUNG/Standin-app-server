@@ -322,10 +322,11 @@ test("full polling/model/export/file path separates preparation, PNG and native 
   }
 });
 
-test("a transient poll 503 preserves the accepted work and exposes latency diagnostics", async () => {
+for (const binary of [false, true]) test(`a transient poll 503 preserves the accepted work and exposes latency diagnostics (${binary ? "v2" : "v1"})`, async () => {
   const s = await setup();
+  const headers = binary ? BINARY_CLIENT : {};
   try {
-    const accepted = await s.prepare();
+    const accepted = await s.prepare(1, 0, "mutation-1", {}, headers);
     assert.equal(accepted.status, 202);
     const op = await accepted.json() as ReturnType<typeof publicOperation>;
     s.state.resolveUnavailable = true;
@@ -347,16 +348,17 @@ test("a transient poll 503 preserves the accepted work and exposes latency diagn
       assert(s.state.events.includes(event));
   } finally { await s.pg.close(); }
 });
-test("latest wins: queued older revision never runs; late running response cannot publish", async () => {
+for (const binary of [false, true]) test(`latest wins: queued older revision never runs; late running response cannot publish (${binary ? "v2" : "v1"})`, async () => {
   const s = await setup();
+  const headers = binary ? BINARY_CLIENT : {};
   try {
     const a = await (
-      await s.prepare()
+      await s.prepare(1, 0, "mutation-1", {}, headers)
     )
       .json()
       .then((v) => v as ReturnType<typeof publicOperation>);
     const b = await (
-      await s.prepare(2, 1)
+      await s.prepare(2, 1, "mutation-2", {}, headers)
     )
       .json()
       .then((v) => v as ReturnType<typeof publicOperation>);
@@ -367,14 +369,14 @@ test("latest wins: queued older revision never runs; late running response canno
     let release!: () => void;
     s.state.hold = new Promise<void>((r) => (release = r));
     const c = await (
-      await s.prepare(3, 2)
+      await s.prepare(3, 2, "mutation-3", {}, headers)
     )
       .json()
       .then((v) => v as ReturnType<typeof publicOperation>);
     const pending = s.tick("preview");
     while (s.state.solveCalls < 2) await new Promise((r) => setTimeout(r, 1));
     const d = await (
-      await s.prepare(4, 3)
+      await s.prepare(4, 3, "mutation-4", {}, headers)
     )
       .json()
       .then((v) => v as ReturnType<typeof publicOperation>);
@@ -384,7 +386,7 @@ test("latest wins: queued older revision never runs; late running response canno
     assert.equal((await s.read(d.operationId)).previewState, "solving");
     await s.tick("preview");
     assert.equal((await s.read(d.operationId)).previewState, "authoritative");
-    assert.equal((await s.prepare(5, 2)).status, 409);
+    assert.equal((await s.prepare(5, 2, "mutation-5", {}, headers)).status, 409);
   } finally {
     await s.pg.close();
   }
@@ -592,10 +594,11 @@ test("simultaneous prepare compare-and-swap has one winner and distinct people k
   }
 });
 
-test("running cancellation aborts and fences late response; byte corruption never delivers", async () => {
+for (const binary of [false, true]) test(`running cancellation aborts and fences late response; byte corruption never delivers (${binary ? "v2" : "v1"})`, async () => {
   const s = await setup();
+  const headers = binary ? BINARY_CLIENT : {};
   try {
-    const op = (await (await s.prepare()).json()) as ReturnType<
+    const op = (await (await s.prepare(1, 0, "mutation-1", {}, headers)).json()) as ReturnType<
       typeof publicOperation
     >;
     let release!: () => void;
@@ -608,7 +611,7 @@ test("running cancellation aborts and fences late response; byte corruption neve
     assert.equal((await s.read(op.operationId)).previewState, "cancelled");
     assert.ok(!s.state.events.includes("artifact_prepare_ready"));
     s.state.hold = undefined;
-    const next = (await (await s.prepare(2, 1)).json()) as ReturnType<
+    const next = (await (await s.prepare(2, 1, "mutation-2", {}, headers)).json()) as ReturnType<
       typeof publicOperation
     >;
     await s.tick("preview");
@@ -618,7 +621,7 @@ test("running cancellation aborts and fences late response; byte corruption neve
     const failed = await s.read(next.operationId);
     assert.equal(failed.previewState, "authoritative");
     assert.equal(failed.exportState, "failed");
-    assert.equal((await s.request(`/${next.operationId}/model`)).status, 200);
+    assert.equal((await s.request(`/${next.operationId}/model`, "GET", undefined, owner, headers)).status, 200);
     s.state.invalidReceipt = false;
     await s.request(`/${next.operationId}/export`, "POST");
     await s.tick("export");
