@@ -30,6 +30,7 @@ export function bindInteractiveCamera<T extends object>(camera: T, sourceSha256:
 const defaults = {
   getOwnedJob,
   loadBodyCatalog,
+  manualPresentationCamera,
   validateExportCandidate,
   validateConfirmedSelection,
   getPoseBvh,
@@ -83,14 +84,16 @@ export function createSelectionResolver(
       ))
     )
       throw new InteractiveError("SELECTION_REQUIRED");
-    const manual = manualPresentationCamera(person, candidate);
+    const manual = deps.manualPresentationCamera(person, candidate);
     if (manualExportCandidate(candidate) && !manual)
       throw new InteractiveError("MANUAL_REVIEW_UNAVAILABLE");
     const body = await deps.selection(installationId, jobId, personIndex);
+    // A confirmed, hash-bound manual candidate follows the existing framed-export
+    // contract. Generic preview-only bodies still do not grant export authority.
     if (
       body.resolutionStatus !== "ready" ||
       !body.resolvedBody ||
-      (purpose === "export" && body.previewOnly) ||
+      (purpose === "export" && body.previewOnly && !(manualExportCandidate(candidate) && manual)) ||
       !shapeRenderable(body)
     )
       throw new InteractiveError("BODY_PREVIEW_STALE");
