@@ -1,3 +1,5 @@
+// Worker validation regressions belong to the default packet contract suite.
+import "./packet-validation.cases.js";
 import test from "node:test";
 import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
