@@ -26,3 +26,7 @@ Node 22 타입 검사·build·전체 suite: 1,164 passed / 2 skipped / 0 failed.
 main/develop 직접 push·병합·배포·릴리스·AWS 변경 없음. PR base는 develop.
 
 추가 검증: Node20 interactive suite 109/109, staging scene/refine·code-only develop·initializer 설정 회귀 27/27 통과. 세 저장소의 binary 공유 reader SHA256은 모두 `4f249f923166f92294126097561696243e4033e9b42f108a56c13bcc09908530`로 동일하다.
+
+열린 #201 통합 검사: squash 승격으로 이력이 갈라져 전체 브랜치 merge-tree에는 기존 release/환경 파일 충돌이 발생한다. 실제 main 대비 #201 delta는 skin-contract.test/converter skin/interactive service·test의4파일이며, 이 동기화 head에 git apply --check clean이다. 별도 detached 임시 워크트리에만 적용한 Node22 전체 회귀 1,165 passed / 2 skipped / 0 failed. #201은 이번 PR에 포함하지 않았으며 향후 main 병합 후 기능 delta만 별도 동기화해야 한다.
+
+환경 확인: develop 대비 workflows/config/DB/installations/replay/client-version/access/retention/index 경로 byte diff 없음. binary/v1 호환 및 기존 수집·동의 정책 보존.
