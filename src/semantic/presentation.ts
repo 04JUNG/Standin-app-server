@@ -69,7 +69,7 @@ export function attachSemanticPresentation(
       pose_id: c.poseId,
       source: "library",
       kind,
-      rank: list.length + 1,
+      rank: c.rank,
       camera_kind: "front_reference",
       render_camera: structuredClone(front),
       score_kind: "semantic_similarity",

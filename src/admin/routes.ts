@@ -3,6 +3,8 @@ import { campaignCountSummary } from "../marketingCounts.js";
 import { marketingUsage, marketingUsageDetails } from "./marketingUsage.js";
 import { journeySummary } from "./journeys.js";
 import { blogAnalytics } from './blogAnalytics.js';
+import { createCustomBodyRoutes } from "./customBodyRoutes.js";
+import { journeyMetrics } from "./journeyStore.js";
 import { createHumanThumbnailRoutes } from "../human-thumbnail.js";
 import { randomUUID } from "node:crypto";
 import { acquisitionSummary } from "../installations/acquisition.js";
@@ -91,6 +93,10 @@ import {
   totals,
 } from "../ops/store.js";
 
+import { createAdminReplayRoutes } from "../replay/routes.js";
+import { replayService } from "../replay/runtime.js";
+import { readFile } from "node:fs/promises";
+
 export const adminRoutes = new Hono<AppEnv>();
 
 /**
@@ -122,7 +128,19 @@ adminRoutes.use("*", async (c, next) => {
 });
 
 adminRoutes.use("*", qualityReviewGuard());
+adminRoutes.route("/replays", createAdminReplayRoutes(replayService, async (reviewer, replayId, requestId) => {
+  await execute(`INSERT INTO admin_access_audit(audit_id,reviewer,action,request_id,occurred_at,replay_id,installation_id)
+    VALUES($1,$2,$3,$4,$5,$6,(SELECT installation_id FROM replay_sessions WHERE id=$6))`,
+    [randomUUID(),reviewer,replayId?"replay_read":"replay_list",requestId??randomUUID(),new Date().toISOString(),replayId??null]);
+}));
+// Bundle contains trusted player code only; recorded DOM is never served as executable HTML.
+adminRoutes.get("/replay-player.js", async c => {
+  c.header("Cache-Control", "private, no-store");
+  c.header("Content-Type", "application/javascript; charset=utf-8");
+  return c.body(await readFile(new URL("../../dist/replay/player.bundle.js", import.meta.url)));
+});
 adminRoutes.route("/review/pose-candidates", createHumanThumbnailRoutes());
+adminRoutes.route("/review/custom-bodies", createCustomBodyRoutes((c, action, installationId) => audit(c, action, { installationId })));
 
 /**
  * 관리자 접근을 남긴다.
@@ -155,7 +173,11 @@ async function audit(
 
 // GET /v1/admin/ops/dashboard — 의존성 없는 정적 대시보드 한 장.
 // 데이터는 담지 않는다. 화면이 열린 뒤 아래 /ops를 토큰 헤더로 호출해 채운다.
-adminRoutes.get("/ops/dashboard", (c) => c.html(DASHBOARD_HTML));
+adminRoutes.get("/ops/dashboard", (c) => {
+  c.header("Content-Security-Policy", "default-src 'self'; script-src 'self' blob: 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self' blob:; connect-src 'self'; frame-src 'self' about:; object-src 'none'; base-uri 'none'; form-action 'none'");
+  c.header("Referrer-Policy", "no-referrer");
+  return c.html(DASHBOARD_HTML);
+});
 
 /**
  * GET /v1/admin/ops — 대시보드가 읽는 집계(계획 3단계).
@@ -330,7 +352,7 @@ adminRoutes.get("/overview", async (c) => {
     dailyAggregates(days),
   ]);
   const accuracy = toAccuracy(daily);
-  const usage = toUsage(daily, funnelRow.active_installations);
+  const usage = toUsage(daily, funnelRow.active_installations, days);
   await audit(c, "review_overview", {});
   return c.json({
     windowDays: days,
@@ -342,6 +364,29 @@ adminRoutes.get("/overview", async (c) => {
       days: accuracy.days,
     },
   });
+});
+
+adminRoutes.get("/journey", async (c) => {
+  const parsed = parseWindowDays(c.req.query("days"));
+  const audience = c.req.query("audience") ?? "all";
+  const rawIdle = c.req.query("idleMinutes") ?? "30";
+  const idleMinutes = Number(rawIdle);
+  if (!parsed.ok || !["all", "internal", "unclassified"].includes(audience) ||
+      !/^\d+$/.test(rawIdle) || !Number.isInteger(idleMinutes) || idleMinutes < 5 || idleMinutes > 1440) {
+    return c.json(errorEnvelope("INVALID_INPUT", "기간·대상·관찰 대기 시간을 확인해 주세요.", c.get("requestId")), 400);
+  }
+  const to = new Date().toISOString();
+  const from = new Date(Date.parse(to) - parsed.days * 86400000).toISOString();
+  try {
+    const result = await journeyMetrics({from,to,days:parsed.days,idleMinutes,audience});
+    await audit(c, "review_journey_metrics", {});
+    return c.json(result);
+  } catch (error) {
+    if (error instanceof Error && ["JOURNEY_WINDOW_TOO_LARGE","JOURNEY_HISTORY_TOO_LARGE"].includes(error.message)) {
+      return c.json(errorEnvelope("INVALID_INPUT", "작업이 많습니다. 조회 기간을 줄여 주세요.", c.get("requestId")), 400);
+    }
+    throw error;
+  }
 });
 
 adminRoutes.get("/marketing", async (c) => {
@@ -404,7 +449,7 @@ adminRoutes.get("/product", async (c) => {
     since: new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString(),
     // 정확도·사용률은 일별 집계에서 온다. 그 표에는 **오늘이 없다**(하루가 끝나야 넣는다).
     accuracy: toAccuracy(daily),
-    usage: toUsage(daily, funnelRow.active_installations),
+    usage: toUsage(daily, funnelRow.active_installations, days),
     funnel: toFunnel(funnelRow),
     jobsFailed: funnelRow.jobs_failed,
     clientStages: clientStages.map((stage) => ({

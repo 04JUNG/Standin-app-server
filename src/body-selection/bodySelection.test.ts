@@ -22,7 +22,9 @@ import {
   parsePreferenceChange,
   parseSelectionChange,
 } from "./routes.js";
-import { BodyError, bodyStore, readSelection, type BodyDb } from "./store.js";
+import {
+  BodyError, bodyStore, initializeBodySelections, presentPreferences, readSelection, type BodyDb,
+} from "./store.js";
 import { catalog, fixture, result } from "./fixtures.js";
 const recommendation = () =>
   mapBodyRecommendations(fixture(), catalog()).get(0)!;
@@ -166,11 +168,16 @@ test("partial bad person does not lose good person's recommendation; auto_defaul
   );
 });
 test("recommendation mapping leaves every pose and quality field intact", () => {
-  const old = config.bodySelectionEnabled;
+  const previous = {
+    bodySelectionEnabled: config.bodySelectionEnabled,
+    bodyRecommendationEnabled: config.bodyRecommendationEnabled,
+  };
   try {
-    Reflect.set(config, "bodySelectionEnabled", false);
+    Object.assign(config, { bodySelectionEnabled: false, bodyRecommendationEnabled: false });
     const off = result();
-    Reflect.set(config, "bodySelectionEnabled", true);
+    Object.assign(config, { bodySelectionEnabled: true });
+    assert.deepEqual(result(), off);
+    Object.assign(config, { bodyRecommendationEnabled: true });
     const on = result();
     const strip = (r: AnalysisResult) => ({
       ...r,
@@ -181,9 +188,61 @@ test("recommendation mapping leaves every pose and quality field intact", () => 
     assert.deepEqual(strip(on), off);
     assert.ok(on.candidatesByPerson[0].bodyRecommendation);
   } finally {
-    Reflect.set(config, "bodySelectionEnabled", old);
+    Object.assign(config, previous);
   }
 });
+test("the paused recommendation flag rejects old client auto actions", async (t) => {
+  const previous = config.bodyRecommendationEnabled;
+  Object.assign(config, { bodyRecommendationEnabled: false });
+  t.after(() => Object.assign(config, { bodyRecommendationEnabled: previous }));
+  const store = {
+    ...bodyStore,
+    savePreferences: async () => assert.fail("auto preference was written"),
+    saveSelection: async () => assert.fail("auto selection was written"),
+  };
+  const app = new Hono<AppEnv>();
+  app.route("/preferences", createBodyPreferenceRoutes(store, () => true));
+  app.route("/jobs", createBodySelectionRoutes(store, () => true));
+  for (const [path, change] of [
+    ["/preferences", { mode: "auto" }],
+    ["/jobs/job_test/people/0/body-selection", { intent: "auto" }],
+  ] as const) {
+    const response = await app.request(path, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...change, expectedRevision: 0, mutationId: "old-client" }),
+    });
+    assert.equal(response.status, 409);
+    assert.equal((await response.json() as { error: { code: string } }).error.code, "BODY_RECOMMENDATION_DISABLED");
+  }
+});
+
+test("an old automatic snapshot starts from the last manually used body when paused", async (t) => {
+  const previous = config.bodyRecommendationEnabled;
+  Object.assign(config, { bodyRecommendationEnabled: false });
+  t.after(() => Object.assign(config, { bodyRecommendationEnabled: previous }));
+  const c = catalog();
+  const lastUsed = { characterId: c.assets[0].characterId, controls: null, usedAt: "" };
+  const preferences = { ...defaultPreferences(), mode: "auto" as const, lastUsed };
+  const policy = snapshot(preferences, c);
+  const analysis = result();
+  const writes: ReturnType<typeof resolveBody>[] = [];
+  analysis.candidatesByPerson[0].bodyRecommendation = recommendation();
+  const db = {
+    async query(sql: string, values: unknown[]) {
+      if (sql.startsWith("SELECT")) return { rows: [{ body_policy_json: policy }] };
+      writes.push(JSON.parse(values[2] as string));
+      return { rows: [] };
+    },
+  } as BodyDb;
+  assert.equal(presentPreferences(preferences, c).mode, "last_used");
+  await initializeBodySelections(db, analysis.jobId, analysis, c);
+  assert.equal(writes[0].recommendation.status, "disabled");
+  assert.equal(writes[0].resolvedSource, "last_used");
+  assert.equal(writes[0].resolvedBody?.characterId, lastUsed.characterId);
+  assert.equal(preferences.mode, "auto");
+});
+
 test("mutations reject ambiguous modes, unknown fields and missing revision/idempotency keys", () => {
   const common = { expectedRevision: 0, mutationId: "mutation-123" };
   assert.equal(
@@ -417,7 +476,7 @@ test("preference reads and writes use the same UX gate for every flag combinatio
                   ? {
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({
-                        mode: "auto",
+                        mode: "last_used",
                         expectedRevision: 0,
                         mutationId: "test-mutation",
                       }),
@@ -712,4 +771,80 @@ test("PostgreSQL schema: migrate settings, persist explicit-auto fallback and pr
   assert.deepEqual((await readPreferences(db, "owner")).cards, []);
   await initializeBodySelections(db, analysis.jobId, analysis, c);
   assert.equal((await readSelection(db, "owner", analysis.jobId, 0, c)).resolvedBody?.characterId, "character-2");
+});
+
+
+function roleCatalog(): BodyCatalog {
+  const c = catalog(4);
+  // Intentionally keep the old BASE first. IDs here are synthetic contract fixtures.
+  Object.assign(c.assets[0], { characterId: "male-base-previous", role: "previous_default", gender: "male", order: 30 });
+  Object.assign(c.assets[1], { characterId: "new-male", role: "default", gender: "male", order: 10 });
+  Object.assign(c.assets[2], { characterId: "new-female", role: "default", gender: "female", order: 20 });
+  Object.assign(c.assets[3], { characterId: "female-base-previous", role: "previous_default", gender: "female", order: 40 });
+  c.defaultCharacterId = "new-male";
+  return parseCatalog(c);
+}
+
+test("declared defaults select the new male without changing auto, manual, last-used or personal cards", () => {
+  const c = roleCatalog();
+  const rec = { status: "available" as const, body: bodyRef(c.assets[2]), reasonCodes: [] };
+  const prefs = defaultPreferences();
+  const old = bodyRef(c.assets[0]);
+  const policy = snapshot(prefs, c);
+  assert.equal(resolveBody(0, policy, rec, c, ["pose-a"]).resolvedBody?.characterId, "new-male");
+  assert.equal(resolveBody(0, policy, rec, c, ["pose-a"], "auto").resolvedBody?.characterId, "new-female");
+  assert.equal(resolveBody(0, snapshot({ ...prefs, mode: "auto" }, c), rec, c, ["pose-a"]).resolvedBody?.characterId, "new-female");
+  assert.deepEqual(resolveBody(0, policy, rec, c, ["pose-a"], "manual", old).resolvedBody, old);
+  prefs.lastUsed = { characterId: old.characterId, controls: null, usedAt: "fixture" };
+  prefs.cards = [{ cardId: "mine", characterId: old.characterId, name: "주인공 A", controls: {}, createdAt: "", updatedAt: "" }];
+  const remembered = snapshot(prefs, c);
+  assert.equal(resolveBody(0, remembered, rec, c, ["pose-a"]).resolvedSource, "last_used");
+  assert.deepEqual(remembered.preferences.cards, prefs.cards);
+  assert.deepEqual(resolveBody(0, remembered, rec, c, ["pose-a"]).resolvedBody, old);
+});
+
+test("role metadata is fail-closed and does not fall back to the preserved old BASE", () => {
+  const c = roleCatalog();
+  const policy = snapshot(defaultPreferences(), c);
+  c.assets[1].supportedPoseIds = [];
+  assert.equal(resolveBody(0, policy, recommendation(), c, ["pose-a"]).resolutionStatus, "unavailable");
+  c.assets.splice(1, 1);
+  assert.equal(resolveBody(0, policy, recommendation(), c, ["pose-a"]).resolvedBody?.characterId, "new-male");
+  assert.equal(resolveBody(0, policy, recommendation(), c, ["pose-a"]).resolutionStatus, "unavailable");
+  assert.throws(() => parseCatalog(c));
+  for (const edit of [
+    (x: BodyCatalog) => { x.defaultCharacterId = x.assets[0].characterId; },
+    (x: BodyCatalog) => { x.assets[0].role = "default"; },
+    (x: BodyCatalog) => { x.assets[2].gender = "child"; },
+    (x: BodyCatalog) => { x.assets[1].order = -1; },
+  ]) { const x = roleCatalog(); edit(x); assert.throws(() => parseCatalog(x)); }
+});
+
+test("reopening captured and pre-capture fallback jobs preserves old identity and revision after role rollout", async () => {
+  const c = roleCatalog();
+  const old = bodyRef(c.assets[0]);
+  const rec = { status: "disabled" as const, body: null, reasonCodes: [] };
+  const policy = { ...snapshot(defaultPreferences(), c), firstUseDefault: old };
+  const stored = resolveBody(0, policy, rec, c, ["pose-a"]);
+  stored.selectionRevision = 9;
+  const analysis = result();
+  const db = { query: async (sql: string) => {
+    if (sql.includes("SELECT status,result_json,body_policy_json")) return { rows: [{ status: "completed", result_json: JSON.stringify(analysis), body_policy_json: policy }] };
+    if (sql.startsWith("SELECT value FROM body_selections")) return { rows: [{ value: structuredClone(stored) }] };
+    throw new Error("unexpected write");
+  } } as unknown as BodyDb;
+  for (const captured of [true, false]) {
+    if (!captured) delete (policy as import("./model.js").BodyPolicy).firstUseDefault;
+    for (const source of ["catalog_default_fallback", "fixed_default", "user_default_fallback"]) {
+      // Old source labels may exist on persisted rows predating the current contract.
+      Object.assign(stored, { resolvedSource: source });
+      const value = await readSelection(db, "owner", analysis.jobId, 0, c);
+      assert.deepEqual(value.resolvedBody, old);
+      assert.equal(value.selectionRevision, 9);
+    }
+  }
+  c.assets[0].assetSha256 = "f".repeat(64);
+  const missing = await readSelection(db, "owner", analysis.jobId, 0, c);
+  assert.deepEqual(missing.resolvedBody, old);
+  assert.equal(missing.resolutionStatus, "unavailable");
 });

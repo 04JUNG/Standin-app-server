@@ -11,6 +11,8 @@ export interface ColumnHealthRow {
   label: string;
   rows: number;
   nulls: number;
+  applicability?: "used" | "unused";
+  note?: string;
 }
 
 export interface ColumnHealth {
@@ -20,6 +22,8 @@ export interface ColumnHealth {
   nullRate: number | null;
   /** 전부 비어 있는 컬럼. 그 컬럼에 기대는 지표는 지금 의미가 없다. */
   empty: boolean;
+  applicability: "used" | "unused";
+  note: string;
 }
 
 export function toColumnHealth(rows: ColumnHealthRow[]): ColumnHealth[] {
@@ -29,18 +33,23 @@ export function toColumnHealth(rows: ColumnHealthRow[]): ColumnHealth[] {
     nulls: row.nulls,
     nullRate: row.rows ? Math.round((row.nulls / row.rows) * 1000) / 10 : null,
     empty: row.rows > 0 && row.nulls === row.rows,
+    applicability: row.applicability ?? "used",
+    note: row.note ?? "수집 대상 필드 · 누락 사유는 원본 계약과 상세 기록 확인",
   }));
 }
 
 export interface StageGap {
   stage: string;
-  /** 서버가 남긴 진실. */
+  /** 서버 기록. 클라이언트 이벤트와 행동·기간·단위가 같다는 보장은 없다. */
   server: number;
   /** 클라이언트가 보낸 이벤트 수. */
   client: number;
-  /** 클라 − 서버. 음수면 이벤트 유실, 양수면 서버에 닿지 못한 시도가 있었다는 뜻이다. */
+  /** 클라 − 서버의 산술 차이. 부호만으로 원인을 판정하지 않는다. */
   gap: number;
   note: string;
+  serverUnit: "jobs";
+  clientUnit: "events";
+  comparable: false;
 }
 
 export function toStageGaps(
@@ -48,10 +57,10 @@ export function toStageGaps(
   client: Record<string, number>,
 ): StageGap[] {
   const pairs: Array<{ stage: string; serverKey: string; clientKey: string; note: string }> = [
-    { stage: "러프 투입", serverKey: "jobs", clientKey: "input_confirmed", note: "양수면 접수 전에 끊긴 시도" },
-    { stage: "분석 실패", serverKey: "failed", clientKey: "analysis_failed", note: "양수면 서버에 닿지 못한 실패" },
-    { stage: "후보 선택", serverKey: "selections", clientKey: "selection_confirmed", note: "음수면 이벤트 유실" },
-    { stage: "저장 완료", serverKey: "exports", clientKey: "export_completed", note: "음수면 이벤트 유실" },
+    { stage: "분석 요청 / 입력 확정", serverKey: "jobs", clientKey: "input_confirmed", note: "서버 접수와 입력 확정은 서로 다른 행동" },
+    { stage: "분석 실패", serverKey: "failed", clientKey: "analysis_failed", note: "서버 작업 실패와 앱이 관찰한 실패는 범위가 다를 수 있음" },
+    { stage: "포즈 사용 확정", serverKey: "selections", clientKey: "selection_confirmed", note: "서버 작업 수와 클라이언트 확정 이벤트 수의 비교" },
+    { stage: "서버 내보내기 / 앱 저장", serverKey: "exports", clientKey: "export_completed", note: "서버 파일 제공 기록과 앱 저장 완료는 서로 다른 행동 · 실제 저장은 v2 nativeDiskWrite 기록 확인" },
   ];
   return pairs.map((pair) => {
     const serverCount = server[pair.serverKey] ?? 0;
@@ -61,7 +70,10 @@ export function toStageGaps(
       server: serverCount,
       client: clientCount,
       gap: clientCount - serverCount,
-      note: pair.note,
+      note: `${pair.note}. 기간 기준·동의 범위·앱 버전·집계 단위가 달라 원인은 미확정`,
+      serverUnit: "jobs",
+      clientUnit: "events",
+      comparable: false,
     };
   });
 }
@@ -82,6 +94,7 @@ export interface DistanceBucket {
   jobs: number;
   selected: number;
   selectionRate: number | null;
+  usableDistance: boolean;
 }
 
 /** 구간 순서는 SQL의 CASE 순서와 맞춘다 — 화면에서 거리순으로 읽혀야 한다. */
@@ -98,6 +111,7 @@ export function toDistanceBuckets(rows: DistanceBucketRow[]): DistanceBucket[] {
       jobs,
       selected,
       selectionRate: jobs ? Math.round((selected / jobs) * 1000) / 10 : null,
+      usableDistance: bucket !== "없음",
     };
   }).filter((bucket) => bucket.jobs > 0);
 }

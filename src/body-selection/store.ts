@@ -1,3 +1,5 @@
+import { bodyPresentation } from "./presentation.js";
+import { defaultPickerVisibility, type PickerVisibility } from "./pickerVisibility.js";
 import { shapeRuntimeMetadata } from "./shapeRuntime.js";
 import { automaticRecommendation, isChildBody } from "./childPolicy.js";
 import { neutralMetadata } from "./neutral.js";
@@ -23,11 +25,14 @@ import {
   bodyEligible,
   resolveBody,
   snapshot,
+  upgradedRememberedBase,
+  currentPresetAssets,
   type BodyCard,
   type BodyCatalog,
   type BodyIntent,
   type BodyPolicy,
   type BodyPreferences,
+  type BodyRecommendation,
   type BodySelection,
 } from "./model.js";
 export type BodyDb = Pick<PoolClient, "query">;
@@ -45,7 +50,8 @@ export interface Mutation {
   mutationId: string;
 }
 export interface PreferenceChange extends Mutation {
-  mode: BodyPreferences["mode"];
+  mode?: BodyPreferences["mode"];
+  pickerVisibility?: PickerVisibility;
 }
 /** Card edits. Each bumps the preferences revision like any other preference write. */
 export type CardChange = Mutation &
@@ -84,18 +90,35 @@ function shapeError(e: unknown): never {
  * Characters the settings page may edit, with what it needs to show them outside a job:
  * the name, the neutral preview and the live-preview runtime (same metadata as body-options).
  */
-export function presentShapeEditable(catalog: BodyCatalog) {
+export function presentShapeEditable(catalog: BodyCatalog, keep: Iterable<string> = []) {
   const byId = new Map(catalog.assets.map((a) => [a.characterId, a]));
-  return shapeEditable(catalog).map((entry) => {
+  return shapeEditable({ ...catalog, assets: currentPresetAssets(catalog, keep) }).map((entry) => {
     const a = byId.get(entry.characterId)!;
     return {
       ...entry,
+      ...bodyPresentation(a),
       ...(a.displayName ? { displayName: a.displayName } : {}),
       ...(a.neutralPreview ? { neutralPreview: neutralMetadata(a) } : {}),
       ...(a.shapeRuntime ? { shapeRuntime: shapeRuntimeMetadata(a) } : {}),
     };
   });
 }
+const disabledRecommendation: BodyRecommendation = {
+  status: "disabled",
+  body: null,
+  reasonCodes: ["body_disabled"],
+};
+
+function effectivePreferences(value: BodyPreferences): BodyPreferences {
+  return config.bodyRecommendationEnabled || value.mode === "last_used"
+    ? value
+    : { ...value, mode: "last_used" };
+}
+
+function effectivePolicy(policy: BodyPolicy): BodyPolicy {
+  return { ...policy, preferences: effectivePreferences(policy.preferences) };
+}
+
 /** Preferences as the client sees them: stored value plus what the catalog allows. */
 export type PresentedPreferences = BodyPreferences & {
   shapeEditable?: ReturnType<typeof presentShapeEditable>;
@@ -104,11 +127,28 @@ export function presentPreferences(
   value: BodyPreferences,
   catalog: BodyCatalog = loadBodyCatalog(),
 ): PresentedPreferences {
+  const normalized = effectivePreferences(normalizePreferences(value));
   return {
-    ...normalizePreferences(value),
+    ...normalized,
+    pickerVisibility: (() => {
+      const visible = normalized.pickerVisibility ?? defaultPickerVisibility();
+      return { ...visible, hiddenPresetIds: [...new Set(visible.hiddenPresetIds.map(id => {
+        const asset = catalog.assets.find(a => a.characterId === id);
+        return (asset && upgradedRememberedBase(asset, catalog)?.characterId) || id;
+      }))] };
+    })(),
     cards: cardsOf(value),
-    lastUsed: value.lastUsed ?? null,
-    shapeEditable: presentShapeEditable(catalog),
+    lastUsed: (() => {
+      const last = value.lastUsed;
+      if (!last || last.controls) return last ?? null;
+      const asset = catalog.assets.find(a => a.characterId === last.characterId);
+      const replacement = asset && upgradedRememberedBase(asset, catalog);
+      return replacement ? { ...last, characterId: replacement.characterId } : last;
+    })(),
+    shapeEditable: presentShapeEditable(catalog, [
+      ...cardsOf(value).map(c => c.characterId),
+      ...(value.lastUsed?.controls ? [value.lastUsed.characterId] : []),
+    ]),
   };
 }
 /**
@@ -184,17 +224,20 @@ export async function writePreferences(
     [owner],
   );
   if (!lock.rows.length) throw new BodyError("NOT_FOUND", 404);
-  const previous = await replay(db, owner, "preferences", change, [
-    change.mode,
-    change.expectedRevision,
-  ]);
+  // Keep legacy mode-write hashes stable. New visibility writes have their own payload.
+  const payload = [change.mode ?? null, change.expectedRevision];
+  const previous = await replay(
+    db, owner, "preferences", change,
+    change.pickerVisibility === undefined ? payload : [...payload, change.pickerVisibility],
+  );
   if (previous.value)
     return normalizePreferences(previous.value as BodyPreferences);
   const current = await readPreferences(db, owner);
   expect(current.revision, change.expectedRevision, "BODY_PREFERENCE_CONFLICT");
   const value: BodyPreferences = {
     ...current,
-    mode: change.mode,
+    mode: change.mode ?? current.mode,
+    ...(change.pickerVisibility ? { pickerVisibility: structuredClone(change.pickerVisibility) } : {}),
     revision: current.revision + 1,
   };
   await db.query(
@@ -313,6 +356,13 @@ export async function writeCards(
   const value: BodyPreferences = {
     ...current,
     cards: next,
+    ...(current.pickerVisibility ? {
+      pickerVisibility: {
+        ...current.pickerVisibility,
+        hiddenCardIds: current.pickerVisibility.hiddenCardIds.filter((id) =>
+          next.some((card) => card.cardId === id)),
+      },
+    } : {}),
     revision: current.revision + 1,
   };
   await storePreferences(db, owner, value);
@@ -351,7 +401,7 @@ export async function captureBodyPolicy(
   owner: string,
   catalog = loadBodyCatalog(),
 ): Promise<void> {
-  const policy = snapshot(await readPreferences(db, owner), catalog);
+  const policy = snapshot(effectivePreferences(await readPreferences(db, owner)), catalog);
   await db.query(
     "UPDATE jobs SET body_policy_json=$2 WHERE id=$1 AND body_policy_json IS NULL",
     [jobId, JSON.stringify(policy)],
@@ -391,12 +441,10 @@ function initialBody(
   const context = personBodyContext(person, semantic);
   return resolveBody(
     person.personIndex,
-    policy,
-    person.bodyRecommendation ?? {
-      status: "disabled",
-      body: null,
-      reasonCodes: ["body_disabled"],
-    },
+    effectivePolicy(policy),
+    config.bodyRecommendationEnabled
+      ? person.bodyRecommendation ?? disabledRecommendation
+      : disabledRecommendation,
     catalog,
     context.poses,
     "inherit",
@@ -481,9 +529,16 @@ function revalidate(
     value.intent !== "manual" &&
     (legacyDefault || automaticDefault || unresolved || autoChild)
   ) {
+    // Catalog role adoption must not upgrade an already resolved historical fallback.
+    // Older jobs predate firstUseDefault; their stored BodyRef is the only identity record.
+    const capturedPolicy =
+      (automaticDefault || legacyDefault) && value.resolvedBody &&
+      policy.firstUseDefault === undefined && catalog.assets.some((a) => a.role !== undefined)
+        ? { ...policy, firstUseDefault: value.resolvedBody }
+        : policy;
     value = resolveBody(
       value.personIndex,
-      policy,
+      capturedPolicy,
       value.recommendation,
       catalog,
       poses,
@@ -540,8 +595,38 @@ export async function readSelection(
     [jobId, index],
   );
   if (!rows[0]) throw new BodyError("BODY_SELECTION_UNSUPPORTED", 409);
-  const stored = rows[0].value;
+  const stored = await migrateRememberedSelection(db, jobId, index, rows[0].value, person, catalog, semantic);
   return revalidate(stored, person, catalog, semantic, policy);
+}
+/** Persist one revision change so previous preview/export receipts cannot reuse the old mesh. */
+async function migrateRememberedSelection(
+  db: BodyDb, jobId: string, index: number, initial: BodySelection,
+  person: AnalysisPerson, catalog: BodyCatalog, semantic: boolean,
+): Promise<BodySelection> {
+  const { poses, previewOnly } = personBodyContext(person, semantic);
+  let stored = initial;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (stored.intent !== "inherit" || stored.resolvedSource !== "last_used" ||
+        stored.shape || !stored.resolvedBody) return stored;
+    const replacement = upgradedRememberedBase(stored.resolvedBody, catalog);
+    if (!replacement || !bodyEligible(replacement, catalog, poses, previewOnly)) return stored;
+    const next: BodySelection = {
+      ...stored, resolvedBody: replacement, shape: null,
+      selectionRevision: stored.selectionRevision + 1,
+    };
+    // Compare the complete old row: a simultaneous manual selection always wins.
+    const updated = await db.query<{ value: BodySelection }>(
+      "UPDATE body_selections SET value=$3 WHERE job_id=$1 AND person_index=$2 AND value=$4::jsonb RETURNING value",
+      [jobId, index, JSON.stringify(next), JSON.stringify(stored)],
+    );
+    if (updated.rows[0]) return updated.rows[0].value;
+    const current = await db.query<{ value: BodySelection }>(
+      "SELECT value FROM body_selections WHERE job_id=$1 AND person_index=$2", [jobId, index],
+    );
+    if (!current.rows[0]) throw new BodyError("BODY_SELECTION_UNSUPPORTED", 409);
+    stored = current.rows[0].value;
+  }
+  throw new BodyError("BODY_SELECTION_CONFLICT", 409);
 }
 export async function writeSelection(
   db: BodyDb,
@@ -577,8 +662,9 @@ export async function writeSelection(
     "SELECT value FROM body_selections WHERE job_id=$1 AND person_index=$2",
     [jobId, index],
   );
-  const current = stored.rows[0]?.value;
-  if (!current) throw new BodyError("BODY_SELECTION_UNSUPPORTED", 409);
+  const original = stored.rows[0]?.value;
+  if (!original) throw new BodyError("BODY_SELECTION_UNSUPPORTED", 409);
+  const current = await migrateRememberedSelection(db, jobId, index, original, person, catalog, semantic);
   expect(
     current.selectionRevision,
     change.expectedRevision,
@@ -605,8 +691,8 @@ export async function writeSelection(
   }
   const value = resolveBody(
     index,
-    policy,
-    current.recommendation,
+    effectivePolicy(policy),
+    config.bodyRecommendationEnabled ? current.recommendation : disabledRecommendation,
     catalog,
     poses,
     change.intent,
@@ -647,8 +733,16 @@ export async function bodyOptions(
   );
   const catalog = deps.catalog(),
     { poses, previewOnly } = personBodyContext(person, semantic);
+  const preferences = await readPreferences(db, owner);
+  const keep = cardsOf(preferences).map(c => c.characterId);
+  const { rows: selected } = await db.query<{ value: BodySelection }>(
+    "SELECT value FROM body_selections WHERE job_id=$1 AND person_index=$2", [jobId, index],
+  );
+  const current = selected[0]?.value;
+  if (current?.resolvedBody && (current.intent === "manual" || current.shape))
+    keep.push(current.resolvedBody.characterId);
   const characters = await Promise.all(
-    catalog.assets.map(async (a) => {
+    currentPresetAssets(catalog, keep).map(async (a) => {
       const reasons = !poses.length
         ? ["BODY_NOT_APPLICABLE"]
         : !bodyEligible(a, catalog, poses, previewOnly)
@@ -659,6 +753,7 @@ export async function bodyOptions(
       return {
         characterId: a.characterId,
         bodyRef: bodyRef(a),
+        ...bodyPresentation(a),
         ...(a.displayName ? { displayName: a.displayName } : {}),
         ...(a.neutralPreview ? { neutralPreview: neutralMetadata(a) } : {}),
         ...(shapeSpec(a) ? { shape: shapeSpec(a) } : {}),

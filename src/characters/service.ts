@@ -1,7 +1,8 @@
 import { handSelectionAvailable } from "../hands/service.js";
 import { bodyUxAvailable } from "../body-selection/availability.js";
 import { loadBodyCatalog } from "../body-selection/catalog.js";
-import { bodyRef, type BodyRef } from "../body-selection/model.js";
+import { readNeutral } from "../body-selection/neutral.js";
+import { bodyRef, upgradedRememberedBase, type BodyRef, type BodyCatalog, type BodyAsset } from "../body-selection/model.js";
 import { framingAvailable, modelPreviewIdentity } from "../converter/framing.js";
 // /v1/models 의 본체. converter의 "지금 만들 수 있는 것"과 BFF의 "어떻게 보여줄 것인가"를
 // 합쳐 클라이언트 계약(Standin-client docs/08 §8-1)으로 만든다.
@@ -24,6 +25,8 @@ export type CharacterAvailability = "available" | "coming_soon";
 
 export interface ModelCharacter {
   bodyRef?: BodyRef | null;
+  role?: BodyAsset["role"];
+  order?: number;
   characterId: string;
   displayName: string;
   gender: CharacterGender;
@@ -51,11 +54,15 @@ export interface CharacterDeps {
   enabled: boolean;
   defaultCharacterId: string;
   listUpstream: () => Promise<ConverterCharacter[]>;
+  bodyCatalog: () => BodyCatalog;
 }
 
 function defaultDeps(): CharacterDeps {
   return {
     enabled: converterEnabled(),
+    bodyCatalog: () => config.bodySelectionEnabled
+      ? loadBodyCatalog()
+      : { version: "disabled", defaultCharacterId: null, assets: [] },
     defaultCharacterId: config.converterCharacterId,
     listUpstream: () => fetchConverterCharacters(),
   };
@@ -85,7 +92,7 @@ function toModel(
   available: boolean,
   upstream: ConverterCharacter | undefined,
   defaultCharacterId: string,
-  selectedBody: BodyRef | null = null,
+  selectedBody: BodyAsset | null = null,
 ): ModelCharacter {
   const presentation = presentationFor(
     characterId,
@@ -93,15 +100,17 @@ function toModel(
   );
   return {
     characterId,
-    ...(config.bodySelectionEnabled ? { bodyRef: selectedBody } : {}),
-    displayName: presentation.displayName,
-    gender: presentation.gender,
+    ...(config.bodySelectionEnabled ? { bodyRef: selectedBody ? bodyRef(selectedBody) : null } : {}),
+    displayName: selectedBody?.displayName ?? presentation.displayName,
+    gender: selectedBody?.gender === "child" ? "unspecified" : selectedBody?.gender ?? presentation.gender,
+    ...(selectedBody?.role ? { role: selectedBody.role } : {}),
+    ...(selectedBody?.order !== undefined ? { order: selectedBody.order } : {}),
     availability: available ? "available" : "coming_soon",
     source: "builtin",
     isDefault: characterId === defaultCharacterId,
     rigProfile: upstream?.rigProfile ?? null,
     revision: upstream?.revision ?? null,
-    // 앱이 자기가 커밋한 이미지를 먼저 쓴다. 서버 렌더는 후속 과제다.
+    // New immutable identities receive their verified neutral preview below.
     previewUrl: null,
     description: presentation.description,
   };
@@ -123,13 +132,18 @@ export async function listCharacters(
   const deps = { ...defaultDeps(), ...overrides };
   const upstream = (await deps.listUpstream()).filter((row) => !isRetiredCharacter(row.characterId));
   const byId = new Map(upstream.map((row) => [row.characterId, row]));
-  const ids = new Set([...Object.keys(CHARACTER_PRESENTATION), ...byId.keys()]);
-
-  const bodies = config.bodySelectionEnabled ? loadBodyCatalog().assets : [];
+  const bodyCatalog = deps.bodyCatalog();
+  const bodies = bodyCatalog.assets;
+  const ids = new Set([...Object.keys(CHARACTER_PRESENTATION), ...byId.keys(), ...bodies.map((a) => a.characterId)]);
+  // /models also serves legacy exports: its global default remains the converter config.
   const defaultCharacterId = isRetiredCharacter(deps.defaultCharacterId)
     ? (upstream[0]?.characterId ?? "")
     : deps.defaultCharacterId;
   const characters = [...ids]
+    .filter(id => {
+      const asset = bodies.find(a => a.characterId === id);
+      return !asset || !upgradedRememberedBase(asset, bodyCatalog);
+    })
     .map((id) => {
       const a = bodies.find((asset) => asset.characterId === id);
       return toModel(
@@ -137,15 +151,34 @@ export async function listCharacters(
         byId.has(id),
         byId.get(id),
         defaultCharacterId,
-        a ? bodyRef(a) : null,
+        a ?? null,
       );
     })
     .sort((a, b) => {
       const order =
-        presentationFor(a.characterId, "").order -
-        presentationFor(b.characterId, "").order;
+        (a.order ?? presentationFor(a.characterId, "").order) -
+        (b.order ?? presentationFor(b.characterId, "").order);
       return order !== 0 ? order : a.characterId.localeCompare(b.characterId);
     });
+
+  // The installed client uses <img> without installation headers for model cards.
+  // Current defaults and presets use the same hash-bound PNG as body selection.
+  await Promise.all(characters.map(async (row) => {
+    const asset = bodies.find(a => a.characterId === row.characterId);
+    if ((asset?.role === "default" || asset?.role === "preset") && asset.neutralPreview) {
+      const bytes = await readNeutral(asset);
+      row.previewUrl = `data:image/png;base64,${bytes.toString("base64")}`;
+    }
+  }));
+  if (bodies.some(a => a.characterId === defaultCharacterId && a.role === "default")) {
+    for (const row of characters) {
+      if (!(row.characterId in CHARACTER_PRESENTATION)) continue;
+      row.displayName = row.gender === "female" ? "이전 기본 여성" : "이전 기본 남성";
+      row.role = "previous_default";
+      row.order = row.gender === "female" ? 200 : 190;
+    }
+    characters.sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.characterId.localeCompare(b.characterId));
+  }
 
   cache = { at: Date.now(), ids: new Set(byId.keys()) };
   return { characters, defaultCharacterId };
@@ -177,6 +210,7 @@ export async function characterSelectionEnabled(
 export async function currentCapabilities(
   overrides: Partial<CharacterDeps> = {},
 ): Promise<{
+  analyticsJourney?: boolean;
   handSelection: boolean;
   bodySelection: boolean;
   bodyRecommendation: boolean;
@@ -190,9 +224,10 @@ export async function currentCapabilities(
   modelPreview: boolean;
 }> {
   return {
+    analyticsJourney: true,
     handSelection: await handSelectionAvailable(),
     bodySelection: config.bodySelectionEnabled,
-    bodyRecommendation: config.bodySelectionEnabled,
+    bodyRecommendation: config.bodySelectionEnabled && config.bodyRecommendationEnabled,
     bodyPreviews: bodyUxAvailable(),
     bodyPreviewAssets: config.bodySelectionEnabled && converterEnabled(),
     refine: config.refineFeatureEnabled,

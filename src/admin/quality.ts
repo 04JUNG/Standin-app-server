@@ -1,8 +1,7 @@
-// 정확도·사용률 지표의 순수 함수. SQL은 `qualityStore.ts`에 있다.
+// 검색 결과 활용·사용량 지표의 순수 함수. SQL은 `qualityStore.ts`에 있다.
 //
-// 원본은 `daily_analytics_aggregates`다 — 하루가 끝난 뒤 한 번 계산해 두는 표라, 같은
-// 창을 몇 번 열어도 365일치 원본을 다시 훑지 않는다. 대신 **오늘은 들어 있지 않다**
-// (`day < current_date`). 화면도 "어제까지"라고 적는다.
+// 동의 범위가 반영된 quality_review 뷰를 날짜별로 집계한다. 철회 후에도 캐시 집계가
+// 남지 않도록 원본에서 계산하며, **오늘은 제외**한다(`day < current_date`).
 
 /** `daily_analytics_aggregates` 한 줄. snake_case는 여기서 끝난다. */
 export interface DailyAggregateRow {
@@ -15,6 +14,12 @@ export interface DailyAggregateRow {
   mean_reciprocal_rank: number | null;
   exports_completed: number;
   feedback_json: string;
+  /** 신규 SQL이 반환하는 작업/인물 표본. 구형 호출은 기존 컬럼으로 복구한다. */
+  selected_jobs?: number;
+  selected_completed_jobs?: number;
+  selection_samples?: number;
+  valid_rank_samples?: number;
+  exported_selected_jobs?: number;
 }
 
 export interface FeedbackShare {
@@ -25,13 +30,13 @@ export interface FeedbackShare {
 }
 
 export interface AccuracyMetrics {
-  /** 분석이 끝난 Job 중 사용자가 후보를 고른 비율(%). */
+  /** 분석이 끝난 Job 중 포즈 사용 확정 기록이 있는 작업 비율(%). 검색 정확도는 아니다. */
   selectionRate: number | null;
-  /** 고른 것 중 Top-1이었던 비율(%). 검색이 첫 줄에 맞혔는가. */
+  /** 유효 순위가 기록된 인물 선택 중 Top-1 비율(%). */
   top1Rate: number | null;
   /** 선택 순위의 역수 평균. 1에 가까울수록 위쪽에서 고른다. */
   meanReciprocalRank: number | null;
-  /** 고른 뒤 실제로 내보낸 비율(%). 고르고 버린 경우를 가른다. */
+  /** 사용 확정 작업 중 서버 내보내기 완료 기록이 있는 작업 비율(%). 실제 저장과 다르다. */
   exportRate: number | null;
   jobsCompleted: number;
   selections: number;
@@ -42,6 +47,12 @@ export interface AccuracyMetrics {
   trend: Array<{ day: string; selectionRate: number | null; jobsCompleted: number }>;
   /** 집계에 들어간 날 수. 0이면 아직 하루도 마감되지 않았다는 뜻이다. */
   days: number;
+  metricKind: "result_usage";
+  selectionBasis: "completed_jobs";
+  rankSamples: number;
+  rankSelectionSamples: number;
+  rankCoverageRate: number | null;
+  exportBasis: "server_exported_selected_jobs";
 }
 
 export interface UsageMetrics {
@@ -50,13 +61,18 @@ export interface UsageMetrics {
   jobsFailed: number;
   /** 시작한 Job 중 실패 비율(%). */
   failureRate: number | null;
-  /** 하루 평균 분석 건수. */
+  /** 기록이 있는 마감 날짜를 분모로 한 평균 분석 건수. 선택 기간 평균과 구분한다. */
   jobsPerDay: number | null;
   /** 활성 설치 하나당 분석 건수. 많이 쓰는 소수가 끌고 가는지 본다. */
   jobsPerActiveInstallation: number | null;
   activeInstallations: number;
   trend: Array<{ day: string; jobsStarted: number; jobsFailed: number }>;
   days: number;
+  jobsPerDayBasis: "recorded_days";
+  recordedDays: number;
+  selectedCalendarDays: number | null;
+  jobsPerSelectedCalendarDay: number | null;
+  activeInstallationScope: "rolling_window";
 }
 
 function rate(numerator: number, denominator: number): number | null {
@@ -86,17 +102,24 @@ export function toAccuracy(rows: DailyAggregateRow[]): AccuracyMetrics {
   let top1 = 0;
   let exports = 0;
   let reciprocalSum = 0;
+  let rankSamples = 0;
+  let rankSelectionSamples = 0;
+  let selectedCompleted = 0;
   const feedbackTotals: Record<string, number> = {};
 
   for (const row of rows) {
     jobsCompleted += row.jobs_completed;
-    selections += row.confirmed_selections;
+    selections += row.selected_jobs ?? row.confirmed_selections;
+    selectedCompleted += row.selected_completed_jobs ?? row.selected_jobs ?? row.confirmed_selections;
+    rankSelectionSamples += row.selection_samples ?? row.confirmed_selections;
     top1 += row.top1_selections;
-    exports += row.exports_completed;
+    exports += row.exported_selected_jobs ?? row.exports_completed;
     // MRR은 날짜별 평균을 다시 평균 내면 안 된다(날마다 선택 수가 다르다).
     // 저장된 평균에 그날의 선택 수를 곱해 합으로 되돌린 뒤 전체로 나눈다.
-    if (row.mean_reciprocal_rank !== null) {
-      reciprocalSum += row.mean_reciprocal_rank * row.confirmed_selections;
+    if (row.mean_reciprocal_rank !== null && Number.isFinite(Number(row.mean_reciprocal_rank))) {
+      const validSamples = row.valid_rank_samples ?? row.selection_samples ?? row.confirmed_selections;
+      rankSamples += validSamples;
+      reciprocalSum += Number(row.mean_reciprocal_rank) * validSamples;
     }
     for (const [reason, count] of Object.entries(parseFeedback(row.feedback_json))) {
       feedbackTotals[reason] = (feedbackTotals[reason] ?? 0) + count;
@@ -109,9 +132,9 @@ export function toAccuracy(rows: DailyAggregateRow[]): AccuracyMetrics {
     .sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason));
 
   return {
-    selectionRate: rate(selections, jobsCompleted),
-    top1Rate: rate(top1, selections),
-    meanReciprocalRank: selections > 0 ? Math.round((reciprocalSum / selections) * 1000) / 1000 : null,
+    selectionRate: rate(selectedCompleted, jobsCompleted),
+    top1Rate: rate(top1, rankSamples),
+    meanReciprocalRank: rankSamples > 0 ? Math.round((reciprocalSum / rankSamples) * 1000) / 1000 : null,
     exportRate: rate(exports, selections),
     jobsCompleted,
     selections,
@@ -119,14 +142,20 @@ export function toAccuracy(rows: DailyAggregateRow[]): AccuracyMetrics {
     feedbackRate: rate(feedbackCount, jobsCompleted),
     trend: rows.map((row) => ({
       day: row.day,
-      selectionRate: rate(row.confirmed_selections, row.jobs_completed),
+      selectionRate: rate(row.selected_completed_jobs ?? row.selected_jobs ?? row.confirmed_selections, row.jobs_completed),
       jobsCompleted: row.jobs_completed,
     })),
     days: rows.length,
+    metricKind: "result_usage",
+    selectionBasis: "completed_jobs",
+    rankSamples,
+    rankSelectionSamples,
+    rankCoverageRate: rate(rankSamples, rankSelectionSamples),
+    exportBasis: "server_exported_selected_jobs",
   };
 }
 
-export function toUsage(rows: DailyAggregateRow[], activeInstallations: number): UsageMetrics {
+export function toUsage(rows: DailyAggregateRow[], activeInstallations: number, selectedCalendarDays?: number): UsageMetrics {
   let started = 0;
   let completed = 0;
   let failed = 0;
@@ -150,5 +179,11 @@ export function toUsage(rows: DailyAggregateRow[], activeInstallations: number):
       jobsFailed: row.jobs_failed,
     })),
     days: rows.length,
+    jobsPerDayBasis: "recorded_days",
+    recordedDays: rows.length,
+    selectedCalendarDays: selectedCalendarDays ?? null,
+    jobsPerSelectedCalendarDay: selectedCalendarDays && selectedCalendarDays > 0
+      ? Math.round((started / selectedCalendarDays) * 10) / 10 : null,
+    activeInstallationScope: "rolling_window",
   };
 }

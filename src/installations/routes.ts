@@ -1,3 +1,6 @@
+import { createAccessRoutes } from "../access/routes.js";
+import { CLIENT_VERSION_HEADER, isSupportedClientVersion } from "../client-version/policy.js";
+import { updateRequired } from "../client-version/response.js";
 import { createBodyPreferenceRoutes } from "../body-selection/routes.js";
 import { acquisitionRoutes } from "./acquisition.js";
 import { Hono } from "hono";
@@ -21,6 +24,9 @@ import { createAppJourneyRoutes } from '../journey/routes.js';
 export const installationRoutes = new Hono<AppEnv>();
 installationRoutes.route('/current/journey', createAppJourneyRoutes());
 installationRoutes.route("/current/acquisition", acquisitionRoutes);
+installationRoutes.use("/current/access", requireInstallation);
+installationRoutes.use("/current/access/*", requireInstallation);
+installationRoutes.route("/current/access", createAccessRoutes());
 installationRoutes.use("/current/body-preferences", requireInstallation);
 installationRoutes.use("/current/body-preferences/*", requireInstallation);
 installationRoutes.route(
@@ -42,6 +48,12 @@ installationRoutes.post("/", async (c) => {
   const consentVersion = shortString(body?.consentVersion);
   const consentedAt = shortString(body?.consentedAt);
   const appVersion = shortString(body?.appVersion);
+  if (
+    !isSupportedClientVersion(appVersion) ||
+    !isSupportedClientVersion(c.req.header(CLIENT_VERSION_HEADER) ?? appVersion)
+  ) {
+    return updateRequired(c);
+  }
   const osName = shortString(body?.osName);
   const osVersion = shortString(body?.osVersion);
   const architecture = shortString(body?.architecture);

@@ -1,0 +1,336 @@
+{
+  "schemaVersion": "standin.interactive-http.v1",
+  "status": "implemented-opt-in-local-real-verified",
+  "updatedAt": "2026-11-06",
+  "source": {
+    "repository": "04JUNG/Standin-app-server",
+    "baseCommit": "37adaa616b21ac49933974f73b56fbc5c575b0c2",
+    "branch": "codex/interactive-real-model-bff",
+    "commit": "7dcfcfda16b7825b35122e0ddab2418b593154a0",
+    "commitRef": "codex/interactive-real-model-bff",
+    "commitRole": "implementation baseline plus real-model integration in this branch"
+  },
+  "converterContract": {
+    "path": "converter-contract-v1.json",
+    "status": "implemented-opt-in-local-real-verified",
+    "baseCommit": "592ab0f059089e64a5c88a3ad607539124e8e6c6",
+    "stateSchema": "solved-pose-state-v1",
+    "modelSchema": "interactive-pose-model-v1",
+    "receiptSchema": "interactive-fbx-receipt-v1",
+    "canonicalEncoding": "typed-f64be-json-v1",
+    "initialFbxRequired": true,
+    "httpTransport": "private authenticated /interactive/v1; default disabled",
+    "runtimeSha256": "d35d8c8c2d7888c437e53791c8dd5ba58c8bd65a597c016eb26e6236c3369eff",
+    "adapterVersion": "post-frozen-file-canonical-snapshot-v2",
+    "deadline": "Immutable BFF operation expiry; maximum one hour, missing/expired handle revokes ready"
+  },
+  "basePath": "/v1/analysis/jobs/{jobId}/people/{personIndex}/interactive-state",
+  "authentication": "existing installation headers on every request; private no-store",
+  "transport": "polling (1000ms suggested); no SSE in v1",
+  "routes": {
+    "POST /": {
+      "request": {
+        "schemaVersion": "standin.interactive-http.v1",
+        "candidateId": "server candidate id",
+        "revision": 1,
+        "expectedRevision": 0,
+        "expectedStateHash": null,
+        "mutationId": "8..128 ASCII idempotency key"
+      },
+      "response": "202 Operation; 200 same idempotency replay"
+    },
+    "GET /{operationId}": "200 Operation after full current-state revalidation",
+    "DELETE /{operationId}": "200 cancelled (idempotent); abort queued and active worker",
+    "GET /{operationId}/model": "200 server packet; never client matrices",
+    "POST /{operationId}/export": "202 same-state idempotent export preparation",
+    "GET /{operationId}/file": "200 verified FBX only; latest revision + full release/current-state recheck",
+    "GET /{operationId}/poster": "200 server-authoritative static PNG or 404; never blocks list/export",
+    "GET /?candidateId={candidateId}": "200 {schemaVersion,currentRevision,currentStateHash,appearanceExport:{version:fbx-outline-v1,available:boolean},skinExport:{version:fbx-skin-v1,available:boolean,supportedIds:string[]},operation|null}; optional URL-encoded appearance/skin JSON matches exact head; current candidate ownership required",
+    "POST /{operationId}/client-frame": {
+      "request": "ClientFrame JSON schema below; max 1 MiB PNG / 1.5 MB HTTP body",
+      "response": "201 auxiliary UI-only acknowledgement; same-hash retry idempotent; never accuracy/file safety evidence; never authoritative history poster"
+    },
+    "GET /v1/analysis/jobs/{jobId}/people/{personIndex}/interactive-frame": "200 archived current-selection server PNG; separate from operation/file expiry, same owned-job retention/source checks",
+    "GET /{operationId}/variants": "200 bounded exact previously verified owner-bound hand variants; current ready operation required",
+    "GET /{operationId}/skin-assets/{sha256}": "200 bounded approved application/gzip UV or image/png preview after installation/current operation/selection/asset revalidation; private/no-store, exact SHA/bytes; no arbitrary hashes/URLs"
+  },
+  "Operation": {
+    "schemaVersion": "standin.interactive-http.v1",
+    "operationId": "op_UUID",
+    "revision": 1,
+    "stateHash": "null while solving; Converter canonical snapshot SHA256 assigned once after solve",
+    "previewState": "solving | authoritative | error | superseded | cancelled",
+    "exportState": "not-requested | queued | building | ready | failed | superseded | cancelled",
+    "eventSequence": 1,
+    "expiresAt": "ISO8601",
+    "modelUrl": null,
+    "fileUrl": null,
+    "posterUrl": null,
+    "errorCode": null,
+    "selectionHash": "sha256 canonical server selection identity (immutable from prepare)",
+    "exportReceipt": "null before ready; {schema,operationId,revision,stateHash,artifactSha256,artifactBytes,runtimeRevision,packetModelSha256,solverVersion,validationVersion,initialFbxRequired:true,nativeSaved:false} after validated receipt",
+    "appearance": "optional nonzero versioned appearance; zero omitted"
+  },
+  "rules": [
+    "Persist body/hand/scope/refine and confirmed candidate using existing routes before prepare; request never mutates these selections",
+    "revision strictly increases per installation/job/person; expectedRevision+expectedStateHash compare-and-swap; retries reuse mutationId and identical body",
+    "Every response must match current client revision+stateHash before display; never save previous ready file after hand/refine change",
+    "stateHash includes installation/job/person/candidate, source/refined hashes, character/rig/shape, hands, scope, server camera, runtime/solver identities; excludes orbit, names, timestamps, paths",
+    "preview-ready is not release authority; no native-save/export-completed event during preparation",
+    "Private server poster uses same stateHash/revision; stale render cannot overwrite current frame; client capture is auxiliary UI only",
+    "Legacy framed ready/preview, semantic static lists, scene and explicit download contracts retained; rollout disabled by default",
+    "selectionHash is the stable pre-solve request fingerprint; stateHash is the Converter full canonical snapshot hash. Revision fences even pre-solve replies. expectedStateHash nullable, compared when non-null.",
+    "Archived static representative frames are separate from expiring export authority; every image delivery still verifies current ownership/selection/source. Existing thumbnailUrl is retained.",
+    "Client frame cameraHash is a claimed auxiliary metadata value, never trusted camera/projection evidence. One auxiliary image per operation; cannot populate authoritative history."
+  ],
+  "changes": [
+    "Initial BFF polling draft; converter packet schema pending",
+    "Aligned snapshot hash semantics to Converter solved_state.py: no synthetic geometry hash before solve; separate selectionHash.",
+    "Implemented durable polling/head recovery/cancel/queue, strict canonical packet+receipt+file checks, server history archive and auxiliary frame upload; actual Converter HTTP transport and full camera mapping remain blocked.",
+    "Pinned BFF implementation 7dcfcfd and Converter draft implementation 3fa41e71; confirmed no HTTP transport and no frozen/activated integration.",
+    "Real-model v2 integration: authenticated internal HTTP, normalized search projection, strict file-canonical display/export correspondence, prebuilt 5/5 local Top5 and bounded verified hand tables. Default flags remain off.",
+    "Strict appearance-bound final export boundary; rejected CSP hull remains unavailable, zero legacy unchanged.",
+    "Align native-v2/culling/surface/continuous full-width/width2 cropped target proof with current posed-FBX scope; preserve v1 rejection and zero path."
+  ],
+  "implementationStatus": "implemented private Converter HTTP/camera/static/verified-hand transport; local real-asset and full-wire tests pass; disabled by default",
+  "schemas": {
+    "Prepare": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "const": "standin.interactive-http.v1"
+        },
+        "candidateId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "revision": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "expectedStateHash": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mutationId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{8,128}$"
+        },
+        "appearance": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "const": "fbx-outline-v1"
+            },
+            "width": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            }
+          },
+          "required": [
+            "version",
+            "width"
+          ],
+          "additionalProperties": false
+        },
+        "skin": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "string",
+              "const": "fbx-skin-v1"
+            },
+            "id": {
+              "type": "string",
+              "enum": [
+                "default",
+                "gray-guide",
+                "flesh",
+                "flesh-guide",
+                "muscle"
+              ]
+            }
+          },
+          "required": [
+            "version",
+            "id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "candidateId",
+        "revision",
+        "expectedRevision",
+        "expectedStateHash",
+        "mutationId"
+      ],
+      "additionalProperties": false
+    },
+    "ClientFrame": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "const": "standin.interactive-http.v1"
+        },
+        "revision": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "stateHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "cameraHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "rendererVersion": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]{1,64}$"
+        },
+        "imageSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "pngBase64": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 1400000
+        },
+        "source": {
+          "type": "string",
+          "const": "client-canvas-ui-auxiliary"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "revision",
+        "stateHash",
+        "cameraHash",
+        "rendererVersion",
+        "imageSha256",
+        "pngBase64",
+        "source"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "modelResponse": {
+    "schema": "solved-pose-state-v1",
+    "operation": "same operationId",
+    "revision": "same revision",
+    "stateHash": "SHA256 of original canonicalState ASCII bytes",
+    "previewState": "authoritative",
+    "exportState": "not-requested (packet creation readiness, consult operation for current export state)",
+    "canonicalEncoding": "typed-f64be-json-v1",
+    "canonicalState": "Converter canonical JSON payload: schema, identity, bounded model (bones+skin+mesh+split normals), safety, dependencies; float values encoded {$f64: 16 hex chars}. See Converter contract; no external assets or client matrices."
+  },
+  "limits": {
+    "operationTtlSeconds": 3600,
+    "queuedPerInstallation": 20,
+    "leaseSeconds": 30,
+    "pollSeconds": 1,
+    "serverPosterBytes": 4194304,
+    "clientFrameBytes": 1048576
+  },
+  "activation": {
+    "environmentFlag": "INTERACTIVE_STATE_ENABLED=false",
+    "hardGate": "converterTransportAvailable=false",
+    "sse": false,
+    "realWorkerValidated": false,
+    "nativeSaveValidated": false,
+    "top5MatrixCoverageValidated": false
+  },
+  "staticAssets": {
+    "resolve": "batched offline Converter manifest; never Blender per card",
+    "url": "/v1/analysis/jobs/{jobId}/people/{personIndex}/interactive-static/{candidateId}/{sha256}",
+    "capability": "interactive-preview-capability-v1 only when all returned candidates have prebuilt source/character/scope coverage",
+    "scopeOfProof": "5/5 local candidates, not global library"
+  },
+  "documentation": "docs/INTERACTIVE_STATE_V1.md",
+  "appearanceExport": {
+    "version": "fbx-outline-v1",
+    "status": "scoped native v2 posed-FBX-import support; legacy opaque v1 rejected; default off",
+    "documentation": "docs/OUTLINE_EXPORT_APPEARANCE.md",
+    "environmentFlag": "OUTLINE_EXPORT_ENABLED=false",
+    "zero": "omit before identity hash; preserve existing bytes",
+    "selectionIdentity": "nonzero appearance + complete current server selection; base Converter packet schema unchanged",
+    "receipt": "separate final outlined-fbx-receipt-v1 proof, base receipt retained; no ready URL without both",
+    "finalByteLimit": 31457280,
+    "support": {
+      "expression": "skinned-outward-transparent-native-outline-v2",
+      "mapping": "csp-native-scope-stature-v2-experimental",
+      "acceptanceScope": "posed-fbx-import",
+      "characters": [
+        "male-default83-v0-7-6-p1",
+        "female-default80-v0-3-9-p1"
+      ],
+      "fullWidth": "continuous 0 < width <= 2",
+      "croppedWidth": "exactly 2",
+      "check": "live supported_targets exact row + requested width + independently pinned BFF matrix; summary lists/booleans insufficient"
+    }
+  },
+  "skinExport": {
+    "version": "fbx-skin-v1",
+    "status": "scoped full skin-only and combined-width2 support, independently pinned; default off",
+    "documentation": "docs/SKIN_EXPORT.md",
+    "environmentFlag": "SKIN_EXPORT_ENABLED=false",
+    "request": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "string",
+          "const": "fbx-skin-v1"
+        },
+        "id": {
+          "type": "string",
+          "enum": [
+            "default",
+            "gray-guide",
+            "flesh",
+            "flesh-guide",
+            "muscle"
+          ]
+        }
+      },
+      "required": [
+        "version",
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "default": "omit before request and selection hashing; identical legacy file path when outline also zero/omitted",
+    "selectionIdentity": "base server selection + optional nonzero appearance + nondefault skin + digest of exact approved asset version/manifest/model/UV/texture/runtime/target",
+    "pipeline": "canonical base FBX -> skin -> optional native-v2 outline",
+    "proof": "separate base receipt + normalized skinProof + optional outline; base.final=skin.source and skin.final=outline.source",
+    "support": "exact current #168 male/female full, four nondefault IDs, outline0/omission or exact2; partial UV lineage, personal/previous models, scene/VRM unsupported",
+    "headers": {
+      "skinOnly": "textured-fbx-v1",
+      "skinAndOutline": "outlined-fbx-v1"
+    },
+    "assetManifestSha256": "1fb0fa382d4fa7d27233b6139cba9c5f1ec575c6b8f86b7deac2a3dc4d447386",
+    "preview": "optional authoritative Operation.skinPreview, exact neutral topology/UV and prebuilt2048 PNG; owned operation skin-assets/{sha256} paths, final4096 texture SHA separate"
+  }
+}

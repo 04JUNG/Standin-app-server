@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import type { BodyAsset } from "./model.js";
 export function neutralMetadata(asset: BodyAsset) {
   const p = asset.neutralPreview;
@@ -18,6 +19,7 @@ export async function readNeutral(asset: BodyAsset) {
   const bytes = await readFile(p.path);
   if (
     bytes.length > 2 * 1024 * 1024 ||
+    createHash("sha256").update(bytes).digest("hex") !== p.sha256 ||
     !bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
   )
     throw new Error("invalid preview");

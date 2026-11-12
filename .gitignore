@@ -12,3 +12,9 @@ Thumbs.db
 .vscode/
 .idea/
 .claude/settings.local.json
+
+# Local replay DB, private objects and generated credentials
+work/
+
+# Also exclude the local dependency symlink used by isolated worktrees.
+/node_modules

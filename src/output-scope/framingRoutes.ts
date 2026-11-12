@@ -1,3 +1,4 @@
+import { legacyAppearanceError } from "../appearance/legacy.js";
 import { renderFinalPreview } from "../converter/finalPreview.js";
 import { candidatePathId, candidateSourceBytes } from "../candidate-source.js";
 import { refinableLibraryCandidate } from "../refine/eligibility.js";
@@ -74,19 +75,25 @@ export function createFramingRoutes(
       code: string,
       message: string,
     ) => c.json(errorEnvelope(code, message, c.get("requestId")), status);
+    const appearanceError = legacyAppearanceError(c);
+    if (appearanceError) return appearanceError;
     const installationId = c.get("installationId")!;
     const jobId = c.req.query("jobId") ?? "",
       candidateId = c.req.query("candidateId") ?? "";
     const rawPerson = c.req.query("personIndex");
     const personIndex = Number(rawPerson);
     const scope = c.req.query("outputScope"),
-      format = c.req.query("format");
+      requestedFormat = c.req.query("format");
+    // Same release/ownership checks as download, without counting a preview as an export.
+    const reviewFile = requestedFormat === "review-fbx";
+    const format = reviewFile ? "fbx" : requestedFormat;
     // A receipt grants no authority. Every request rechecks the owned job and
     // all current selections before accessing the immutable artifact cache.
     const artifactReceipt = c.req.query("artifactReceipt");
     const prepared = format === "ready" || artifactReceipt !== undefined;
     const release = format === "fbx" || format === "ready";
-    if ((artifactReceipt !== undefined && !/^[a-f0-9]{64}$/.test(artifactReceipt)) ||
+    if ((reviewFile && !artifactReceipt) ||
+        (artifactReceipt !== undefined && !/^[a-f0-9]{64}$/.test(artifactReceipt)) ||
         (artifactReceipt !== undefined && format !== "fbx" && format !== "preview"))
       return fail(400, "INVALID_INPUT", "파일 준비 정보를 다시 확인해 주세요.");
     const poseId = c.req.param("id");
@@ -157,7 +164,7 @@ export function createFramingRoutes(
       status: "requested" | "completed" | "failed",
       errorCode?: string,
     ) =>
-      format === "fbx"
+      format === "fbx" && !reviewFile
         ? deps.recordExport({
             installationId,
             jobId,
@@ -587,8 +594,12 @@ export function createFramingRoutes(
           "Content-Length": String(bytes.byteLength),
           "Cache-Control": "private, no-store",
           "X-Standin-Output-Scope": scope,
+          ...(result?.finalCache ? {
+            "X-Standin-Final-Artifact-Origin": result.finalCache.status,
+          } : {}),
           ...(prepared ? {
             "X-Standin-Artifact-Contract": "verified-fbx-v1",
+            "X-Standin-Local-Preview": "fbx-v1",
             "X-Standin-Review-Key": reviewKey,
             "X-Standin-Character-SHA256": result!.characterSha256!,
             "X-Standin-Source-BVH-SHA256": sha256Hex(bvhBytes),

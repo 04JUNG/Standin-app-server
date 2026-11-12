@@ -1,0 +1,30 @@
+{
+  "prefix": "body-models/releases/anatomy-20261111-5ab242a0112a-bff/presets-0897cb6c18fd",
+  "manifestSha256": "0897cb6c18fdef3e24b945bc2df9b09e8e7f65579130a98127e97c72264a97cc",
+  "characterIds": [
+    "male-base-v0-8-0",
+    "male-ideal83-v0-8-0",
+    "male-ideal70-v0-8-0",
+    "male-toon64-v0-8-0",
+    "male-muscular-v0-8-0",
+    "male-muscle-max-v0-8-0",
+    "male-bulk-v0-8-0",
+    "male-soft-v0-8-0",
+    "male-fat-max-v0-8-0",
+    "female-base-v0-4-0",
+    "female-slim-v0-4-0",
+    "female-ideal83-v0-4-0",
+    "female-ideal70-v0-4-0",
+    "female-toon64-v0-4-0",
+    "female-muscular-v0-4-0",
+    "female-muscle-max-v0-4-0",
+    "female-soft-v0-4-0",
+    "female-fat-max-v0-4-0",
+    "female-new-fat-v0-4-0",
+    "female-new-muscular-v0-4-0"
+  ],
+  "worker": {
+    "prefix": "body-models/releases/staging-9-20261012-9acb2ee7ec24/presets-0c14e26fd74a",
+    "manifestSha256": "0c14e26fd74afbff0af28cdf6955a9805ea025654425b61836145f310616a8f3"
+  }
+}

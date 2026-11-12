@@ -1,12 +1,14 @@
+import { CLIENT_VERSION_HEADER } from "./client-version/policy.js";
 import { cors } from "hono/cors";
 
 /** Share the production edge policy with browser/webview regression tests. */
 export function appCors(origins: string[]) {
   return cors({
     origin: origins,
-    allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowMethods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowHeaders: [
       "Content-Type",
+      CLIENT_VERSION_HEADER,
       "If-None-Match",
       "Authorization",
       "X-Installation-Id",
@@ -15,6 +17,8 @@ export function appCors(origins: string[]) {
     ],
     // 429 응답의 Retry-After를 웹뷰가 읽으려면 노출 목록에 있어야 한다(사용량 제한 안내).
     exposeHeaders: [
+      "X-Standin-State-Hash",
+      "X-Standin-Revision",
       "X-Standin-Poster-Variant",
       "X-Standin-Poster-Yaw",
       "X-Standin-Poster-Fallback",
@@ -51,11 +55,16 @@ export function appCors(origins: string[]) {
       "X-Standin-Preview-Revision",
       "X-Standin-Model-Revision",
       "X-Standin-Artifact-SHA256",
+      "X-Skin-Asset-SHA256",
       "X-Standin-Artifact-Contract",
+      "X-Standin-Local-Preview",
       "X-Standin-Person-Count",
       "X-Standin-Scene-Version",
       "X-Standin-Scene-Contract",
       "X-Standin-Scene-Save-Mode",
+      "X-Standin-Scene-Manifest-Version",
+      "X-Standin-Scene-Snapshot-SHA256",
+      "X-Standin-File-Count",
       "X-Standin-Preview-Artifact-SHA256",
     ],
     credentials: true,

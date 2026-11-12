@@ -1,5 +1,6 @@
 /** Body choices are independent of pose selection. No inference is performed here. */
 import { automaticRecommendation } from "./childPolicy.js";
+import { validPickerVisibility, type PickerVisibility } from "./pickerVisibility.js";
 import {
   bodyShape,
   type BodyShape,
@@ -14,7 +15,13 @@ export interface BodyRef {
   measurementVersion: string;
   characterId: string;
 }
-export interface BodyAsset extends BodyRef {
+/** Operator-authored presentation; identities and rendering contracts are independent. */
+export interface BodyPresentation {
+  gender?: "male" | "female" | "child";
+  role?: "default" | "previous_default" | "preset";
+  order?: number;
+}
+export interface BodyAsset extends BodyRef, BodyPresentation {
   displayName?: string;
   neutralPreview?: {
     path: string;
@@ -70,6 +77,8 @@ export interface BodyPreferences {
   scope: "installation";
   /** Last hand-picked body, or the common male base when none is usable. */
   mode: "auto" | "last_used";
+  /** Installation-owned list visibility, independent of saved cards and selection. */
+  pickerVisibility?: PickerVisibility;
   /** Absent on rows written before cards existed (see `cardsOf`). */
   cards?: BodyCard[];
   /** Written by manual body selections, not by preference writes. Never bumps `revision`. */
@@ -183,12 +192,53 @@ export function snapshot(
     firstUseDefault: firstUseBody(catalog),
   };
 }
-/** Use only a registered current male BASE asset; never invent a fallback identity. */
+/** Use the declared male default, or the original BASE rule for role-free catalogs. */
 export function firstUseBody(catalog: BodyCatalog): BodyRef | null {
-  const asset = catalog.assets.find((a) =>
-    /^male-base(?:-|$)/.test(a.characterId),
-  );
+  // Once roles are declared, never rediscover the old BASE by array order or ID.
+  const declared = catalog.assets.some((a) => a.role !== undefined);
+  const asset = declared
+    ? catalog.assets.find((a) =>
+        a.characterId === catalog.defaultCharacterId &&
+        a.role === "default" && a.gender === "male",
+      )
+    : catalog.assets.find((a) => /^male-base(?:-|$)/.test(a.characterId));
   return asset ? bodyRef(asset) : null;
+}
+/** Explicit anatomy release migration, not a general rewrite of historical assets. */
+export function upgradedRememberedBase(ref: BodyRef, catalog: BodyCatalog): BodyRef | null {
+  const predecessors: Record<string, string> = {
+    "body-male-base": "male-base-v0-8-0",
+    "male-base-v0-7-2": "male-base-v0-8-0",
+    "male-base-v0-7-6": "male-base-v0-8-0",
+    "body-female-base": "female-base-v0-4-0",
+    "female-base-v0-3-4": "female-base-v0-4-0",
+    "female-base-v0-3-9": "female-base-v0-4-0",
+  };
+  // Presets keep their proportions; only the underlying anatomy generation changes.
+  for (const [gender, versions, next, names] of [
+    ["male", ["0-7-2", "0-7-6"], "0-8-0", ["ideal83", "ideal70", "toon64", "muscular", "muscle-max", "bulk", "soft", "fat-max"]],
+    ["female", ["0-3-4", "0-3-9"], "0-4-0", ["slim", "ideal83", "ideal70", "toon64", "muscular", "muscle-max", "soft", "fat-max", "new-fat", "new-muscular"]],
+  ] as const) {
+    for (const name of names) for (const version of versions)
+      predecessors[`${gender}-${name}-v${version}`] = `${gender}-${name}-v${next}`;
+  }
+  const target = predecessors[ref.characterId];
+  if (!target || !catalog.assets.some(a => sameBody(a, ref))) return null;
+  const role = target.includes("-base-") ? "default" : "preset";
+  const asset = catalog.assets.find(a => a.characterId === target && a.role === role);
+  return asset ? bodyRef(asset) : null;
+}
+/** Hide superseded catalog templates, retaining historical identities for saved work. */
+export function currentPresetAssets(catalog: BodyCatalog, keep: Iterable<string> = []): BodyAsset[] {
+  const retained = new Set(keep);
+  return catalog.assets.filter(a => retained.has(a.characterId) || !upgradedRememberedBase(a, catalog));
+}
+export function currentLastUsed(
+  last: BodyPolicy["lastUsed"], catalog: BodyCatalog,
+): BodyPolicy["lastUsed"] {
+  if (!last || last.shape) return last;
+  const replacement = upgradedRememberedBase(last.body, catalog);
+  return replacement ? { body: replacement, shape: null } : last;
 }
 /**
  * The last hand-picked body as the catalog accepts it now. If its controls no longer fit
@@ -203,7 +253,7 @@ function lastUsedBody(
     ? catalog.assets.find((a) => a.characterId === last.characterId)
     : undefined;
   if (!last || !asset) return null;
-  if (!last.controls) return { body: bodyRef(asset), shape: null };
+  if (!last.controls) return currentLastUsed({ body: bodyRef(asset), shape: null }, catalog);
   try {
     return { body: bodyRef(asset), shape: bodyShape(asset, last.controls) };
   } catch {
@@ -255,7 +305,7 @@ export function resolveBody(
   const last =
     policy.lastUsed === undefined
       ? lastUsedBody(preferences, catalog)
-      : policy.lastUsed;
+      : currentLastUsed(policy.lastUsed, catalog);
   if (intent === "inherit" && preferences.mode === "last_used") {
     if (last && bodyEligible(last.body, catalog, poses, previewOnly)) {
       try {
@@ -309,6 +359,9 @@ export function normalizePreferences(value: BodyPreferences): BodyPreferences {
     version: "body-preferences.v1",
     scope: "installation",
     mode: old.mode === "auto" ? "auto" : "last_used",
+    ...(validPickerVisibility(value.pickerVisibility)
+      ? { pickerVisibility: structuredClone(value.pickerVisibility) }
+      : {}),
     cards,
     lastUsed: value.lastUsed ?? null,
     revision: value.revision,

@@ -15,6 +15,8 @@ import type { BodyScope } from "../output-scope/model.js";
 export const FRAMING_VERSION = "skin-regions-v2-shoulder-head";
 const MAX_RESPONSE = 48 * 1024 * 1024;
 export interface FramedArtifact {
+  /** Origin of these immutable bytes, not an authorization or job receipt. */
+  finalCache?: { status: "hit" | "miss"; blenderRuns: number };
   artifactContract?: "verified-fbx-v1";
   fbx: Uint8Array;
   preview: Uint8Array;
@@ -183,6 +185,10 @@ export async function convertFramed(
       throw new Error("unexpected hand bake");
     }
     const validation = value.artifact_validation as Record<string, unknown> | undefined;
+    const cache = value.final_cache as Record<string, unknown> | null | undefined;
+    if (cache != null && ((cache.status !== "hit" && cache.status !== "miss") ||
+        cache.blender_runs !== (cache.status === "hit" ? 0 : 1)))
+      throw new Error("invalid final cache diagnostics");
     const fbx = decode("fbx_base64"),
       preview = input.previewFormat === "none" ? Buffer.alloc(0) : decode("preview_base64");
     if (
@@ -220,6 +226,7 @@ export async function convertFramed(
     )
       throw new Error("lineage");
     return {
+      ...(cache ? { finalCache: { status: cache.status as "hit" | "miss", blenderRuns: Number(cache.blender_runs) } } : {}),
       ...(input.previewFormat === "none" ? { artifactContract: "verified-fbx-v1" as const } : {}),
       fbx,
       preview,

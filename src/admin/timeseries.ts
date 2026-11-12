@@ -72,6 +72,8 @@ export interface TimeseriesPoint {
   jobsCompleted: number;
   jobsFailed: number;
   downloads: number;
+  /** 완료된 서버 내보내기 이벤트 수. 실제 디스크 저장 수가 아니다. */
+  serverExportRecords: number;
 }
 
 /**
@@ -104,6 +106,7 @@ export function fillBuckets(
       jobsCompleted: row?.jobs_completed ?? 0,
       jobsFailed: row?.jobs_failed ?? 0,
       downloads: row?.downloads ?? 0,
+      serverExportRecords: row?.downloads ?? 0,
     });
   }
   return points;
