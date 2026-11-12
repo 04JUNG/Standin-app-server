@@ -1,6 +1,7 @@
 /** Private verified base FBX → immutable approved textured FBX. */
-import { skinPreview, verifySkinPreviewAsset } from "../appearance/skin-preview.js";
+import { skinPreview, verifySkinPreviewAsset, type SkinPreview } from "../appearance/skin-preview.js";
 import { config } from "../config.js";
+import { log } from "../log.js";
 import { hash, InteractiveError, type Operation } from "../interactive-state/model.js";
 import type { ResolvedSelection } from "../interactive-state/selection.js";
 import type { SkinArtifacts } from "../interactive-state/service.js";
@@ -25,13 +26,25 @@ export function createSkinArtifacts(overrides: Partial<SkinDeps> = {}): SkinArti
   const deps: SkinDeps = { enabled: () => config.skinExportEnabled && !!config.betaDataBucket,
     baseUrl: config.converterBaseUrl.replace(/\/+$/, ""), token: config.interactiveConverterToken,
     fetch, timeoutMs: config.converterShapeTimeoutMs, storage: new PrivateSkinStorage(), ...overrides };
+  const bounded = (signal?: AbortSignal) => AbortSignal.any([AbortSignal.timeout(deps.timeoutMs), ...(signal ? [signal] : [])]);
+  /** Idempotent reads reconnect once. Node 20's fetch can reuse a pooled socket that the Converter
+   * (uvicorn, 5 s keep-alive) already closed and fail with ECONNRESET before any response arrives. */
+  async function read(path: string, route: string, signal?: AbortSignal) {
+    for (let attempt = 1; ; attempt++) {
+      try { return await deps.fetch(`${deps.baseUrl}${path}`, { headers: { Authorization: `Bearer ${deps.token}` }, signal: bounded(signal) }); }
+      catch (error) {
+        if (signal?.aborted || (error as { name?: unknown })?.name === "TimeoutError" || attempt >= 2) throw error;
+        const cause = (error as { cause?: { code?: unknown } })?.cause?.code;
+        log.warn({ type: "skin_converter_read_retry", route, errorCode: typeof cause === "string" ? cause : "FETCH_FAILED" });
+      }
+    }
+  }
   async function request(path: "/skin-contract" | "/skin-fbx", signal?: AbortSignal, body?: FormData, trace?: ConverterTrace) {
     if (!deps.enabled() || !deps.baseUrl || deps.token.length < 32) throw new InteractiveError("SKIN_DISABLED", 503);
     let response: Response;
     const startedAt = performance.now();
-    try { response = await deps.fetch(`${deps.baseUrl}${path}`, { method: body ? "POST" : "GET",
-      headers: { Authorization: `Bearer ${deps.token}` }, ...(body ? { body } : {}),
-      signal: AbortSignal.any([AbortSignal.timeout(deps.timeoutMs), ...(signal ? [signal] : [])]) }); }
+    try { response = body ? await deps.fetch(`${deps.baseUrl}${path}`, { method: "POST",
+      headers: { Authorization: `Bearer ${deps.token}` }, body, signal: bounded(signal) }) : await read(path, path, signal); }
     catch {
       reportConverterTiming(trace, startedAt);
       throw new InteractiveError(signal?.aborted ? "INTERACTIVE_SUPERSEDED" : "SKIN_UNAVAILABLE", signal?.aborted ? 409 : 503);
@@ -72,9 +85,7 @@ export function createSkinArtifacts(overrides: Partial<SkinDeps> = {}): SkinArti
   async function readAsset(digest: string, expectedBytes: number, signal?: AbortSignal) {
     if (assets.has(digest)) return assets.get(digest)!;
     let response: Response;
-    try { response = await deps.fetch(`${deps.baseUrl}/skin-assets/${digest}`, {
-      headers: { Authorization: `Bearer ${deps.token}` },
-      signal: AbortSignal.any([AbortSignal.timeout(deps.timeoutMs), ...(signal ? [signal] : [])]) }); }
+    try { response = await read(`/skin-assets/${digest}`, "/skin-assets/:digest", signal); }
     catch { throw new InteractiveError(signal?.aborted ? "INTERACTIVE_SUPERSEDED" : "SKIN_UNAVAILABLE", signal?.aborted ? 409 : 503); }
     const reader = response.body?.getReader();
     if (!reader) throw new InteractiveError("SKIN_ASSETS_UNAVAILABLE", 503);
@@ -89,30 +100,30 @@ export function createSkinArtifacts(overrides: Partial<SkinDeps> = {}): SkinArti
       return Buffer.concat(chunks);
     } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
   }
+  /** Exact pinned bytes, cached once verified. Callers still fence every response with a fresh
+   * approval; a failed fence must not force another download and structure check on retry. */
+  async function verifiedAsset(preview: SkinPreview, digest: string, signal?: AbortSignal) {
+    const pin = digest === preview.uv.sha256 ? preview.uv : digest === preview.texture.sha256 ? preview.texture : undefined;
+    if (!pin) throw new InteractiveError("NOT_FOUND", 404);
+    const bytes = await readAsset(digest, pin.bytes, signal);
+    const contentType = await verifySkinPreviewAsset(preview, digest, bytes);
+    if (!assets.has(digest)) { if (assets.size >= 8) assets.delete(assets.keys().next().value!); assets.set(digest, bytes); }
+    return { bytes, contentType };
+  }
   return {
     async previewAsset(selection, skin, digest, signal) {
       const current = await context(selection, skin, undefined, signal);
-      const preview = skinPreview(current.context, selection.characterId);
-      const pin = digest === preview.uv.sha256 ? preview.uv : digest === preview.texture.sha256 ? preview.texture : undefined;
-      if (!pin) throw new InteractiveError("NOT_FOUND", 404);
-      const bytes = await readAsset(digest, pin.bytes, signal);
-      const contentType = verifySkinPreviewAsset(preview, digest, bytes);
+      const asset = await verifiedAsset(skinPreview(current.context, selection.characterId), digest, signal);
       const fresh = await context(selection, skin, undefined, signal);
       if (fresh.approval.identity !== current.approval.identity) throw new InteractiveError("SKIN_BINDING_MISMATCH");
-      if (!assets.has(digest)) { if (assets.size >= 8) assets.delete(assets.keys().next().value!); assets.set(digest, bytes); }
-      return { bytes, contentType };
+      return asset;
     },
     async asset(op, digest, signal) {
       // The operation service revalidates the exact live approval before and
       // after this read. The stored descriptor still pins the approved bytes.
       const preview = op.skinPreview;
       if (!preview) throw new InteractiveError("SKIN_BINDING_MISMATCH");
-      const pin = digest === preview.uv.sha256 ? preview.uv : digest === preview.texture.sha256 ? preview.texture : undefined;
-      if (!pin) throw new InteractiveError("NOT_FOUND", 404);
-      const bytes = await readAsset(digest, pin.bytes, signal);
-      const contentType = verifySkinPreviewAsset(preview, digest, bytes);
-      if (!assets.has(digest)) { if (assets.size >= 8) assets.delete(assets.keys().next().value!); assets.set(digest, bytes); }
-      return { bytes, contentType };
+      return verifiedAsset(preview, digest, signal);
     },
     async check(selection, skin, appearance) { return (await context(selection, skin, appearance)).approval; },
     async prepare(op, selection, source, signal) {
