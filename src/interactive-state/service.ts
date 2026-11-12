@@ -1,5 +1,5 @@
 import { type SkinPreview } from "../appearance/skin-preview.js";
-import { nondefaultSkin, type Skin } from "../appearance/skin.js";
+import { nondefaultSkin, skinSupportsScope, skinUnavailableCode, type Skin, type SkinUnavailable } from "../appearance/skin.js";
 import { nonzeroAppearance, type Appearance } from "../appearance/model.js";
 import { parsePublishedPacket, parseReceipt } from "./packet.js";
 import {
@@ -151,14 +151,21 @@ export class InteractiveService {
     if (this.deps.outline) {
       try { await this.deps.outline.check(selection, nonzeroAppearance(appearance)); appearanceAvailable = true; } catch { /* Fail closed capability only. */ }
     }
-    let approval: SkinApproval | undefined;
+    let approval: SkinApproval | undefined, skinUnavailable: SkinUnavailable | undefined;
     if (this.deps.skin) {
-      try { approval = await this.deps.skin.check(selection, material, normalized); } catch { /* Fail closed capability only. */ }
+      // A cropped scope can never be approved, so say why without asking the Converter.
+      if (!skinSupportsScope(selection.scope)) skinUnavailable = { code: "SKIN_UNSUPPORTED", outputScope: selection.scope };
+      else {
+        try { approval = await this.deps.skin.check(selection, material, normalized); }
+        catch (error) { skinUnavailable = { code: skinUnavailableCode(error) }; /* Fail closed capability only. */ }
+      }
     }
     if (!material || approval) selection = this.withAppearance(selection, normalized, material, approval);
     return {
       schemaVersion: "standin.interactive-http.v1",
+      // Keep `skinExport` to these three keys: clients up to 2.10.4 parse it strictly.
       skinExport: { version: "fbx-skin-v1", available: !!approval, supportedIds: approval?.supportedIds ?? ["default"] },
+      ...(skinUnavailable ? { skinUnavailable } : {}),
       appearanceExport: { version: "fbx-outline-v1", available: appearanceAvailable },
       currentRevision: head?.revision ?? 0,
       currentStateHash: head?.stateHash ?? null,

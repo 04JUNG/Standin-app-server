@@ -49,6 +49,9 @@ async function setup() {
   const state = {
     selection: "first",
     skinAvailable: false,
+    skinChecks: 0,
+    skinCheckError: undefined as unknown,
+    scope: "full" as ResolvedSelection["scope"],
     skinAsset: "fixture asset manifest version 1",
     skinCalls: 0,
     corruptSkinFile: false,
@@ -87,14 +90,15 @@ async function setup() {
     if (state.runtimeFailures > 0) { state.runtimeFailures--; throw state.runtimeError; }
     if (state.resolveUnavailable) throw new Error("temporary upstream failure");
     if (!state.valid) throw new InteractiveError("NOT_FOUND", 404);
-    return fixtureSelection(hash(state.selection));
+    return { ...fixtureSelection(hash(state.selection)), scope: state.scope };
   };
   const skinBytes = (op: Operation) => Buffer.concat([syntheticFbx, Buffer.from(`|skin:${op.skin?.id}`)]);
   const service = new InteractiveService({
     store,
     resolve: resolver,
     skin: {
-      check: async () => { if (!state.skinAvailable) throw new InteractiveError("SKIN_NOT_CSP_CERTIFIED", 503);
+      check: async () => { state.skinChecks++; if (state.skinCheckError) throw state.skinCheckError;
+        if (!state.skinAvailable) throw new InteractiveError("SKIN_NOT_CSP_CERTIFIED", 503);
         return { identity: hash(state.skinAsset), supportedIds: ["default", "gray-guide", "flesh", "flesh-guide", "muscle"] }; },
       prepare: async (op, _selection, source, signal) => {
         state.skinCalls++;
@@ -961,6 +965,42 @@ test("approved asset replacement invalidates ready skin bytes and changes the ne
     s.state.skinAvailable = false;
     const head = await (await s.request("?" + new URLSearchParams({ candidateId: "candidate", skin: JSON.stringify(flesh) }))).json() as { operation: unknown; skinExport: { available: boolean; supportedIds: string[] } };
     assert.equal(head.operation, null); assert.equal(head.skinExport.available, false); assert.deepEqual(head.skinExport.supportedIds, ["default"]);
+  } finally { await s.pg.close(); }
+});
+
+test("head says why skins are unavailable: cropped scope without a Converter call, otherwise the skin code", async () => {
+  const s = await setup();
+  type Head = { operation: unknown; skinExport: { available: boolean; supportedIds: string[] }; skinUnavailable?: unknown };
+  const head = async (skin?: unknown) => await (await s.request("?" + new URLSearchParams({ candidateId: "candidate",
+    ...(skin ? { skin: JSON.stringify(skin) } : {}) }))).json() as Head;
+  try {
+    let body = await head(flesh);
+    assert.deepEqual(body.skinExport, { version: "fbx-skin-v1", available: false, supportedIds: ["default"] });
+    assert.deepEqual(body.skinUnavailable, { code: "SKIN_NOT_CSP_CERTIFIED" });
+    s.state.skinCheckError = new Error("socket reset");
+    assert.deepEqual((await head(flesh)).skinUnavailable, { code: "SKIN_UNAVAILABLE" });
+    s.state.skinCheckError = new InteractiveError("INTERACTIVE_SUPERSEDED", 409);
+    assert.deepEqual((await head(flesh)).skinUnavailable, { code: "SKIN_UNAVAILABLE" });
+    s.state.skinCheckError = new InteractiveError("SKIN_UV_INCOMPATIBLE");
+    assert.deepEqual((await head(flesh)).skinUnavailable, { code: "SKIN_UV_INCOMPATIBLE" });
+    s.state.skinCheckError = undefined; s.state.skinAvailable = true;
+    body = await head(flesh);
+    // Clients up to 2.10.4 parse skinExport strictly: an available capability gains no keys.
+    assert.deepEqual(Object.keys(body.skinExport).sort(), ["available", "supportedIds", "version"]);
+    assert.equal(body.skinExport.available, true); assert.ok(!("skinUnavailable" in body));
+    for (const scope of ["half", "bust", "shoulder_head", "head"] as const) {
+      s.state.scope = scope; s.state.skinChecks = 0;
+      for (const skin of [flesh, undefined]) {
+        body = await head(skin);
+        assert.deepEqual(body.skinExport, { version: "fbx-skin-v1", available: false, supportedIds: ["default"] });
+        assert.deepEqual(body.skinUnavailable, { code: "SKIN_UNSUPPORTED", outputScope: scope });
+      }
+      assert.equal(s.state.skinChecks, 0);
+    }
+    // The cropped default-skin pose still prepares; only nondefault skins are refused.
+    assert.equal((await s.prepare(1, 0, "cropped-default")).status, 202);
+    assert.equal((await head()).operation === null, false);
+    assert.equal((await head(flesh)).operation, null);
   } finally { await s.pg.close(); }
 });
 
