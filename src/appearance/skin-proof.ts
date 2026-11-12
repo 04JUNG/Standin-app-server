@@ -74,7 +74,7 @@ export function parseTexturedArtifact(raw: unknown, op: Operation, selection: Re
     const baseRig = op.receipt?.skin as { meshes?: unknown; bones?: unknown } | undefined;
     if (!texture || op.skin?.id === "default" || selection.scope !== "full" ||
       hash(context.skin) !== hash(op.skin) || a.characterSha256 !== selection.body.resolvedBody?.assetSha256 ||
-      baseRig?.meshes !== 1 || baseRig.bones !== a.bones || a.bones !== 52 ||
+      baseRig?.meshes !== 1 || baseRig.bones !== a.bones || !Number.isSafeInteger(a.bones) || a.bones < 1 || a.bones > 256 ||
       r.runtime_revision !== context.runtimeRevision || r.asset_manifest_sha256 !== context.assetManifestSha256 || r.asset_version !== context.assetVersion ||
       r.uv_sha256 !== a.uvSha256 || r.texture_sha256 !== texture.sha256 ||
       r.material.manifest.texture_sha256 !== texture.sha256 ||

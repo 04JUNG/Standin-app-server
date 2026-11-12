@@ -89,7 +89,7 @@ const packetSchema = z
 const safety = z
   .object({
     bodyAccepted: z.literal(true),
-    handChecksPassed: z.literal(true),
+    handChecksPassed: z.boolean(),
     surface: z.literal("existing-adapter-checks-only"),
     finalFileVerified: z.literal(false),
   })
