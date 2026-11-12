@@ -293,24 +293,35 @@ async function keepAliveConverter(idleCloseMs: number) {
   };
 }
 
-test("a probe right after a stall longer than the Converter's idle close still succeeds", async () => {
-  // Production uvicorn closes idle keep-alive sockets after 5 s. Another session reproduced
-  // UND_ERR_SOCKET for the first request after a 6-10 s BFF stall in node:20-slim. This host
-  // does not always hit the stale socket, so the retry decision itself is tested with fakes below.
-  const converter = await keepAliveConverter(300);
-  try {
-    await (await fetch(converter.url)).json();
-    stall(800);
-    const deadline = probeDeadline(2000);
+test("reproduction: the first probe after a stall reuses a socket the Converter already closed", async () => {
+  // Sequence from the skin investigation (node:20-slim + uvicorn, 6-10 s stalls): a second
+  // request just before a stall that outlives the Converter's idle close (uvicorn 5 s).
+  const outcomes: Record<string, string> = {};
+  for (const fixed of [false, true]) {
+    const converter = await keepAliveConverter(300);
     try {
-      const response = await probeOnce(() => fetch(converter.url, { signal: deadline.signal }), deadline.signal);
-      assert.equal(((await response.json()) as typeof health).ok, true);
+      await (await fetch(converter.url)).text();
+      const inflight = fetch(converter.url).then((r) => r.text());
+      await sleep(50);
+      stall(800);
+      const agreement = new HandAgreement(
+        { enabled: () => true, catalog: async () => catalog, health: (init) => fetch(converter.url, init) },
+        { freshMs: 0 },
+      );
+      outcomes[fixed ? "fixed" : "single attempt"] = await (fixed
+        ? agreement.read(true).then(() => "ok", (e: { code?: string }) => e.code ?? "error")
+        : fetch(converter.url).then(
+            (r) => r.text().then(() => "ok"),
+            (e: { cause?: { code?: string } }) => e.cause?.code ?? "error",
+          ));
+      await inflight.catch(() => {});
     } finally {
-      deadline.clear();
+      await converter.close();
     }
-  } finally {
-    await converter.close();
   }
+  assert.equal(outcomes.fixed, "ok");
+  // Linux (production, CI) reuses the closed socket; Windows notices the close first.
+  if (process.platform === "linux") assert.equal(outcomes["single attempt"], "UND_ERR_SOCKET");
 });
 
 test("only a stale connection is retried, once, inside the same deadline", async () => {
