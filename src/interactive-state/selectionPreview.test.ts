@@ -135,10 +135,12 @@ test("HTTP endpoint is gated, bounds payloads, and creates no exportable stored 
     c.set("requestId", "preview-test");
     await next();
   });
+  const missing = async () => {
+    throw new InteractiveError("NOT_FOUND", 404);
+  };
   const exportService = {
-    current: async () => {
-      throw new InteractiveError("NOT_FOUND", 404);
-    },
+    current: missing,
+    lookup: missing,
   } as unknown as import("./service.js").InteractiveService;
   app.route(
     "/v1/analysis/jobs",

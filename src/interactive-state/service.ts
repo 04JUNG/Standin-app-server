@@ -154,8 +154,12 @@ export class InteractiveService {
           : null,
     };
   }
+  // Byte and mutation handlers perform their own fresh selection checks.
+  lookup(l: Location, id: string) {
+    return this.deps.store.get(l, id);
+  }
   async current(l: Location, id: string) {
-    const op = await this.deps.store.get(l, id);
+    const op = await this.lookup(l, id);
     // Cancelled states are visible after ownership/current selection validation.
     await this.revalidate(op);
     return op;
@@ -487,22 +491,24 @@ export class InteractiveService {
           selection,
         );
         if (controller.signal.aborted) return;
-        await revalidate();
         let processed = { ...op, receipt }, source: Uint8Array | undefined;
-        if (op.skin || op.appearance) source = await this.verifiedFile(processed, controller.signal);
+        if (op.skin || op.appearance) {
+          await revalidate();
+          source = await this.verifiedFile(processed, controller.signal);
+        }
         const skinReceipt = op.skin
           ? await this.skin().prepare(processed, selection, source!, controller.signal)
           : undefined;
         if (controller.signal.aborted) return;
-        await revalidate();
         if (skinReceipt) {
+          await revalidate();
           processed = { ...processed, skinReceipt };
           source = await this.skin().file(processed, selection, controller.signal);
           this.verifyAppearanceBytes(source, skinReceipt, "SKIN_INTEGRITY_ERROR");
           outlineSourceOperation(processed);
         }
         if (controller.signal.aborted) return;
-        await revalidate();
+        if (op.appearance) await revalidate();
         const outlineReceipt = op.appearance
           ? await this.outline().prepare(outlineSourceOperation(processed), selection, source!, controller.signal)
           : undefined;

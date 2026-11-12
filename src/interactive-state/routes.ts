@@ -223,7 +223,7 @@ export function createInteractiveRoutes(
       "Retry-After": "1",
     });
   });
-  const op = async (c: Parameters<typeof l>[0]) => {
+  const op = async (c: Parameters<typeof l>[0], revalidate = false) => {
     const location = l(c),
       id = c.req.param("operationId");
     if (!/^op_[a-f0-9-]{36}$/.test(id))
@@ -231,13 +231,13 @@ export function createInteractiveRoutes(
     // Settings are immutable on prepare; do not silently ignore appearance on a file/export URL.
     if (Object.keys(c.req.query()).some(k => /^(outline|appearance|skin)/i.test(k)))
       throw new InteractiveError("INVALID_INPUT", 400);
-    return service.current(location, id);
+    return revalidate ? service.current(location, id) : service.lookup(location, id);
   };
   r.get(`${INTERACTIVE_PATH}/:operationId`, async (c) => {
     const started = performance.now();
     let status = 200;
     try {
-      const operation = await op(c);
+      const operation = await op(c, true);
       return c.json(publicOperation(operation), 200, {
         "Cache-Control": "private, no-store", "Retry-After": "1",
         "Server-Timing": `bff_poll;dur=${(performance.now() - started).toFixed(3)}`,
@@ -252,7 +252,7 @@ export function createInteractiveRoutes(
     }
   });
   r.delete(`${INTERACTIVE_PATH}/:operationId`, async (c) =>
-    c.json(publicOperation(await service.cancel(await op(c))), 200, {
+    c.json(publicOperation(await service.cancel(await op(c, true))), 200, {
       "Cache-Control": "private, no-store",
     }),
   );

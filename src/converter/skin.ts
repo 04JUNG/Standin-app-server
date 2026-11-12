@@ -5,6 +5,7 @@ import { hash, InteractiveError, type Operation } from "../interactive-state/mod
 import type { ResolvedSelection } from "../interactive-state/selection.js";
 import type { SkinArtifacts } from "../interactive-state/service.js";
 import { sha256Hex } from "./client.js";
+import { reportConverterTiming, type ConverterTrace } from "./interactive-timing.js";
 import { checkSkinContract, type SkinPolicy } from "../appearance/skin-contract.js";
 import { MAX_SKIN_BYTES, parseTexturedArtifact, skinBinding } from "../appearance/skin-proof.js";
 import { PrivateSkinStorage, type OutlineStorage } from "../appearance/storage.js";
@@ -24,15 +25,23 @@ export function createSkinArtifacts(overrides: Partial<SkinDeps> = {}): SkinArti
   const deps: SkinDeps = { enabled: () => config.skinExportEnabled && !!config.betaDataBucket,
     baseUrl: config.converterBaseUrl.replace(/\/+$/, ""), token: config.interactiveConverterToken,
     fetch, timeoutMs: config.converterShapeTimeoutMs, storage: new PrivateSkinStorage(), ...overrides };
-  async function request(path: "/skin-contract" | "/skin-fbx", signal?: AbortSignal, body?: FormData) {
+  async function request(path: "/skin-contract" | "/skin-fbx", signal?: AbortSignal, body?: FormData, trace?: ConverterTrace) {
     if (!deps.enabled() || !deps.baseUrl || deps.token.length < 32) throw new InteractiveError("SKIN_DISABLED", 503);
     let response: Response;
+    const startedAt = performance.now();
     try { response = await deps.fetch(`${deps.baseUrl}${path}`, { method: body ? "POST" : "GET",
       headers: { Authorization: `Bearer ${deps.token}` }, ...(body ? { body } : {}),
       signal: AbortSignal.any([AbortSignal.timeout(deps.timeoutMs), ...(signal ? [signal] : [])]) }); }
-    catch { throw new InteractiveError(signal?.aborted ? "INTERACTIVE_SUPERSEDED" : "SKIN_UNAVAILABLE", signal?.aborted ? 409 : 503); }
+    catch {
+      reportConverterTiming(trace, startedAt);
+      throw new InteractiveError(signal?.aborted ? "INTERACTIVE_SUPERSEDED" : "SKIN_UNAVAILABLE", signal?.aborted ? 409 : 503);
+    }
+    const headersMs = performance.now() - startedAt;
     const reader = response.body?.getReader();
-    if (!reader) throw new InteractiveError("SKIN_UNAVAILABLE", 503);
+    if (!reader) {
+      reportConverterTiming(trace, startedAt, response, headersMs);
+      throw new InteractiveError("SKIN_UNAVAILABLE", 503);
+    }
     const cap = path === "/skin-contract" ? 128 * 1024 : response.ok ? 42 * 1024 * 1024 : 16384;
     let size = 0; const chunks: Uint8Array[] = [];
     try {
@@ -50,7 +59,11 @@ export function createSkinArtifacts(overrides: Partial<SkinDeps> = {}): SkinArti
       }
       return raw;
     } catch (e) { if (e instanceof InteractiveError) throw e; throw new InteractiveError("SKIN_INTEGRITY_ERROR"); }
-    finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+    finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+      reportConverterTiming(trace, startedAt, response, headersMs, size);
+    }
   }
   async function context(selection: ResolvedSelection, skin?: Skin, appearance?: Appearance, signal?: AbortSignal) {
     return checkSkinContract(await request("/skin-contract", signal), selection, skin, appearance, deps.policy);
@@ -112,7 +125,7 @@ export function createSkinArtifacts(overrides: Partial<SkinDeps> = {}): SkinArti
         body.set("source_artifact_sha256", String(op.receipt!.artifactSha256)); body.set("skin", JSON.stringify(op.skin));
         body.set("character_id", selection.characterId); body.set("character_sha256", selection.body.resolvedBody!.assetSha256);
         body.set("output_scope", selection.scope); body.set("binding_sha256", binding);
-        raw = await request("/skin-fbx", signal, body);
+        raw = await request("/skin-fbx", signal, body, { op, phase: "skin" });
         parseTexturedArtifact(raw, op, selection, current.context);
         if (signal.aborted) throw new InteractiveError("INTERACTIVE_SUPERSEDED");
         const fresh = await context(selection, op.skin, op.appearance, signal);

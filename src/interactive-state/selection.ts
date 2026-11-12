@@ -98,24 +98,21 @@ export function createSelectionResolver(
     )
       throw new InteractiveError("BODY_PREVIEW_STALE");
     const characterId = body.resolvedBody.characterId;
-    if ((await deps.checkCharacter(characterId)) !== "ok")
-      throw new InteractiveError("CHARACTER_UNAVAILABLE");
-    const hands = await deps.handBakeFor(person);
-    const base = await candidateSourceBytes(
-      jobId,
-      person,
-      candidate,
-      deps.getPoseBvh,
-      deps.loadAssets,
-    );
+    // All probes use the authorized candidate/body. Keep every live check, but
+    // do not serialize independent network and database round trips.
+    const [characterStatus, hands, base, artifact, refine, runtime, model] = await Promise.all([
+      deps.checkCharacter(characterId),
+      deps.handBakeFor(person),
+      candidateSourceBytes(jobId, person, candidate, deps.getPoseBvh, deps.loadAssets),
+      deps.resolveExportArtifact(jobId, personIndex, candidateId),
+      deps.findRefinedArtifact(jobId, personIndex, candidateId),
+      deps.runtime(),
+      deps.modelPreviewIdentity(characterId),
+    ]);
+    if (characterStatus !== "ok") throw new InteractiveError("CHARACTER_UNAVAILABLE");
     const originalSha = sha256Hex(base);
     if (candidate.camera && candidate.camera.source_bvh_sha256 !== originalSha)
       throw new InteractiveError("POSE_UNAVAILABLE");
-    const artifact = await deps.resolveExportArtifact(
-      jobId,
-      personIndex,
-      candidateId,
-    );
     if (
       artifact.variant === "refined" &&
       candidate.sourceBvhSha256 &&
@@ -123,18 +120,11 @@ export function createSelectionResolver(
     )
       throw new InteractiveError("POSE_UNAVAILABLE");
     const bvhBytes = artifact.variant === "refined" ? artifact.bytes : base;
-    const refine = await deps.findRefinedArtifact(
-      jobId,
-      personIndex,
-      candidateId,
-    );
     if (
       artifact.variant === "refined" &&
       (!refine?.lineage || refine.lineage.baseSha256 !== originalSha)
     )
       throw new InteractiveError("INTERACTIVE_REFINE_LINEAGE_UNAVAILABLE");
-    const runtime = await deps.runtime(),
-      model = await deps.modelPreviewIdentity(characterId);
     // Missing live identity is a temporary readiness failure, not proof of a changed model.
     // Keep export closed; only an actual hash mismatch invalidates the review.
     if (!model) throw new InteractiveError("BODY_PREVIEW_UNAVAILABLE", 503);
