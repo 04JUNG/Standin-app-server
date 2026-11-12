@@ -96,7 +96,7 @@ function fixture(kind = "near_match", semantic = false) {
 }
 function setup(kind: string, semantic: boolean, bodyMode: boolean, handsMode: boolean) {
   const f = fixture(kind, semantic);
-  const state = { refined: false, shape: null as BodySelection["shape"], scope: "half" as BodyScope, handCalls: 0, owner: true, confirmed: false, available: true, changed: false, calls: 0, late: "", revision: 1, runtime: "c".repeat(64), character: "b".repeat(64), modelRevision: "e".repeat(64), badLineage: false };
+  const state = { refined: false, shape: null as BodySelection["shape"], scope: "half" as BodyScope, handCalls: 0, exports: [] as string[], renders: 0, owner: true, confirmed: false, available: true, changed: false, calls: 0, late: "", revision: 1, runtime: "c".repeat(64), character: "b".repeat(64), modelRevision: "e".repeat(64), badLineage: false };
   const body = (): BodySelection => ({ schemaVersion: "body-selection.v1", personIndex: 0,
     intent: "manual", manualCharacterId: "chosen", recommendation: { status: "unavailable", body: null, reasonCodes: [] },
     resolvedBody: { bodyId: "body", bodyVersion: "1", assetSha256: state.character, characterId: "chosen", measurementVersion: "1", rigVersion: "1" },
@@ -118,11 +118,12 @@ function setup(kind: string, semantic: boolean, bodyMode: boolean, handsMode: bo
       return new Response(state.changed ? "changed" : f.source, { status: state.available ? 200 : 409 });
     },
     renderFinalPreview: async (artifact) => {
+      state.renders++;
       assert.equal(artifact.artifactSha256, sha256Hex(artifact.fbx));
       assert.equal(artifact.fbx.toString(), "FBX exact registered asset " + state.scope);
       return Buffer.from("PNG from final FBX");
     },
-    checkCharacter: async () => "ok", converterEnabled: () => true, recordExport: async () => {},
+    checkCharacter: async () => "ok", converterEnabled: () => true, recordExport: async (e) => { state.exports.push(e.status); },
     handBakeFor: async () => { state.handCalls++; return structuredClone(hands); },
     modelPreviewIdentity: async () => ({ characterSha256: state.character, modelRevision: state.modelRevision }),
     convertFramed: async (input) => {
@@ -149,11 +150,11 @@ function setup(kind: string, semantic: boolean, bodyMode: boolean, handsMode: bo
     },
   }, { selection: async () => body(), runtime: async () => ({ schemaVersion: "body-preview-runtime.v1", previewRevision: state.runtime,
     modelVersion: "posed-mesh-v1", modelRevision: state.modelRevision, solverVersion: "solver", framingVersion: "framing" }), enabled: () => true }));
-  const request = (extra: Record<string, string> = {}) => app.request(`/${f.c.poseId ?? f.c.id}/framed?` + new URLSearchParams({
+  const request = (extra: Record<string, string> = {}, method = "GET") => app.request(`/${f.c.poseId ?? f.c.id}/framed?` + new URLSearchParams({
     jobId: f.result.jobId, personIndex: "0", candidateId: f.c.id, outputScope: state.scope, format: "preview",
     ...(bodyMode ? { bodySelectionRevision: "1" } : {}), ...(hands && scopeIncludesHands(state.scope) ? { handSelectionRevision: "2" } : {}), ...extra,
-  }));
-  return { ...f, state, request };
+  }), { method });
+  return { ...f, state, request, hands };
 }
 for (const kind of ["library_match", "near_match", "geometry_review", "framing_reference", "mirror_reference", "generated_review"])
   test(`manual ${kind} reviews and exports without changing failed screen status`, async () => {
@@ -506,4 +507,50 @@ for (const bodyMode of [false, true]) test(`verified ${kind} receipt preserves m
   assert.equal(f.c.releaseAllowed, false);
   f.state.confirmed = false;
   assert.equal((await f.request({ format: "fbx", artifactReceipt: key, reviewKey: key })).status, 409);
+});
+
+for (const bodyMode of [false, true]) test(`local final-FBX preview and HEAD reuse one verified artifact, body=${bodyMode}`, async () => {
+  const f = setup("library_match", false, bodyMode, true);
+  f.state.confirmed = true;
+  enableLibraryRefine(f);
+  const ready = await f.request({ format: "ready" });
+  assert.equal(ready.status, 200);
+  assert.equal(ready.headers.get("X-Standin-Local-Preview"), "fbx-v1");
+  const key = ready.headers.get("X-Standin-Review-Key")!;
+  const params = { artifactReceipt: key, reviewKey: key };
+  const preview = await f.request({ ...params, format: "review-fbx" });
+  assert.equal(preview.status, 200, await preview.clone().text());
+  assert.equal(await preview.text(), "FBX exact registered asset half");
+  assert.equal(f.state.renders, 0, "local review never renders PNG");
+  assert.deepEqual(f.state.exports, [], "review does not inflate export metrics");
+  const save = await f.request({ ...params, format: "fbx" }, "HEAD");
+  assert.equal(save.status, 200);
+  assert.equal(await save.text(), "");
+  assert.equal(save.headers.get("X-Standin-Artifact-SHA256"), preview.headers.get("X-Standin-Artifact-SHA256"));
+  assert.deepEqual(f.state.exports, ["requested", "completed"]);
+  assert.equal(f.state.calls, 1);
+  f.state.owner = false;
+  assert.equal((await f.request({ ...params, format: "fbx" }, "HEAD")).status, 409);
+});
+for (const change of ["source", "hands", "body", "runtime", "permission", "receipt"])
+  test(`local preview rejects changed ${change} instead of serving stale bytes`, async () => {
+    const f = setup("near_match", true, true, true);
+    f.state.confirmed = true;
+    const ready = await f.request({ format: "ready" });
+    const key = ready.headers.get("X-Standin-Review-Key")!;
+    if (change === "source") f.state.changed = true;
+    if (change === "hands") f.hands!.revision++;
+    if (change === "body") f.state.revision++;
+    if (change === "runtime") f.state.runtime = "1".repeat(64);
+    if (change === "permission") f.c.manualExportAllowed = false;
+    const response = await f.request({ format: "review-fbx", artifactReceipt: change === "receipt" ? "1".repeat(64) : key, reviewKey: key });
+    assert.notEqual(response.status, 200);
+    assert.equal(f.state.renders, 0);
+    assert.deepEqual(f.state.exports, []);
+  });
+test("local FBX preview cannot enter without a verified receipt or confirmed selection", async () => {
+  const f = setup("near_match", false, true, false);
+  assert.equal((await f.request({ format: "review-fbx" })).status, 400);
+  assert.equal((await f.request({ format: "review-fbx", artifactReceipt: "a".repeat(64) })).status, 409);
+  assert.equal(f.state.calls, 0);
 });
