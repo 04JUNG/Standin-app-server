@@ -4,6 +4,7 @@ import {
   convertFramed,
   framingAvailable,
   FramedArtifactCache,
+  FramingHealthProbe,
   FRAMING_VERSION,
   type FramedArtifact,
 } from "./framing.js";
@@ -484,4 +485,48 @@ test("pending automatic prewarm preserves the verified calculation fallback", as
   await assert.rejects(convertFramed(readyInput, deps({ ...value,
     artifact_validation: { ...value.artifact_validation, skin_verified: false } })),
     { code: "CONVERTER_INTEGRITY" });
+});
+
+
+test("health probes share fresh evidence, collapse concurrent reads and never reuse expired hashes", async () => {
+  let now = 0, calls = 0, available = true;
+  let release: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const probe = new FramingHealthProbe(() => ({
+    ...deps({}), timeoutMs: 5000, defaultCharacterId: "body",
+    fetch: (async () => {
+      calls++;
+      await gate;
+      if (!available) throw new Error("timeout");
+      return new Response(JSON.stringify({ ok: true, solver_version: EXPECTED_SOLVER_VERSION,
+        framing_version: FRAMING_VERSION, output_scopes: ["full", "half", "bust", "head"],
+        preview_model_revision: "a".repeat(64), character_hashes: { body: "b".repeat(64) } }));
+    }) as typeof fetch,
+  }), () => now);
+  const first = Array.from({ length: 20 }, () => probe.read());
+  assert.equal(calls, 1);
+  release!();
+  const values = await Promise.all(first);
+  assert.equal(values[0].hashes?.body, "b".repeat(64));
+  assert.ok(values.every((value) => value === values[0]));
+  await probe.read(); assert.equal(calls, 1);
+  now = 30_001; available = false;
+  const missing = await probe.read();
+  assert.deepEqual(missing, { supported: false });
+  assert.equal(calls, 2);
+  now += 999; await probe.read(); assert.equal(calls, 2);
+  now += 2; available = true;
+  assert.equal((await probe.read()).hashes?.body, "b".repeat(64));
+  assert.equal(calls, 3);
+});
+
+test("503 health responses cannot publish hashes and recover after a short retry interval", async () => {
+  let now = 0, calls = 0;
+  const probe = new FramingHealthProbe(() => ({
+    ...deps({}), timeoutMs: 5000, defaultCharacterId: "body",
+    fetch: (async () => { calls++; return new Response(JSON.stringify({ ok: true,
+      character_hashes: { body: "b".repeat(64) } }), { status: 503 }); }) as typeof fetch,
+  }), () => now);
+  assert.deepEqual(await probe.read(), { supported: false });
+  now = 1001; await probe.read(); assert.equal(calls, 2);
 });
