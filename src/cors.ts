@@ -5,7 +5,7 @@ import { cors } from "hono/cors";
 export function appCors(origins: string[]) {
   return cors({
     origin: origins,
-    allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowMethods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowHeaders: [
       "Content-Type",
       CLIENT_VERSION_HEADER,
@@ -57,6 +57,7 @@ export function appCors(origins: string[]) {
       "X-Standin-Artifact-SHA256",
       "X-Skin-Asset-SHA256",
       "X-Standin-Artifact-Contract",
+      "X-Standin-Local-Preview",
       "X-Standin-Person-Count",
       "X-Standin-Scene-Version",
       "X-Standin-Scene-Contract",
