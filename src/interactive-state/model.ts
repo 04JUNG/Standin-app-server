@@ -9,7 +9,7 @@ export const SHA = /^[a-f0-9]{64}$/;
 export class InteractiveError extends Error {
   constructor(
     readonly code: string,
-    readonly status: 400 | 404 | 409 | 410 | 413 | 429 | 503 = 409,
+    readonly status: 400 | 404 | 409 | 410 | 413 | 426 | 429 | 503 = 409,
   ) {
     super(code);
   }

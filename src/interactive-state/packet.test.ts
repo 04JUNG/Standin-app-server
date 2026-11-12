@@ -1,4 +1,5 @@
 import test from "node:test";
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { checkIdentity, parsePacket, parseReceipt } from "./packet.js";
@@ -131,4 +132,16 @@ test("trusted default recipe rules bind unshaped bodies but cannot authorize mis
  explicit.body.shape = { shapeSha256: null } as never;
  explicit.body.shapeSource = null;
  assert.throws(() => checkIdentity(actual, op, explicit));
+});
+
+test("unchecked hand quality is explicit while body acceptance remains mandatory", () => {
+  const typed = JSON.parse(fixture.packet.canonicalState);
+  typed.safety.handChecksPassed = false;
+  const packet = () => { const canonicalState = JSON.stringify(typed); return { ...fixture.packet, canonicalState, stateHash: createHash("sha256").update(canonicalState).digest("hex") }; };
+  const next = packet();
+  const result = parsePacket(next, { ...op, stateHash: next.stateHash }, selection);
+  assert.equal(result.payload.safety.handChecksPassed, false);
+  typed.safety.bodyAccepted = false;
+  const unsafe = packet();
+  assert.throws(() => parsePacket(unsafe, { ...op, stateHash: unsafe.stateHash }, selection), /CONVERTER_INTEGRITY/);
 });

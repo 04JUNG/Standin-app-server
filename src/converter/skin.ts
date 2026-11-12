@@ -33,7 +33,7 @@ export function createSkinArtifacts(overrides: Partial<SkinDeps> = {}): SkinArti
     catch { throw new InteractiveError(signal?.aborted ? "INTERACTIVE_SUPERSEDED" : "SKIN_UNAVAILABLE", signal?.aborted ? 409 : 503); }
     const reader = response.body?.getReader();
     if (!reader) throw new InteractiveError("SKIN_UNAVAILABLE", 503);
-    const cap = path === "/skin-contract" ? 65536 : response.ok ? 42 * 1024 * 1024 : 16384;
+    const cap = path === "/skin-contract" ? 128 * 1024 : response.ok ? 42 * 1024 * 1024 : 16384;
     let size = 0; const chunks: Uint8Array[] = [];
     try {
       for (;;) { const { done, value } = await reader.read(); if (done) break;
@@ -69,7 +69,7 @@ export function createSkinArtifacts(overrides: Partial<SkinDeps> = {}): SkinArti
     try {
       if (!response.ok || response.headers.get("X-Skin-Asset-SHA256") !== digest) throw new InteractiveError("SKIN_ASSETS_UNAVAILABLE", 503);
       for (;;) { const { done, value } = await reader.read(); if (done) break;
-        size += value.length; if (size > expectedBytes || size > 4 * 1024 * 1024) throw new InteractiveError("SKIN_INTEGRITY_ERROR"); chunks.push(value); }
+        size += value.length; if (size > expectedBytes || size > 16 * 1024 * 1024) throw new InteractiveError("SKIN_INTEGRITY_ERROR"); chunks.push(value); }
       const advertised = response.headers.get("content-length");
       if (size !== expectedBytes || (advertised !== null && (!/^\d+$/.test(advertised) || Number(advertised) !== size)))
         throw new InteractiveError("SKIN_INTEGRITY_ERROR");
@@ -77,6 +77,18 @@ export function createSkinArtifacts(overrides: Partial<SkinDeps> = {}): SkinArti
     } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
   }
   return {
+    async previewAsset(selection, skin, digest, signal) {
+      const current = await context(selection, skin, undefined, signal);
+      const preview = skinPreview(current.context, selection.characterId);
+      const pin = digest === preview.uv.sha256 ? preview.uv : digest === preview.texture.sha256 ? preview.texture : undefined;
+      if (!pin) throw new InteractiveError("NOT_FOUND", 404);
+      const bytes = await readAsset(digest, pin.bytes, signal);
+      const contentType = verifySkinPreviewAsset(preview, digest, bytes);
+      const fresh = await context(selection, skin, undefined, signal);
+      if (fresh.approval.identity !== current.approval.identity) throw new InteractiveError("SKIN_BINDING_MISMATCH");
+      if (!assets.has(digest)) { if (assets.size >= 8) assets.delete(assets.keys().next().value!); assets.set(digest, bytes); }
+      return { bytes, contentType };
+    },
     async asset(op, selection, digest, signal) {
       const current = await context(selection, op.skin, op.appearance, signal), preview = skinPreview(current.context, selection.characterId);
       if (!op.skinPreview || hash(op.skinPreview) !== hash(preview)) throw new InteractiveError("SKIN_BINDING_MISMATCH");
