@@ -153,3 +153,32 @@ test("solve forwards the immutable BFF deadline and exact source bytes",async()=
  await worker.solve({identity:{source:"server"},bvhBytes:source} as unknown as Parameters<typeof worker.solve>[0],{...op,expiresAt},new AbortController().signal);
  assert.equal(sent?.expiresAt,expiresAt);assert.deepEqual(Buffer.from(String(sent?.bvhBase64),"base64"),Buffer.from(source));
 });
+
+test("binary state is opt-in per solve; without it the request headers are exactly the original v1 set",async()=>{
+ const seen:Array<Record<string,string>>=[];
+ const worker=createInteractiveWorker({baseUrl:"http://internal.invalid",token,fetch:(async(_input,init)=>{
+  const headers=init!.headers as Record<string,string>;seen.push(headers);
+  const encoding=headers["X-Standin-State-Encoding"]??"typed-f64be-json-v1";
+  return Response.json({snapshotId:"private_snapshot",packet:{canonicalEncoding:encoding}},{headers:{"X-Standin-State-Encoding":encoding}});
+ }) as typeof fetch});
+ const selection={identity:{},bvhBytes:new Uint8Array([1])} as unknown as Parameters<typeof worker.solve>[0];
+ const legacy=await worker.solve(selection,op,new AbortController().signal);
+ assert.deepEqual(Object.keys(seen[0]).sort(),["Authorization","Content-Type","X-Request-Id","X-Standin-Owner"]);
+ assert.deepEqual(Object.keys(legacy).sort(),["packet","snapshotId"]);
+ const binary=await worker.solve(selection,op,new AbortController().signal,{stateEncoding:"standin-binary-f64le-v2"});
+ assert.equal(seen[1]["X-Standin-State-Encoding"],"standin-binary-f64le-v2");
+ assert.equal(binary.stateEncoding,"standin-binary-f64le-v2");
+});
+test("binary /model bytes must arrive with the v2 media type; v1 /model reads are unchanged",async()=>{
+ let contentType="application/vnd.standin.solved-pose-state-v2";
+ const worker=createInteractiveWorker({baseUrl:"http://internal.invalid",token,fetch:(async()=>new Response(new Uint8Array([1,2,3]),{headers:{"Content-Type":contentType}})) as typeof fetch});
+ const media="application/vnd.standin.solved-pose-state-v2";
+ assert.deepEqual([...await worker.model(op,undefined,media)],[1,2,3]);
+ contentType="Application/Vnd.Standin.Solved-Pose-State-V2; charset=binary";
+ assert.deepEqual([...await worker.model(op,undefined,media)],[1,2,3]);
+ for(const wrong of ["application/vnd.standin.solved-pose-state-v1+json","application/octet-stream",""]){
+  contentType=wrong;
+  await assert.rejects(worker.model(op,undefined,media),/CONVERTER_INTEGRITY/);
+  assert.deepEqual([...await worker.model(op)],[1,2,3]);
+ }
+});

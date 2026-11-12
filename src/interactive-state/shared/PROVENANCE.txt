@@ -1,0 +1,8 @@
+Upstream: 04JUNG/Standin-server
+Path: converter/shared/interactive_pose_v2.mjs
+Implementation commit: dac06ff50fce70a20e80d944488048dfe1a8ce8f (04JUNG/Standin-server#231, branch perf/binary-solved-packet; update to the merge commit after it lands)
+Contract: docs/INTERACTIVE_STATE_BINARY_V2.md (encoding standin-binary-f64le-v2)
+SHA256: 4f249f923166f92294126097561696243e4033e9b42f108a56c13bcc09908530
+Copied byte-for-byte. Do not edit here: re-vendor from the Converter and update the SHA256 line.
+interactive_pose_v2.d.mts is the BFF's own type declaration for that module, not vendored code.
+scripts/copy-vendored.mjs refuses to build if the module no longer matches the SHA256 above.
