@@ -1,5 +1,7 @@
 /** Private Converter transport. No inference, pose solving or release authority. */
 import { config } from "../config.js";
+import { log } from "../log.js";
+import { reportConverterTiming, type ConverterTrace } from "./interactive-timing.js";
 import {
   InteractiveError,
   hash,
@@ -44,10 +46,14 @@ export function createInteractiveWorker(
     binding: string,
     signal?: AbortSignal,
     body?: unknown,
+    trace?: ConverterTrace,
   ) {
     if (!deps.baseUrl || deps.token.length < 32)
       throw new InteractiveError("INTERACTIVE_CONVERTER_UNAVAILABLE", 503);
     let response: Response;
+    const startedAt = performance.now();
+    let headersMs: number | undefined;
+    let length = 0;
     try {
       response = await deps.fetch(`${deps.baseUrl}${route}`, {
         method,
@@ -62,11 +68,14 @@ export function createInteractiveWorker(
           ...(signal ? [signal] : []),
         ]),
       });
+      headersMs = performance.now() - startedAt;
     } catch {
+      reportConverterTiming(trace, startedAt);
       throw new InteractiveError("INTERACTIVE_CONVERTER_UNAVAILABLE", 503);
     }
     if (!response.ok) {
       await response.body?.cancel();
+      reportConverterTiming(trace, startedAt, response, headersMs, length);
       if (
         route.startsWith("/interactive/v1/snapshots/") &&
         (response.status === 404 || response.status === 410)
@@ -80,8 +89,10 @@ export function createInteractiveWorker(
       );
     }
     const reader = response.body?.getReader();
-    if (!reader) throw new InteractiveError("CONVERTER_INTEGRITY");
-    let length = 0;
+    if (!reader) {
+      reportConverterTiming(trace, startedAt, response, headersMs, length);
+      throw new InteractiveError("CONVERTER_INTEGRITY");
+    }
     const parts: Uint8Array[] = [];
     try {
       for (;;) {
@@ -102,6 +113,7 @@ export function createInteractiveWorker(
     } finally {
       await reader.cancel().catch(() => {});
       reader.releaseLock();
+      reportConverterTiming(trace, startedAt, response, headersMs, length);
     }
   }
   const json = async (
@@ -110,11 +122,22 @@ export function createInteractiveWorker(
     binding: string,
     signal?: AbortSignal,
     body?: unknown,
+    trace?: ConverterTrace,
   ) => {
     try {
-      return JSON.parse(
-        (await request(route, method, binding, signal, body)).toString("utf8"),
-      ) as Record<string, unknown>;
+      const bytes = await request(route, method, binding, signal, body, trace);
+      const startedAt = performance.now();
+      try {
+        return JSON.parse(bytes.toString("utf8")) as Record<string, unknown>;
+      } finally {
+        if (trace?.phase === "solve") log.info({
+          type: "interactive_packet_decode",
+          jobId: trace.op.jobId,
+          operationId: trace.op.operationId,
+          revision: trace.op.revision,
+          durationMs: performance.now() - startedAt,
+        });
+      }
     } catch (error) {
       if (error instanceof InteractiveError) throw error;
       throw new InteractiveError("CONVERTER_INTEGRITY");
@@ -153,6 +176,7 @@ export function createInteractiveWorker(
           expiresAt: op.expiresAt,
           bvhBase64: Buffer.from(selection.bvhBytes).toString("base64"),
         },
+        { op, phase: "solve" },
       );
       if (
         typeof result.snapshotId !== "string" ||
@@ -161,11 +185,11 @@ export function createInteractiveWorker(
         throw new InteractiveError("CONVERTER_INTEGRITY");
       return { snapshotId: result.snapshotId, packet: result.packet };
     },
-    model: (op, signal) => request(path(op, "model"), "GET", owner(op), signal),
-    export: (op, signal) => json(path(op, "export"), "POST", owner(op), signal),
-    file: (op, signal) => request(path(op, "file"), "GET", owner(op), signal),
+    model: (op, signal) => request(path(op, "model"), "GET", owner(op), signal, undefined, { op, phase: "model" }),
+    export: (op, signal) => json(path(op, "export"), "POST", owner(op), signal, undefined, { op, phase: "export" }),
+    file: (op, signal) => request(path(op, "file"), "GET", owner(op), signal, undefined, { op, phase: "file" }),
     variants: (op, signal) =>
-      request(path(op, "variants"), "GET", owner(op), signal),
+      request(path(op, "variants"), "GET", owner(op), signal, undefined, { op, phase: "variants" }),
     async cancel(op) {
       await json("/interactive/v1/cancel", "POST", owner(op), undefined, {
         ownerBinding: owner(op),

@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { log } from "../log.js";
 import { createInteractiveWorker } from "./interactive.js";
 import { hash, type Operation } from "../interactive-state/model.js";
 const op = {
@@ -124,4 +125,30 @@ test("solve forwards the immutable BFF deadline and exact source bytes",async()=
  const source=new Uint8Array([0,1,2]);
  await worker.solve({identity:{source:"server"},bvhBytes:source} as unknown as Parameters<typeof worker.solve>[0],{...op,expiresAt},new AbortController().signal);
  assert.equal(sent?.expiresAt,expiresAt);assert.deepEqual(Buffer.from(String(sent?.bvhBase64),"base64"),Buffer.from(source));
+});
+
+test("Converter calculation timing is independent of BFF transfer time", async (t) => {
+  const info = t.mock.method(log, "info", () => {});
+  for (const measured of [true, false]) {
+    const worker = createInteractiveWorker({
+      baseUrl: "http://internal.invalid",
+      token,
+      fetch: (async () => new Response("{}", { headers: {
+        ...(measured ? { "x-standin-interactive-handler-ms": "180000" } : {}),
+        "x-standin-queue-wait-ms": "1230",
+        "x-standin-execution-ms": "177450.4",
+      } })) as typeof fetch,
+    });
+    await worker.export(op, new AbortController().signal);
+  }
+  const [measured, legacy] = info.mock.calls.map(({ arguments: [fields] }) => fields);
+  assert.ok(measured && legacy);
+  assert.equal(measured.phase, "export");
+  assert.equal(measured.operationId, op.operationId);
+  assert.equal(measured.converterHandlerMs, 180000);
+  assert.equal(measured.converterQueueMs, 1230);
+  assert.equal(measured.converterWorkerMs, 177450.4);
+  assert.equal(measured.payloadBytes, 2);
+  assert.ok(measured.durationMs! >= Number(measured.headersMs));
+  assert.equal(legacy.converterWorkerMs, undefined);
 });
