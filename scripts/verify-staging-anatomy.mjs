@@ -20,7 +20,8 @@ export function verifyStagingAnatomy(task, mainName = 'bff') {
   }
   if (JSON.stringify(init.command) !== JSON.stringify(['node', '--input-type=module', '-e', initializer]))
     throw Error('Staging body initializer changed');
-  if (env(main).CONVERTER_CHARACTER_ID !== 'male-base-v0-8-0' ||
+  if (env(main).SKIN_EXPORT_ENABLED !== 'true' || env(main).OUTLINE_EXPORT_ENABLED !== 'true' ||
+      env(main).CONVERTER_CHARACTER_ID !== 'male-base-v0-8-0' ||
       env(main).BODY_CATALOG_PATH !== '/app/body-staging/body-models.json' ||
       !main?.dependsOn?.some(d => d.containerName === init?.name && d.condition === 'SUCCESS')) {
     throw Error('Staging anatomy default/catalog dependency changed');
