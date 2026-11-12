@@ -1,5 +1,6 @@
 /** Lightweight immutable render identity; never probes Blender or starts a bake. */
 import { config } from "../config.js";
+import { log } from "../log.js";
 import { ConverterError, EXPECTED_SOLVER_VERSION } from "./client.js";
 import { FRAMING_VERSION } from "./framing.js";
 export interface PreviewRuntime {
@@ -13,6 +14,8 @@ export interface PreviewRuntime {
 export async function getPreviewRuntime(
   fetcher = fetch,
 ): Promise<PreviewRuntime> {
+  const started = performance.now();
+  let status: number | undefined;
   try {
     const response = await fetcher(
       `${config.converterBaseUrl.replace(/\/+$/, "")}/preview-contract`,
@@ -20,6 +23,7 @@ export async function getPreviewRuntime(
         signal: AbortSignal.timeout(5000),
       },
     );
+    status = response.status;
     if (!response.ok) {
       await response.body?.cancel();
       throw new Error("unavailable");
@@ -60,10 +64,16 @@ export async function getPreviewRuntime(
       solverVersion: v.solver_version,
       framingVersion: v.framing_version,
     };
-  } catch {
+  } catch (error) {
+    log.warn({ type: "interactive_runtime_probe_failed", status,
+      durationMs: performance.now() - started,
+      errorCode: error instanceof Error && ["TimeoutError", "AbortError"].includes(error.name)
+        ? error.name : "BODY_PREVIEW_UNAVAILABLE" });
     throw new ConverterError(
       "BODY_PREVIEW_UNAVAILABLE",
       "preview runtime contract unavailable",
     );
+  } finally {
+    log.info({ type: "interactive_runtime_probe", status, durationMs: performance.now() - started });
   }
 }

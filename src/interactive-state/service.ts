@@ -62,15 +62,28 @@ export interface InteractiveDeps {
   ): Promise<Uint8Array>;
   metric(
     event: string,
-    stage: Stage | "download",
+    stage: Stage | "download" | "validation",
     elapsedMs: number,
     code?: string,
+    context?: { operationId: string; revision: number },
   ): void;
 }
 export class InteractiveService {
   private running = new Map<string, AbortController>();
   private stopped = false;
   constructor(readonly deps: InteractiveDeps) {}
+  private async timed<T>(op: Operation, event: string, stage: Stage | "download" | "validation", action: () => T | Promise<T>): Promise<T> {
+    const started = performance.now();
+    let code: string | undefined;
+    try { return await action(); }
+    catch (error) {
+      code = error instanceof InteractiveError ? error.code : "INTERACTIVE_UNAVAILABLE";
+      throw error;
+    } finally {
+      this.deps.metric(event, stage, performance.now() - started, code,
+        { operationId: op.operationId, revision: op.revision });
+    }
+  }
   private async consume<T>(
     op: Operation,
     action: () => Promise<T>,
@@ -147,6 +160,9 @@ export class InteractiveService {
     return op;
   }
   async revalidate(op: Operation) {
+    return this.timed(op, "artifact_revalidate", "validation", () => this.revalidateSelection(op));
+  }
+  private async revalidateSelection(op: Operation) {
     const selection = await this.resolve(op, op.candidateId, op.appearance, op.skin);
     if (op.skin && hash(op.skinPreview ?? null) !== hash(selection.skinPreview ?? null)) {
       await this.cancel(op, true);
@@ -425,16 +441,18 @@ export class InteractiveService {
         "artifact_prepare_started",
         stage,
         Date.now() - Date.parse(op.createdAt),
+        undefined, { operationId: op.operationId, revision: op.revision },
       );
       if (stage === "preview") {
-        const solved = await this.deps.worker.solve(
+        const solved = await this.timed(op, "artifact_converter_solve", stage, () => this.deps.worker.solve(
           selection,
           op,
           controller.signal,
-        );
+        ));
         if (!/^[A-Za-z0-9_-]{1,128}$/.test(solved.snapshotId))
           throw new InteractiveError("CONVERTER_INTEGRITY");
-        const validated = parsePacket(solved.packet, op, selection);
+        const validated = await this.timed(op, "artifact_packet_validation", stage,
+          () => parsePacket(solved.packet, op, selection));
         checkSkinPreviewModel(op.skinPreview, validated.payload.model);
         if (controller.signal.aborted) return;
         await this.revalidate(op);
@@ -459,7 +477,7 @@ export class InteractiveService {
         op = building;
         const receipt = parseReceipt(
           await this.consume(op, () =>
-            this.deps.worker.export(op, controller.signal),
+            this.timed(op, "artifact_converter_export", stage, () => this.deps.worker.export(op, controller.signal)),
           ),
           op,
           selection,
@@ -510,7 +528,8 @@ export class InteractiveService {
         );
         if (!published) throw new InteractiveError("INTERACTIVE_SUPERSEDED");
       }
-      this.deps.metric("artifact_prepare_ready", stage, Date.now() - started);
+      this.deps.metric("artifact_prepare_ready", stage, Date.now() - started,
+        undefined, { operationId: op.operationId, revision: op.revision });
     } catch (error) {
       const code =
         error instanceof InteractiveError
@@ -534,6 +553,7 @@ export class InteractiveService {
         stage,
         Date.now() - started,
         code,
+        { operationId: op.operationId, revision: op.revision },
       );
     } finally {
       clearInterval(guard);

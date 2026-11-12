@@ -58,6 +58,7 @@ async function setup() {
     corruptOutlineFile: false,
     outlineHold: undefined as Promise<void> | undefined,
     valid: true,
+    resolveUnavailable: false,
     solveCalls: 0,
     exportCalls: 0,
     cancelCalls: 0,
@@ -71,6 +72,7 @@ async function setup() {
     sent: [] as number[],
   };
   const resolver = async () => {
+    if (state.resolveUnavailable) throw new Error("temporary upstream failure");
     if (!state.valid) throw new InteractiveError("NOT_FOUND", 404);
     return fixtureSelection(hash(state.selection));
   };
@@ -265,6 +267,32 @@ test("full polling/model/export/file path separates preparation, PNG and native 
   } finally {
     await s.pg.close();
   }
+});
+
+test("a transient poll 503 preserves the accepted work and exposes latency diagnostics", async () => {
+  const s = await setup();
+  try {
+    const accepted = await s.prepare();
+    assert.equal(accepted.status, 202);
+    const op = await accepted.json() as ReturnType<typeof publicOperation>;
+    s.state.resolveUnavailable = true;
+    const failed = await s.request(`/${op.operationId}`);
+    assert.equal(failed.status, 503);
+    assert.equal(failed.headers.get("Retry-After"), "1");
+    assert.equal((await s.read(op.operationId)).previewState, "solving");
+    assert.equal(s.state.cancelCalls, 0);
+    s.state.resolveUnavailable = false;
+    await s.tick("preview");
+    const recovered = await s.request(`/${op.operationId}`);
+    assert.equal(recovered.status, 200);
+    assert.match(recovered.headers.get("Server-Timing")!, /^bff_poll;dur=\d/);
+    const current = await recovered.json() as ReturnType<typeof publicOperation>;
+    assert.equal(current.operationId, op.operationId);
+    assert.equal(current.previewState, "authoritative");
+    assert.equal(s.state.solveCalls, 1);
+    for (const event of ["artifact_revalidate", "artifact_converter_solve", "artifact_packet_validation"])
+      assert(s.state.events.includes(event));
+  } finally { await s.pg.close(); }
 });
 test("latest wins: queued older revision never runs; late running response cannot publish", async () => {
   const s = await setup();

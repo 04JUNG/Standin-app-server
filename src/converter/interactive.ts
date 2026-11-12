@@ -1,5 +1,7 @@
 /** Private Converter transport. No inference, pose solving or release authority. */
 import { config } from "../config.js";
+import { randomUUID } from "node:crypto";
+import { log } from "../log.js";
 import {
   InteractiveError,
   hash,
@@ -44,16 +46,20 @@ export function createInteractiveWorker(
     binding: string,
     signal?: AbortSignal,
     body?: unknown,
+    operationId?: string,
   ) {
     if (!deps.baseUrl || deps.token.length < 32)
       throw new InteractiveError("INTERACTIVE_CONVERTER_UNAVAILABLE", 503);
     let response: Response;
+    const started = performance.now(), requestId = `req_${randomUUID()}`;
+    const routePattern = route.replace(/\/snapshots\/[^/]+/, "/snapshots/:snapshot").replace(/\/static\/[^/]+$/, "/static/:sha");
     try {
       response = await deps.fetch(`${deps.baseUrl}${route}`, {
         method,
         headers: {
           Authorization: `Bearer ${deps.token}`,
           "X-Standin-Owner": binding,
+          "X-Request-Id": requestId,
           ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -63,9 +69,23 @@ export function createInteractiveWorker(
         ]),
       });
     } catch {
+      log.warn({ type: "interactive_converter_transport", requestId, operationId, route: routePattern,
+        method, durationMs: performance.now() - started, errorCode: "INTERACTIVE_CONVERTER_UNAVAILABLE" });
       throw new InteractiveError("INTERACTIVE_CONVERTER_UNAVAILABLE", 503);
     }
+    const headersMs = performance.now() - started;
+    const durationHeader = (name: string) => {
+      const raw = response.headers.get(name), value = raw === null ? NaN : Number(raw);
+      return Number.isFinite(value) && value >= 0 ? value : undefined;
+    };
+    const diagnostics = {
+      type: "interactive_converter_transport", requestId, operationId, route: routePattern, method,
+      status: response.status, headersMs,
+      converterQueueMs: durationHeader("x-standin-queue-wait-ms"),
+      converterExecutionMs: durationHeader("x-standin-execution-ms"),
+    };
     if (!response.ok) {
+      log.warn({ ...diagnostics, durationMs: performance.now() - started });
       await response.body?.cancel();
       if (
         route.startsWith("/interactive/v1/snapshots/") &&
@@ -80,8 +100,12 @@ export function createInteractiveWorker(
       );
     }
     const reader = response.body?.getReader();
-    if (!reader) throw new InteractiveError("CONVERTER_INTEGRITY");
+    if (!reader) {
+      log.warn({ ...diagnostics, errorCode: "CONVERTER_INTEGRITY" });
+      throw new InteractiveError("CONVERTER_INTEGRITY");
+    }
     let length = 0;
+    let complete = false;
     const parts: Uint8Array[] = [];
     try {
       for (;;) {
@@ -98,8 +122,11 @@ export function createInteractiveWorker(
         (!/^\d+$/.test(advertised) || Number(advertised) !== bytes.length)
       )
         throw new InteractiveError("CONVERTER_INTEGRITY");
+      complete = true;
       return bytes;
     } finally {
+      log.info({ ...diagnostics, durationMs: performance.now() - started,
+        bodyMs: performance.now() - started - headersMs, responseBytes: length, complete });
       await reader.cancel().catch(() => {});
       reader.releaseLock();
     }
@@ -110,11 +137,16 @@ export function createInteractiveWorker(
     binding: string,
     signal?: AbortSignal,
     body?: unknown,
+    operationId?: string,
   ) => {
     try {
-      return JSON.parse(
-        (await request(route, method, binding, signal, body)).toString("utf8"),
-      ) as Record<string, unknown>;
+      const bytes = await request(route, method, binding, signal, body, operationId);
+      const started = performance.now();
+      try { return JSON.parse(bytes.toString("utf8")) as Record<string, unknown>; }
+      finally {
+        log.info({ type: "interactive_converter_json", operationId,
+          durationMs: performance.now() - started, responseBytes: bytes.length });
+      }
     } catch (error) {
       if (error instanceof InteractiveError) throw error;
       throw new InteractiveError("CONVERTER_INTEGRITY");
@@ -153,6 +185,7 @@ export function createInteractiveWorker(
           expiresAt: op.expiresAt,
           bvhBase64: Buffer.from(selection.bvhBytes).toString("base64"),
         },
+        op.operationId,
       );
       if (
         typeof result.snapshotId !== "string" ||
@@ -161,9 +194,9 @@ export function createInteractiveWorker(
         throw new InteractiveError("CONVERTER_INTEGRITY");
       return { snapshotId: result.snapshotId, packet: result.packet };
     },
-    model: (op, signal) => request(path(op, "model"), "GET", owner(op), signal),
-    export: (op, signal) => json(path(op, "export"), "POST", owner(op), signal),
-    file: (op, signal) => request(path(op, "file"), "GET", owner(op), signal),
+    model: (op, signal) => request(path(op, "model"), "GET", owner(op), signal, undefined, op.operationId),
+    export: (op, signal) => json(path(op, "export"), "POST", owner(op), signal, undefined, op.operationId),
+    file: (op, signal) => request(path(op, "file"), "GET", owner(op), signal, undefined, op.operationId),
     variants: (op, signal) =>
       request(path(op, "variants"), "GET", owner(op), signal),
     async cancel(op) {

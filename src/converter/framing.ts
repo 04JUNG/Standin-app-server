@@ -1,6 +1,7 @@
 /** Paired FBX + PNG from the same final artifact. No pose inference lives here. */
 import { sameShapeSource, type BodyShape, type ShapeSource } from "../body-selection/shape.js";
 import { config } from "../config.js";
+import { log } from "../log.js";
 import { framedPairStore, type FramedLocation, type FramedPairStore } from "./framedStorage.js";
 import {
   ConverterError,
@@ -307,6 +308,7 @@ export class FramingHealthProbe {
     return this.pending;
   }
   private async refresh(): Promise<FramingHealth> {
+    const started = performance.now();
     let value: FramingHealth = { supported: false };
     // A timeout/503 is readiness evidence for one second, not 30s of incompatibility.
     let ttl = 1000;
@@ -334,7 +336,13 @@ export class FramingHealthProbe {
           value.hashes = v.character_hashes as Record<string, string>;
         }
       }
-    } catch { /* Unavailable converters remain closed, with a short recovery interval. */ }
+    } catch (error) {
+      log.warn({ type: "interactive_health_probe_failed", durationMs: performance.now() - started,
+        errorCode: error instanceof Error && ["TimeoutError", "AbortError"].includes(error.name)
+          ? error.name : "BODY_PREVIEW_UNAVAILABLE" });
+    }
+    log.info({ type: "interactive_health_probe", durationMs: performance.now() - started,
+      supported: value.supported, hasIdentity: !!value.hashes });
     this.cached = { expires: this.now() + ttl, value };
     return value;
   }

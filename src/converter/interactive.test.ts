@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createInteractiveWorker } from "./interactive.js";
+import { log, type LogFields } from "../log.js";
 import { hash, type Operation } from "../interactive-state/model.js";
 const op = {
   installationId: "owner",
@@ -11,6 +12,33 @@ const op = {
   snapshotId: "private_nonce",
 } as Operation;
 const token = "local-test-service-token-32-characters";
+test("transport separates Converter work, transfer and JSON parsing with operation correlation", async (t) => {
+  const events: LogFields[] = [];
+  t.mock.method(log, "info", (fields: LogFields) => events.push(fields));
+  let requestId = "";
+  const worker = createInteractiveWorker({
+    baseUrl: "http://internal.invalid", token,
+    fetch: (async (_input, init) => {
+      requestId = (init!.headers as Record<string, string>)["X-Request-Id"];
+      return new Response("{}", { headers: {
+        "X-Standin-Queue-Wait-Ms": "1200.5", "X-Standin-Execution-Ms": "51000",
+      } });
+    }) as typeof fetch,
+  });
+  await worker.export(op, new AbortController().signal);
+  assert.match(requestId, /^req_[a-f0-9-]{36}$/);
+  const transport = events.find(e => e.type === "interactive_converter_transport")!;
+  assert.equal(transport.requestId, requestId);
+  assert.equal(transport.operationId, op.operationId);
+  assert.equal(transport.converterQueueMs, 1200.5);
+  assert.equal(transport.converterExecutionMs, 51000);
+  assert.equal(transport.responseBytes, 2);
+  assert.equal(transport.complete, true);
+  assert.equal(transport.route, "/interactive/v1/snapshots/:snapshot/export");
+  assert.equal(events.find(e => e.type === "interactive_converter_json")?.operationId, op.operationId);
+  assert(!JSON.stringify(events).includes(token));
+  assert(!JSON.stringify(events).includes("private_nonce"));
+});
 test("private transport binds ownership and cancellation revision without URL credentials", async () => {
   const calls: Array<{ url: string; init: RequestInit }> = [];
   const worker = createInteractiveWorker({
