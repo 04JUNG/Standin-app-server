@@ -20,7 +20,7 @@ export function prepareStagingAnatomy(task, mainName = 'bff') {
   const assets = mainName === 'analysis-worker' ? release.worker : release;
   setEnv(init, { BODY_ASSETS_ROLE: 'bff', BODY_ASSETS_ROOT: '/app/body-staging',
     BODY_ASSETS_MANIFEST_KEY: assets.prefix + '/manifest.json', BODY_ASSETS_MANIFEST_SHA256: assets.manifestSha256 });
-  setEnv(main, { CONVERTER_CHARACTER_ID: 'male-base-v0-8-0', BODY_CATALOG_PATH: '/app/body-staging/body-models.json' });
+  setEnv(main, { SKIN_EXPORT_ENABLED: 'true', OUTLINE_EXPORT_ENABLED: 'true', CONVERTER_CHARACTER_ID: 'male-base-v0-8-0', BODY_CATALOG_PATH: '/app/body-staging/body-models.json' });
   init.command = ['node', '--input-type=module', '-e', initializer];
   return next;
 }
