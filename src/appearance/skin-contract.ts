@@ -24,8 +24,8 @@ const asset = z.object({ character_id: z.string().min(1).max(200), kind: z.enum(
 export const skinContractSchema = z.object({ version: z.literal("fbx-skin-v1"), expression: z.literal(SKIN_EXPRESSION),
   enabled: z.boolean(), assets_available: z.boolean(), csp_certified: z.boolean(), acceptance_scope: z.literal("posed-fbx-import"),
   runtime_revision: sha, asset_manifest_sha256: sha, asset_version: z.string().min(1).max(100),
-  skins: z.array(skinId).max(5), supported_targets: z.array(z.object({ character_id: z.string().min(1).max(200),
-    character_sha256: sha, output_scope: z.literal("full"), skin_ids: z.array(skinId).min(1).max(4) }).strict()).max(100),
+  skins: z.array(skinId).max(6), supported_targets: z.array(z.object({ character_id: z.string().min(1).max(200),
+    character_sha256: sha, output_scope: z.literal("full"), skin_ids: z.array(skinId).min(1).max(5) }).strict()).max(100),
   candidate_models: z.record(z.string().max(200), model), assets: z.array(asset).max(256),
   zero: z.literal("default-legacy-byte-preserving"), order: z.tuple([z.literal("skin"), z.literal("outline")]),
 }).strict();
