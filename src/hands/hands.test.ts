@@ -414,3 +414,26 @@ for (const scope of ["head", "shoulder_head", "bust"] as const) {
     assert.equal((await f.store.selection("owner", "job", 1)).personIndex, 1);
   });
 }
+
+
+test("both source-pose hands export without a hand-library dependency", async () => {
+  const f = fixture();
+  const saved = await f.store.selection("owner", "job", 0, {
+    left: "source_pose", right: "source_pose",
+    library_sha256: catalog.library_sha256, expectedRevision: 0,
+  });
+  assert.equal(saved.left, "source_pose");
+  assert.equal(saved.right, "source_pose");
+  assert.equal(await handBakeFor(f.json().candidatesByPerson[0]), null);
+});
+
+test("a preset on either side retains fresh hand-library validation", async () => {
+  for (const side of ["left", "right"] as const) {
+    const f = fixture();
+    await f.store.selection("owner", "job", 0, {
+      left: "source_pose", right: "source_pose", [side]: "fist",
+      library_sha256: catalog.library_sha256, expectedRevision: 0,
+    });
+    await assert.rejects(handBakeFor(f.json().candidatesByPerson[0]));
+  }
+});

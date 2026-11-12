@@ -286,70 +286,77 @@ function validFinalModel(
   );
 }
 
-let healthCache:
-  | {
-      expires: number;
-      supported: boolean;
-      revision?: string;
-      hashes?: Record<string, string>;
-    }
-  | undefined;
+interface FramingHealth {
+  supported: boolean;
+  revision?: string;
+  hashes?: Record<string, string>;
+}
+/** Share only fresh health evidence. Unavailability never reuses stale model hashes. */
+export class FramingHealthProbe {
+  private cached?: { expires: number; value: FramingHealth };
+  private pending?: Promise<FramingHealth>;
+  constructor(
+    private readonly deps: () => ConverterDeps,
+    private readonly now = Date.now,
+  ) {}
+  read(): Promise<FramingHealth> {
+    if (this.cached && this.cached.expires > this.now())
+      return Promise.resolve(this.cached.value);
+    if (this.pending) return this.pending;
+    this.pending = this.refresh().finally(() => { this.pending = undefined; });
+    return this.pending;
+  }
+  private async refresh(): Promise<FramingHealth> {
+    let value: FramingHealth = { supported: false };
+    // A timeout/503 is readiness evidence for one second, not 30s of incompatibility.
+    let ttl = 1000;
+    try {
+      const deps = this.deps();
+      const res = await deps.fetch(`${deps.baseUrl}/healthz`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      const v = await boundedJson(res);
+      if (res.ok) {
+        const scopes = v.output_scopes;
+        value.supported = v.ok === true &&
+          v.solver_version === EXPECTED_SOLVER_VERSION &&
+          v.framing_version === FRAMING_VERSION &&
+          Array.isArray(scopes) &&
+          ["full", "half", "bust", "head"].every((scope) => scopes.includes(scope));
+        // Only a complete healthy response establishes compatibility for 30s.
+        if (v.ok === true) ttl = 30_000;
+        if (value.supported && typeof v.preview_model_revision === "string" &&
+            /^[a-f0-9]{64}$/.test(v.preview_model_revision) &&
+            v.character_hashes && typeof v.character_hashes === "object" &&
+            !Array.isArray(v.character_hashes) && Object.values(v.character_hashes).every(
+              (hash) => typeof hash === "string" && /^[a-f0-9]{64}$/.test(hash))) {
+          value.revision = v.preview_model_revision;
+          value.hashes = v.character_hashes as Record<string, string>;
+        }
+      }
+    } catch { /* Unavailable converters remain closed, with a short recovery interval. */ }
+    this.cached = { expires: this.now() + ttl, value };
+    return value;
+  }
+}
+const healthProbe = new FramingHealthProbe(() => dependencies({}));
 export async function framingAvailable(
   overrides: Partial<ConverterDeps> = {},
 ): Promise<boolean> {
   if (!Object.keys(overrides).length && !converterEnabled()) return false;
-  if (
-    !Object.keys(overrides).length &&
-    healthCache &&
-    healthCache.expires > Date.now()
-  )
-    return healthCache.supported;
-  let supported = false;
-  let revision: string | undefined;
-  let hashes: Record<string, string> | undefined;
-  try {
-    const deps = dependencies(overrides);
-    const res = await deps.fetch(`${deps.baseUrl}/healthz`, {
-      signal: AbortSignal.timeout(5000),
-    });
-    const value = await boundedJson(res);
-    const scopes = value.output_scopes;
-    supported =
-      res.ok &&
-      value.ok === true &&
-      value.solver_version === EXPECTED_SOLVER_VERSION &&
-      value.framing_version === FRAMING_VERSION &&
-      Array.isArray(scopes) &&
-      ["full", "half", "bust", "head"].every((scope) => scopes.includes(scope));
-    if (
-      supported &&
-      typeof value.preview_model_revision === "string" &&
-      /^[a-f0-9]{64}$/.test(value.preview_model_revision) &&
-      value.character_hashes &&
-      typeof value.character_hashes === "object" &&
-      !Array.isArray(value.character_hashes) &&
-      Object.values(value.character_hashes).every(
-        (v) => typeof v === "string" && /^[a-f0-9]{64}$/.test(v),
-      )
-    ) {
-      revision = value.preview_model_revision;
-      hashes = value.character_hashes as Record<string, string>;
-    }
-  } catch {
-    /* Old/offline converter: keep the feature closed. */
-  }
-  if (!Object.keys(overrides).length)
-    healthCache = { expires: Date.now() + 30_000, supported, revision, hashes };
-  return supported;
+  const probe = Object.keys(overrides).length
+    ? new FramingHealthProbe(() => dependencies(overrides)) : healthProbe;
+  return (await probe.read()).supported;
 }
 
 export async function modelPreviewIdentity(
   characterId = config.converterCharacterId,
 ) {
-  if (!(await framingAvailable())) return null;
-  const characterSha256 = healthCache?.hashes?.[characterId];
-  return healthCache?.supported && healthCache.revision && characterSha256
-    ? { modelRevision: healthCache.revision, characterSha256 }
+  if (!converterEnabled()) return null;
+  const health = await healthProbe.read();
+  const characterSha256 = health.hashes?.[characterId];
+  return health.supported && health.revision && characterSha256
+    ? { modelRevision: health.revision, characterSha256 }
     : null;
 }
 
