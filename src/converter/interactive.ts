@@ -9,6 +9,16 @@ import {
 } from "../interactive-state/model.js";
 import type { InteractiveWorker } from "../interactive-state/worker.js";
 const MAX = 64 * 1024 * 1024;
+/** BFF opt-in for the Converter's binary state; absent keeps the original v1 request. */
+export const STATE_ENCODING_HEADER = "X-Standin-State-Encoding";
+interface ExchangeOptions {
+  headers?: Record<string, string>;
+  /** Reject a successful response whose Content-Type media type differs. */
+  mediaType?: string;
+  responseHeaders?: (headers: Headers) => void;
+}
+const mediaTypeOf = (value: string | null) =>
+  value === null ? null : value.split(";")[0].trim().toLowerCase();
 export interface SnapshotTransport {
   baseUrl: string;
   token: string;
@@ -47,6 +57,7 @@ export function createInteractiveWorker(
     signal?: AbortSignal,
     body?: unknown,
     operationId?: string,
+    options: ExchangeOptions = {},
   ) {
     if (!deps.baseUrl || deps.token.length < 32)
       throw new InteractiveError("INTERACTIVE_CONVERTER_UNAVAILABLE", 503);
@@ -61,6 +72,7 @@ export function createInteractiveWorker(
           "X-Standin-Owner": binding,
           "X-Request-Id": requestId,
           ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+          ...options.headers,
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         signal: AbortSignal.any([
@@ -99,6 +111,15 @@ export function createInteractiveWorker(
         response.status === 409 ? 409 : 503,
       );
     }
+    if (
+      options.mediaType !== undefined &&
+      mediaTypeOf(response.headers.get("content-type")) !== options.mediaType
+    ) {
+      log.warn({ ...diagnostics, errorCode: "CONVERTER_INTEGRITY" });
+      await response.body?.cancel();
+      throw new InteractiveError("CONVERTER_INTEGRITY");
+    }
+    options.responseHeaders?.(response.headers);
     const reader = response.body?.getReader();
     if (!reader) {
       log.warn({ ...diagnostics, errorCode: "CONVERTER_INTEGRITY" });
@@ -138,9 +159,10 @@ export function createInteractiveWorker(
     signal?: AbortSignal,
     body?: unknown,
     operationId?: string,
+    options?: ExchangeOptions,
   ) => {
     try {
-      const bytes = await request(route, method, binding, signal, body, operationId);
+      const bytes = await request(route, method, binding, signal, body, operationId, options);
       const started = performance.now();
       try { return JSON.parse(bytes.toString("utf8")) as Record<string, unknown>; }
       finally {
@@ -171,7 +193,15 @@ export function createInteractiveWorker(
         throw new InteractiveError("CONVERTER_INTEGRITY");
       return request(`/interactive/v1/static/${sha256}`, "GET", "", signal);
     },
-    async solve(selection, op, signal) {
+    async solve(selection, op, signal, options) {
+      // No requested encoding: send exactly the original v1 request (selection preview, v1 ops).
+      const answered: { encoding: string | null } = { encoding: null };
+      const negotiated: ExchangeOptions | undefined = options?.stateEncoding
+        ? {
+            headers: { [STATE_ENCODING_HEADER]: options.stateEncoding },
+            responseHeaders: (headers) => { answered.encoding = headers.get(STATE_ENCODING_HEADER); },
+          }
+        : undefined;
       const result = await json(
         "/interactive/v1/solve",
         "POST",
@@ -186,15 +216,22 @@ export function createInteractiveWorker(
           bvhBase64: Buffer.from(selection.bvhBytes).toString("base64"),
         },
         op.operationId,
+        negotiated,
       );
       if (
         typeof result.snapshotId !== "string" ||
         !/^[A-Za-z0-9_-]{1,128}$/.test(result.snapshotId)
       )
         throw new InteractiveError("CONVERTER_INTEGRITY");
-      return { snapshotId: result.snapshotId, packet: result.packet };
+      return {
+        snapshotId: result.snapshotId,
+        packet: result.packet,
+        ...(answered.encoding !== null ? { stateEncoding: answered.encoding } : {}),
+      };
     },
-    model: (op, signal) => request(path(op, "model"), "GET", owner(op), signal, undefined, op.operationId),
+    model: (op, signal, mediaType) =>
+      request(path(op, "model"), "GET", owner(op), signal, undefined, op.operationId,
+        mediaType === undefined ? {} : { mediaType }),
     export: (op, signal) => json(path(op, "export"), "POST", owner(op), signal, undefined, op.operationId),
     file: (op, signal) => request(path(op, "file"), "GET", owner(op), signal, undefined, op.operationId),
     variants: (op, signal) =>

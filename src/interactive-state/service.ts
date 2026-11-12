@@ -2,14 +2,23 @@ import { type SkinPreview } from "../appearance/skin-preview.js";
 import { nondefaultSkin, type Skin } from "../appearance/skin.js";
 import { nonzeroAppearance, type Appearance } from "../appearance/model.js";
 import { parsePublishedPacket, parseReceipt } from "./packet.js";
-import { validatePacketAsync } from "./packet-validation.js";
+import {
+  STATE_MEDIA_TYPE_V2,
+  isBinaryPacket,
+  parseBinaryPacketMeta,
+  verifyPublishedBinaryState,
+} from "./packetV2.js";
+import { validatePacketAsync, validateBinaryPacketAsync } from "./packet-validation.js";
 import { recoverValidation } from "./revalidation.js";
 import { ConverterError, sha256Hex } from "../converter/client.js";
 import { decodeFrame, type ClientFrame } from "./clientFrame.js";
 import {
   InteractiveError,
+  STATE_ENCODING_V1,
+  STATE_ENCODING_V2,
   active,
   hash,
+  stateEncodingOf,
   type Location,
   type Operation,
   type Prepare,
@@ -57,6 +66,8 @@ export interface InteractiveDeps {
   resolve(l: Location, candidateId: string): Promise<ResolvedSelection>;
   worker: InteractiveWorker;
   posters: PosterStorage;
+  /** Operator switch (INTERACTIVE_BINARY_STATE). Omitted = binary state never requested. */
+  binaryState?: () => boolean;
   renderPoster(
     op: Operation,
     bytes: Uint8Array,
@@ -111,7 +122,11 @@ export class InteractiveService {
   private withAppearance(selection: ResolvedSelection, appearance?: Appearance, skin?: Skin, approval?: SkinApproval): ResolvedSelection & { skinPreview?: SkinPreview } {
     return appearance || skin ? { ...selection, ...(skin && approval?.preview ? { skinPreview: approval.preview } : {}), selectionHash: hash({ baseSelectionHash: selection.selectionHash, ...(appearance ? { appearance } : {}), ...(skin ? { skin, skinAssetIdentity: approval!.identity } : {}) }) } : selection;
   }
-  async prepare(l: Location, input: Prepare) {
+  private binaryStateEnabled() {
+    return this.deps.binaryState?.() === true;
+  }
+  /** `client.binaryState`: the request advertised `solved-state-binary-v2`. */
+  async prepare(l: Location, input: Prepare, client: { binaryState?: boolean } = {}) {
     const selection = await this.resolve(l, input.candidateId, input.appearance, input.skin);
     if (input.appearance) await this.outline().check(selection, input.appearance);
     const prepared = await this.deps.store.prepare(
@@ -119,6 +134,7 @@ export class InteractiveService {
       input,
       selection.selectionHash,
       "skinPreview" in selection ? selection.skinPreview : undefined,
+      client.binaryState && this.binaryStateEnabled() ? STATE_ENCODING_V2 : STATE_ENCODING_V1,
     );
     try {
       await this.revalidate(prepared.op);
@@ -207,9 +223,24 @@ export class InteractiveService {
       })) ?? this.current(op, op.operationId)
     );
   }
-  async model(op: Operation, signal?: AbortSignal) {
+  /** Media type of the `/model` bytes, fixed together with stateHash at publication. */
+  async model(op: Operation, signal?: AbortSignal, client: { binaryState?: boolean } = {}) {
     if (!active(op) || !op.stateHash)
       throw new InteractiveError("INTERACTIVE_NOT_READY");
+    if (stateEncodingOf(op) === STATE_ENCODING_V2) {
+      // Never hand binary bytes to a client that did not advertise it (e.g. an app downgrade).
+      if (!client.binaryState)
+        throw new InteractiveError("INTERACTIVE_PROTOCOL_REQUIRED", 426);
+      await this.revalidate(op);
+      const bytes = await this.consume(op, () =>
+        this.deps.worker.model(op, signal, STATE_MEDIA_TYPE_V2),
+      );
+      // Publication fully decoded these exact bytes; delivery only rehashes them (no parse).
+      await this.timed(op, "artifact_model_delivery_validation", "validation",
+        () => verifyPublishedBinaryState(bytes, op));
+      await this.assertDeliverable(op);
+      return bytes;
+    }
     await this.revalidate(op);
     const bytes = await this.consume(op, () =>
       this.deps.worker.model(op, signal),
@@ -276,6 +307,10 @@ export class InteractiveService {
     if (!active(op) || op.exportState !== "ready" || !this.deps.worker.variants)
       throw new InteractiveError("INTERACTIVE_NOT_READY");
     await this.revalidate(op);
+    // The Converter has no hand atlas for binary states and always answers 409; answer the
+    // same 409 CONVERTER_INTEGRITY clients already receive, without the round trip.
+    if (stateEncodingOf(op) === STATE_ENCODING_V2)
+      throw new InteractiveError("CONVERTER_INTEGRITY", 409);
     const bytes = await this.consume(op, () =>
       this.deps.worker.variants!(op, signal),
     );
@@ -453,23 +488,47 @@ export class InteractiveService {
         undefined, { operationId: op.operationId, revision: op.revision },
       );
       if (stage === "preview") {
-        const solved = await this.timed(op, "artifact_converter_solve", stage, () => this.deps.worker.solve(
-          selection,
-          op,
-          controller.signal,
-        ));
+        // The operator switch is honoured again here so it also stops already queued binary work.
+        const requested = op.requestedStateEncoding === STATE_ENCODING_V2;
+        const binary = requested && this.binaryStateEnabled();
+        const solved = await this.timed(op, "artifact_converter_solve", stage, () => binary
+          ? this.deps.worker.solve(selection, op, controller.signal, { stateEncoding: STATE_ENCODING_V2 })
+          : this.deps.worker.solve(
+            selection,
+            op,
+            controller.signal,
+          ));
         if (!/^[A-Za-z0-9_-]{1,128}$/.test(solved.snapshotId))
           throw new InteractiveError("CONVERTER_INTEGRITY");
-        const validated = await this.timed(op, "artifact_packet_validation", stage,
-          () => validatePacketAsync(solved.packet, op, selection, controller.signal));
+        let publication: Pick<Operation, "stateHash" | "snapshotProof" | "stateEncoding">;
+        if (binary && isBinaryPacket(solved.packet)) {
+          if (solved.stateEncoding !== undefined && solved.stateEncoding !== STATE_ENCODING_V2)
+            throw new InteractiveError("CONVERTER_INTEGRITY");
+          const meta = parseBinaryPacketMeta(solved.packet, op);
+          const bytes = await this.timed(op, "artifact_converter_model", stage, () =>
+            this.deps.worker.model({ ...op, snapshotId: solved.snapshotId }, controller.signal, STATE_MEDIA_TYPE_V2));
+          const validated = await this.timed(op, "artifact_packet_validation", stage,
+            () => validateBinaryPacketAsync(meta, bytes, op, selection, controller.signal));
+          publication = { stateHash: meta.stateHash, snapshotProof: validated.snapshotProof, stateEncoding: STATE_ENCODING_V2 };
+        } else {
+          // Typed-JSON v1, unchanged. Also the fallback when an older Converter or its kill
+          // switch answers a binary request with v1: the operation is then recorded as v1.
+          if (binary && solved.stateEncoding !== undefined && solved.stateEncoding !== STATE_ENCODING_V1)
+            throw new InteractiveError("CONVERTER_INTEGRITY");
+          const validated = await this.timed(op, "artifact_packet_validation", stage,
+            () => validatePacketAsync(solved.packet, op, selection, controller.signal));
+          publication = { stateHash: validated.stateHash, snapshotProof: validated.snapshotProof, stateEncoding: STATE_ENCODING_V1 };
+          if (requested)
+            this.deps.metric("artifact_state_encoding_fallback", stage, 0, binary ? "CONVERTER_ANSWERED_V1" : "BINARY_STATE_DISABLED",
+              { operationId: op.operationId, revision: op.revision });
+        }
         if (controller.signal.aborted) return;
         await revalidate();
         const published = await this.deps.store.update(
           op,
           {
-            stateHash: validated.stateHash,
+            ...publication,
             snapshotId: solved.snapshotId,
-            snapshotProof: validated.snapshotProof,
             previewState: "authoritative",
           },
           claim.leaseId,

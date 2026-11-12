@@ -3,6 +3,8 @@ import {
   fixtureSelection,
   fixturePacket,
   fixtureReceipt,
+  fixtureBinaryState,
+  fixtureBinaryReceipt,
   syntheticFbx,
 } from "./fixture.js";
 import test from "node:test";
@@ -73,6 +75,13 @@ async function setup() {
     fileHold: undefined as Promise<void> | undefined,
     events: [] as string[],
     sent: [] as number[],
+    // Binary state (standin-binary-f64le-v2) controls.
+    binaryEnabled: true,
+    converterBinary: true,
+    corruptBinary: false,
+    solveOptions: [] as unknown[],
+    modelMedia: [] as Array<string | undefined>,
+    variantsCalls: 0,
   };
   const resolver = async () => {
     if (state.runtimeFailures > 0) { state.runtimeFailures--; throw state.runtimeError; }
@@ -114,20 +123,37 @@ async function setup() {
       },
       file: async op => { await state.fileHold; return state.corruptOutlineFile ? Buffer.from("corrupt outlined bytes") : Buffer.concat([op.skin ? skinBytes(op) : syntheticFbx, Buffer.from("!")]); },
     },
+    binaryState: () => state.binaryEnabled,
     worker: {
-      solve: async (_s, op, signal) => {
+      solve: async (_s, op, signal, ...options) => {
         state.solveCalls++;
         state.sent.push(op.revision);
+        state.solveOptions.push(...options);
         await state.hold;
         if (signal.aborted) throw new Error("aborted");
         state.runtimeFailures = state.afterWorkValidationFailures;
-        return { snapshotId: "snapshot", packet: fixturePacket(op) };
+        const requested = options[0]?.stateEncoding;
+        if (requested === "standin-binary-f64le-v2" && state.converterBinary)
+          return { snapshotId: "snapshot", packet: fixtureBinaryState(op).packet, stateEncoding: requested };
+        // A current Converter echoes v1 (kill switch); an older one would send no header.
+        return { snapshotId: "snapshot", packet: fixturePacket(op), ...(requested ? { stateEncoding: "typed-f64be-json-v1" } : {}) };
       },
-      model: async (op) => Buffer.from(JSON.stringify(fixturePacket(op))),
+      model: async (op, _signal, mediaType) => {
+        state.modelMedia.push(mediaType);
+        if (mediaType !== "application/vnd.standin.solved-pose-state-v2")
+          return Buffer.from(JSON.stringify(fixturePacket(op)));
+        const bytes = Buffer.from(fixtureBinaryState(op).bytes);
+        if (state.corruptBinary) bytes[bytes.length - 1] ^= 1;
+        return bytes;
+      },
+      variants: async () => {
+        state.variantsCalls++;
+        return Buffer.from("{}");
+      },
       export: async (op) => {
         state.exportCalls++;
         await state.hold;
-        const receipt = fixtureReceipt(op);
+        const receipt = op.stateEncoding === "standin-binary-f64le-v2" ? fixtureBinaryReceipt(op) : fixtureReceipt(op);
         state.runtimeFailures = state.afterWorkValidationFailures;
         return state.invalidReceipt ? { ...receipt, verified: false } : receipt;
       },
@@ -156,7 +182,8 @@ async function setup() {
   });
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
-    c.req.raw.headers.set("X-Standin-Interactive-Protocol", "pose-body-only-v1");
+    if (!c.req.raw.headers.has("X-Standin-Interactive-Protocol"))
+      c.req.raw.headers.set("X-Standin-Interactive-Protocol", "pose-body-only-v1");
     c.set("installationId", c.req.header("X-Owner") ?? owner);
     c.set("requestId", "req_fixture");
     await next();
@@ -166,10 +193,10 @@ async function setup() {
     createInteractiveRoutes(service, () => true),
   );
   const base = `/v1/analysis/jobs/${job}/people/0/interactive-state`;
-  const request = (path = "", method = "GET", body?: unknown, as = owner) =>
+  const request = (path = "", method = "GET", body?: unknown, as = owner, headers: Record<string, string> = {}) =>
     app.request(`${base}${path}`, {
       method,
-      headers: { "X-Owner": as, "Content-Type": "application/json" },
+      headers: { "X-Owner": as, "Content-Type": "application/json", ...headers },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
   const prepare = (
@@ -177,6 +204,7 @@ async function setup() {
     expectedRevision = 0,
     mutationId = `mutation-${revision}`,
     extra = {},
+    headers: Record<string, string> = {},
   ) =>
     request("", "POST", {
       schemaVersion: HTTP_SCHEMA,
@@ -186,7 +214,7 @@ async function setup() {
       expectedStateHash: null,
       mutationId,
       ...extra,
-    });
+    }, owner, headers);
   const read = (id: string) =>
     store.get({ installationId: owner, jobId: job, personIndex: 0 }, id);
   return {
@@ -294,10 +322,11 @@ test("full polling/model/export/file path separates preparation, PNG and native 
   }
 });
 
-test("a transient poll 503 preserves the accepted work and exposes latency diagnostics", async () => {
+for (const binary of [false, true]) test(`a transient poll 503 preserves the accepted work and exposes latency diagnostics (${binary ? "v2" : "v1"})`, async () => {
   const s = await setup();
+  const headers = binary ? BINARY_CLIENT : {};
   try {
-    const accepted = await s.prepare();
+    const accepted = await s.prepare(1, 0, "mutation-1", {}, headers);
     assert.equal(accepted.status, 202);
     const op = await accepted.json() as ReturnType<typeof publicOperation>;
     s.state.resolveUnavailable = true;
@@ -319,16 +348,17 @@ test("a transient poll 503 preserves the accepted work and exposes latency diagn
       assert(s.state.events.includes(event));
   } finally { await s.pg.close(); }
 });
-test("latest wins: queued older revision never runs; late running response cannot publish", async () => {
+for (const binary of [false, true]) test(`latest wins: queued older revision never runs; late running response cannot publish (${binary ? "v2" : "v1"})`, async () => {
   const s = await setup();
+  const headers = binary ? BINARY_CLIENT : {};
   try {
     const a = await (
-      await s.prepare()
+      await s.prepare(1, 0, "mutation-1", {}, headers)
     )
       .json()
       .then((v) => v as ReturnType<typeof publicOperation>);
     const b = await (
-      await s.prepare(2, 1)
+      await s.prepare(2, 1, "mutation-2", {}, headers)
     )
       .json()
       .then((v) => v as ReturnType<typeof publicOperation>);
@@ -339,14 +369,14 @@ test("latest wins: queued older revision never runs; late running response canno
     let release!: () => void;
     s.state.hold = new Promise<void>((r) => (release = r));
     const c = await (
-      await s.prepare(3, 2)
+      await s.prepare(3, 2, "mutation-3", {}, headers)
     )
       .json()
       .then((v) => v as ReturnType<typeof publicOperation>);
     const pending = s.tick("preview");
     while (s.state.solveCalls < 2) await new Promise((r) => setTimeout(r, 1));
     const d = await (
-      await s.prepare(4, 3)
+      await s.prepare(4, 3, "mutation-4", {}, headers)
     )
       .json()
       .then((v) => v as ReturnType<typeof publicOperation>);
@@ -356,7 +386,7 @@ test("latest wins: queued older revision never runs; late running response canno
     assert.equal((await s.read(d.operationId)).previewState, "solving");
     await s.tick("preview");
     assert.equal((await s.read(d.operationId)).previewState, "authoritative");
-    assert.equal((await s.prepare(5, 2)).status, 409);
+    assert.equal((await s.prepare(5, 2, "mutation-5", {}, headers)).status, 409);
   } finally {
     await s.pg.close();
   }
@@ -564,10 +594,11 @@ test("simultaneous prepare compare-and-swap has one winner and distinct people k
   }
 });
 
-test("running cancellation aborts and fences late response; byte corruption never delivers", async () => {
+for (const binary of [false, true]) test(`running cancellation aborts and fences late response; byte corruption never delivers (${binary ? "v2" : "v1"})`, async () => {
   const s = await setup();
+  const headers = binary ? BINARY_CLIENT : {};
   try {
-    const op = (await (await s.prepare()).json()) as ReturnType<
+    const op = (await (await s.prepare(1, 0, "mutation-1", {}, headers)).json()) as ReturnType<
       typeof publicOperation
     >;
     let release!: () => void;
@@ -580,7 +611,7 @@ test("running cancellation aborts and fences late response; byte corruption neve
     assert.equal((await s.read(op.operationId)).previewState, "cancelled");
     assert.ok(!s.state.events.includes("artifact_prepare_ready"));
     s.state.hold = undefined;
-    const next = (await (await s.prepare(2, 1)).json()) as ReturnType<
+    const next = (await (await s.prepare(2, 1, "mutation-2", {}, headers)).json()) as ReturnType<
       typeof publicOperation
     >;
     await s.tick("preview");
@@ -590,7 +621,7 @@ test("running cancellation aborts and fences late response; byte corruption neve
     const failed = await s.read(next.operationId);
     assert.equal(failed.previewState, "authoritative");
     assert.equal(failed.exportState, "failed");
-    assert.equal((await s.request(`/${next.operationId}/model`)).status, 200);
+    assert.equal((await s.request(`/${next.operationId}/model`, "GET", undefined, owner, headers)).status, 200);
     s.state.invalidReceipt = false;
     await s.request(`/${next.operationId}/export`, "POST");
     await s.tick("export");
@@ -931,4 +962,162 @@ test("approved asset replacement invalidates ready skin bytes and changes the ne
     const head = await (await s.request("?" + new URLSearchParams({ candidateId: "candidate", skin: JSON.stringify(flesh) }))).json() as { operation: unknown; skinExport: { available: boolean; supportedIds: string[] } };
     assert.equal(head.operation, null); assert.equal(head.skinExport.available, false); assert.deepEqual(head.skinExport.supportedIds, ["default"]);
   } finally { await s.pg.close(); }
+});
+
+const BINARY_CLIENT = { "X-Standin-Interactive-Protocol": "pose-body-only-v1, solved-state-binary-v2" };
+const V2_MEDIA = "application/vnd.standin.solved-pose-state-v2";
+const V1_MEDIA = "application/vnd.standin.solved-pose-state-v1+json";
+test("binary client: Converter v2 state is fully validated once, then delivered as exact bytes with v2 headers", async () => {
+  const s = await setup();
+  try {
+    const op = await (await s.prepare(1, 0, "binary-1", {}, BINARY_CLIENT)).json() as ReturnType<typeof publicOperation>;
+    assert.equal(Object.hasOwn(op, "stateEncoding"), false); // public operation contract unchanged
+    assert.equal((await s.read(op.operationId)).requestedStateEncoding, "standin-binary-f64le-v2");
+    await s.tick("preview");
+    const solved = await s.read(op.operationId);
+    const expected = fixtureBinaryState(solved);
+    assert.deepEqual(s.state.solveOptions, [{ stateEncoding: "standin-binary-f64le-v2" }]);
+    assert.deepEqual(s.state.modelMedia, [V2_MEDIA]);
+    assert.equal(solved.previewState, "authoritative");
+    assert.equal(solved.stateEncoding, "standin-binary-f64le-v2");
+    assert.equal(solved.stateHash, expected.packet.stateHash);
+    assert.equal(solved.snapshotProof?.modelSha256, expected.packet.modelSha256);
+    for (const event of ["artifact_converter_solve", "artifact_converter_model", "artifact_packet_validation"])
+      assert(s.state.events.includes(event), event);
+    const model = await s.request(`/${op.operationId}/model`, "GET", undefined, owner, BINARY_CLIENT);
+    assert.equal(model.status, 200);
+    assert.equal(model.headers.get("Content-Type"), V2_MEDIA);
+    assert.equal(model.headers.get("X-Standin-State-Hash"), solved.stateHash);
+    assert.equal(model.headers.get("X-Standin-Revision"), "1");
+    assert.equal(model.headers.get("Cache-Control"), "private, no-store");
+    const body = Buffer.from(await model.arrayBuffer());
+    assert.deepEqual(body, expected.bytes);
+    assert.equal(sha256Hex(body), solved.stateHash);
+    assert.deepEqual(s.state.modelMedia.at(-1), V2_MEDIA);
+    // A client without the token never receives binary bytes (e.g. app downgrade).
+    const legacy = await s.request(`/${op.operationId}/model`);
+    assert.equal(legacy.status, 426);
+    assert.equal((await legacy.json() as { error: { code: string } }).error.code, "INTERACTIVE_PROTOCOL_REQUIRED");
+    // Export receipts carry the v2 stateHash and v2 model digest; the existing binding accepts them.
+    assert.equal((await s.request(`/${op.operationId}/export`, "POST", undefined, owner, BINARY_CLIENT)).status, 202);
+    await s.tick("export");
+    const ready = await s.read(op.operationId);
+    assert.equal(ready.exportState, "ready");
+    assert.equal(ready.receipt?.packetModelSha256, expected.packet.modelSha256);
+    assert.equal((await s.request(`/${op.operationId}/file`, "GET", undefined, owner, BINARY_CLIENT)).status, 200);
+    // No v1 atlas exists for binary states: same 409 as the Converter's answer, without calling it.
+    const variants = await s.request(`/${op.operationId}/variants`, "GET", undefined, owner, BINARY_CLIENT);
+    assert.equal(variants.status, 409);
+    assert.equal((await variants.json() as { error: { code: string } }).error.code, "CONVERTER_INTEGRITY");
+    assert.equal(s.state.variantsCalls, 0);
+    // Changed Converter bytes are refused on delivery.
+    s.state.corruptBinary = true;
+    const corrupt = await s.request(`/${op.operationId}/model`, "GET", undefined, owner, BINARY_CLIENT);
+    assert.equal(corrupt.status, 409);
+    assert.equal((await corrupt.json() as { error: { code: string } }).error.code, "CONVERTER_INTEGRITY");
+  } finally { await s.pg.close(); }
+});
+test("an older Converter or its kill switch answering v1 falls back to the unchanged v1 path", async () => {
+  const s = await setup();
+  try {
+    s.state.converterBinary = false;
+    const op = await (await s.prepare(1, 0, "binary-fallback", {}, BINARY_CLIENT)).json() as ReturnType<typeof publicOperation>;
+    await s.tick("preview");
+    const solved = await s.read(op.operationId);
+    assert.deepEqual(s.state.solveOptions, [{ stateEncoding: "standin-binary-f64le-v2" }]);
+    assert.deepEqual(s.state.modelMedia, []); // v1 packets carry canonicalState inline
+    assert.equal(solved.previewState, "authoritative");
+    assert.equal(solved.stateEncoding, "typed-f64be-json-v1");
+    assert.equal(solved.stateHash, fixturePacket(solved).stateHash);
+    assert(s.state.events.includes("artifact_state_encoding_fallback"));
+    const model = await s.request(`/${op.operationId}/model`, "GET", undefined, owner, BINARY_CLIENT);
+    assert.equal(model.status, 200);
+    assert.equal(model.headers.get("Content-Type"), V1_MEDIA);
+    assert.deepEqual(JSON.parse(await model.text()), fixturePacket(solved));
+    assert.equal(s.state.modelMedia.at(-1), undefined);
+    assert.equal((await s.request(`/${op.operationId}/variants`, "GET", undefined, owner, BINARY_CLIENT)).status, 409); // not ready yet
+    await s.request(`/${op.operationId}/export`, "POST", undefined, owner, BINARY_CLIENT);
+    await s.tick("export");
+    assert.equal((await s.request(`/${op.operationId}/variants`, "GET", undefined, owner, BINARY_CLIENT)).status, 200);
+    assert.equal(s.state.variantsCalls, 1);
+  } finally { await s.pg.close(); }
+});
+test("old clients and the operator switch keep the exact v1 request; switch-off also stops queued binary work", async () => {
+  const s = await setup();
+  try {
+    const legacy = await (await s.prepare(1, 0, "legacy-client")).json() as ReturnType<typeof publicOperation>;
+    assert.equal((await s.read(legacy.operationId)).requestedStateEncoding, "typed-f64be-json-v1");
+    await s.tick("preview");
+    assert.deepEqual(s.state.solveOptions, []); // three-argument v1 solve, no encoding header
+    const model = await s.request(`/${legacy.operationId}/model`);
+    assert.equal(model.headers.get("Content-Type"), V1_MEDIA);
+    assert.equal(s.state.modelMedia.at(-1), undefined);
+    s.state.binaryEnabled = false;
+    const off = await (await s.prepare(2, 1, "switch-off", {}, BINARY_CLIENT)).json() as ReturnType<typeof publicOperation>;
+    assert.equal((await s.read(off.operationId)).requestedStateEncoding, "typed-f64be-json-v1");
+    await s.tick("preview");
+    assert.deepEqual(s.state.solveOptions, []);
+    s.state.binaryEnabled = true;
+    const queued = await (await s.prepare(3, 2, "switch-later", {}, BINARY_CLIENT)).json() as ReturnType<typeof publicOperation>;
+    assert.equal((await s.read(queued.operationId)).requestedStateEncoding, "standin-binary-f64le-v2");
+    s.state.binaryEnabled = false;
+    await s.tick("preview");
+    assert.deepEqual(s.state.solveOptions, []);
+    const solved = await s.read(queued.operationId);
+    assert.equal(solved.previewState, "authoritative");
+    assert.equal(solved.stateEncoding, "typed-f64be-json-v1");
+    assert.equal((await s.request(`/${queued.operationId}/model`, "GET", undefined, owner, BINARY_CLIENT)).headers.get("Content-Type"), V1_MEDIA);
+  } finally { await s.pg.close(); }
+});
+test("operations without encoding fields (older rows, or published by an older BFF replica) stay v1", async () => {
+  const s = await setup();
+  try {
+    // Row prepared before this change: no requestedStateEncoding, so the exact v1 solve.
+    const before = await (await s.prepare(1, 0, "pre-binary-row", {}, BINARY_CLIENT)).json() as ReturnType<typeof publicOperation>;
+    await s.pg.query("UPDATE interactive_operations SET value=value-'requestedStateEncoding' WHERE id=$1", [before.operationId]);
+    assert.equal(Object.hasOwn(await s.read(before.operationId), "requestedStateEncoding"), false);
+    await s.tick("preview");
+    assert.deepEqual(s.state.solveOptions, []);
+    assert.equal((await s.read(before.operationId)).previewState, "authoritative");
+    let model = await s.request(`/${before.operationId}/model`, "GET", undefined, owner, BINARY_CLIENT);
+    assert.equal(model.status, 200);
+    assert.equal(model.headers.get("Content-Type"), V1_MEDIA);
+    // Binary requested, but an older replica (rolling deploy/rollback) solved and published v1
+    // without writing stateEncoding: the published bytes are still served as v1.
+    const mixed = await (await s.prepare(2, 1, "older-replica", {}, BINARY_CLIENT)).json() as ReturnType<typeof publicOperation>;
+    s.state.binaryEnabled = false;
+    await s.tick("preview");
+    await s.pg.query("UPDATE interactive_operations SET value=value-'stateEncoding' WHERE id=$1", [mixed.operationId]);
+    const published = await s.read(mixed.operationId);
+    assert.equal(published.requestedStateEncoding, "standin-binary-f64le-v2");
+    assert.equal(Object.hasOwn(published, "stateEncoding"), false);
+    model = await s.request(`/${mixed.operationId}/model`, "GET", undefined, owner, BINARY_CLIENT);
+    assert.equal(model.status, 200);
+    assert.equal(model.headers.get("Content-Type"), V1_MEDIA);
+    assert.deepEqual(JSON.parse(await model.text()), fixturePacket(published));
+    // The encoding is fixed with stateHash: no later update may change or add it on its own.
+    await assert.rejects(s.store.update(published, { stateEncoding: "standin-binary-f64le-v2" }), /CONVERTER_INTEGRITY/);
+    await assert.rejects(s.store.update(published, { stateHash: published.stateHash, stateEncoding: "standin-binary-f64le-v2" }), /CONVERTER_INTEGRITY/);
+  } finally { await s.pg.close(); }
+});
+test("binary publication fails closed on tampered metadata, bytes or a skipped encoding echo", async () => {
+  for (const tamper of ["length", "bytes", "echo", "unrequested"] as const) {
+    const s = await setup();
+    try {
+      const worker = s.service.deps.worker, solve = worker.solve, model = worker.model;
+      if (tamper === "length") worker.solve = async (...args) => { const r = await solve(...args);
+        return { ...r, packet: { ...(r.packet as object), stateBytes: (r.packet as { stateBytes: number }).stateBytes + 8 } }; };
+      if (tamper === "bytes") worker.model = async (...args) => { const b = Buffer.from(await model(...args)); b[200] ^= 1; return b; };
+      if (tamper === "echo") worker.solve = async (...args) => ({ ...await solve(...args), stateEncoding: "typed-f64be-json-v1" });
+      // A binary packet for an operation that did not request it (old client) is refused.
+      if (tamper === "unrequested") worker.solve = async (_s, op) => ({ snapshotId: "snapshot", packet: fixtureBinaryState(op).packet });
+      const op = await (await s.prepare(1, 0, `tamper-${tamper}`, {}, tamper === "unrequested" ? {} : BINARY_CLIENT)).json() as ReturnType<typeof publicOperation>;
+      await s.tick("preview");
+      const failed = await s.read(op.operationId);
+      assert.equal(failed.previewState, "error", tamper);
+      assert.equal(failed.errorCode, "CONVERTER_INTEGRITY", tamper);
+      assert.equal(failed.stateHash, null, tamper);
+      assert(s.state.events.includes("artifact_prepare_failed"), tamper);
+    } finally { await s.pg.close(); }
+  }
 });

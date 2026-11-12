@@ -1,5 +1,6 @@
 import { releaseEnabled } from "../refine/release.js";
-import { INTERACTIVE_PROTOCOL_HEADER, supportsPoseBodyProtocol } from "../interactive-state/protocol.js";
+import { BINARY_STATE_PROTOCOL, INTERACTIVE_PROTOCOL_HEADER, supportsPoseBodyProtocol } from "../interactive-state/protocol.js";
+import { STATE_MEDIA_TYPE_V2 } from "../interactive-state/packetV2.js";
 import { interactiveEnabled } from "../interactive-state/runtime.js";
 import { staticAssets } from "../interactive-state/static.js";
 import { historyFrames } from "../interactive-state/history.js";
@@ -429,6 +430,17 @@ jobsRoutes.get("/:id/result", async (c) => {
         localHands: false,
         initialFbxRequired: true,
       },
+      // Separate key: clients parse interactiveState strictly. Lets a client add the optional
+      // protocol token only once this BFF says it understands it (safe across BFF rollbacks).
+      ...(interactiveEnabled() && appearanceProtocol
+        ? {
+            solvedStateBinary: {
+              protocolToken: BINARY_STATE_PROTOCOL,
+              mediaType: STATE_MEDIA_TYPE_V2,
+              available: config.interactiveBinaryState,
+            },
+          }
+        : {}),
       sceneAvailability: availability,
       sceneSaveContract: sceneSaveContract(
         availability.originalSelection.available,

@@ -6,6 +6,14 @@ function env(key: string, def = ""): string {
   return process.env[key] ?? def;
 }
 
+/** Operator switch values are strict: a typo must fail startup, not silently pick a mode. */
+export function parseSwitch(key: string, value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "1" || normalized === "true") return true;
+  if (normalized === "0" || normalized === "false") return false;
+  throw new Error(`${key} must be 0 or 1`);
+}
+
 export const config = {
   campaignCountsEnabled: env("CAMPAIGN_COUNTS_ENABLED", "false") === "true",
   // Read-only Marketing API credential. Inject through ECS Secrets, never browser configuration.
@@ -23,6 +31,15 @@ export const config = {
   skinExportEnabled: env("SKIN_EXPORT_ENABLED", "false") === "true",
   outlineExportEnabled: env("OUTLINE_EXPORT_ENABLED", "false") === "true",
   interactiveStateEnabled: env("INTERACTIVE_STATE_ENABLED", "false") === "true",
+  /**
+   * Binary solved state (standin-binary-f64le-v2) for clients that advertise
+   * `solved-state-binary-v2`. 0 = new and still-solving work uses typed-JSON v1 (emergency
+   * rollback); already published binary operations keep their bytes. Invalid values fail startup.
+   */
+  interactiveBinaryState: parseSwitch(
+    "INTERACTIVE_BINARY_STATE",
+    env("INTERACTIVE_BINARY_STATE", "1"),
+  ),
   replayEnabled: env("REPLAY_ENABLED", "true") === "true",
   captureReplayEnabled: env("CAPTURE_REPLAY_ENABLED", "true") === "true",
   cspResultCaptureEnabled: env("CSP_RESULT_CAPTURE_ENABLED", "true") === "true",
