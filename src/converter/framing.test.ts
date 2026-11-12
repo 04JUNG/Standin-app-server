@@ -490,12 +490,16 @@ test("pending automatic prewarm preserves the verified calculation fallback", as
 
 test("health probes share fresh evidence, collapse concurrent reads and never reuse expired hashes", async () => {
   let now = 0, calls = 0, available = true;
+  const probeIds: string[] = [];
   let release: (() => void) | undefined;
   const gate = new Promise<void>((resolve) => { release = resolve; });
   const probe = new FramingHealthProbe(() => ({
     ...deps({}), timeoutMs: 5000, defaultCharacterId: "body",
-    fetch: (async () => {
+    fetch: (async (_url, request) => {
       calls++;
+      const id = new Headers(request?.headers).get("X-Request-Id");
+      assert.match(id ?? "", /^req_[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/);
+      probeIds.push(id!);
       await gate;
       if (!available) throw new Error("timeout");
       return new Response(JSON.stringify({ ok: true, solver_version: EXPECTED_SOLVER_VERSION,
@@ -518,6 +522,7 @@ test("health probes share fresh evidence, collapse concurrent reads and never re
   now += 2; available = true;
   assert.equal((await probe.read()).hashes?.body, "b".repeat(64));
   assert.equal(calls, 3);
+  assert.equal(new Set(probeIds).size, 3);
 });
 
 test("503 health responses cannot publish hashes and recover after a short retry interval", async () => {

@@ -1,4 +1,5 @@
 /** Paired FBX + PNG from the same final artifact. No pose inference lives here. */
+import { randomUUID } from "node:crypto";
 import { sameShapeSource, type BodyShape, type ShapeSource } from "../body-selection/shape.js";
 import { config } from "../config.js";
 import { log } from "../log.js";
@@ -309,12 +310,14 @@ export class FramingHealthProbe {
   }
   private async refresh(): Promise<FramingHealth> {
     const started = performance.now();
+    const probeRequestId = `req_${randomUUID()}`;
     let value: FramingHealth = { supported: false };
     // A timeout/503 is readiness evidence for one second, not 30s of incompatibility.
     let ttl = 1000;
     try {
       const deps = this.deps();
       const res = await deps.fetch(`${deps.baseUrl}/healthz`, {
+        headers: { "X-Request-Id": probeRequestId },
         signal: AbortSignal.timeout(5000),
       });
       const v = await boundedJson(res);
@@ -337,11 +340,11 @@ export class FramingHealthProbe {
         }
       }
     } catch (error) {
-      log.warn({ type: "interactive_health_probe_failed", durationMs: performance.now() - started,
+      log.warn({ type: "interactive_health_probe_failed", probeRequestId, durationMs: performance.now() - started,
         errorCode: error instanceof Error && ["TimeoutError", "AbortError"].includes(error.name)
           ? error.name : "BODY_PREVIEW_UNAVAILABLE" });
     }
-    log.info({ type: "interactive_health_probe", durationMs: performance.now() - started,
+    log.info({ type: "interactive_health_probe", probeRequestId, durationMs: performance.now() - started,
       supported: value.supported, hasIdentity: !!value.hashes });
     this.cached = { expires: this.now() + ttl, value };
     return value;
