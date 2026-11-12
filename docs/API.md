@@ -1960,3 +1960,17 @@ original candidate route remains available. An unavailable worker is an explicit
 Release objects use the existing installation/job S3 retention prefix. Production
 activation is outside this PR. Staging live-call and download evidence remains a
 separate release check, not implied by TypeScript or mock tests.
+
+
+### Read-only selection skin overlays
+
+Authenticated `GET /v1/analysis/jobs/:jobId/people/:personIndex/selection-skin-preview?candidateId=…&skin=<JSON>` returns `{baseSelectionHash,skinPreview}` for an approved non-default skin without preparing an interactive operation, running a solver or creating an FBX. The current owned/confirmed candidate, body, shape and selected hands are resolved using the same canonical selection checks as export. It grants no download permission.
+
+The descriptor UV/texture URLs use `selection-skin-assets/:digest` and include `candidateId`, exact `skin` JSON, and mandatory `baseSelectionHash`. Every read rechecks owner, current base selection and approved model/UV/texture metadata; a stale body/pose/hand selection returns `409 PREVIEW_CHANGED`. Only approved UV/texture hashes are readable. Responses are `Cache-Control: private, no-store`, with `X-Skin-Asset-SHA256` and `X-Standin-Base-Selection-Hash` on binary assets. The client validates these plus existing mesh/UV compatibility before overlaying a retained 3D model. Operation changes caused only by appearance do not invalidate the base overlay. Final FBX generation, file verification and delivery authority remain separate and required.
+
+Canonical `handChecksPassed` may explicitly be false when optional hand-quality screening was not run. `bodyAccepted` remains mandatory true; model, pose correspondence, source/hand selection identity and current-revision download checks are unchanged.
+
+
+#### Pose/body-only interactive protocol opt-in
+
+New clients send `X-Standin-Interactive-Protocol: pose-body-only-v1` on BFF requests. Only opt-in clients receive `interactivePreview.operations`, `interactiveState.available`, and `selectionPreview` capabilities. Old clients retain the verified final-FBX preview fallback; a cached interactive URL without the exact opt-in header returns `426 INTERACTIVE_PROTOCOL_REQUIRED` with an update instruction before any worker or asset processing. All new read-only overlay routes use the same protocol gate. The header is allowed by CORS and must not be forwarded to external signed URLs. No hand check is falsely marked passed to accommodate older schemas. Deploy the compatible client before enabling the new Converter runtime; existing clients lacking support cannot consume unchecked-hand packets.

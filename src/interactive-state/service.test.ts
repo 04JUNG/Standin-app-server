@@ -148,6 +148,7 @@ async function setup() {
   });
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
+    c.req.raw.headers.set("X-Standin-Interactive-Protocol", "pose-body-only-v1");
     c.set("installationId", c.req.header("X-Owner") ?? owner);
     c.set("requestId", "req_fixture");
     await next();

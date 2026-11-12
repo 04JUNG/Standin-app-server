@@ -42,6 +42,7 @@ export interface SkinApproval {
   preview?: SkinPreview;
 }
 export interface SkinArtifacts {
+  previewAsset?(selection: ResolvedSelection, skin: Skin, digest: string, signal?: AbortSignal): Promise<{ bytes: Uint8Array; contentType: string }>;
   asset?(op: Operation, selection: ResolvedSelection, digest: string, signal?: AbortSignal): Promise<{ bytes: Uint8Array; contentType: string }>;
   check(selection: ResolvedSelection, skin?: Skin, appearance?: Appearance): Promise<SkinApproval>;
   prepare(op: Operation, selection: ResolvedSelection, source: Uint8Array, signal: AbortSignal): Promise<Record<string, unknown>>;
@@ -217,6 +218,29 @@ export class InteractiveService {
     // This is HTTP delivery, not native disk persistence or an export-completed event.
     this.deps.metric("artifact_download_delivered", "download", 0);
     return bytes;
+  }
+  /** Read-only appearance overlays never prepare an operation or grant file permission. */
+  async selectionSkinPreview(l: Location, candidateId: string, skin: Skin) {
+    const selection = await this.deps.resolve(l, candidateId);
+    const approval = await this.skin().check(selection, skin);
+    if (!approval.preview) throw new InteractiveError("SKIN_UNSUPPORTED");
+    const fresh = await this.deps.resolve(l, candidateId);
+    if (fresh.selectionHash !== selection.selectionHash) throw new InteractiveError("PREVIEW_CHANGED");
+    const query = new URLSearchParams({ candidateId, skin: JSON.stringify(skin), baseSelectionHash: selection.selectionHash });
+    const base = `/v1/analysis/jobs/${l.jobId}/people/${l.personIndex}/selection-skin-assets`;
+    const preview = approval.preview;
+    return { baseSelectionHash: selection.selectionHash, skinPreview: { ...preview,
+      uv: { ...preview.uv, url: `${base}/${preview.uv.sha256}?${query}` },
+      texture: { ...preview.texture, url: `${base}/${preview.texture.sha256}?${query}` } } };
+  }
+  async selectionSkinAsset(l: Location, candidateId: string, skin: Skin, digest: string, baseSelectionHash: string, signal?: AbortSignal) {
+    const selection = await this.deps.resolve(l, candidateId);
+    if (selection.selectionHash !== baseSelectionHash) throw new InteractiveError("PREVIEW_CHANGED");
+    if (!this.skin().previewAsset) throw new InteractiveError("SKIN_UNAVAILABLE", 503);
+    const asset = await this.skin().previewAsset!(selection, skin, digest, signal);
+    const fresh = await this.deps.resolve(l, candidateId);
+    if (fresh.selectionHash !== selection.selectionHash) throw new InteractiveError("PREVIEW_CHANGED");
+    return { ...asset, baseSelectionHash: selection.selectionHash };
   }
   async skinAsset(op: Operation, digest: string, signal?: AbortSignal) {
     if (!active(op) || !op.stateHash || !op.skin || !op.skinPreview || !this.deps.skin?.asset)

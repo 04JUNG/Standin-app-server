@@ -48,3 +48,11 @@ test("claimed verification flags cannot hide malformed material manifest or wron
     { fbx_base64: Buffer.from("untextured bytes").toString("base64") }, { extra: true }])
     assert.throws(() => parseTexturedArtifact({ ...fixture(), ...patch }, op, selection, context), /SKIN_INTEGRITY_ERROR/);
 });
+
+test("current approved 54-bone anatomy retains exact base-rig validation", () => {
+  const current = { ...context, asset: { ...context.asset, bones: 54 } };
+  const currentOp = { ...op, receipt: { ...op.receipt!, skin: { meshes: 1, bones: 54 } } };
+  assert.doesNotThrow(() => parseTexturedArtifact(fixture(), currentOp, selection, current));
+  for (const bones of [52, 53, 55])
+    assert.throws(() => parseTexturedArtifact(fixture(), { ...currentOp, receipt: { ...currentOp.receipt, skin: { meshes: 1, bones } } }, selection, current), /SKIN_INTEGRITY_ERROR/);
+});

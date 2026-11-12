@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { INTERACTIVE_PROTOCOL_HEADER, supportsPoseBodyProtocol } from "./protocol.js";
 import { skinSchema, skinMessage } from "../appearance/skin.js";
 import type { SelectionPreviewService } from "./selectionPreview.js";
 import { appearanceSchema, outlineMessage } from "../appearance/model.js";
@@ -32,7 +33,7 @@ export function createInteractiveRoutes(
     return c.json(
       errorEnvelope(
         code,
-        code.startsWith("SKIN_") ? skinMessage(code) : code.startsWith("OUTLINE_") ? outlineMessage(code) : "선택한 결과를 다시 확인해 주세요.",
+        code === "INTERACTIVE_PROTOCOL_REQUIRED" ? "앱을 최신 버전으로 업데이트해 주세요." : code.startsWith("SKIN_") ? skinMessage(code) : code.startsWith("OUTLINE_") ? outlineMessage(code) : "선택한 결과를 다시 확인해 주세요.",
         c.get("requestId"),
       ),
       status,
@@ -70,12 +71,14 @@ export function createInteractiveRoutes(
     }),
   );
   const l = (c: {
-    req: { param(name: string): string; query(): Record<string, string> };
+    req: { param(name: string): string; query(): Record<string, string>; header(name: string): string | undefined };
     get(name: "installationId"): string | undefined;
   }) => {
     if (!enabled()) throw new InteractiveError("INTERACTIVE_DISABLED", 503);
     const installationId = c.get("installationId");
     if (!installationId) throw new InteractiveError("NOT_FOUND", 404);
+    if (!supportsPoseBodyProtocol(c.req.header(INTERACTIVE_PROTOCOL_HEADER)))
+      throw new InteractiveError("INTERACTIVE_PROTOCOL_REQUIRED", 426);
     const raw = c.req.param("personIndex"),
       personIndex = Number(raw),
       jobId = c.req.param("jobId");
@@ -88,6 +91,29 @@ export function createInteractiveRoutes(
       throw new InteractiveError("INVALID_INPUT", 400);
     return { installationId, jobId, personIndex };
   };
+  const skinRequest = (c: { req: { query(name: string): string | undefined } }) => {
+    const candidateId = c.req.query("candidateId"), raw = c.req.query("skin");
+    if (!candidateId || candidateId.length > 200 || !raw || raw.length > 200)
+      throw new InteractiveError("INVALID_INPUT", 400);
+    let value: unknown;
+    try { value = JSON.parse(raw); } catch { throw new InteractiveError("INVALID_INPUT", 400); }
+    const skin = skinSchema.safeParse(value);
+    if (!skin.success || skin.data.id === "default") throw new InteractiveError("INVALID_INPUT", 400);
+    return { candidateId, skin: skin.data };
+  };
+  r.get("/:jobId/people/:personIndex/selection-skin-preview", async c => {
+    const location = l(c), { candidateId, skin } = skinRequest(c);
+    return c.json(await service.selectionSkinPreview(location, candidateId, skin), 200, { "Cache-Control": "private, no-store" });
+  });
+  r.get("/:jobId/people/:personIndex/selection-skin-assets/:digest", async c => {
+    const location = l(c), { candidateId, skin } = skinRequest(c), digest = c.req.param("digest");
+    if (!/^[a-f0-9]{64}$/.test(digest)) throw new InteractiveError("NOT_FOUND", 404);
+    const baseSelectionHash = c.req.query("baseSelectionHash");
+    if (!baseSelectionHash || !/^[a-f0-9]{64}$/.test(baseSelectionHash)) throw new InteractiveError("INVALID_INPUT", 400);
+    const asset = await service.selectionSkinAsset(location, candidateId, skin, digest, baseSelectionHash, c.req.raw.signal);
+    return new Response(asset.bytes, { headers: { "Content-Type": asset.contentType, "Content-Length": String(asset.bytes.length),
+      "Cache-Control": "private, no-store", "X-Skin-Asset-SHA256": digest, "X-Standin-Base-Selection-Hash": asset.baseSelectionHash } });
+  });
   const previewPath = "/:jobId/people/:personIndex/selection-preview";
   r.use(
     previewPath,
