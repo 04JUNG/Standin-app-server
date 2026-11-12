@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { log } from "../log.js";
-import { INTERACTIVE_PROTOCOL_HEADER, supportsPoseBodyProtocol } from "./protocol.js";
+import { INTERACTIVE_PROTOCOL_HEADER, supportsBinaryState, supportsPoseBodyProtocol } from "./protocol.js";
+import { STATE_MEDIA_TYPE_V1, STATE_MEDIA_TYPE_V2 } from "./packetV2.js";
 import { skinSchema, skinMessage } from "../appearance/skin.js";
 import type { SelectionPreviewService } from "./selectionPreview.js";
 import { appearanceSchema, outlineMessage } from "../appearance/model.js";
@@ -14,7 +15,7 @@ import { errorEnvelope } from "../mapping.js";
 import { BodyError } from "../body-selection/store.js";
 import { HandError } from "../hands/model.js";
 import { ConverterError } from "../converter/client.js";
-import { InteractiveError, prepareSchema, publicOperation, finalReceipt } from "./model.js";
+import { InteractiveError, STATE_ENCODING_V2, prepareSchema, publicOperation, finalReceipt, stateEncodingOf } from "./model.js";
 import type { InteractiveService } from "./service.js";
 export const INTERACTIVE_PATH = "/:jobId/people/:personIndex/interactive-state";
 export function createInteractiveRoutes(
@@ -217,7 +218,9 @@ export function createInteractiveRoutes(
     const location = l(c),
       parsed = prepareSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) throw new InteractiveError("INVALID_INPUT", 400);
-    const result = await service.prepare(location, parsed.data);
+    const result = await service.prepare(location, parsed.data, {
+      binaryState: supportsBinaryState(c.req.header(INTERACTIVE_PROTOCOL_HEADER)),
+    });
     return c.json(publicOperation(result.op), result.replay ? 200 : 202, {
       "Cache-Control": "private, no-store",
       "Retry-After": "1",
@@ -310,7 +313,9 @@ export function createInteractiveRoutes(
       const operation = await op(c);
       const bytes =
         kind === "model"
-          ? await service.model(operation, c.req.raw.signal)
+          ? await service.model(operation, c.req.raw.signal, {
+              binaryState: supportsBinaryState(c.req.header(INTERACTIVE_PROTOCOL_HEADER)),
+            })
           : kind === "file"
             ? await service.file(operation, c.req.raw.signal)
             : await service.poster(operation);
@@ -318,7 +323,9 @@ export function createInteractiveRoutes(
         headers: {
           "Content-Type":
             kind === "model"
-              ? "application/vnd.standin.solved-pose-state-v1+json"
+              ? stateEncodingOf(operation) === STATE_ENCODING_V2
+                ? STATE_MEDIA_TYPE_V2
+                : STATE_MEDIA_TYPE_V1
               : kind === "poster"
                 ? "image/png"
                 : "application/octet-stream",

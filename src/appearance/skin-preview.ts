@@ -4,6 +4,7 @@ import { z } from "zod";
 import { hash, InteractiveError } from "../interactive-state/model.js";
 import { sha256Hex } from "../converter/client.js";
 import type { SkinContext } from "./skin-proof.js";
+import { triangleIndexJson, type SolvedModelV2 } from "../interactive-state/shared/interactive_pose_v2.mjs";
 export interface SkinPreview {
   schema: "skin-preview-v1";
   skin: SkinContext["skin"];
@@ -28,6 +29,15 @@ export function checkSkinPreviewModel(preview: SkinPreview | undefined, model: {
   const pin = preview.compatibility, mesh = model.meshes[0];
   if (model.meshes.length !== 1 || !mesh || mesh.name !== pin.previewMesh || mesh.positions.length !== pin.vertices ||
     model.bones.length !== pin.bones || hash(mesh.triangles) !== pin.trianglesSha256)
+    throw new InteractiveError("SKIN_UV_INCOMPATIBLE");
+}
+/** Same pin for binary states: triangleIndexJson(triangles) is the canonical JSON the v1 `hash` digests. */
+export function checkSkinPreviewBinaryModel(preview: SkinPreview | undefined, model: SolvedModelV2) {
+  if (!preview) return;
+  const pin = preview.compatibility, mesh = model.meshes[0];
+  if (model.meshes.length !== 1 || !mesh || mesh.name !== pin.previewMesh || mesh.vertexCount !== pin.vertices ||
+    model.bones.length !== pin.bones ||
+    sha256Hex(Buffer.from(triangleIndexJson(mesh.triangles), "ascii")) !== pin.trianglesSha256)
     throw new InteractiveError("SKIN_UV_INCOMPATIBLE");
 }
 export function verifySkinPreviewAsset(preview: SkinPreview, digest: string, bytes: Uint8Array) {

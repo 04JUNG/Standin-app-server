@@ -1,0 +1,147 @@
+{
+  "evidence": "Lossless v2 re-encoding of the v1 protocol fixture (same identity/model); Converter Python implementation.",
+  "converterCommit": "dac06ff50fce70a20e80d944488048dfe1a8ce8f",
+  "sourceSha256": {
+    "converter/solved_state.py": "1d974ca8752d4b976a464cf64fb77ca017b81491fd625da45172e2ca90d6aba2",
+    "converter/solved_state_v2.py": "969aa7e966bc45effb1174cff3b50d4db1f5540b27915ad9c4988e9405814f8c",
+    "converter/shared/interactive_pose_v2.mjs": "4f249f923166f92294126097561696243e4033e9b42f108a56c13bcc09908530"
+  },
+  "mediaType": "application/vnd.standin.solved-pose-state-v2",
+  "v1StateHash": "828b27ba805178c59c298c5d3ae33e878de5127399e349c3f5fdc5866a301096",
+  "packet": {
+    "schema": "solved-pose-state-v1",
+    "operation": "op_00000000-0000-4000-8000-000000000001",
+    "revision": 1,
+    "stateHash": "b8cb7b7039a097011e7bf477afef11cb6e7f7603232a3861e7c950631d70b814",
+    "previewState": "authoritative",
+    "exportState": "not-requested",
+    "canonicalEncoding": "standin-binary-f64le-v2",
+    "stateBytes": 3480,
+    "modelSha256": "8b3ea83ddb372b9b261c584b96259f7d432467ae2895c1b64cdca80c5bceeba9"
+  },
+  "stateBase64": "U1RORFNQUzKDCQAAeyJkZXBlbmRlbmNpZXMiOnsiYm91bmRhcnkiOiJwb3N0LWZyb3plbi1ib2R5LXByZS1maW5hbC1leHBvcnQtdjEiLCJpbml0aWFsRmJ4UmVxdWlyZWQiOnRydWV9LCJlbmNvZGluZyI6InN0YW5kaW4tYmluYXJ5LWY2NGxlLXYyIiwiaWRlbnRpdHkiOnsiYm9keSI6eyJjaGFyYWN0ZXJJZCI6InJlZ2lzdGVyZWQtZml4dHVyZSIsImNoYXJhY3RlclNoYTI1NiI6ImNjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2MiLCJyaWdQcm9maWxlIjoibWl4YW1vIn0sImNhbWVyYSI6eyJiYWtlZCI6ZmFsc2UsImRpc3RhbmNlVG9yc28iOnsiJGY2NCI6IjQwMTAwMDAwMDAwMDAwMDAifSwicHJvamVjdGlvbiI6Im9ydGhvZ3JhcGhpYyIsInByb2plY3Rpb25NYXRyaXgiOlt7IiRmNjQiOiIzZmYwMDAwMDAwMDAwMDAwIn0seyIkZjY0IjoiMDAwMDAwMDAwMDAwMDAwMCJ9LHsiJGY2NCI6IjAwMDAwMDAwMDAwMDAwMDAifSx7IiRmNjQiOiIwMDAwMDAwMDAwMDAwMDAwIn0seyIkZjY0IjoiMDAwMDAwMDAwMDAwMDAwMCJ9LHsiJGY2NCI6IjNmZjAwMDAwMDAwMDAwMDAifSx7IiRmNjQiOiIwMDAwMDAwMDAwMDAwMDAwIn0seyIkZjY0IjoiMDAwMDAwMDAwMDAwMDAwMCJ9LHsiJGY2NCI6IjAwMDAwMDAwMDAwMDAwMDAifSx7IiRmNjQiOiIwMDAwMDAwMDAwMDAwMDAwIn0seyIkZjY0IjoiM2ZmMDAwMDAwMDAwMDAwMCJ9LHsiJGY2NCI6IjAwMDAwMDAwMDAwMDAwMDAifSx7IiRmNjQiOiIwMDAwMDAwMDAwMDAwMDAwIn0seyIkZjY0IjoiMDAwMDAwMDAwMDAwMDAwMCJ9LHsiJGY2NCI6IjAwMDAwMDAwMDAwMDAwMDAifSx7IiRmNjQiOiIzZmYwMDAwMDAwMDAwMDAwIn1dLCJ0b3Jzb1JlZmVyZW5jZVNoYTI1NiI6ImNjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2MiLCJ2aWV3TWF0cml4IjpbeyIkZjY0IjoiM2ZmMDAwMDAwMDAwMDAwMCJ9LHsiJGY2NCI6IjAwMDAwMDAwMDAwMDAwMDAifSx7IiRmNjQiOiIwMDAwMDAwMDAwMDAwMDAwIn0seyIkZjY0IjoiMDAwMDAwMDAwMDAwMDAwMCJ9LHsiJGY2NCI6IjAwMDAwMDAwMDAwMDAwMDAifSx7IiRmNjQiOiIzZmYwMDAwMDAwMDAwMDAwIn0seyIkZjY0IjoiMDAwMDAwMDAwMDAwMDAwMCJ9LHsiJGY2NCI6IjAwMDAwMDAwMDAwMDAwMDAifSx7IiRmNjQiOiIwMDAwMDAwMDAwMDAwMDAwIn0seyIkZjY0IjoiMDAwMDAwMDAwMDAwMDAwMCJ9LHsiJGY2NCI6IjNmZjAwMDAwMDAwMDAwMDAifSx7IiRmNjQiOiIwMDAwMDAwMDAwMDAwMDAwIn0seyIkZjY0IjoiMDAwMDAwMDAwMDAwMDAwMCJ9LHsiJGY2NCI6IjAwMDAwMDAwMDAwMDAwMDAifSx7IiRmNjQiOiIwMDAwMDAwMDAwMDAwMDAwIn0seyIkZjY0IjoiM2ZmMDAwMDAwMDAwMDAwMCJ9XX0sImhhbmRzIjp7ImxlZnQiOm51bGwsImxpYnJhcnlTaGEyNTYiOiJkNmM3YTkyMDUxMDg4YWQ2YmExNzFiOTVmNDMwNjVkNjY4OGI4YjY1OTU1MTM1MDViYThhNjc2MzgwNWM2YjQ3IiwicmlnaHQiOm51bGwsInJ1bGVzVmVyc2lvbiI6ImhhbmQtYmFrZS12MSJ9LCJtaXJyb3IiOmZhbHNlLCJvd25lckJpbmRpbmciOiJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIiwic2NvcGUiOiJmdWxsIiwic2VsZWN0aW9uIjp7ImNhbmRpZGF0ZSI6ImNhbmRpZGF0ZSIsIm9wZXJhdGlvbiI6Im9wXzAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMSIsInBlcnNvbiI6IjAiLCJyZXZpc2lvbiI6MX0sInNoYXBlIjp7ImNvbnRyb2xzU2hhMjU2IjpudWxsLCJydWxlc1ZlcnNpb24iOiJub25lIiwic2hhMjU2IjpudWxsLCJzb3VyY2VTaGEyNTYiOm51bGx9LCJzb2x2ZXIiOnsiYWRhcHRlclZlcnNpb24iOiJwb3N0LWZyb3plbi1zbmFwc2hvdC12MSIsIm1hbmlmZXN0U2hhMjU2IjoiNTJlYWUwYjBlYjZhNzAyMzU0MGZkZjAyM2FkNDMyMWYyNGMxMWQ0MzlmM2VjZjlmMzkwYjViNzIzNThiMjRlMyIsInJ1bnRpbWVTaGEyNTYiOiIyYmY0N2I5ZTE4N2E2Nzg5NjBkMDI2NWRiN2NkMmEzNjE2NDYzOWYwYzQwYzk0MDYxYWQ2YjRlZDNhZjQzNTcyIiwidmVyc2lvbiI6ImNoYWluLXRyYW5zcG9ydC12My4yLjUifSwic291cmNlIjp7Im9yaWdpbmFsQnZoU2hhMjU2IjoiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYiIsInJlZmluZVZlcnNpb24iOiJub25lIiwicmVmaW5lZEJ2aFNoYTI1NiI6bnVsbH19LCJzYWZldHkiOnsiYm9keUFjY2VwdGVkIjp0cnVlLCJmaW5hbEZpbGVWZXJpZmllZCI6ZmFsc2UsImhhbmRDaGVja3NQYXNzZWQiOnRydWUsInN1cmZhY2UiOiJleGlzdGluZy1hZGFwdGVyLWNoZWNrcy1vbmx5In0sInNjaGVtYSI6InNvbHZlZC1wb3NlLXN0YXRlLXYxIn0AU1RORE1ETDKaAQAAeyJib25lcyI6W3sibmFtZSI6IkhpcHMiLCJwYXJlbnQiOi0xfV0sImNhcGFiaWxpdGllcyI6eyJsb2NhbEhhbmRzIjpmYWxzZX0sImNvb3JkaW5hdGVzIjp7ImJha2VkIjoicmlnZ2VkX3Jlc3QiLCJtYXRyaXhMYXlvdXQiOiJyb3ctbWFqb3IiLCJvcmlnaW5CbGVuZGVyIjpbeyIkZjY0IjoiMDAwMDAwMDAwMDAwMDAwMCJ9LHsiJGY2NCI6IjAwMDAwMDAwMDAwMDAwMDAifSx7IiRmNjQiOiIzZmYwMDAwMDAwMDAwMDAwIn1dLCJzcGFjZSI6InJpZ2h0LWhhbmRlZC15LXVwLW1ldHJlcy1oaXAtb3JpZ2luIn0sIm1lc2hlcyI6W3siaW5mbHVlbmNlcyI6MywibmFtZSI6Im1lc2hfMDAwIiwibm9ybWFscyI6MywidHJpYW5nbGVzIjoxLCJ2ZXJ0aWNlcyI6M31dLCJzY2hlbWEiOiJpbnRlcmFjdGl2ZS1wb3NlLW1vZGVsLXYxIn0AAAAAAAAAAPA/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwPwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8D8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAA8D8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwPwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8D8AAAAAAADwPwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8D8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwPwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8D8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwPwAAAAAAAAAAAAAAAAAAAAAAAAAAAADwPwAAAAAAAAAAAAAAAAAAAAAAAAAAAADwPwAAAAABAAAAAgAAAAAAAAAAAAAAAQAAAAIAAAAAAAAAAAAAAAEAAAACAAAAAwAAAAAAAAAAAAAAAAAAAAAA8D8AAAAAAADwPwAAAAAAAPA/",
+  "receipt": {
+    "schema": "interactive-fbx-receipt-v1",
+    "stateHash": "b8cb7b7039a097011e7bf477afef11cb6e7f7603232a3861e7c950631d70b814",
+    "revision": 1,
+    "operation": "op_00000000-0000-4000-8000-000000000001",
+    "identity": {
+      "body": {
+        "characterId": "registered-fixture",
+        "characterSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "rigProfile": "mixamo"
+      },
+      "camera": {
+        "baked": false,
+        "distanceTorso": 4.0,
+        "projection": "orthographic",
+        "projectionMatrix": [
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "torsoReferenceSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "viewMatrix": [
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "hands": {
+        "left": null,
+        "librarySha256": "d6c7a92051088ad6ba171b95f43065d6688b8b6595513505ba8a6763805c6b47",
+        "right": null,
+        "rulesVersion": "hand-bake-v1"
+      },
+      "mirror": false,
+      "ownerBinding": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scope": "full",
+      "selection": {
+        "candidate": "candidate",
+        "operation": "op_00000000-0000-4000-8000-000000000001",
+        "person": "0",
+        "revision": 1
+      },
+      "shape": {
+        "controlsSha256": null,
+        "rulesVersion": "none",
+        "sha256": null,
+        "sourceSha256": null
+      },
+      "solver": {
+        "adapterVersion": "post-frozen-snapshot-v1",
+        "manifestSha256": "52eae0b0eb6a7023540fdf023ad4321f24c11d439f3ecf9f390b5b72358b24e3",
+        "runtimeSha256": "2bf47b9e187a678960d0265db7cd2a36164639f0c40c94061ad6b4ed3af43572",
+        "version": "chain-transport-v3.2.5"
+      },
+      "source": {
+        "originalBvhSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "refineVersion": "none",
+        "refinedBvhSha256": null
+      }
+    },
+    "verified": true,
+    "artifactSha256": "9cd7f785bd455c6cd6be8a17efd7fcfa6741def643f74f104221062053d9b466",
+    "artifactBytes": 29,
+    "runtimeRevision": "2bf47b9e187a678960d0265db7cd2a36164639f0c40c94061ad6b4ed3af43572",
+    "packetModelSha256": "8b3ea83ddb372b9b261c584b96259f7d432467ae2895c1b64cdca80c5bceeba9",
+    "reimportModelSha256": "e2287733dad970faa670d35429fdc30d2e5bacb0257f80a8dc7806c8c46d92e0",
+    "skin": {
+      "version": "final-fbx-v1",
+      "artifact_sha256": "9cd7f785bd455c6cd6be8a17efd7fcfa6741def643f74f104221062053d9b466",
+      "scope": "full",
+      "bones": 1,
+      "meshes": 1,
+      "vertices": 3,
+      "polygons": 1,
+      "skin_verified": true
+    },
+    "correspondence": {
+      "topology": true,
+      "jointIdentity": true,
+      "skinIdentity": true,
+      "maxPositionErrorM": 0.0,
+      "maxMatrixError": 0.0,
+      "maxWeightError": 0.0,
+      "maxNormalError": 0.0,
+      "positionToleranceM": 0.0001,
+      "matrixTolerance": 1e-05,
+      "weightTolerance": 1e-06
+    },
+    "safety": {
+      "bodyAccepted": true,
+      "finalFileVerified": false,
+      "handChecksPassed": true,
+      "surface": "existing-adapter-checks-only"
+    },
+    "limitations": [
+      "synthetic-fixture-only"
+    ]
+  }
+}
