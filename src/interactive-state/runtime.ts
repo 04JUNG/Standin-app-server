@@ -31,12 +31,13 @@ export const interactiveService = new InteractiveService({
       false,
       signal,
     ),
-  metric: (event, stage, elapsedMs, code) =>
+  metric: (event, stage, elapsedMs, code, context) =>
     log.info({
       type: "interactive_artifact",
       event,
       stage,
       durationMs: elapsedMs,
+      ...context,
       ...(code ? { errorCode: code } : {}),
     }),
 });

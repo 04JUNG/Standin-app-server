@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { log } from "../log.js";
 import { INTERACTIVE_PROTOCOL_HEADER, supportsPoseBodyProtocol } from "./protocol.js";
 import { skinSchema, skinMessage } from "../appearance/skin.js";
 import type { SelectionPreviewService } from "./selectionPreview.js";
@@ -30,6 +31,9 @@ export function createInteractiveRoutes(
     const code =
       known || e instanceof ConverterError ? e.code : "INTERACTIVE_UNAVAILABLE";
     const status = known ? e.status : 503;
+    log.warn({ type: "interactive_request_failed", requestId: c.get("requestId"),
+      operationId: c.req.param("operationId"), status, errorCode: code });
+    if (status === 503) c.header("Retry-After", "1");
     return c.json(
       errorEnvelope(
         code,
@@ -229,12 +233,24 @@ export function createInteractiveRoutes(
       throw new InteractiveError("INVALID_INPUT", 400);
     return service.current(location, id);
   };
-  r.get(`${INTERACTIVE_PATH}/:operationId`, async (c) =>
-    c.json(publicOperation(await op(c)), 200, {
-      "Cache-Control": "private, no-store",
-      "Retry-After": "1",
-    }),
-  );
+  r.get(`${INTERACTIVE_PATH}/:operationId`, async (c) => {
+    const started = performance.now();
+    let status = 200;
+    try {
+      const operation = await op(c);
+      return c.json(publicOperation(operation), 200, {
+        "Cache-Control": "private, no-store", "Retry-After": "1",
+        "Server-Timing": `bff_poll;dur=${(performance.now() - started).toFixed(3)}`,
+      });
+    } catch (error) {
+      status = error instanceof InteractiveError || error instanceof BodyError || error instanceof HandError
+        ? error.status : 503;
+      throw error;
+    } finally {
+      log.info({ type: "interactive_poll", requestId: c.get("requestId"),
+        operationId: c.req.param("operationId"), status, durationMs: performance.now() - started });
+    }
+  });
   r.delete(`${INTERACTIVE_PATH}/:operationId`, async (c) =>
     c.json(publicOperation(await service.cancel(await op(c))), 200, {
       "Cache-Control": "private, no-store",

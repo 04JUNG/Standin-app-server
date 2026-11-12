@@ -1974,3 +1974,9 @@ Canonical `handChecksPassed` may explicitly be false when optional hand-quality 
 #### Pose/body-only interactive protocol opt-in
 
 New clients send `X-Standin-Interactive-Protocol: pose-body-only-v1` on BFF requests. Only opt-in clients receive `interactivePreview.operations`, `interactiveState.available`, and `selectionPreview` capabilities. Old clients retain the verified final-FBX preview fallback; a cached interactive URL without the exact opt-in header returns `426 INTERACTIVE_PROTOCOL_REQUIRED` with an update instruction before any worker or asset processing. All new read-only overlay routes use the same protocol gate. The header is allowed by CORS and must not be forwarded to external signed URLs. No hand check is falsely marked passed to accommodate older schemas. Deploy the compatible client before enabling the new Converter runtime; existing clients lacking support cannot consume unchecked-hand packets.
+
+## Interactive preparation polling recovery
+
+A temporary 503 from `GET /v1/analysis/jobs/:jobId/people/:personIndex/interactive-state/:operationId` does not mean the accepted operation failed. Retain the ID/revision and retry the GET without creating or cancelling preparation. A 503 includes `Retry-After: 1`; a successful poll includes `Server-Timing: bff_poll;dur=<milliseconds>`. Ownership, current selection, expiry, and artifact integrity checks remain mandatory.
+
+See [final export recovery](FINAL_EXPORT_RECOVERY.md) for retry bounds, BFF/Converter timing fields and production verification.
