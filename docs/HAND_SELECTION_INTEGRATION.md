@@ -10,7 +10,17 @@
 
 `capabilities.handSelection`은 추론 카탈로그와 converter `/healthz.hand_library`의
 version·SHA-256, solver, framing, 지원 출력 범위가 일치할 때만 true다.
-썸네일 조회의 readiness는 5초간 합쳐 쓰고, 최종 변환 전후에는 converter를 새로 확인한다.
+썸네일 조회의 readiness는 5초간 합쳐 쓰고, 최종 변환 전후(준비·폴링·내보내기)에는
+2초 이내에 확인한 일치만 쓴다. 동시에 들어온 확인은 converter 확인 1회를 함께 기다린다.
+
+converter가 다른 library·solver·framing·출력 범위로 **응답하면** 즉시 닫고 마지막 일치를 버린다.
+확인 자체가 안 될 때(시간 초과·연결 실패·HTTP 429/5xx·추론 카탈로그 장애)만, 120초 안에
+확인한 마지막 일치를 그대로 쓴다. converter는 solve마다 `hand library changed`로 library를
+다시 검사하므로, 이 허용 구간이 다른 library를 파일에 넣지는 못한다.
+확인 시간 제한(5초)은 BFF 자신의 event loop가 멈춘 시간을 세지 않는다
+(`src/converter/probeDeadline.ts`). 2026-11-12 운영에서 legacy v1 패킷 검증이 BFF를 약 33초
+멈췄을 때, converter가 0.7초 만에 보낸 응답이 BFF 쪽 5초 타이머에 먼저 끊겨 `HANDS_UNAVAILABLE`이
+된 사례가 있었다.
 자동 인식이 꺼져 있어도 카탈로그와 converter가 준비되면 기본 손을 수동으로 선택할 수 있다.
 
 ## 클라이언트 API

@@ -4,9 +4,11 @@ import {
   InteractiveError,
   active,
   hash,
+  stateEncodingOf,
   type Location,
   type Operation,
   type Prepare,
+  type StateEncoding,
 } from "./model.js";
 export interface Db {
   query<T>(sql: string, args?: unknown[]): Promise<{ rows: T[] }>;
@@ -18,7 +20,8 @@ export class OperationStore {
     readonly tx: Transaction = (fn) => transaction((c) => fn(c)),
     readonly clock = Date.now,
   ) {}
-  async prepare(l: Location, input: Prepare, selectionHash: string, skinPreview?: Operation["skinPreview"]) {
+  async prepare(l: Location, input: Prepare, selectionHash: string, skinPreview?: Operation["skinPreview"],
+    requestedStateEncoding?: StateEncoding) {
     return this.tx(async (db) => {
       // Same parent-row lock as selection/retention prevents resurrection during deletion.
       if (
@@ -91,6 +94,7 @@ export class OperationStore {
         revision: input.revision,
         selectionHash,
         stateHash: null,
+        ...(requestedStateEncoding ? { requestedStateEncoding } : {}),
         previewState: "solving",
         exportState: "not-requested",
         eventSequence: 1,
@@ -180,6 +184,7 @@ export class OperationStore {
         | "previewState"
         | "exportState"
         | "stateHash"
+        | "stateEncoding"
         | "snapshotId"
         | "snapshotProof"
         | "receipt"
@@ -229,6 +234,13 @@ export class OperationStore {
         patch.stateHash &&
         current.stateHash &&
         patch.stateHash !== current.stateHash
+      )
+        throw new InteractiveError("CONVERTER_INTEGRITY");
+      // The encoding is part of what stateHash names: only written together with it, never changed.
+      if (
+        patch.stateEncoding &&
+        (!patch.stateHash ||
+          (current.stateHash && patch.stateEncoding !== stateEncodingOf(current)))
       )
         throw new InteractiveError("CONVERTER_INTEGRITY");
       const updated = await this.write(db, {

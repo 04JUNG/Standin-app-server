@@ -1,16 +1,12 @@
 import { config } from "../config.js";
 import { resolvePersonOutputScope, scopeIncludesHands, type OutputScope } from "../output-scope/model.js";
 import { getHandCatalog, getHandThumbnail } from "../inference.js";
-import {
-  converterEnabled,
-  EXPECTED_SOLVER_VERSION,
-} from "../converter/client.js";
-import { FRAMING_VERSION } from "../converter/framing.js";
+import { converterEnabled } from "../converter/client.js";
+import { HandAgreement, type HandAgreementDeps } from "./agreement.js";
 import {
   HandError,
   SOURCE_POSE,
   parseCatalog,
-  record,
   type HandCatalog,
   type HandBake,
   type HandSelection,
@@ -34,74 +30,25 @@ export async function handCatalog(): Promise<HandCatalog> {
   }
 }
 /** No feature is advertised until inference and converter agree on the library. */
-const readinessDeps = {
+const readinessDeps: HandAgreementDeps = {
   enabled: () => config.handSelectionEnabled && converterEnabled(),
   catalog: handCatalog,
-  health: () =>
-    fetch(`${config.converterBaseUrl.replace(/\/+$/, "")}/healthz`, {
-      signal: AbortSignal.timeout(5000),
-    }),
+  health: (init) =>
+    fetch(`${config.converterBaseUrl.replace(/\/+$/, "")}/healthz`, init),
 };
-let readyCache: { until: number; catalog: HandCatalog } | undefined;
-let pending: Promise<HandCatalog> | undefined;
+const agreement = new HandAgreement(readinessDeps);
+/**
+ * `fresh` (prepare, poll, export) accepts agreement evidence up to 2 s old; listing reads
+ * accept 5 s. Concurrent reads share one Converter probe. See `HandAgreement`.
+ */
 export async function readyHandCatalog(
   fresh = false,
-  overrides: Partial<typeof readinessDeps> = {},
+  overrides: Partial<HandAgreementDeps> = {},
 ): Promise<HandCatalog> {
-  const custom = Object.keys(overrides).length > 0;
-  const deps = { ...readinessDeps, ...overrides };
-  if (!deps.enabled())
-    throw new HandError(
-      "HAND_SELECTION_DISABLED",
-      503,
-      "손 선택을 사용할 수 없습니다.",
-    );
-  if (!fresh && !custom && readyCache && readyCache.until > Date.now())
-    return readyCache.catalog;
-  if (!fresh && !custom && pending) return pending;
-  const check = verifyHandCatalog(deps);
-  if (!fresh && !custom) {
-    pending = check;
-    try {
-      const catalog = await check;
-      readyCache = { until: Date.now() + 5000, catalog };
-      return catalog;
-    } finally {
-      pending = undefined;
-    }
-  }
-  return check;
-}
-async function verifyHandCatalog(
-  deps: typeof readinessDeps,
-): Promise<HandCatalog> {
-  try {
-    const catalog = await deps.catalog();
-    const response = await deps.health();
-    const value = record(await response.json());
-    const library = record(value.hand_library);
-    if (
-      !response.ok ||
-      value.ok !== true ||
-      value.solver_version !== EXPECTED_SOLVER_VERSION ||
-      value.framing_version !== FRAMING_VERSION ||
-      !Array.isArray(value.output_scopes) ||
-      !["full", "half", "bust", "head"].every((s) =>
-        (value.output_scopes as unknown[]).includes(s),
-      ) ||
-      library.version !== catalog.library_version ||
-      library.sha256 !== catalog.library_sha256
-    )
-      throw new Error("hand library mismatch");
-    return catalog;
-  } catch (error) {
-    if (error instanceof HandError) throw error;
-    throw new HandError(
-      "HANDS_UNAVAILABLE",
-      503,
-      "손 적용 서비스를 확인하지 못했습니다.",
-    );
-  }
+  // Test/diagnostic overrides get a private agreement with no shared evidence.
+  if (Object.keys(overrides).length > 0)
+    return new HandAgreement({ ...readinessDeps, ...overrides }, { freshMs: 0, cacheMs: 0 }).read(fresh);
+  return agreement.read(fresh);
 }
 export async function handSelectionAvailable() {
   if (!config.handSelectionEnabled || !converterEnabled()) return false;

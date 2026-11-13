@@ -8,6 +8,7 @@ import { hash, InteractiveError, type Operation } from "../interactive-state/mod
 import type { ResolvedSelection } from "../interactive-state/selection.js";
 import type { OutlineArtifacts } from "../interactive-state/service.js";
 import { sha256Hex } from "./client.js";
+import { reportConverterTiming, type ConverterTrace } from "./interactive-timing.js";
 import { checkContract, outlineBinding, parseOutlinedArtifact, MAX_OUTLINE_BYTES } from "../appearance/contract.js";
 import { PrivateOutlineStorage, type OutlineStorage } from "../appearance/storage.js";
 export function resolvedStature(selection: ResolvedSelection): number {
@@ -46,16 +47,24 @@ export function createOutlineArtifacts(overrides: Partial<OutlineDeps> = {}): Ou
   const deps: OutlineDeps = { enabled: () => config.outlineExportEnabled && !!config.betaDataBucket,
     baseUrl: config.converterBaseUrl.replace(/\/+$/, ""), token: config.interactiveConverterToken,
     fetch, timeoutMs: config.converterShapeTimeoutMs, storage: new PrivateOutlineStorage(), stature: resolvedStature, ...overrides };
-  async function request(path: string, signal?: AbortSignal, body?: FormData) {
+  async function request(path: string, signal?: AbortSignal, body?: FormData, trace?: ConverterTrace) {
     if (!deps.enabled() || !deps.baseUrl || deps.token.length < 32) throw new InteractiveError("OUTLINE_DISABLED", 503);
     let response: Response;
+    const startedAt = performance.now();
     try {
       response = await deps.fetch(`${deps.baseUrl}${path}`, { method: body ? "POST" : "GET",
         headers: { Authorization: `Bearer ${deps.token}` }, ...(body ? { body } : {}),
         signal: AbortSignal.any([AbortSignal.timeout(deps.timeoutMs), ...(signal ? [signal] : [])]) });
-    } catch { throw new InteractiveError(signal?.aborted ? "INTERACTIVE_SUPERSEDED" : "OUTLINE_UNAVAILABLE", signal?.aborted ? 409 : 503); }
+    } catch {
+      reportConverterTiming(trace, startedAt);
+      throw new InteractiveError(signal?.aborted ? "INTERACTIVE_SUPERSEDED" : "OUTLINE_UNAVAILABLE", signal?.aborted ? 409 : 503);
+    }
+    const headersMs = performance.now() - startedAt;
     const reader = response.body?.getReader();
-    if (!reader) throw new InteractiveError("OUTLINE_UNAVAILABLE", 503);
+    if (!reader) {
+      reportConverterTiming(trace, startedAt, response, headersMs);
+      throw new InteractiveError("OUTLINE_UNAVAILABLE", 503);
+    }
     const cap = path === "/outline-contract" ? 16384 : response.ok ? 42 * 1024 * 1024 : 16384;
     let size = 0; const chunks: Uint8Array[] = [];
     try {
@@ -76,7 +85,11 @@ export function createOutlineArtifacts(overrides: Partial<OutlineDeps> = {}): Ou
     } catch (e) {
       if (e instanceof InteractiveError) throw e;
       throw new InteractiveError("OUTLINE_INTEGRITY_ERROR");
-    } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+      reportConverterTiming(trace, startedAt, response, headersMs, size);
+    }
   }
   async function context(selection: ResolvedSelection, signal?: AbortSignal, appearance?: Appearance) {
     const contract = checkContract(await request("/outline-contract", signal), selection, appearance?.width), stature = deps.stature(selection);
@@ -98,7 +111,7 @@ export function createOutlineArtifacts(overrides: Partial<OutlineDeps> = {}): Ou
         body.set("appearance", JSON.stringify(op.appearance)); body.set("output_scope", selection.scope);
         body.set("character_id", selection.characterId); body.set("character_sha256", selection.body.resolvedBody!.assetSha256);
         body.set("binding_sha256", binding); body.set("stature_m", String(stature));
-        raw = await request("/outline-fbx", signal, body);
+        raw = await request("/outline-fbx", signal, body, { op, phase: "outline" });
         parseOutlinedArtifact(raw, op, selection, stature, contract);
         if (signal.aborted) throw new InteractiveError("INTERACTIVE_SUPERSEDED");
         const fresh = await context(selection, signal, op.appearance);
