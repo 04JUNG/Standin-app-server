@@ -3,6 +3,7 @@ import {
   fixtureSelection,
   fixturePacket,
   fixtureReceipt,
+  protocolFixture,
   fixtureBinaryState,
   fixtureBinaryReceipt,
   syntheticFbx,
@@ -25,6 +26,8 @@ import {
   type Operation,
 } from "./model.js";
 import type { ResolvedSelection } from "./selection.js";
+import type { SkinPreview } from "../appearance/skin-preview.js";
+import { decodeTyped } from "./packet.js";
 const owner = "inst_owner",
   job = "job_fixture";
 async function setup() {
@@ -54,6 +57,9 @@ async function setup() {
     scope: "full" as ResolvedSelection["scope"],
     skinAsset: "fixture asset manifest version 1",
     skinCalls: 0,
+    skinAssetReads: 0,
+    skinPreview: undefined as SkinPreview | undefined,
+    onSkinAssetRead: undefined as (() => void) | undefined,
     corruptSkinFile: false,
     skinHold: undefined as Promise<void> | undefined,
     skinReceiptCorrupt: false,
@@ -99,7 +105,12 @@ async function setup() {
     skin: {
       check: async () => { state.skinChecks++; if (state.skinCheckError) throw state.skinCheckError;
         if (!state.skinAvailable) throw new InteractiveError("SKIN_NOT_CSP_CERTIFIED", 503);
-        return { identity: hash(state.skinAsset), supportedIds: ["default", "gray-guide", "flesh", "flesh-guide", "muscle"] }; },
+        return { identity: hash(state.skinAsset), supportedIds: ["default", "gray-guide", "flesh", "flesh-guide", "muscle"], preview: state.skinPreview }; },
+      asset: async () => {
+        state.skinAssetReads++;
+        state.onSkinAssetRead?.();
+        return { bytes: Buffer.from("preview"), contentType: "image/png" };
+      },
       prepare: async (op, _selection, source, signal) => {
         state.skinCalls++;
         assert.deepEqual(source, syntheticFbx);
@@ -878,6 +889,38 @@ test("skin-only and skin+outline retain original base proof and deliver the exac
       assert.equal((await s.request(`/${op.operationId}/file`)).status, 409);
     } finally { await s.pg.close(); }
   }
+});
+
+test("skin asset reads remain fenced against approval changes during the read", async () => {
+  const s = await setup();
+  try {
+    const { model } = decodeTyped(JSON.parse(protocolFixture.packet.canonicalState)) as {
+      model: { meshes: { name: string; positions: unknown[]; triangles: number[][] }[]; bones: unknown[] };
+    };
+    const mesh = model.meshes[0], assetSha = sha256Hex(Buffer.from("preview"));
+    const { body } = protocolFixture.receipt.identity;
+    s.state.skinAvailable = true;
+    s.state.skinPreview = {
+      schema: "skin-preview-v1", skin: { version: "fbx-skin-v1", id: "flesh" },
+      assetVersion: "fixture", assetManifestSha256: hash("approved"),
+      compatibility: { characterId: body.characterId, characterSha256: body.characterSha256,
+        previewMesh: mesh.name, vertices: mesh.positions.length, bones: model.bones.length,
+        trianglesSha256: hash(mesh.triangles), weightsSha256: hash("weights"), polygonIndicesSha256: hash("indices") },
+      uv: { sha256: hash("uv"), bytes: 20 }, texture: { sha256: assetSha, bytes: 7 },
+    };
+    const op = await (await s.prepare(1, 0, "skin-asset-race", { skin: flesh })).json() as ReturnType<typeof publicOperation>;
+    await s.tick("preview");
+    assert.equal((await s.read(op.operationId)).previewState, "authoritative");
+    const url = `/${op.operationId}/skin-assets/${assetSha}`;
+    const good = await s.request(url);
+    assert.equal(good.status, 200);
+    assert.equal(await good.text(), "preview");
+    s.state.onSkinAssetRead = () => { s.state.skinAsset = "replacement asset"; };
+    const stale = await s.request(url);
+    assert.equal(stale.status, 409);
+    assert.equal(s.state.skinAssetReads, 2);
+    assert.equal(stale.headers.get("X-Skin-Asset-SHA256"), null);
+  } finally { await s.pg.close(); }
 });
 
 test("skin revisions/cancellation/base-state changes fence late skin publication and held downloads", async () => {
