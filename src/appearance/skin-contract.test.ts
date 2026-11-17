@@ -22,6 +22,15 @@ const contract = { version: "fbx-skin-v1", expression: SKIN_EXPRESSION, enabled:
   assets: [{ character_id: selection.characterId, kind: "preview-texture", skin_id: "flesh", sha256: a.previewTextures.flesh!.sha256, bytes: a.previewTextures.flesh!.bytes, url: `/skin-assets/${a.previewTextures.flesh!.sha256}` }, { character_id: selection.characterId, kind: "uv", skin_id: null, sha256: a.uvSha256, bytes: a.uvBytes, url: `/skin-assets/${a.uvSha256}` },
     { character_id: selection.characterId, kind: "texture", skin_id: "flesh", sha256: a.textures.flesh!.sha256, bytes: a.textures.flesh!.bytes, url: `/skin-assets/${a.textures.flesh!.sha256}` }],
   zero: "default-legacy-byte-preserving", order: ["skin", "outline"] };
+test("preserved and LOD skin descriptors fit a finite contract without weakening selected pins", () => {
+  const assets = [...contract.assets, ...Array.from({ length: 455 }, (_, i) =>
+    ({ ...contract.assets[0], character_id: `preserved-${i}` }))];
+  assert.deepEqual(checkSkinContract({ ...contract, assets }, selection, seed.skin, undefined, policy).approval.supportedIds,
+    ["default", "flesh"]);
+  assert.throws(() => checkSkinContract({ ...contract, assets: [...assets, ...assets.slice(3, 58)] }, selection, seed.skin, undefined, policy), /SKIN_UNAVAILABLE/);
+  assert.throws(() => checkSkinContract({ ...contract, assets: assets.map((a, i) => i === 0 ? { ...a, sha256: hash("substitution") } : a) },
+    selection, seed.skin, undefined, policy), /SKIN_UNSUPPORTED/);
+});
 test("live booleans never override independent exact model/UV/asset/composition pins", () => {
   const result = checkSkinContract(contract, selection, seed.skin, undefined, policy);
   assert.deepEqual(result.approval.supportedIds, ["default", "flesh"]);

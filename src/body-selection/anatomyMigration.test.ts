@@ -3,10 +3,35 @@ import assert from "node:assert/strict";
 import { PGlite } from "@electric-sql/pglite";
 import { SCHEMA } from "../db.js";
 import { catalog, result } from "./fixtures.js";
-import { bodyRef, currentLastUsed, currentPresetAssets, defaultPreferences, resolveBody, snapshot } from "./model.js";
+import { bodyRef, currentLastUsed, currentPresetAssets, currentTemplateReplacement, defaultPreferences, resolveBody, snapshot } from "./model.js";
 import { readSelection, writeSelection, bodyOptions, presentPreferences, type BodyDb } from "./store.js";
 
 const rec = { status: "disabled" as const, body: null, reasonCodes: [] };
+test("the declared current source selects templates without migrating historical identities or custom bodies", () => {
+  const c = catalog(2);
+  const runtime = (rules: string, preset: string) => ({ rules, preset, path: "/runtime.ssr", sha256: "a".repeat(64), bytes: 1, format: "standin-shape-runtime.v2" as const });
+  const source = (rules: string) => ({ rules, blendSha256: "b".repeat(64), controllerSha256: "c".repeat(64) });
+  Object.assign(c.assets[0], { characterId: "male-base-v0-8-0", gender: "male", role: "previous_default", shapeSource: source("old"), shapeRuntime: runtime("old", "BASE") });
+  Object.assign(c.assets[1], { characterId: "male-base-lod-v5p1-20261118", gender: "male", role: "default", shapeSource: source("new"), shapeRuntime: runtime("new", "BASE") });
+  c.defaultCharacterId = c.assets[1].characterId;
+  const old = bodyRef(c.assets[0]), before = structuredClone(c.assets[0]);
+  assert.equal(currentTemplateReplacement(c.assets[0], c)?.characterId, c.assets[1].characterId);
+  assert.deepEqual(currentPresetAssets(c).map(a => a.characterId), [c.assets[1].characterId]);
+  assert.equal(currentPresetAssets(c, [old.characterId]).length, 2);
+  const last = { body: old, shape: null };
+  assert.equal(currentLastUsed(last, c), last);
+  assert.deepEqual(resolveBody(0, { preferences: defaultPreferences(), lastUsed: last }, rec, c, ["pose-a"], "manual", old).resolvedBody, old);
+  assert.deepEqual(c.assets[0], before);
+  c.assets.push({ ...structuredClone(c.assets[1]), characterId: "ambiguous", role: "preset" });
+  assert.equal(currentTemplateReplacement(c.assets[0], c), null);
+  c.assets.pop();
+  delete c.assets[0].shapeSource;
+  assert.equal(currentTemplateReplacement(c.assets[0], c), null);
+  c.assets[0].shapeSource = before.shapeSource;
+  c.assets[1].shapeSource = source("unrelated");
+  c.assets[1].shapeRuntime = runtime("unrelated", "OTHER");
+  assert.equal(currentTemplateReplacement(c.assets[0], c), null);
+});
 test("all 18 preset templates upgrade only after their matching new preset exists", () => {
   for (const [gender, oldVersion, newVersion, names] of [
     ["male", "0-7-6", "0-8-0", ["ideal83", "ideal70", "toon64", "muscular", "muscle-max", "bulk", "soft", "fat-max"]],
