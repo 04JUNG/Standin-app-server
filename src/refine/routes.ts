@@ -105,67 +105,105 @@ export function createRefineRoutes(overrides: Partial<typeof defaults> = {}) {
         ),
         409,
       );
-    if (useRelease) {
-      if (!selected?.poseId) return c.json(errorEnvelope("INVALID_SELECTION","원본 포즈를 확인하지 못했습니다.",requestId),409);
-      try {
-        const release = await runRelease({installationId,jobId,personIndex,candidateId});
-        const record = release as {status:string; camera?:unknown; artifact_sha256?:string; version:string; selected?:string};
-        if (record.status === "accepted") return c.json({jobId, personIndex, candidateId,
-          refined:true, reasonCode:"rc4_accepted", adjustedLimbs:[], thumbnailUrl:null,
-          exportUrl:`/v1/analysis/jobs/${encodeURIComponent(jobId)}/people/${personIndex}/refine/release/fbx?${new URLSearchParams({candidateId})}`,
-          release:{...record,previewUrl:`/v1/analysis/jobs/${encodeURIComponent(jobId)}/people/${personIndex}/refine/release/preview?${new URLSearchParams({candidateId})}`},
-        });
-        return c.json({jobId,personIndex,candidateId,refined:false,reasonCode:"rc4_withheld",adjustedLimbs:[],thumbnailUrl:null,
-          exportUrl:`/v1/pose-candidates/${encodeURIComponent(selected.poseId)}/export?${new URLSearchParams({jobId,personIndex:String(personIndex),candidateId})}`});
-      } catch {
-        return c.json(errorEnvelope("REFINE_RELEASE_UNAVAILABLE", "최종 보정 파일을 준비하지 못했습니다.",requestId),503);
+    // Opt-in response stream. Policy/ownership checks above stay ordinary HTTP errors.
+    // No event is emitted for cached/skipped calls; only the upstream invocation emits refining.
+    const execute = async (onProgress?: (phase: "refining" | "preparing") => void) => {
+      if (useRelease) {
+        if (!selected?.poseId) return c.json(errorEnvelope("INVALID_SELECTION","원본 포즈를 확인하지 못했습니다.",requestId),409);
+        try {
+          const release = await runRelease({installationId,jobId,personIndex,candidateId}, onProgress);
+          const record = release as {status:string; camera?:unknown; artifact_sha256?:string; version:string; selected?:string};
+          if (record.status === "accepted") return c.json({jobId, personIndex, candidateId,
+            refined:true, reasonCode:"rc4_accepted", adjustedLimbs:[], thumbnailUrl:null,
+            exportUrl:`/v1/analysis/jobs/${encodeURIComponent(jobId)}/people/${personIndex}/refine/release/fbx?${new URLSearchParams({candidateId})}`,
+            release:{...record,previewUrl:`/v1/analysis/jobs/${encodeURIComponent(jobId)}/people/${personIndex}/refine/release/preview?${new URLSearchParams({candidateId})}`},
+          });
+          return c.json({jobId,personIndex,candidateId,refined:false,reasonCode:"rc4_withheld",adjustedLimbs:[],thumbnailUrl:null,
+            exportUrl:`/v1/pose-candidates/${encodeURIComponent(selected.poseId)}/export?${new URLSearchParams({jobId,personIndex:String(personIndex),candidateId})}`});
+        } catch {
+          return c.json(errorEnvelope("REFINE_RELEASE_UNAVAILABLE", "최종 보정 파일을 준비하지 못했습니다.",requestId),503);
+        }
       }
-    }
-    const outcome = await deps.runRefine({
-      installationId,
-      jobId,
-      personIndex,
-      candidateId,
-      deferPreview: body?.deferPreview === true,
-    });
-    if (isRefineFailure(outcome)) {
-      return c.json(
-        errorEnvelope(
-          "INVALID_SELECTION",
-          "작업에서 노출된 후보가 아닙니다.",
-          requestId,
-        ),
-        409,
-      );
-    }
-
-    // exportUrl은 기존 공개 export 경로 그대로다(BFF-06). 조정본이 있으면 그 URL이 조정본을,
-    // 없으면 베이스를 준다 — 클라이언트는 어느 쪽인지 몰라도 같은 URL만 내려받으면 된다.
-    const exportUrl =
-      `/v1/pose-candidates/${encodeURIComponent(outcome.poseId)}/export?` +
-      new URLSearchParams({
+      const outcome = await deps.runRefine({
+        installationId,
         jobId,
-        personIndex: String(personIndex),
+        personIndex,
         candidateId,
+        deferPreview: body?.deferPreview === true,
+        onProgress,
       });
+      if (isRefineFailure(outcome)) {
+        return c.json(
+          errorEnvelope(
+            "INVALID_SELECTION",
+            "작업에서 노출된 후보가 아닙니다.",
+            requestId,
+          ),
+          409,
+        );
+      }
 
-    // 미리보기는 별도 GET이다. 응답에 base64를 그대로 실으면 다인 컷에서 refine 응답이
-    // 인물 수만큼 커지는데, 이 값은 화면에 한 번 그려지고 마는 그림이다.
-    const thumbnailUrl = outcome.thumbnailAvailable
-      ? `/v1/analysis/jobs/${encodeURIComponent(jobId)}/people/${personIndex}/refine/thumbnail?` +
-        new URLSearchParams({ candidateId })
-      : null;
+      // exportUrl은 기존 공개 export 경로 그대로다(BFF-06). 조정본이 있으면 그 URL이 조정본을,
+      // 없으면 베이스를 준다 — 클라이언트는 어느 쪽인지 몰라도 같은 URL만 내려받으면 된다.
+      const exportUrl =
+        `/v1/pose-candidates/${encodeURIComponent(outcome.poseId)}/export?` +
+        new URLSearchParams({
+          jobId,
+          personIndex: String(personIndex),
+          candidateId,
+        });
 
-    return c.json({
-      jobId,
-      personIndex,
-      candidateId,
-      refined: outcome.refined,
-      reasonCode: outcome.reasonCode,
-      adjustedLimbs: outcome.adjustedLimbs,
-      exportUrl,
-      thumbnailUrl,
+      // 미리보기는 별도 GET이다. 응답에 base64를 그대로 실으면 다인 컷에서 refine 응답이
+      // 인물 수만큼 커지는데, 이 값은 화면에 한 번 그려지고 마는 그림이다.
+      const thumbnailUrl = outcome.thumbnailAvailable
+        ? `/v1/analysis/jobs/${encodeURIComponent(jobId)}/people/${personIndex}/refine/thumbnail?` +
+          new URLSearchParams({ candidateId })
+        : null;
+
+      return c.json({
+        jobId,
+        personIndex,
+        candidateId,
+        refined: outcome.refined,
+        reasonCode: outcome.reasonCode,
+        adjustedLimbs: outcome.adjustedLimbs,
+        exportUrl,
+        thumbnailUrl,
+      });
+    };
+    if (c.req.query("progress") !== "selected-refine-v1") return execute();
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        let connected = true;
+        const emit = (event: object) => {
+          if (!connected) return;
+          try { controller.enqueue(encoder.encode(JSON.stringify(event) + "\n")); }
+          catch { connected = false; }
+        };
+        void (async () => {
+          try {
+            const response = await execute((phase) => emit({
+              type: "progress", jobId, personIndex, candidateId, phase,
+            }));
+            emit({type: "result", status: response.status, body: await response.json()});
+          } catch {
+            emit({type: "result", status: 503, body: errorEnvelope(
+              "REFINE_UNAVAILABLE", "포즈 조정을 완료하지 못했습니다.", requestId,
+            )});
+          } finally {
+            try { controller.close(); } catch { /* disconnected client */ }
+          }
+        })();
+      },
+      // Disconnect stops delivery, never fabricates successful cancellation of upstream work.
+      cancel() {},
     });
+    return new Response(stream, {headers: {
+      "Content-Type": "application/x-ndjson",
+      "Cache-Control": "no-store, no-transform",
+      "X-Accel-Buffering": "no",
+    }});
   });
 
   // GET /v1/analysis/jobs/:jobId/people/:personIndex/refine/thumbnail?candidateId=…
