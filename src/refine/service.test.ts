@@ -613,3 +613,33 @@ test("malformed, oversized and client asserted shadow authority are discarded", 
   assert.equal(readRefineShadow({ ...valid, signature: "fake" }), undefined);
   assert.equal(readRefineShadow({ ...valid, payload: { version: "refine-shadow-v1", text: "x".repeat(65536) } }), undefined);
 });
+
+test("selected progress brackets only the actual upstream call, never policy/cache/persistence", async () => {
+  for (const mode of ["execute", "disabled", "context", "cache", "failure"] as const) {
+    const context = deps();
+    const events: string[] = [];
+    const original = context.base.refineUpstream;
+    context.base.refineUpstream = async (input) => {
+      assert.deepEqual(events, ["refining"]);
+      if (mode === "failure") throw new Error("upstream unavailable");
+      return original(input);
+    };
+    const persist = context.base.putRefinedBvh;
+    context.base.putRefinedBvh = async (...args) => {
+      assert.deepEqual(events, ["refining", "preparing"]);
+      return persist(...args);
+    };
+    if (mode === "disabled") context.base.featureEnabled = () => false;
+    if (mode === "context") context.base.loadRefineContext = async () => null;
+    if (mode === "cache") context.base.findRefinedArtifact = async () => ({
+      jobId: INPUT.jobId, personIndex: 0, candidateId: INPUT.candidateId, poseId: "pose-1",
+      refined: true, reason: "ok", limbs: [], objectKey: "saved", thumbnailKey: null,
+    });
+    await runRefine({...INPUT, onProgress: (phase, target) => {
+      events.push(phase);
+      if (phase === "refining") assert.deepEqual(target?.keypoints, CONTEXT.keypoints);
+      else assert.equal(target, undefined);
+    }}, context.base);
+    assert.deepEqual(events, ["execute", "failure"].includes(mode) ? ["refining", "preparing"] : []);
+  }
+});

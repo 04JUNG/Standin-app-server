@@ -42,7 +42,7 @@ export async function downloadReleasePreview(p:Location) {
   return {record,bytes};
 }
 const inFlight=new Map<string,Promise<unknown>>();
-export async function runRelease(p:Location) {
+export async function runRelease(p:Location, onProgress?: (phase: "refining" | "preparing") => void) {
   if(!releaseEnabled() || !refinedStorageAvailable())throw new Error("release disabled");
   const k=key(p);const existing=inFlight.get(k);if(existing)return existing;
   const promise=(async()=>{
@@ -53,7 +53,10 @@ export async function runRelease(p:Location) {
     if(job.result?.candidatesByPerson.length!==1)throw new Error("single target required");
     const cached=await downloadRelease(p);if(cached)return cached.record;
     const image=await loadInput(job.inputS3Key);
-    const raw=await releaseRefine(image,candidate.poseId);
+    let raw: unknown;
+    onProgress?.("refining");
+    try { raw=await releaseRefine(image,candidate.poseId); }
+    finally { onProgress?.("preparing"); }
     const withheld=held.safeParse(raw);if(withheld.success)return withheld.data;
     const record=accepted.parse(raw);
     const exposed=job.result?.candidatesByPerson.find(v=>v.personIndex===p.personIndex)?.candidates.find(v=>v.id===p.candidateId);
