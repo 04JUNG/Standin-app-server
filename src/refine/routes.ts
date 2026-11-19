@@ -2,6 +2,8 @@ import { releaseEnabled, runRelease, downloadRelease, downloadReleasePreview } f
 // POST /v1/analysis/jobs/:jobId/people/:personIndex/refine — 선택 후보 refine 프록시.
 // jobsRoutes 아래에 마운트된다(경로 prefix는 /v1/analysis/jobs).
 import { candidateRefineAllowed, releaseCandidateAllowed } from "./eligibility.js";
+import { loadRefineContext } from "./store.js";
+import { selectedRefineTarget, type SelectedRefineObserver } from "./selected-target.js";
 import { Hono } from "hono";
 import type { AppEnv } from "../env.js";
 import { errorEnvelope } from "../mapping.js";
@@ -18,6 +20,7 @@ const defaults = {
   validateExportCandidate,
   runRefine,
   resolveRefinedThumbnail,
+  loadRefineContext,
 };
 export function createRefineRoutes(overrides: Partial<typeof defaults> = {}) {
   const deps = { ...defaults, ...overrides };
@@ -107,11 +110,13 @@ export function createRefineRoutes(overrides: Partial<typeof defaults> = {}) {
       );
     // Opt-in response stream. Policy/ownership checks above stay ordinary HTTP errors.
     // No event is emitted for cached/skipped calls; only the upstream invocation emits refining.
-    const execute = async (onProgress?: (phase: "refining" | "preparing") => void) => {
+    const execute = async (onProgress?: SelectedRefineObserver) => {
       if (useRelease) {
         if (!selected?.poseId) return c.json(errorEnvelope("INVALID_SELECTION","원본 포즈를 확인하지 못했습니다.",requestId),409);
         try {
-          const release = await runRelease({installationId,jobId,personIndex,candidateId}, onProgress);
+          const context = onProgress ? await deps.loadRefineContext(jobId, personIndex).catch(() => undefined) : undefined;
+          const release = await runRelease({installationId,jobId,personIndex,candidateId},
+            onProgress ? phase => onProgress(phase, phase === "refining" ? context ?? undefined : undefined) : undefined);
           const record = release as {status:string; camera?:unknown; artifact_sha256?:string; version:string; selected?:string};
           if (record.status === "accepted") return c.json({jobId, personIndex, candidateId,
             refined:true, reasonCode:"rc4_accepted", adjustedLimbs:[], thumbnailUrl:null,
@@ -183,8 +188,9 @@ export function createRefineRoutes(overrides: Partial<typeof defaults> = {}) {
         };
         void (async () => {
           try {
-            const response = await execute((phase) => emit({
+            const response = await execute((phase, context) => emit({
               type: "progress", jobId, personIndex, candidateId, phase,
+              ...(phase === "refining" ? { target: selectedRefineTarget(context, owned.inputWidth, owned.inputHeight) } : {}),
             }));
             emit({type: "result", status: response.status, body: await response.json()});
           } catch {

@@ -139,7 +139,7 @@ export async function runRefine(
     personIndex: number;
     candidateId: string;
     deferPreview?: boolean;
-    onProgress?: (phase: "refining" | "preparing") => void;
+    onProgress?: import("./selected-target.js").SelectedRefineObserver;
   },
   deps: RefineDeps = defaultDeps,
 ): Promise<RefineOutcome | RefineFailure> {
@@ -234,7 +234,7 @@ export async function runRefine(
 
   let upstream;
   try {
-    input.onProgress?.("refining");
+    input.onProgress?.("refining", context);
     upstream = await deps.refineUpstream({
       // 미리보기는 refine 밖에서 그린다. 안에서 그리면 5초 상한을 넘겨 조정 결과까지 잃는다.
       ...(input.deferPreview || !config.refineInlineThumbnail

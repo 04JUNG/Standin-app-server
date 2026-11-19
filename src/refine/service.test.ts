@@ -635,7 +635,11 @@ test("selected progress brackets only the actual upstream call, never policy/cac
       jobId: INPUT.jobId, personIndex: 0, candidateId: INPUT.candidateId, poseId: "pose-1",
       refined: true, reason: "ok", limbs: [], objectKey: "saved", thumbnailKey: null,
     });
-    await runRefine({...INPUT, onProgress: (phase) => events.push(phase)}, context.base);
+    await runRefine({...INPUT, onProgress: (phase, target) => {
+      events.push(phase);
+      if (phase === "refining") assert.deepEqual(target?.keypoints, CONTEXT.keypoints);
+      else assert.equal(target, undefined);
+    }}, context.base);
     assert.deepEqual(events, ["execute", "failure"].includes(mode) ? ["refining", "preparing"] : []);
   }
 });

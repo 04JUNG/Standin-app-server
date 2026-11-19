@@ -1998,6 +1998,23 @@ Each line is one JSON event:
 {"type":"result","status":200,"body":{"jobId":"job_example","personIndex":0,"candidateId":"pose::front","refined":false,"reasonCode":"no_gain","adjustedLimbs":[],"exportUrl":"...","thumbnailUrl":null}}
 ```
 
+A `refining` event can also carry optional `target` with version
+`selected-refine-target.v1`, positive original image `width`/`height`, a
+`skeleton: {format:"coco17", coordinateSpace:"image-normalized", points:[17 nullable pairs]}`,
+and `targetJoints` (unique COCO body indices). It contains stored observed refine input,
+not optimizer iterations or accepted output. Legacy refine uses the same context sent
+upstream; RC4 uses the earlier stored observed input as a reference, not a claim about
+RC4's newly extracted skeleton or internal active joints. Only allowed arm elbows/wrists
+and observed allowed leg knees/ankles are highlighted. Faces, missing/invalid/zero-score
+points and unobserved lower legs are omitted. Original image dimensions must be known.
+The source image is the owned original rough; these coordinates must never be painted
+on a mannequin thumbnail. Missing/invalid target means no joint effect, not guessed
+coordinates. `preparing` and result events have no target.
+
+The target is constructed server-side after ownership/selection checks; client-supplied
+coordinates or target fields have no authority. This extension changes no refine policy,
+solver request, camera, result or export. It adds no model/render call.
+
 `refining` brackets the real upstream `/refine` or opt-in RC4 `/refine/release` invocation,
 after local policy/cache/context/input checks. It confirms BFF upstream execution, not
 individual solver iterations, measured percentages or successful adjustment. `preparing`
