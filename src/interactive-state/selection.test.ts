@@ -5,6 +5,7 @@ import { sha256Hex } from "../converter/client.js";
 import type { Job } from "../jobs/store.js";
 import type { BodySelection } from "../body-selection/model.js";
 import type { HandBake } from "../hands/model.js";
+import type { ShapeSource } from "../body-selection/shape.js";
 const source = Buffer.from("server-approved-bvh"),
   sha = sha256Hex(source);
 function setup(purpose: "export" | "preview" = "export") {
@@ -24,6 +25,8 @@ function setup(purpose: "export" | "preview" = "export") {
     modelAvailable: true,
     modelSha: "c".repeat(64),
     catalogSha: "c".repeat(64),
+    catalogSource: null as ShapeSource | null,
+    sliderRuntime: true,
     source: source,
   };
   const body = () =>
@@ -42,7 +45,9 @@ function setup(purpose: "export" | "preview" = "export") {
   const resolver = createSelectionResolver(
     {
       manualPresentationCamera: (_person, candidate) => s.manual ? { camera: candidate?.camera } as never : null,
-      loadBodyCatalog: () => ({ version: "test", defaultCharacterId: null, assets: [{ characterId: "registered", assetSha256: s.catalogSha, shapeRuntime: { rules: "standin-body-0.7.2" } }] }) as never,
+      loadBodyCatalog: () => ({ version: "test", defaultCharacterId: null, assets: [{ characterId: "registered", assetSha256: s.catalogSha,
+        ...(s.sliderRuntime ? { shapeRuntime: { rules: "standin-body-0.7.2" } } : {}),
+        ...(s.catalogSource ? { shapeSource: s.catalogSource } : {}) }] }) as never,
       getOwnedJob: async () =>
         s.owner
           ? ({
@@ -198,6 +203,21 @@ test("default shape rules are bound only from an exact trusted catalog body", as
  const changed=await resolve();
  assert.equal(changed.defaultShapeRules,null);
  assert.notEqual(first.selectionHash,changed.selectionHash);
+});
+
+test("neutral authoring source is pinned without a slider runtime and changes invalidate the selection", async () => {
+  const {s,resolve}=setup("preview");
+  s.sliderRuntime=false;
+  s.catalogSource={rules:"standin-lod-male-v5p2",blendSha256:"a".repeat(64),controllerSha256:"b".repeat(64)};
+  const first=await resolve();
+  assert.equal(first.defaultShapeRules,s.catalogSource.rules);
+  assert.deepEqual(first.identity.shapeSource,s.catalogSource);
+  s.catalogSource={...s.catalogSource,blendSha256:"d".repeat(64)};
+  assert.notEqual((await resolve()).selectionHash,first.selectionHash);
+  s.catalogSha="e".repeat(64);
+  const mismatched=await resolve();
+  assert.equal(mismatched.defaultShapeRules,null);
+  assert.equal(mismatched.identity.shapeSource,null);
 });
 
 test("confirmed hash-bound manual review exports a presentation body without upgrading preview authority", async () => {
