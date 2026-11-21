@@ -1,7 +1,8 @@
 /** Structural protocol tests use synthetic bytes; actual CSP evidence is recorded separately. */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { OUTLINE_EXPRESSION, OUTLINE_MAPPING, OUTLINE_SUPPORT } from "./support.js";
+import { OUTLINE_EXPRESSION, OUTLINE_MAPPING, OUTLINE_SUPPORT, supportedOutline } from "./support.js";
+import { approvedSkins } from "./skin-pins.js";
 import { checkContract, outlineBinding, parseOutlinedArtifact, type OutlineContract } from "./contract.js";
 import { outlineObjectKey } from "./storage.js";
 import { hash, type Operation } from "../interactive-state/model.js";
@@ -9,6 +10,15 @@ import { fixtureSelection } from "../interactive-state/fixture.js";
 import { sha256Hex } from "../converter/client.js";
 import { resolvedStature, createOutlineArtifacts } from "../converter/outline.js";
 const sha = "a".repeat(64), bytes = Buffer.from("Kaydara FBX Binary  \0\x1a\0synthetic-proof-only");
+test("new20 skin and outline pins agree on full-only exact identities", () => {
+  const models = Object.entries(approvedSkins.models).filter(([id]) => id.includes("-lod-"));
+  assert.equal(models.length, 20);
+  for (const [id, model] of models) {
+    for (const width of [.5, 1, 2]) assert.equal(supportedOutline(id, model.characterSha256, "full", width), true, id);
+    assert.equal(supportedOutline(id, sha, "full", 2), false);
+    assert.equal(supportedOutline(id, model.characterSha256, "head", 2), false);
+  }
+});
 const baseSelection = fixtureSelection(hash("selection"));
 const selection = { ...baseSelection, characterId: "female-default80-v0-3-9-p1",
   body: { ...baseSelection.body, resolvedBody: { ...baseSelection.body.resolvedBody!,

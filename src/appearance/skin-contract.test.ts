@@ -22,6 +22,15 @@ const contract = { version: "fbx-skin-v1", expression: SKIN_EXPRESSION, enabled:
   assets: [{ character_id: selection.characterId, kind: "preview-texture", skin_id: "flesh", sha256: a.previewTextures.flesh!.sha256, bytes: a.previewTextures.flesh!.bytes, url: `/skin-assets/${a.previewTextures.flesh!.sha256}` }, { character_id: selection.characterId, kind: "uv", skin_id: null, sha256: a.uvSha256, bytes: a.uvBytes, url: `/skin-assets/${a.uvSha256}` },
     { character_id: selection.characterId, kind: "texture", skin_id: "flesh", sha256: a.textures.flesh!.sha256, bytes: a.textures.flesh!.bytes, url: `/skin-assets/${a.textures.flesh!.sha256}` }],
   zero: "default-legacy-byte-preserving", order: ["skin", "outline"] };
+test("preserved and LOD skin descriptors fit a finite contract without weakening selected pins", () => {
+  const assets = [...contract.assets, ...Array.from({ length: 455 }, (_, i) =>
+    ({ ...contract.assets[0], character_id: `preserved-${i}` }))];
+  assert.deepEqual(checkSkinContract({ ...contract, assets }, selection, seed.skin, undefined, policy).approval.supportedIds,
+    ["default", "flesh"]);
+  assert.throws(() => checkSkinContract({ ...contract, assets: [...assets, ...assets.slice(3, 58)] }, selection, seed.skin, undefined, policy), /SKIN_UNAVAILABLE/);
+  assert.throws(() => checkSkinContract({ ...contract, assets: assets.map((a, i) => i === 0 ? { ...a, sha256: hash("substitution") } : a) },
+    selection, seed.skin, undefined, policy), /SKIN_UNSUPPORTED/);
+});
 test("live booleans never override independent exact model/UV/asset/composition pins", () => {
   const result = checkSkinContract(contract, selection, seed.skin, undefined, policy);
   assert.deepEqual(result.approval.supportedIds, ["default", "flesh"]);
@@ -124,8 +133,11 @@ test("skin HTTP stream/body bounds and disabled transport fail before file prepa
   assert.equal(calls, 0);
   await assert.rejects(createSkinArtifacts({ ...deps, enabled: () => true,
     fetch: (async () => new Response("{}", { headers: { "Content-Length": "99" } })) as typeof fetch }).check(selection, seed.skin), /SKIN_INTEGRITY_ERROR/);
+  // The exact legacy22 + new20 contract exceeds the previous 128 KiB bound.
+  await createSkinArtifacts({ ...deps, enabled: () => true,
+    fetch: (async () => new Response(JSON.stringify(contract).padEnd(150000, " "))) as typeof fetch }).check(selection, seed.skin);
   let pulls = 0;
   await assert.rejects(createSkinArtifacts({ ...deps, enabled: () => true,
     fetch: (async () => new Response(new ReadableStream({ pull(c) { pulls++; c.enqueue(new Uint8Array(16384)); } }))) as typeof fetch }).check(selection, seed.skin), /SKIN_INTEGRITY_ERROR/);
-  assert.ok(pulls <= 10);
+  assert.ok(pulls <= 18); // At most 256 KiB plus the first rejected 16 KiB chunk.
 });

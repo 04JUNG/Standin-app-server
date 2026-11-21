@@ -134,12 +134,14 @@ export function createSelectionResolver(
     // Camera mapping belongs to Converter. Legacy yaw-only cameras lack projection; refuse capability.
     if (!camera || !("projection" in camera))
       throw new InteractiveError("INTERACTIVE_CAMERA_UNSUPPORTED");
+    const catalogAsset = deps.loadBodyCatalog().assets.find((asset) =>
+      asset.characterId === characterId &&
+      asset.assetSha256 === body.resolvedBody!.assetSha256);
+    // Neutral bodies use the same pinned authoring recipe as shaped bodies.
+    // Its authority must not depend on an optional slider-preview SSR asset.
+    const authoringSource = body.shapeSource ?? (!body.shape ? catalogAsset?.shapeSource : null) ?? null;
     const defaultShapeRules = !body.shape
-      ? deps.loadBodyCatalog().assets.find((asset) =>
-          asset.characterId === characterId &&
-          asset.assetSha256 === body.resolvedBody!.assetSha256
-        )?.shapeRuntime?.rules ?? null
-      : null;
+      ? authoringSource?.rules ?? catalogAsset?.shapeRuntime?.rules ?? null : null;
     const identity = {
       schema: "interactive-selection-v1",
       ownerBinding: hash({ installationId, jobId, personIndex }),
@@ -160,7 +162,7 @@ export function createSelectionResolver(
       body: body.resolvedBody,
       bodyRevision: body.selectionRevision,
       shape: body.shape ?? null,
-      shapeSource: body.shapeSource ?? null,
+      shapeSource: authoringSource,
       defaultShapeRules,
       hands,
       scope: resolvePersonOutputScope(person).resolved,

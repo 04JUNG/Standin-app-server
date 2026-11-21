@@ -55,7 +55,9 @@ export function createSkinArtifacts(overrides: Partial<SkinDeps> = {}): SkinArti
       reportConverterTiming(trace, startedAt, response, headersMs);
       throw new InteractiveError("SKIN_UNAVAILABLE", 503);
     }
-    const cap = path === "/skin-contract" ? 128 * 1024 : response.ok ? 42 * 1024 * 1024 : 16384;
+    // Exact legacy22 + new20 model assets make the pinned contract 149,679 bytes.
+    // Keep a bounded metadata response while allowing that complete contract.
+    const cap = path === "/skin-contract" ? 256 * 1024 : response.ok ? 42 * 1024 * 1024 : 16384;
     let size = 0; const chunks: Uint8Array[] = [];
     try {
       for (;;) { const { done, value } = await reader.read(); if (done) break;

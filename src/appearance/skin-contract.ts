@@ -26,7 +26,7 @@ export const skinContractSchema = z.object({ version: z.literal("fbx-skin-v1"), 
   runtime_revision: sha, asset_manifest_sha256: sha, asset_version: z.string().min(1).max(100),
   skins: z.array(skinId).max(6), supported_targets: z.array(z.object({ character_id: z.string().min(1).max(200),
     character_sha256: sha, output_scope: z.literal("full"), skin_ids: z.array(skinId).min(1).max(5) }).strict()).max(100),
-  candidate_models: z.record(z.string().max(200), model), assets: z.array(asset).max(256),
+  candidate_models: z.record(z.string().max(200), model), assets: z.array(asset).max(512),
   zero: z.literal("default-legacy-byte-preserving"), order: z.tuple([z.literal("skin"), z.literal("outline")]),
 }).strict();
 export function checkSkinContract(raw: unknown, selection: ResolvedSelection, skin?: Skin, appearance?: Appearance, policy: SkinPolicy = approvedSkins) {

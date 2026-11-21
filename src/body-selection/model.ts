@@ -229,9 +229,24 @@ export function upgradedRememberedBase(ref: BodyRef, catalog: BodyCatalog): Body
   return asset ? bodyRef(asset) : null;
 }
 /** Hide superseded catalog templates, retaining historical identities for saved work. */
+export function currentTemplateReplacement(asset: BodyAsset, catalog: BodyCatalog): BodyAsset | null {
+  const gender = asset.gender;
+  const preset = asset.shapeRuntime?.preset;
+  if (!gender || !preset || !asset.shapeSource?.rules) return null;
+  const defaults = catalog.assets.filter(a => a.gender === gender && a.role === "default");
+  const rules = defaults.length === 1 ? defaults[0].shapeSource?.rules : undefined;
+  if (!rules || asset.shapeSource?.rules === rules) return null;
+  const matches = catalog.assets.filter(a => a.characterId !== asset.characterId &&
+    a.gender === gender && (a.role === "default" || a.role === "preset") &&
+    a.shapeSource?.rules === rules && a.shapeRuntime?.preset === preset);
+  return matches.length === 1 ? matches[0] : null;
+}
+
+/** Presentation only: never rewrite saved bodies, cards, custom controls or jobs. */
 export function currentPresetAssets(catalog: BodyCatalog, keep: Iterable<string> = []): BodyAsset[] {
   const retained = new Set(keep);
-  return catalog.assets.filter(a => retained.has(a.characterId) || !upgradedRememberedBase(a, catalog));
+  return catalog.assets.filter(a => retained.has(a.characterId) ||
+    (!upgradedRememberedBase(a, catalog) && !currentTemplateReplacement(a, catalog)));
 }
 export function currentLastUsed(
   last: BodyPolicy["lastUsed"], catalog: BodyCatalog,
