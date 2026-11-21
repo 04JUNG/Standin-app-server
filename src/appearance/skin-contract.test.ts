@@ -133,8 +133,11 @@ test("skin HTTP stream/body bounds and disabled transport fail before file prepa
   assert.equal(calls, 0);
   await assert.rejects(createSkinArtifacts({ ...deps, enabled: () => true,
     fetch: (async () => new Response("{}", { headers: { "Content-Length": "99" } })) as typeof fetch }).check(selection, seed.skin), /SKIN_INTEGRITY_ERROR/);
+  // The exact legacy22 + new20 contract exceeds the previous 128 KiB bound.
+  await createSkinArtifacts({ ...deps, enabled: () => true,
+    fetch: (async () => new Response(JSON.stringify(contract).padEnd(150000, " "))) as typeof fetch }).check(selection, seed.skin);
   let pulls = 0;
   await assert.rejects(createSkinArtifacts({ ...deps, enabled: () => true,
     fetch: (async () => new Response(new ReadableStream({ pull(c) { pulls++; c.enqueue(new Uint8Array(16384)); } }))) as typeof fetch }).check(selection, seed.skin), /SKIN_INTEGRITY_ERROR/);
-  assert.ok(pulls <= 10);
+  assert.ok(pulls <= 18); // At most 256 KiB plus the first rejected 16 KiB chunk.
 });
