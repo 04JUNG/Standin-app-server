@@ -1982,3 +1982,51 @@ The header is a comma-separated token list (exact, case-sensitive tokens; whites
 A temporary 503 from `GET /v1/analysis/jobs/:jobId/people/:personIndex/interactive-state/:operationId` does not mean the accepted operation failed. Retain the ID/revision and retry the GET without creating or cancelling preparation. A 503 includes `Retry-After: 1`; a successful poll includes `Server-Timing: bff_poll;dur=<milliseconds>`. Ownership, current selection, expiry, and artifact integrity checks remain mandatory.
 
 See [final export recovery](FINAL_EXPORT_RECOVERY.md) for retry bounds, BFF/Converter timing fields and production verification.
+
+## Selected refinement progress (optional v1)
+
+`POST /v1/analysis/jobs/:jobId/people/:personIndex/refine?progress=selected-refine-v1`
+opts into `application/x-ndjson`. The original POST without the query still returns the
+same JSON. Ownership, exposed candidate and refine eligibility are checked before streaming.
+No capability or feature flag is enabled by this extension; search/Top5 never uses it.
+
+Each line is one JSON event:
+
+```json
+{"type":"progress","jobId":"job_example","personIndex":0,"candidateId":"pose::front","phase":"refining"}
+{"type":"progress","jobId":"job_example","personIndex":0,"candidateId":"pose::front","phase":"preparing"}
+{"type":"result","status":200,"body":{"jobId":"job_example","personIndex":0,"candidateId":"pose::front","refined":false,"reasonCode":"no_gain","adjustedLimbs":[],"exportUrl":"...","thumbnailUrl":null}}
+```
+
+A `refining` event can also carry optional `target` with version
+`selected-refine-target.v1`, positive original image `width`/`height`, a
+`skeleton: {format:"coco17", coordinateSpace:"image-normalized", points:[17 nullable pairs]}`,
+and `targetJoints` (unique COCO body indices). It contains stored observed refine input,
+not optimizer iterations or accepted output. Legacy refine uses the same context sent
+upstream; RC4 uses the earlier stored observed input as a reference, not a claim about
+RC4's newly extracted skeleton or internal active joints. Only allowed arm elbows/wrists
+and observed allowed leg knees/ankles are highlighted. Faces, missing/invalid/zero-score
+points and unobserved lower legs are omitted. Original image dimensions must be known.
+The source image is the owned original rough; these coordinates must never be painted
+on a mannequin thumbnail. Missing/invalid target means no joint effect, not guessed
+coordinates. `preparing` and result events have no target.
+
+The target is constructed server-side after ownership/selection checks; client-supplied
+coordinates or target fields have no authority. This extension changes no refine policy,
+solver request, camera, result or export. It adds no model/render call.
+
+`refining` brackets the real upstream `/refine` or opt-in RC4 `/refine/release` invocation,
+after local policy/cache/context/input checks. It confirms BFF upstream execution, not
+individual solver iterations, measured percentages or successful adjustment. `preparing`
+starts when that invocation ends, before artifact persistence/download and preview work.
+Cache hits, local skips and input failures emit no `refining` event. A successful terminal
+response with `refined:false` keeps the original and preserves the actual reasonCode.
+Errors after stream headers use a terminal result carrying the existing HTTP status/error
+envelope. Missing terminal result is a transport failure, never success.
+
+Clients must bind events to request job/person/candidate, abort obsolete selections and
+ignore late data. Disconnecting the response cancels delivery; it does not assert that the
+existing synchronous upstream computation has been cancelled. No progress state is added
+to analysis jobs or persisted across users. Old BFF JSON is supported without guessing a
+running refinement. Review BFF then client independently; deploy BFF first, then the client
+when separately authorized. This PR does not deploy either service.
