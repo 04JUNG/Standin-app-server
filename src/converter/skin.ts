@@ -118,13 +118,12 @@ export function createSkinArtifacts(overrides: Partial<SkinDeps> = {}): SkinArti
       if (fresh.approval.identity !== current.approval.identity) throw new InteractiveError("SKIN_BINDING_MISMATCH");
       return asset;
     },
-    async asset(op, selection, digest, signal) {
-      const current = await context(selection, op.skin, op.appearance, signal), preview = skinPreview(current.context, selection.characterId);
-      if (!op.skinPreview || hash(op.skinPreview) !== hash(preview)) throw new InteractiveError("SKIN_BINDING_MISMATCH");
-      const asset = await verifiedAsset(preview, digest, signal);
-      const fresh = await context(selection, op.skin, op.appearance, signal);
-      if (fresh.approval.identity !== current.approval.identity) throw new InteractiveError("SKIN_BINDING_MISMATCH");
-      return asset;
+    async asset(op, digest, signal) {
+      // The operation service revalidates the exact live approval before and
+      // after this read. The stored descriptor still pins the approved bytes.
+      const preview = op.skinPreview;
+      if (!preview) throw new InteractiveError("SKIN_BINDING_MISMATCH");
+      return verifiedAsset(preview, digest, signal);
     },
     async check(selection, skin, appearance) { return (await context(selection, skin, appearance)).approval; },
     async prepare(op, selection, source, signal) {

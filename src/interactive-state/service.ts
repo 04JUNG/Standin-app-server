@@ -54,7 +54,7 @@ export interface SkinApproval {
 }
 export interface SkinArtifacts {
   previewAsset?(selection: ResolvedSelection, skin: Skin, digest: string, signal?: AbortSignal): Promise<{ bytes: Uint8Array; contentType: string }>;
-  asset?(op: Operation, selection: ResolvedSelection, digest: string, signal?: AbortSignal): Promise<{ bytes: Uint8Array; contentType: string }>;
+  asset?(op: Operation, digest: string, signal?: AbortSignal): Promise<{ bytes: Uint8Array; contentType: string }>;
   check(selection: ResolvedSelection, skin?: Skin, appearance?: Appearance): Promise<SkinApproval>;
   prepare(op: Operation, selection: ResolvedSelection, source: Uint8Array, signal: AbortSignal): Promise<Record<string, unknown>>;
   file(op: Operation, selection: ResolvedSelection, signal?: AbortSignal): Promise<Uint8Array>;
@@ -305,8 +305,8 @@ export class InteractiveService {
   async skinAsset(op: Operation, digest: string, signal?: AbortSignal) {
     if (!active(op) || !op.stateHash || !op.skin || !op.skinPreview || !this.deps.skin?.asset)
       throw new InteractiveError("INTERACTIVE_NOT_READY");
-    const selection = await this.revalidate(op);
-    const asset = await this.consume(op, () => this.skin().asset!(op, selection, digest, signal));
+    await this.revalidate(op);
+    const asset = await this.consume(op, () => this.skin().asset!(op, digest, signal));
     await this.assertDeliverable(op);
     return asset;
   }

@@ -115,6 +115,19 @@ test("preview assets survive a reset pooled Converter socket, are cached once ve
   // 4) An approval change while bytes are read is still refused.
   resets = new Set(); onAssetRead = () => { current = { ...live, runtime_revision: hash("replacement runtime") }; };
   await assert.rejects(adapter().previewAsset!(selection, seed.skin, texture.sha256), /SKIN_BINDING_MISMATCH/);
+  // Operation assets use the stored approval and the same asynchronous worker verdict.
+  current = live; resets = new Set(); onAssetRead = () => {}; contractReads = 0; assetReads = 0;
+  const operation = { ...seedOp, skinPreview: checkSkinContract(live, selection, seed.skin, undefined,
+    { ...policy, models: { [selection.characterId]: pin } }).approval.preview };
+  const operationAssets = adapter();
+  const operationUv = await operationAssets.asset!(operation, pin.uvSha256);
+  assert.equal(operationUv.contentType, "application/gzip"); assert.deepEqual(Buffer.from(operationUv.bytes), uv);
+  await operationAssets.asset!(operation, pin.uvSha256);
+  assert.equal(assetReads, 1); assert.equal(contractReads, 0, "service fences own the live approval checks");
+  await assert.rejects(operationAssets.asset!({ ...operation,
+    skinPreview: { ...operation.skinPreview, compatibility: { ...operation.skinPreview.compatibility, vertices: 2 } } }, pin.uvSha256), /SKIN_INTEGRITY_ERROR/);
+  await assert.rejects(operationAssets.asset!(operation, hash("unknown asset")), /NOT_FOUND/);
+  await assert.rejects(operationAssets.asset!({ ...operation, skinPreview: undefined }, pin.uvSha256), /SKIN_BINDING_MISMATCH/);
 });
 test("skin HTTP stream/body bounds and disabled transport fail before file preparation", async () => {
   let calls = 0;
